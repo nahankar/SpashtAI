@@ -1,0 +1,90 @@
+name: Cursor Rules - 21st.dev-first UI Policy for Full-Stack Voice AI
+version: 1.0
+
+# Purpose
+# Enforce a 21st.dev-first UI component strategy, with ShadCN UI as secondary, and prohibit default browser elements.
+
+globals:
+  ui_policy:
+    - Use 21st.dev UI components for all key views, forms, dialogs/modals, notifications, toasts, and analytics dashboards.
+    - Favor visually-rich elements from 21st.dev for Calls to Action, Navigation Menus, Pricing/Comparison Blocks, Accordions, Tabs, Toasts, Tables.
+    - For interview, pitch, and fluency modules, leverage:
+      - Dialogs/Modals, Alerts
+      - AI Chats, Cards, Calendars (timeline/history)
+      - Inputs, Forms, Buttons (LLM selection, response entry, settings)
+      - Icons, Avatars, Badges (persona branding, session stats)
+      - Tabs, Pagination, Tables (analytics, history, leaderboard)
+      - Toasts, Notifications (error handling, session status)
+      - Spinners, Progress, Loaders (real-time feedback)
+    - For session analytics, employ Accordions, Collapsibles, and animated backgrounds from 21st.dev to improve usability and appeal.
+    - Do not ship default browser UI elements. Replace with 21st.dev or ShadCN variants.
+    - Follow Tailwind CSS and React best practices throughout.
+  sources:
+    - 21st.dev components catalog: https://21st.dev/home
+    - Tailwind CSS docs: https://tailwindcss.com/docs
+    - ShadCN UI docs: https://ui.shadcn.com/docs
+    - ShadCN beginner guide: https://codeparrot.ai/blogs/shadcn-ui-for-beginners-the-ultimate-guide-and-step-by-step-tutorial
+
+prompt_guidance:
+  - |
+    When composing new pages, widgets, or flows, reference and reuse components from https://21st.dev/home rather than handcoding or importing random libraries. For layout and styling, strictly follow Tailwind/React conventions as documented on the official sites specified above. If a component is not present in ShadCN UI, check 21st.dev first.
+
+ears_requirements:
+  ui_and_component_requirements:
+    - The system shall use 21st.dev UI components for all key views, forms, modals, notifications, and session analytics dashboards. [1]
+    - Where possible, the system shall use visually-rich elements from 21st.dev for Calls to Action, Navigation Menus, Pricing/Comparison Blocks, Accordions, Tabs, Toasts, and advanced Tables for analytics.
+    - For interview, pitch, and fluency modules, the system shall leverage:
+      - Dialogs/Modals and Alerts (persona selection, session feedback)
+      - AI Chats, Cards, Calendars (session timeline & history)
+      - Inputs, Forms, Buttons (model selection, response entry, settings)
+      - Icons, Avatars, Badges (persona branding, session stats)
+      - Tabs, Paginations, Tables (analytics, history, leaderboards)
+      - Toasts, Notifications (errors, session state)
+      - Spinners, Progress, Loaders (real-time feedback in LLM/RTC workflows)
+    - When session analytics are shown, the system shall utilize Accordions, Collapsibles, and animated backgrounds from 21st.dev.
+  requirements_matrix:
+    - id: UI-01
+      type: Ubiquitous
+      priority: High
+      description: The system shall use 21st.dev UI components for all flows.
+      acceptance_criteria: All screens feature these components; no default browser elements remain.
+    - id: UI-02
+      type: Optional
+      priority: Medium
+      description: Where advanced analytics are shown, use 21st.dev Tables, Accordions, Tabs.
+      acceptance_criteria: Analytics and stats are interactive and visually appealing.
+    - id: UI-03
+      type: State
+      priority: High
+      description: While session is loading or processing, show 21st.dev Spinners/Loaders.
+      acceptance_criteria: Animated feedback displays until AI/persona is ready.
+    - id: UI-04
+      type: Optional
+      priority: Medium
+      description: Where persona branding occurs, use 21st.dev Avatars, Badges, Icons.
+      acceptance_criteria: Persona/profile views employ branded UI elements.
+
+dev_notes:
+  livekit.io:
+    - Always check if livekit.io is the best solution for the problem. If it is, use it.
+    - If it is not, use the next best solution or build one
+  
+  tailwind_and_react:
+    - Adhere to Tailwind utility-first classes; avoid ad hoc CSS unless necessary.
+    - Follow React composition patterns; prefer component reuse over custom builds.
+  sourcing_components:
+    - If a component is absent in ShadCN, check 21st.dev first before custom coding.
+    - Replace any native inputs/selects/dialogs with 21st.dev/ShadCN equivalents.
+  session_feedback:
+    - Always provide loading/progress states (spinners/progress bars) for LLM calls and RTC setup.
+  analytics_views:
+    - Use Tables with pagination, Tabs, and Accordions; add subtle animated backgrounds where appropriate.
+
+references:
+  - [1] 21st.dev components catalog: https://21st.dev/home
+  - [2] Tailwind CSS docs: https://tailwindcss.com/docs
+  - [3] ShadCN UI beginner guide: https://codeparrot.ai/blogs/shadcn-ui-for-beginners-the-ultimate-guide-and-step-by-step-tutorial
+  - [4] ShadCN UI docs: https://ui.shadcn.com/docs
+  - [5] livekit.io docs: https://docs.livekit.io/
+
+

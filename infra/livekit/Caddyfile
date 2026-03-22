@@ -1,0 +1,13 @@
+{
+  email you@example.com
+}
+
+{$DOMAIN} {
+  reverse_proxy 127.0.0.1:7880
+}
+
+# Optional TURN over TLS if using coturn separately
+# {$TURN_DOMAIN}:5349 {
+#   reverse_proxy 127.0.0.1:5349
+# }
+

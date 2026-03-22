@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  gentle:
+    image: lowerquality/gentle:latest
+    container_name: spashtai-gentle
+    ports:
+      - "8765:8765"
+    volumes:
+      - gentle_data:/gentle/data
+      - ./temp_audio:/gentle/temp_audio
+    environment:
+      - GENTLE_HOST=0.0.0.0
+      - GENTLE_PORT=8765
+    restart: unless-stopped
+    networks:
+      - spashtai-network
+
+  # Optional: Redis for job queuing if we need async processing
+  redis:
+    image: redis:7-alpine
+    container_name: spashtai-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - spashtai-network
+
+volumes:
+  gentle_data:
+  redis_data:
+
+networks:
+  spashtai-network:
+    driver: bridge

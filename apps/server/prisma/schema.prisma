@@ -1,0 +1,306 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+  SUPER_ADMIN
+}
+
+model User {
+  id             String          @id @default(cuid())
+  email          String          @unique
+
+  // Authentication
+  passwordHash          String
+  emailVerified         Boolean   @default(false)
+  verificationToken     String?   @unique
+  resetPasswordToken    String?   @unique
+  resetPasswordExpiry   DateTime?
+
+  // Profile
+  firstName     String?
+  lastName      String?
+  avatar        String?
+
+  // Authorization
+  role          UserRole @default(USER)
+
+  // Activity
+  lastLoginAt   DateTime?
+  lastActiveAt  DateTime?
+  loginCount    Int      @default(0)
+
+  // Relations
+  sessions       Session[]
+  replaySessions ReplaySession[]
+  activityLogs   UserActivity[]
+  featureUsage   FeatureUsage[]
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([email])
+  @@index([role])
+}
+
+model FeatureUsage {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  feature   String
+  action    String
+
+  sessionId String?
+  metadata  Json?
+  duration  Int?
+
+  timestamp DateTime @default(now())
+
+  @@index([userId, feature, timestamp])
+}
+
+model UserActivity {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  action    String
+  resource  String?
+  resourceId String?
+
+  ipAddress String?
+  userAgent String?
+  metadata  Json?
+
+  timestamp DateTime @default(now())
+
+  @@index([userId, timestamp])
+}
+
+model AdminAction {
+  id        String   @id @default(cuid())
+  adminId   String
+
+  action    String
+  targetUserId   String?
+  targetResource String?
+
+  reason    String?  @db.Text
+  metadata  Json?
+
+  timestamp DateTime @default(now())
+
+  @@index([adminId, timestamp])
+}
+
+model SystemMetrics {
+  id        String   @id @default(cuid())
+  date      DateTime @unique
+
+  totalUsers          Int
+  activeUsers         Int
+  newUsers            Int
+
+  replayUploads       Int
+  elevateSessions     Int
+  totalMinutesAnalyzed Int
+
+  avgResponseTime     Float?
+  errorRate           Float?
+
+  createdAt DateTime @default(now())
+
+  @@index([date])
+}
+
+model Session {
+  id          String   @id @default(cuid())
+  user        User     @relation(fields: [userId], references: [id])
+  userId      String
+  module      String   // elevate | pitch | fluency
+  startedAt   DateTime @default(now())
+  endedAt     DateTime?
+  durationSec Int?
+
+  viewCount    Int       @default(0)
+  lastViewedAt DateTime?
+  
+  // Relations
+  metrics     SessionMetrics?
+  transcript  SessionTranscript?
+  recordings  SessionRecording[]
+
+  @@index([userId, startedAt])
+}
+
+model SessionMetrics {
+  id        String   @id @default(cuid())
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId String   @unique
+  
+  // LiveKit metrics
+  totalLlmTokens        Int     @default(0)
+  totalLlmDuration      Float   @default(0)
+  avgTtft              Float   @default(0)  // time to first token
+  totalTtsDuration     Float   @default(0)
+  totalTtsAudioDuration Float   @default(0)
+  avgTtsTtfb           Float   @default(0)  // time to first byte
+  totalEouDelay        Float   @default(0)  // end of utterance delay
+  conversationLatencyAvg Float @default(0)
+  
+  // User linguistic metrics
+  userWpm              Float   @default(0)
+  userFillerCount      Int     @default(0)
+  userFillerRate       Float   @default(0)
+  userAvgSentenceLength Float  @default(0)
+  userSpeakingTime     Float   @default(0)
+  userVocabDiversity   Float   @default(0)
+  userResponseTimeAvg  Float   @default(0)
+  
+  // Assistant linguistic metrics
+  assistantWpm         Float   @default(0)
+  assistantFillerCount Int     @default(0)
+  assistantFillerRate  Float   @default(0)
+  assistantAvgSentenceLength Float @default(0)
+  assistantSpeakingTime Float  @default(0)
+  assistantVocabDiversity Float @default(0)
+  assistantResponseTimeAvg Float @default(0)
+  
+  totalTurns           Int     @default(0)
+  
+  // Advanced analytics (spaCy, Praat, Gentle)
+  contentMetrics       Json?   // NLP analysis: vocabulary, grammar, entities
+  deliveryMetrics      Json?   // Audio analysis: prosody, pauses, speech rate
+  performanceInsights  Json?   // Comprehensive scoring and feedback
+  processingStatus     Json?   // Track what's been processed
+  
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @default(now()) @updatedAt
+}
+
+model SessionTranscript {
+  id        String   @id @default(cuid())
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId String   @unique
+  
+  // Full conversation data as JSON
+  conversationData Json
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model SessionRecording {
+  id         String   @id @default(cuid())
+  session    Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId  String   // Removed @unique to allow multiple recordings per session
+  
+  // Egress recording details
+  egressId   String   @unique
+  filePath   String   // Local path or S3 URL
+  duration   Int      @default(0)  // Duration in seconds
+  fileSize   Int      @default(0)  // File size in bytes
+  status     String   @default("completed")  // completed, failed, processing
+  recordingType String @default("user")  // user, agent, merged
+  
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// ── Replay Feature ──
+
+model ReplaySession {
+  id          String   @id @default(cuid())
+  user        User     @relation(fields: [userId], references: [id])
+  userId      String
+
+  meetingType      String
+  userRole         String
+  focusAreas       String[]
+  meetingGoal      String?
+  meetingDate      DateTime?
+  participantName  String?
+
+  // pending | transcribing | analyzing | completed | failed
+  status       String   @default("pending")
+  errorMessage String?
+
+  viewCount    Int       @default(0)
+  exportCount  Int       @default(0)
+
+  uploadedFiles ReplayUpload[]
+  result        ReplayResult?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, createdAt])
+}
+
+model ReplayUpload {
+  id              String        @id @default(cuid())
+  replaySession   ReplaySession @relation(fields: [replaySessionId], references: [id], onDelete: Cascade)
+  replaySessionId String
+
+  fileType     String   // audio | video | transcript | text
+  originalName String
+  storedPath   String
+  fileSize     Int
+  mimeType     String
+  duration     Float?   // seconds, for audio/video
+
+  createdAt DateTime @default(now())
+}
+
+model ReplayResult {
+  id              String        @id @default(cuid())
+  replaySession   ReplaySession @relation(fields: [replaySessionId], references: [id], onDelete: Cascade)
+  replaySessionId String        @unique
+
+  // Transcript
+  transcriptText       String  @db.Text
+  structuredTranscript Json?
+  speakerCount         Int     @default(1)
+  transcriptionSource  String  // aws_transcribe | uploaded | pasted
+
+  // Computed metrics
+  wordsPerMinute      Float   @default(0)
+  fillerWordCount     Int     @default(0)
+  fillerWordRate      Float   @default(0)
+  avgSentenceLength   Float   @default(0)
+  vocabularyDiversity Float   @default(0)
+  totalTurns          Int     @default(0)
+  speakingPercentage  Float   @default(0)
+
+  // AI scores (1-10)
+  overallScore    Float @default(0)
+  clarityScore    Float @default(0)
+  confidenceScore Float @default(0)
+  engagementScore Float @default(0)
+
+  // AI-generated feedback (JSON arrays / objects)
+  strengths               Json?
+  improvements            Json?
+  recommendations         Json?
+  contextSpecificFeedback Json?
+  keyMoments              Json?
+  annotatedTranscript     Json?
+
+  // Model / cost tracking
+  modelUsed        String?
+  promptTokens     Int     @default(0)
+  completionTokens Int     @default(0)
+  processingTimeMs Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+

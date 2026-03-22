@@ -1,0 +1,19 @@
+node_modules
+.vscode
+apps/*/node_modules
+.env
+.DS_Store
+.venv
+.venv312
+**/__pycache__
+*.pyc
+.pytest_cache
+.git-test
+.git_backup_*/
+.git_corrupt_backup_*/
+=0.2.0
+
+# Local storage (dev uploads, audio recordings)
+storage/
+replay_uploads/
+audio_storage/

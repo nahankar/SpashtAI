@@ -1,0 +1,27 @@
+{
+  "name": "spashtai-private",
+  "private": true,
+  "workspaces": [
+    "apps/web",
+    "apps/server"
+  ],
+  "scripts": {
+    "dev:web": "npm --workspace apps/web run dev",
+    "dev:server": "npm --workspace apps/server run dev",
+    "dev": "concurrently -n web,server -c cyan,magenta \"npm:dev:web\" \"npm:dev:server\"",
+    "build:web": "npm --workspace apps/web run build",
+    "build:server": "npm --workspace apps/server run build",
+    "build": "npm run build:web && npm run build:server",
+    "agent:setup": "python3 -m venv .venv && . .venv/bin/activate && pip install -r apps/agent/requirements.txt",
+    "agent:run": ". .venv/bin/activate && python apps/agent/main.py"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
+    "@types/cors": "^2.8.19",
+    "@types/jsonwebtoken": "^9.0.10",
+    "concurrently": "^9.1.2"
+  },
+  "dependencies": {
+    "recharts": "^3.8.0"
+  }
+}

@@ -1,0 +1,42 @@
+# LiveKit Egress Configuration
+# Documentation: https://docs.livekit.io/egress/
+
+# Required: LiveKit server connection
+api_key: devkey
+api_secret: devsecret  # Must match livekit.yaml
+ws_url: ws://livekit:7880
+
+# Redis connection (required for Egress)
+redis:
+  address: redis:6379
+
+# Logging
+log_level: info
+
+# Health check
+health_port: 9090
+
+# CPU/Memory limits (adjust based on your needs)
+cpu_cost:
+  room_composite_cpu_cost: 3.0
+  track_composite_cpu_cost: 2.0
+  track_cpu_cost: 1.0
+
+# Output configuration
+# Files will be saved to /out (mapped to apps/agent/audio_storage via docker volume)
+file_output:
+  local: true
+  output_directory: /out
+
+# S3 configuration for production
+# For development, local file storage is used
+# Uncomment and set environment variables for production:
+# export AWS_ACCESS_KEY_ID=your_access_key
+# export AWS_SECRET_ACCESS_KEY=your_secret_key  
+# export AWS_REGION=us-east-1
+# export S3_RECORDING_BUCKET=spashtai-recordings
+s3:
+  access_key: ${AWS_ACCESS_KEY_ID}
+  secret: ${AWS_SECRET_ACCESS_KEY}
+  region: ${AWS_REGION}
+  bucket: ${S3_RECORDING_BUCKET}

@@ -1,0 +1,312 @@
+#!/us    # Persist conversation events to database (via server API)
+    @session.on("conversation_item_added")
+    def on_conversation_item_added(event):
+        """Save conversation items to persistent storage"""
+        try:
+            logger.info("💬 Conversation: %s said: %s", event.item.role, event.item.text_content[:100])
+            
+            # Save to database asynchronously
+            asyncio.create_task(
+                persistence.save_message(
+                    role=event.item.role,
+                    content=event.item.text_content
+                )
+            )
+            
+            # TODO: Capture and store audio chunks for this conversation item
+            # This will be implemented when LiveKit provides audio chunk access
+            logger.debug("🎵 Audio storage: Conversation item logged for future audio capture")
+            
+        except Exception as e:
+            logger.error("❌ Failed to persist conversation: %s", e)3
+
+"""
+SpashtAI Voice Agent - Official LiveKit Agent Framework Implementation
+Following LiveKit patterns from https://docs.livekit.io/agents/
+Uses persistent conversation storage via s    # Persist conversation eventse (via server API)
+    @session.on("conversation_item_added")
+    def on_conversation_item_added(event):
+        """Save conversation items to persistent storage"""
+        try:
+            logger.info("💬 Conversation: %s said: %s", event.item.role, event.item.text_content[:100])
+            
+            # Save to database asynchronously
+            asyncio.create_task(
+                persistence.save_message(
+                    role=event.item.role,
+                    content=event.item.text_content
+                )
+            )
+        except Exception as e:
+            logger.error("❌ Failed to persist conversation: %s", e)
+    
+    # Persist agent state changes to database (via server API)
+    @session.on("agent_state_changed")
+    def on_agent_state_changed(event):
+        """Save agent state changes to persistent storage"""
+        try:
+            logger.info("🤖 Agent state: %s -> %s", event.old_state, event.new_state)
+            
+            # Save state change to database asynchronously
+            asyncio.create_task(
+                persistence.update_session_state(
+                    state=event.new_state,
+                    metadata={"previous_state": event.old_state}
+                )
+            )
+        except Exception as e:
+            logger.error("❌ Failed to persist state change: %s", e)nstead of direct frontend bridge.
+"""
+    def on_agent_state_changed(event):
+        """Bridge agent state to frontend format"""
+        try:
+            logger.info("🤖 Agent state: %s -> %s", event.old_state, event.new_state)
+            
+            # Map agent states to frontend expected states
+            state_mapping = {
+                "initializing": "restarting",
+                "listening": "ready", 
+                "thinking": "ready",
+                "speaking": "ready"
+            }
+            frontend_state = state_mapping.get(event.new_state, "ready")
+            
+            # Send state to frontend
+            state_data = {
+                "type": "session_state",
+                "text": frontend_state
+            }
+            ctx.room.local_participant.publish_data(
+                payload=json.dumps(state_data).encode(),
+                topic="lk.control"
+            )
+            logger.info("📤 Sent agent state to frontend: %s -> %s", event.new_state, frontend_state)
+        except Exception as e:
+            logger.error("❌ Failed to send agent state: %s", e)erns from https://docs.livekit.io/agents/
+"""
+
+import asyncio
+import json
+import logging
+import os
+import aiohttp
+from typing import Dict, Any, Optional
+
+from dotenv import load_dotenv
+from livekit import agents
+from livekit.agents import (
+    AutoSubscribe,
+    JobContext,
+    WorkerOptions,
+    cli,
+    AgentSession,
+    Agent,
+)
+from livekit.agents.voice.events import ErrorEvent, CloseEvent
+from livekit.plugins import aws
+
+# Load environment variables
+load_dotenv()
+
+logger = logging.getLogger("spashtai-agent")
+logger.setLevel(logging.INFO)
+
+# Server configuration for persistent storage
+SERVER_URL = os.getenv("SERVER_URL", "http://localhost:4000")
+
+class ConversationPersistence:
+    """Handle conversation persistence to server API"""
+    
+    def __init__(self, session_id: str):
+        self.session_id = session_id
+        self.session = None
+    
+    async def save_message(self, role: str, content: str) -> bool:
+        """Save conversation message to server"""
+        try:
+            if not self.session:
+                self.session = aiohttp.ClientSession()
+            
+            async with self.session.post(
+                f"{SERVER_URL}/sessions/{self.session_id}/messages",
+                json={
+                    "role": role,
+                    "content": content,
+                    "timestamp": asyncio.get_event_loop().time()
+                }
+            ) as response:
+                if response.status == 201:
+                    logger.info("✅ Saved %s message to database", role)
+                    return True
+                else:
+                    logger.error("❌ Failed to save message: %s", await response.text())
+                    return False
+        except Exception as e:
+            logger.error("❌ Error saving message to server: %s", e)
+            return False
+    
+    async def update_session_state(self, state: str, metadata: Optional[Dict] = None) -> bool:
+        """Update session state in server"""
+        try:
+            if not self.session:
+                self.session = aiohttp.ClientSession()
+            
+            async with self.session.post(
+                f"{SERVER_URL}/sessions/{self.session_id}/state",
+                json={
+                    "state": state,
+                    "metadata": metadata or {}
+                }
+            ) as response:
+                if response.status == 200:
+                    logger.info("✅ Updated session state to: %s", state)
+                    return True
+                else:
+                    logger.error("❌ Failed to update state: %s", await response.text())
+                    return False
+        except Exception as e:
+            logger.error("❌ Error updating session state: %s", e)
+            return False
+    
+    async def close(self):
+        """Close HTTP session"""
+        if self.session:
+            await self.session.close()
+
+
+class SpashtAIAssistant(Agent):
+    """
+    SpashtAI Interview Assistant Agent
+    Extends the official LiveKit Agent class
+    """
+    
+    def __init__(self):
+        super().__init__(
+            instructions=(
+                "You are a voice assistant for SpashtAI, a platform for voice AI interviews and practice. "
+                "Your interface with users will be voice. You should use short and concise responses, "
+                "and avoid usage of unpronounceable punctuation. Be helpful, encouraging, and professional. "
+                "When conducting interview practice, ask thoughtful questions and provide constructive feedback. "
+                "You are powered by Amazon Nova Sonic for natural speech synthesis."
+            )
+        )
+
+
+def prewarm(proc: JobContext):
+    """
+    Preload models and resources before the agent starts.
+    Official LiveKit pattern for optimization.
+    """
+    proc.wait_for_participant = True
+
+
+async def entrypoint(ctx: JobContext):
+    """
+    Main entrypoint using official LiveKit Agent framework patterns.
+    AWS Nova Sonic only with persistent conversation storage.
+    """
+    # Connect to room and wait for participant (official pattern)
+    await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+    
+    environment = os.getenv("ENVIRONMENT", "development")
+    storage_type = "S3" if environment == "production" and not os.getenv("FORCE_LOCAL_STORAGE", "false").lower() == "true" else "Local"
+    
+    logger.info(f"🚀 Starting SpashtAI agent [{environment.upper()}] with AWS Nova Sonic + {storage_type} audio storage...")
+    
+    # Initialize conversation persistence with room name as session ID
+    session_id = ctx.room.name
+    persistence = ConversationPersistence(session_id)
+    
+    # Get AWS configuration
+    region = os.getenv("BEDROCK_REGION", os.getenv("AWS_REGION", "us-east-1"))
+    
+    # Create AgentSession with AWS Nova Sonic only (official pattern)
+    session = AgentSession(
+        # Use AWS Nova Sonic Realtime Model only - no custom additions
+        llm=aws.realtime.RealtimeModel(
+            region=region,
+            voice="tiffany",  # AWS Nova Sonic voice
+            temperature=0.7,
+            top_p=0.9,
+            max_tokens=1024,
+        ),
+        # Enable built-in transcription forwarding (default: True)
+        # transcription_enabled=True,  # This is the default
+        
+        # Enable TTS-aligned transcriptions for better synchronization
+        use_tts_aligned_transcript=True,
+    )
+    
+    logger.info("✅ AgentSession created with AWS Nova Sonic")
+    
+    # Official error handling pattern from LiveKit documentation
+    @session.on("error")
+    def on_error(event: ErrorEvent):
+        """Handle errors using official LiveKit error event pattern"""
+        if event.error.recoverable:
+            logger.warning("⚠️ Recoverable error occurred: %s", event.error)
+            return  # LiveKit will handle recovery automatically
+        
+        logger.error("❌ Unrecoverable error occurred: %s", event.error)
+        logger.info("🔄 LiveKit will handle this error gracefully")
+    
+    @session.on("close")
+    def on_close(event: CloseEvent):
+        """Handle session close events"""
+        if event.error:
+            logger.error("🔄 Session closed due to error: %s", event.error)
+        else:
+            logger.info("✅ Session closed normally")
+    
+    # Optional: Log conversation events (built-in feature)
+    @session.on("conversation_item_added")
+    def on_conversation_item_added(event):
+        """Log conversation items - transcription is automatic"""
+        logger.info("� Conversation: %s said: %s", event.item.role, event.item.text_content[:100])
+    
+    # Optional: Log agent state changes (built-in feature)
+    @session.on("agent_state_changed")
+    def on_agent_state_changed(event):
+        """Log agent state changes - state is managed automatically"""
+        logger.info("🤖 Agent state: %s -> %s", event.old_state, event.new_state)
+    
+    # Start the session (official pattern)
+    await session.start(
+        room=ctx.room,
+        agent=SpashtAIAssistant(),
+        # Using default options - LiveKit handles transcription, state, etc.
+    )
+    
+    # Set agent participant metadata for frontend recognition
+    try:
+        await ctx.room.local_participant.update_metadata('{"name": "SpashtAI Assistant", "role": "agent"}')
+        logger.info("✅ Agent participant metadata set for frontend")
+    except Exception as e:
+        logger.warning("⚠️ Failed to set agent metadata: %s", e)
+    
+    logger.info("🎯 AgentSession started successfully")
+    logger.info("🎉 SpashtAI agent ready - using persistent conversation storage")
+    
+    # Wait for session to complete, then cleanup
+    try:
+        # This will wait until the session ends
+        await session.wait_for_session_close()
+    finally:
+        # Clean up persistence session
+        await persistence.close()
+        logger.info("🧹 Conversation persistence cleaned up")
+
+
+
+if __name__ == "__main__":
+    # Official LiveKit CLI runner pattern
+    cli.run_app(
+        WorkerOptions(
+            # Main entrypoint function
+            entrypoint_fnc=entrypoint,
+            # Optional: Prewarming function for optimization
+            prewarm_fnc=prewarm,
+            # Set agent name for explicit dispatch
+            agent_name="spashtai-assistant",
+        )
+    )

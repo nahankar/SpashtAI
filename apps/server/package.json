@@ -1,0 +1,39 @@
+{
+  "name": "server",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -b",
+    "start": "node dist/index.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1013.0",
+    "@aws-sdk/client-s3": "^3.1013.0",
+    "@aws-sdk/client-transcribe": "^3.1013.0",
+    "@prisma/client": "^6.3.1",
+    "@types/ws": "^8.18.1",
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^8.3.1",
+    "jsonwebtoken": "^9.0.3",
+    "livekit-server-sdk": "^2.5.3",
+    "multer": "^2.1.1",
+    "ws": "^8.18.3",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.21",
+    "@types/multer": "^2.1.0",
+    "@types/node": "^22.10.2",
+    "prisma": "^6.3.1",
+    "tsx": "^4.19.2",
+    "typescript": "~5.8.3"
+  }
+}

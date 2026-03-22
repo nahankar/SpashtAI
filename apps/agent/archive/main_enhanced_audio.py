@@ -1,0 +1,405 @@
+#!/usr/bin/env python3
+
+"""
+SpashtAI Voice Agent - Enhanced with Audio Recording
+Pure LiveKit AgentFramework + AWS Nova Sonic + Audio File Saving
+"""
+
+import asyncio
+import json
+import logging
+import os
+import aiohttp
+import base64
+import boto3
+from datetime import datetime
+from typing import Optional
+from pathlib import Path
+
+from dotenv import load_dotenv
+from livekit.agents import (
+    AutoSubscribe,
+    JobContext,
+    WorkerOptions,
+    cli,
+)
+from livekit.agents import AgentSession, Agent
+from livekit.plugins import aws
+
+load_dotenv()
+
+logger = logging.getLogger("spashtai-agent")
+logger.setLevel(logging.INFO)
+
+# Server configuration for conversation persistence
+SERVER_URL = os.getenv("SERVER_URL", "http://localhost:4000")
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+
+class AudioRecorder:
+    """Audio recording handler for dev (local files) and prod (S3)"""
+    
+    def __init__(self, session_id: str):
+        self.session_id = session_id
+        self.environment = ENVIRONMENT
+        
+        # Setup local storage for dev
+        if self.environment == "development":
+            self.audio_dir = Path(f"./audio_recordings/{session_id}")
+            self.audio_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Setup S3 for production
+        else:
+            self.s3_client = boto3.client('s3')
+            self.s3_bucket = os.getenv("S3_BUCKET", "spashtai-audio-recordings")
+    
+    async def save_audio_chunk(self, audio_data: bytes, chunk_id: str, audio_type: str = "assistant"):
+        """Save audio chunk - local file for dev, S3 for prod"""
+        try:
+            filename = f"{audio_type}_{chunk_id}_{int(datetime.now().timestamp())}.wav"
+            
+            if self.environment == "development":
+                # Save to local file
+                file_path = self.audio_dir / filename
+                with open(file_path, 'wb') as f:
+                    f.write(audio_data)
+                logger.info(f"🎵 Saved audio chunk locally: {file_path}")
+                return str(file_path)
+            else:
+                # Save to S3
+                s3_key = f"{self.session_id}/{filename}"
+                self.s3_client.put_object(
+                    Bucket=self.s3_bucket,
+                    Key=s3_key,
+                    Body=audio_data,
+                    ContentType="audio/wav"
+                )
+                s3_url = f"s3://{self.s3_bucket}/{s3_key}"
+                logger.info(f"🎵 Saved audio chunk to S3: {s3_url}")
+                return s3_url
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to save audio chunk: {e}")
+            return None
+    
+    async def save_audio_placeholder(self, message_id: str, audio_type: str = "assistant"):
+        """Create audio placeholder for message - will be enhanced to capture real audio"""
+        try:
+            filename = f"{audio_type}_{message_id}_{int(datetime.now().timestamp())}.wav"
+            
+            if self.environment == "development":
+                # Create placeholder file path (will be enhanced to capture real audio)
+                file_path = self.audio_dir / filename
+                # For now, create empty placeholder - will be enhanced to capture AWS Nova Sonic audio
+                placeholder_data = b"PLACEHOLDER_AUDIO_DATA"  # Will be replaced with real audio capture
+                with open(file_path, 'wb') as f:
+                    f.write(placeholder_data)
+                logger.info(f"🎵 Created audio placeholder locally: {file_path}")
+                return str(file_path)
+            else:
+                # S3 placeholder
+                s3_key = f"{self.session_id}/{filename}"
+                self.s3_client.put_object(
+                    Bucket=self.s3_bucket,
+                    Key=s3_key,
+                    Body=b"PLACEHOLDER_AUDIO_DATA",
+                    ContentType="audio/wav"
+                )
+                s3_url = f"s3://{self.s3_bucket}/{s3_key}"
+                logger.info(f"🎵 Created audio placeholder in S3: {s3_url}")
+                return s3_url
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to create audio placeholder: {e}")
+            return None
+
+class ConversationLogger:
+    """Minimal conversation logging to server API"""
+    
+    def __init__(self, session_id: str):
+        self.session_id = session_id
+        self.session: Optional[aiohttp.ClientSession] = None
+    
+    async def log_message(self, role: str, content: str, audio_url: str = None) -> None:
+        """Log conversation message to server (fire and forget)"""
+        try:
+            if not self.session:
+                self.session = aiohttp.ClientSession()
+            
+            payload = {
+                "role": role, 
+                "content": content,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Add audio URL if available
+            if audio_url:
+                payload["audio_url"] = audio_url
+            
+            async with self.session.post(
+                f"{SERVER_URL}/sessions/{self.session_id}/messages",
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=5.0)
+            ) as response:
+                if response.status == 201:
+                    logger.info("✅ Logged %s message to database", role)
+                else:
+                    logger.warning("⚠️ Failed to log message: HTTP %d", response.status)
+        except Exception as e:
+            logger.warning("⚠️ Failed to log message: %s", e)
+    
+    async def close(self):
+        """Close HTTP session"""
+        if self.session:
+            await self.session.close()
+
+def prewarm(proc: JobContext):
+    """Preload models - official LiveKit pattern"""
+    proc.wait_for_participant = True
+
+async def entrypoint(ctx: JobContext):
+    """
+    Pure LiveKit AgentFramework + AWS Nova Sonic entrypoint
+    Using official VoiceAssistant pattern with audio recording
+    """
+    # Connect with official pattern
+    await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+    
+    environment = os.getenv("ENVIRONMENT", "development")
+    region = os.getenv("BEDROCK_REGION", os.getenv("AWS_REGION", "us-east-1"))
+    
+    logger.info(f"🚀 Starting SpashtAI agent [{environment.upper()}] with AWS Nova Sonic + Audio Recording")
+    logger.info(f"🌍 Region: {region}")
+    logger.info(f"🏠 Room: {ctx.room.name}")
+    
+    # Initialize conversation logger and audio recorder with session ID from job metadata
+    session_id = None
+    try:
+        # Extract session ID from job metadata (passed from LiveKit token)
+        if hasattr(ctx, 'job') and hasattr(ctx.job, 'metadata'):
+            import json
+            metadata = json.loads(ctx.job.metadata) if ctx.job.metadata else {}
+            session_id = metadata.get('sessionId')
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to parse job metadata: {e}")
+    
+    # Fallback to generating session ID if not found in metadata
+    if not session_id:
+        session_id = f"session_{int(datetime.now().timestamp() * 1000)}_{ctx.room.name}"
+    
+    logger.info(f"📋 Using session ID: {session_id}")
+    conversation_logger = ConversationLogger(session_id)
+    audio_recorder = AudioRecorder(session_id)
+    
+    try:
+        # Create AWS Nova Sonic LLM (official pattern)
+        llm = aws.realtime.RealtimeModel(
+            region=region,
+            voice="tiffany",
+            temperature=0.7,
+            top_p=0.9,
+            max_tokens=1024,
+        )
+        
+        logger.info("✅ AWS Nova Sonic model created")
+        
+        # Create AgentSession with official LiveKit pattern (from docs example)
+        session = AgentSession(
+            llm=llm,  # AWS Nova Sonic RealtimeModel
+            use_tts_aligned_transcript=True  # Enable TTS-aligned transcriptions (sentence-level for Nova Sonic)
+        )
+        
+        logger.info("✅ AgentSession created with AWS Nova Sonic")
+        
+        # Create Agent with official LiveKit pattern
+        agent = Agent(
+            instructions=(
+                "You are a voice assistant for SpashtAI, a platform for voice AI interviews and practice. "
+                "Your interface with users will be voice. You should use short and concise responses, "
+                "and avoid usage of unpronounceable punctuation. Be helpful, encouraging, and professional. "
+                "When conducting interview practice, ask thoughtful questions and provide constructive feedback. "
+                "You are powered by Amazon Nova Sonic for natural speech synthesis."
+            )
+        )
+        
+        logger.info("✅ Agent created with AWS Nova Sonic")
+        
+        # Set agent participant name and metadata for frontend
+        try:
+            await ctx.room.local_participant.set_name("SpashtAI Assistant")
+            await ctx.room.local_participant.set_metadata(
+                '{"role": "agent", "type": "voice_assistant", "model": "AWS Nova Sonic"}'
+            )
+            logger.info("✅ Agent name and metadata set for frontend identification")
+        except Exception as e:
+            logger.warning("⚠️ Failed to set agent metadata: %s", e)
+        
+        # Add conversation logging event handlers with audio recording
+        @session.on("conversation_item_added")
+        def on_conversation_item_added(item):
+            """Track conversation items, publish to frontend, and save with audio"""
+            try:
+                logger.info(f"🎯 Conversation item added event fired: type='{type(item).__name__}' item={item} created_at={getattr(item, 'created_at', 'unknown')}")
+                
+                # Extract role and content properly - handle different event types
+                role = "unknown"
+                content = ""
+                
+                # Check if it's a ChatMessage (from AWS Nova Sonic)
+                if hasattr(item, 'item') and hasattr(item.item, 'role'):
+                    # It's a conversation_item_added event with nested item
+                    message_item = item.item
+                    role = getattr(message_item, 'role', 'unknown')
+                    content_attr = getattr(message_item, 'content', [])
+                elif hasattr(item, 'role'):
+                    # It's directly a ChatMessage
+                    role = getattr(item, 'role', 'unknown')
+                    content_attr = getattr(item, 'content', [])
+                else:
+                    logger.warning(f"🤔 Unknown item structure: {type(item)} - {item}")
+                    return
+                
+                # Handle different content formats - AWS Nova Sonic uses content arrays
+                if isinstance(content_attr, list) and len(content_attr) > 0:
+                    # Join all content pieces if multiple
+                    content = ' '.join(str(piece).strip() for piece in content_attr if str(piece).strip())
+                elif isinstance(content_attr, str):
+                    content = content_attr.strip()
+                else:
+                    content = str(content_attr).strip()
+                
+                # Debug content extraction with full details
+                logger.info(f"🔍 Content extracted: role='{role}', content_attr='{content_attr}', final_content='{content}'")
+                
+                # Filter out empty, meaningless, or system-generated content
+                if not content or content in ['[]', '', 'None', 'null'] or len(content) < 3:
+                    logger.info(f"⏭️ Skipping empty/invalid conversation item: '{content}'")
+                    return
+                
+                # Send in format expected by frontend processPayload
+                message_data = {
+                    "type": role,  # 'user' or 'assistant'
+                    "text": content,
+                    "final": True,  # Mark as final message
+                    "id": getattr(item, 'id', f"{role}_{int(datetime.now().timestamp() * 1000)}"),
+                    "timestamp": int(datetime.now().timestamp() * 1000)
+                }
+                
+                asyncio.create_task(ctx.room.local_participant.publish_data(
+                    json.dumps(message_data).encode(),
+                    topic="lk.conversation"
+                ))
+                
+                # For assistant messages, record audio and save with audio URL
+                if role == "assistant":
+                    async def save_with_audio():
+                        # Generate a unique audio file ID for this message
+                        audio_id = getattr(item, 'id', f"{role}_{int(datetime.now().timestamp() * 1000)}")
+                        
+                        # For now, create a placeholder audio file (AWS Nova Sonic audio will be enhanced later)
+                        # In production, we would capture the actual audio stream
+                        audio_url = await audio_recorder.save_audio_placeholder(audio_id, "assistant")
+                        
+                        # Log message with audio URL
+                        await conversation_logger.log_message(role, content, audio_url)
+                    
+                    asyncio.create_task(save_with_audio())
+                else:
+                    # For user messages, log without audio for now
+                    asyncio.create_task(conversation_logger.log_message(role, content))
+                
+                logger.info(f"📝 Conversation item processed: {role}: {content[:100]}...")
+            except Exception as e:
+                logger.warning("⚠️ Failed to process conversation item: %s", e)
+        
+        # Audio recording handler - capture audio from LiveKit room events
+        audio_chunks = {}  # Store audio chunks by message ID
+        
+        @ctx.room.on("track_published")
+        def on_track_published(publication, participant):
+            """Handle when audio tracks are published"""
+            if publication.kind == "audio" and participant.identity.startswith("agent"):
+                logger.info(f"🎵 Agent audio track published: {publication.sid}")
+                
+        # We'll capture audio through the AWS Nova Sonic events instead
+        # Store audio data when assistant speaks
+        current_audio_data = []
+        
+        @session.on("user_speech_committed")
+        def on_user_speech(event):
+            """Handle user speech events (backup - conversation_item_added should handle most cases)"""
+            try:
+                logger.info(f"🎯 User speech committed event fired: {event}")
+                # This is a backup handler - conversation_item_added should handle most cases
+                # Only log if we get useful text content
+                text = str(event) if hasattr(event, '__str__') and str(event) not in ['<class', 'object'] else None
+                if text and len(text) > 10:  # Only process meaningful text
+                    asyncio.create_task(conversation_logger.log_message("user", text))
+                    logger.info("✅ Backup logged user speech: %s", text[:50])
+            except Exception as e:
+                logger.warning("⚠️ Failed to log user speech: %s", e)
+        
+        @session.on("agent_speech_committed") 
+        def on_agent_speech(event):
+            """Handle agent speech events (backup - conversation_item_added should handle most cases)"""
+            try:
+                logger.info(f"🎯 Agent speech committed event fired: {event}")
+                # This is a backup handler - conversation_item_added should handle most cases
+                # Only log if we get useful text content
+                text = str(event) if hasattr(event, '__str__') and str(event) not in ['<class', 'object'] else None
+                if text and len(text) > 10:  # Only process meaningful text
+                    asyncio.create_task(conversation_logger.log_message("assistant", text))
+                    logger.info("✅ Backup logged assistant speech: %s", text[:50])
+            except Exception as e:
+                logger.warning("⚠️ Failed to log agent speech: %s", e)
+        
+        # Send agent ready state to frontend with enhanced metadata
+        try:
+            # Use data channel to send state information to frontend
+            await asyncio.sleep(1)  # Wait for connection to be established
+            
+            # Send detailed agent information
+            agent_info = {
+                "type": "session_state", 
+                "text": "ready",
+                "agent_name": "AWS Nova Sonic Agent with Audio Recording",
+                "agent_model": "AWS Nova Sonic",
+                "agent_voice": "tiffany",
+                "audio_recording": True,
+                "environment": environment,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            await ctx.room.local_participant.publish_data(
+                json.dumps(agent_info).encode(), 
+                topic="lk.control"
+            )
+            logger.info(f"✅ Sent enhanced ready state to frontend: {agent_info}")
+        except Exception as e:
+            logger.warning("⚠️ Failed to send ready state: %s", e)
+        
+        # Start the AgentSession using the official pattern (from docs)
+        logger.info("🎯 Starting AgentSession with AWS Nova Sonic + Audio Recording...")
+        
+        # AWS Nova Sonic RealtimeModel doesn't have _chat_ctx like other LLMs
+        # The conversation tracking is handled via the conversation_item_added event handler above
+        
+        await session.start(room=ctx.room, agent=agent)
+        
+        logger.info("🎉 AgentSession completed")
+        
+    except Exception as e:
+        logger.error("❌ Agent error: %s", e)
+        raise
+    finally:
+        # Cleanup
+        await conversation_logger.close()
+        logger.info("🧹 Agent cleanup completed")
+
+if __name__ == "__main__":
+    # Official LiveKit CLI runner
+    cli.run_app(
+        WorkerOptions(
+            entrypoint_fnc=entrypoint,
+            prewarm_fnc=prewarm,
+            # Agent name for explicit dispatch
+            agent_name="spashtai-assistant",
+        )
+    )
