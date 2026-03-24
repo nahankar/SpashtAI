@@ -45,7 +45,7 @@ export async function getSession(req: Request, res: Response) {
 
 export async function createSession(req: Request, res: Response) {
   try {
-    const { id, module = 'elevate', startedAt } = req.body
+    const { id, module = 'elevate', startedAt, sessionName, focusArea, focusContext } = req.body
     const userId = req.user!.userId
 
     const session = await prisma.session.create({
@@ -53,6 +53,9 @@ export async function createSession(req: Request, res: Response) {
         id,
         userId,
         module,
+        sessionName: sessionName?.trim() || null,
+        focusArea: focusArea?.trim() || null,
+        focusContext: focusContext?.trim() || null,
         startedAt: startedAt ? new Date(startedAt) : new Date(),
       },
       include: {

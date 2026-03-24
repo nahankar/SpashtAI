@@ -9,7 +9,7 @@ import { prisma } from '../lib/prisma'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 import { detectFormatAndParse } from '../lib/transcript-parser'
-import { calculateReplayMetrics } from '../lib/replay-metrics'
+import { calculateReplayMetrics, findMatchingSpeaker, getDetectedSpeakers } from '../lib/replay-metrics'
 import { analyzeTranscript } from '../lib/aws-bedrock'
 import {
   uploadToS3,
@@ -54,7 +54,7 @@ const router = Router()
 
 router.post('/sessions', async (req: Request, res: Response) => {
   try {
-    const { meetingType, userRole, focusAreas, meetingGoal, meetingDate, participantName } = req.body
+    const { sessionName, meetingType, userRole, focusAreas, meetingGoal, meetingDate, participantName } = req.body
 
     if (!meetingType || !userRole) {
       return res.status(400).json({ error: 'meetingType and userRole are required' })
@@ -65,6 +65,7 @@ router.post('/sessions', async (req: Request, res: Response) => {
     const session = await prisma.replaySession.create({
       data: {
         userId,
+        sessionName: sessionName?.trim() || null,
         meetingType,
         userRole,
         focusAreas: focusAreas || [],
@@ -173,17 +174,22 @@ router.post('/sessions/:id/process', async (req: Request, res: Response) => {
     })
     if (!session) return res.status(404).json({ error: 'Replay session not found' })
 
-    if (session.status !== 'pending') {
+    if (session.status === 'transcribing' || session.status === 'analyzing') {
       return res.status(400).json({
-        error: `Session is already ${session.status}`,
+        error: `Session is currently ${session.status}`,
         status: session.status,
       })
     }
 
-    // Mark as processing
+    // Clean up previous result before re-processing
+    if (session.status === 'failed' || session.status === 'completed') {
+      await prisma.replayResult.deleteMany({ where: { replaySessionId: id } })
+    }
+
+    // Mark as processing (clear any previous error)
     await prisma.replaySession.update({
       where: { id },
-      data: { status: 'transcribing' },
+      data: { status: 'transcribing', errorMessage: null },
     })
 
     // Fire-and-forget processing — respond immediately
@@ -292,16 +298,30 @@ async function processReplaySession(sessionId: string): Promise<void> {
     throw new Error('No transcript text could be extracted from the uploaded files')
   }
 
+  // ── Step 1b: Validate participant match ──
+
+  const segments = Array.isArray(structuredTranscript)
+    ? structuredTranscript
+    : [{ speaker: 'Speaker', text: fullText }]
+
+  if (session.participantName) {
+    const matched = findMatchingSpeaker(segments, session.participantName)
+    if (!matched) {
+      const detectedSpeakers = getDetectedSpeakers(segments)
+      throw new Error(JSON.stringify({
+        code: 'PARTICIPANT_NOT_FOUND',
+        participantName: session.participantName,
+        detectedSpeakers,
+      }))
+    }
+  }
+
   // ── Step 2: Calculate metrics ──
 
   await prisma.replaySession.update({
     where: { id: sessionId },
     data: { status: 'analyzing' },
   })
-
-  const segments = Array.isArray(structuredTranscript)
-    ? structuredTranscript
-    : [{ speaker: 'Speaker', text: fullText }]
 
   const metrics = calculateReplayMetrics(segments, session.participantName || undefined, durationSec)
 
@@ -361,8 +381,69 @@ async function processReplaySession(sessionId: string): Promise<void> {
     data: { status: 'completed' },
   })
 
+  // Auto-record skill progress from Replay scores
+  try {
+    const skillEntries = [
+      { skill: 'clarity', score: aiResult.clarityScore },
+      { skill: 'confidence', score: aiResult.confidenceScore },
+      { skill: 'engagement', score: aiResult.engagementScore },
+    ].filter((e) => e.score > 0)
+
+    if (metrics.fillerWordRate != null) {
+      const fillerScore = Math.max(0, Math.min(10, 10 - metrics.fillerWordRate * 2))
+      skillEntries.push({ skill: 'filler_words', score: fillerScore })
+    }
+    if (metrics.wordsPerMinute) {
+      const wpmScore = metrics.wordsPerMinute >= 120 && metrics.wordsPerMinute <= 180
+        ? 9
+        : metrics.wordsPerMinute >= 100 && metrics.wordsPerMinute <= 200
+          ? 7
+          : 5
+      skillEntries.push({ skill: 'pacing', score: wpmScore })
+    }
+
+    if (skillEntries.length > 0) {
+      await prisma.skillProgress.createMany({
+        data: skillEntries.map((e) => ({
+          userId: session.userId,
+          skill: e.skill,
+          score: e.score,
+          source: 'replay',
+          sessionId,
+        })),
+      })
+    }
+  } catch (err) {
+    console.warn('Non-critical: failed to record skill progress from Replay', err)
+  }
+
   console.log(`Replay session ${sessionId} processing completed in ${processingTimeMs}ms`)
 }
+
+// ── PATCH /api/replay/sessions/:id ──
+
+router.patch('/sessions/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params
+    const { participantName } = req.body
+
+    const session = await prisma.replaySession.findUnique({ where: { id } })
+    if (!session) return res.status(404).json({ error: 'Replay session not found' })
+
+    const updated = await prisma.replaySession.update({
+      where: { id },
+      data: {
+        participantName: participantName?.trim() || null,
+      },
+      select: { id: true, participantName: true, status: true },
+    })
+
+    res.json(updated)
+  } catch (error) {
+    console.error('Error updating replay session:', error)
+    res.status(500).json({ error: 'Failed to update replay session' })
+  }
+})
 
 // ── GET /api/replay/sessions/:id/status ──
 

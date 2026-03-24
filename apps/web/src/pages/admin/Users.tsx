@@ -1,5 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
+import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
+import { useConfirm } from '@/hooks/useConfirm'
 import { UserTable } from '@/components/admin/UserTable'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -22,6 +24,7 @@ interface UsersResponse {
 }
 
 export function Users() {
+  const confirm = useConfirm()
   const [users, setUsers] = useState<UserRow[]>([])
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
@@ -51,12 +54,15 @@ export function Users() {
   }, [fetchUsers])
 
   async function handleDelete(id: string) {
-    if (!confirm('Are you sure you want to delete this user?')) return
+    const ok = await confirm({ title: 'Delete User', description: 'Are you sure you want to delete this user? This cannot be undone.', confirmLabel: 'Delete', variant: 'destructive' })
+    if (!ok) return
     try {
       await apiClient(`/api/admin/users/${id}`, { method: 'DELETE' })
+      toast.success('User deleted')
       fetchUsers()
     } catch (err) {
       console.error('Delete failed:', err)
+      toast.error('Failed to delete user.')
     }
   }
 

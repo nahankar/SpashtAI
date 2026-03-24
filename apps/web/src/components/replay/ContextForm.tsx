@@ -26,6 +26,7 @@ const FOCUS_AREAS = [
 
 interface ContextFormProps {
   onSubmit: (data: {
+    sessionName?: string
     meetingType: string
     userRole: string
     focusAreas: string[]
@@ -37,6 +38,7 @@ interface ContextFormProps {
 }
 
 export function ContextForm({ onSubmit, loading }: ContextFormProps) {
+  const [sessionName, setSessionName] = useState('')
   const [meetingType, setMeetingType] = useState('')
   const [userRole, setUserRole] = useState('')
   const [focusAreas, setFocusAreas] = useState<string[]>([])
@@ -50,7 +52,7 @@ export function ContextForm({ onSubmit, loading }: ContextFormProps) {
     )
   }
 
-  const canSubmit = meetingType && userRole
+  const canSubmit = sessionName.trim() && meetingType && userRole
 
   return (
     <Card>
@@ -61,6 +63,21 @@ export function ContextForm({ onSubmit, loading }: ContextFormProps) {
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-5">
+        <div className="grid gap-2">
+          <Label htmlFor="sessionName">Session Name *</Label>
+          <input
+            id="sessionName"
+            type="text"
+            placeholder="e.g. Q1 Client Review, Interview with Acme Corp"
+            value={sessionName}
+            onChange={(e) => setSessionName(e.target.value)}
+            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+          <p className="text-xs text-muted-foreground">
+            Give this session a memorable name so you can find it later.
+          </p>
+        </div>
+
         <div className="grid gap-2">
           <Label htmlFor="meetingType">Meeting Type *</Label>
           <select
@@ -161,6 +178,7 @@ export function ContextForm({ onSubmit, loading }: ContextFormProps) {
           disabled={!canSubmit || loading}
           onClick={() =>
             onSubmit({
+              sessionName: sessionName.trim() || undefined,
               meetingType,
               userRole,
               focusAreas,

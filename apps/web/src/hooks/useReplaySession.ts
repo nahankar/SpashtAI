@@ -4,6 +4,7 @@ import { getAuthHeaders } from '@/lib/api-client'
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 
 export interface ReplayContext {
+  sessionName?: string
   meetingType: string
   userRole: string
   focusAreas: string[]
@@ -16,6 +17,11 @@ export interface ReplaySessionStatus {
   id: string
   status: 'pending' | 'transcribing' | 'analyzing' | 'completed' | 'failed'
   errorMessage?: string | null
+}
+
+export interface ParticipantMismatch {
+  participantName: string
+  detectedSpeakers: string[]
 }
 
 export interface ReplayUploadRecord {
@@ -74,6 +80,7 @@ export function useReplaySession() {
   const [results, setResults] = useState<ReplayResultData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [participantMismatch, setParticipantMismatch] = useState<ParticipantMismatch | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const stopPolling = useCallback(() => {
@@ -164,6 +171,22 @@ export function useReplaySession() {
               }
             } else if (statusData.status === 'failed') {
               stopPolling()
+              // Check if this is a participant-not-found error
+              if (statusData.errorMessage) {
+                try {
+                  const parsed = JSON.parse(statusData.errorMessage)
+                  if (parsed.code === 'PARTICIPANT_NOT_FOUND') {
+                    setParticipantMismatch({
+                      participantName: parsed.participantName,
+                      detectedSpeakers: parsed.detectedSpeakers,
+                    })
+                    setError(null)
+                    return
+                  }
+                } catch {
+                  // Not JSON — treat as regular error
+                }
+              }
               setError(statusData.errorMessage || 'Processing failed')
             }
           } catch {
@@ -176,6 +199,39 @@ export function useReplaySession() {
       }
     },
     [stopPolling]
+  )
+
+  const updateParticipantName = useCallback(
+    async (sid: string, newName: string) => {
+      setError(null)
+      setLoading(true)
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/replay/sessions/${sid}`, {
+          method: 'PATCH',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ participantName: newName }),
+        })
+        if (!res.ok) throw new Error((await res.json()).error || 'Failed to update participant')
+        return await res.json()
+      } catch (e: any) {
+        setError(e.message)
+        throw e
+      } finally {
+        setLoading(false)
+      }
+    },
+    []
+  )
+
+  const retryWithSpeaker = useCallback(
+    async (sid: string, speakerName: string) => {
+      setParticipantMismatch(null)
+      setError(null)
+      setStatus(null)
+      await updateParticipantName(sid, speakerName)
+      await startProcessing(sid)
+    },
+    [updateParticipantName, startProcessing]
   )
 
   const fetchResults = useCallback(async (sid: string) => {
@@ -204,9 +260,11 @@ export function useReplaySession() {
     results,
     error,
     loading,
+    participantMismatch,
     createSession,
     uploadFiles,
     startProcessing,
     fetchResults,
+    retryWithSpeaker,
   }
 }

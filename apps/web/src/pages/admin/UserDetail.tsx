@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
+import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
+import { useConfirm } from '@/hooks/useConfirm'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -32,6 +34,7 @@ interface Activity {
 export function UserDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const confirm = useConfirm()
   const [user, setUser] = useState<UserDetailData | null>(null)
   const [activities, setActivities] = useState<Activity[]>([])
   const [loading, setLoading] = useState(true)
@@ -65,12 +68,16 @@ export function UserDetail() {
   }
 
   async function handleDelete() {
-    if (!id || !confirm('Are you sure you want to delete this user? This cannot be undone.')) return
+    if (!id) return
+    const ok = await confirm({ title: 'Delete User', description: 'Are you sure you want to delete this user? This cannot be undone.', confirmLabel: 'Delete', variant: 'destructive' })
+    if (!ok) return
     try {
       await apiClient(`/api/admin/users/${id}`, { method: 'DELETE' })
+      toast.success('User deleted')
       navigate('/admin/users')
     } catch (err) {
       console.error('Failed to delete user:', err)
+      toast.error('Failed to delete user.')
     }
   }
 

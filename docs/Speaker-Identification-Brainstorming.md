@@ -142,26 +142,30 @@ This makes participant selection a genuine differentiator for SpashtAI's Replay 
 
 ## Decision: Phased Approach
 
-### Phase 1 — NOW (Implemented)
-**Method:** Name field in the Context Form
+### Phase 1 — IMPLEMENTED (Updated March 23, 2026)
+**Method:** Name field in the Context Form + strict validation + speaker selection fallback
 
 - User types their name as it appears in the transcript
-- Case-insensitive matching in metrics calculation
+- Case-insensitive + partial matching in metrics calculation
 - AI prompt injection to focus analysis on the named participant
-- Fallback to all-speaker aggregate analysis when name is blank or doesn't match
-- Zero new infrastructure, zero cost, zero privacy risk
+- **CRITICAL FIX (March 23):** If participantName is provided but doesn't match any detected speaker, processing **fails immediately** with a structured error containing the detected speaker list — no silent fallback to dominant speaker
+- Frontend shows a **speaker selection UI** with all detected speakers as clickable buttons
+- User picks correct speaker → session is patched → re-processes automatically
+- When participantName is blank, fallback to dominant speaker is still the correct default behavior
 
-**Covers:** ~80%+ of current use cases (pasted transcripts with named speakers)
+**Covers:** ~95%+ of current use cases (pasted transcripts with named speakers, plus recovery for generic labels like "Speaker 1")
 
-### Phase 2 — FUTURE (When audio upload path is fully built)
-**Method:** Speaker selection UI with sample quotes
+**Related:** Transcript parsing quality directly affects speaker detection. See [Transcript Parsing Architecture](./Transcript-Parsing-Architecture.md) for the parsing strategy that ensures correct speaker extraction from various meeting tools.
 
-- After AWS Transcribe diarization produces generic labels (spk_0, spk_1), show sample quotes per speaker
-- User clicks "This is me"
-- Pre-select if the name field matches a speaker label
-- Only needed when audio uploads produce generic labels
+### Phase 2 — PARTIALLY DONE (March 23, 2026)
+**Method:** Speaker selection UI (implemented), sample quotes (future enhancement)
 
-**Trigger to build:** When audio upload/transcription is used in production and users encounter generic speaker labels
+- **DONE:** When name doesn't match, detected speakers shown as selectable buttons
+- **DONE:** PATCH endpoint to update participantName + re-process failed sessions
+- **FUTURE:** Show 2-3 sample quotes per speaker to help user identify themselves (especially for generic labels like spk_0, spk_1 from AWS Transcribe)
+- **FUTURE:** Pre-select if name field partially matches a speaker label
+
+**Trigger for quotes enhancement:** When audio upload/transcription is used in production and users encounter generic speaker labels
 
 ### Phase 3 — FUTURE (If power users demand it)
 **Method:** Optional voice enrollment

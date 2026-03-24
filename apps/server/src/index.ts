@@ -38,12 +38,19 @@ import {
   saveAdvancedMetrics,
   getAdvancedMetrics
 } from './routes/advanced-metrics'
+import {
+  getSkillProgress,
+  getSkillSummary,
+  recordSkillProgress
+} from './routes/skill-progress'
 import downloadsRouter from './routes/downloads'
 import replayRouter from './routes/replay'
 import authRouter from './routes/auth'
 import adminUsersRouter from './routes/admin/users'
 import adminAnalyticsRouter from './routes/admin/analytics'
 import adminSystemRouter from './routes/admin/system'
+import ticketsRouter from './routes/tickets'
+import adminTicketsRouter from './routes/admin/tickets'
 import { ensureAdminExists } from './lib/init-admin'
 import { requireAuth } from './middleware/auth'
 import { requireAdmin } from './middleware/admin'
@@ -69,6 +76,10 @@ app.use('/api/auth', authRouter)
 app.use('/api/admin/users', requireAuth, requireAdmin, adminUsersRouter)
 app.use('/api/admin/analytics', requireAuth, requireAdmin, adminAnalyticsRouter)
 app.use('/api/admin/system', requireAuth, requireAdmin, adminSystemRouter)
+app.use('/api/admin/tickets', requireAuth, requireAdmin, adminTicketsRouter)
+
+// Protected: user tickets
+app.use('/api/tickets', requireAuth, ticketsRouter)
 
 // Public: LiveKit (has its own auth via API keys)
 app.get('/livekit/token', getLivekitToken)
@@ -119,6 +130,11 @@ app.get('/audio/analytics', requireAuth, getAudioAnalytics)
 // Protected: advanced metrics
 app.post('/sessions/:sessionId/advanced-metrics', requireAuth, saveAdvancedMetrics)
 app.get('/sessions/:sessionId/advanced-metrics', requireAuth, getAdvancedMetrics)
+
+// Protected: skill progress tracking
+app.get('/api/skill-progress', requireAuth, getSkillProgress)
+app.get('/api/skill-progress/summary', requireAuth, getSkillSummary)
+app.post('/api/skill-progress', requireAuth, recordSkillProgress)
 
 // Protected: downloads and replay
 app.use('/api/downloads', requireAuth, downloadsRouter)

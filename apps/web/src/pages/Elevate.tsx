@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
+import { SessionFilters, type SortField, type SortDir } from '@/components/SessionFilters'
 import { useSearchParams, useNavigate, Link } from 'react-router-dom'
 import {
   LiveKitRoom,
@@ -10,6 +11,7 @@ import {
 } from '@livekit/components-react'
 import '@livekit/components-styles'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -21,6 +23,8 @@ import { useRealTimeMetrics, useSessionMetrics } from '@/hooks/useSessionMetrics
 import { useConversationPersistence } from '@/hooks/useConversationPersistence'
 import { AgentVisualizer } from '@/components/layout/AgentVisualizer'
 import { getAuthHeaders } from '@/lib/api-client'
+import { FOCUS_AREAS, getFocusAreaLabel } from '@/lib/focus-areas'
+import { useAuth } from '@/hooks/useAuth'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 
@@ -56,9 +60,21 @@ async function saveSessionData(sessionId: string, metrics: any, transcript: any)
 export function Elevate() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const viewSessionId = searchParams.get('session') // URL parameter for viewing past session
+  const { user } = useAuth()
+  const viewSessionId = searchParams.get('session')
+  const cameFromHistory = searchParams.get('from') === 'history'
+  const inboundFocus = searchParams.get('focus') || ''
+  const inboundContext = searchParams.get('context') ? decodeURIComponent(searchParams.get('context')!) : ''
+  const inboundNewSession = searchParams.get('newSession') === 'true'
   
-  const [identity, setIdentity] = useState('user-' + Math.floor(Math.random() * 9999))
+  const [identity] = useState(() => {
+    const name = user?.firstName || user?.email?.split('@')[0] || 'user'
+    return `${name}-${Math.floor(Math.random() * 9999)}`
+  })
+  const [elevateSessionName, setElevateSessionName] = useState(
+    inboundContext ? `Practice: ${inboundContext.slice(0, 60)}` : ''
+  )
+  const [focusArea, setFocusArea] = useState(inboundFocus || '')
   const [roomName, setRoomName] = useState('') // Empty initially, generated per session
   const [token, setToken] = useState<string | null>(null)
   const [url, setUrl] = useState<string | null>(null)
@@ -69,6 +85,89 @@ export function Elevate() {
   const [showMetrics, setShowMetrics] = useState(false)
   const [showResumePrompt, setShowResumePrompt] = useState(false)
   const [previousSessionId, setPreviousSessionId] = useState<string | null>(null)
+  const [showHistory, setShowHistory] = useState(!viewSessionId && !inboundNewSession)
+
+  interface ElevateSessionItem {
+    id: string
+    module: string
+    sessionName?: string | null
+    focusArea?: string | null
+    startedAt: string
+    endedAt?: string
+    durationSec?: number
+    words?: number
+    fillerRate?: number
+  }
+  const [pastSessions, setPastSessions] = useState<ElevateSessionItem[]>([])
+  const [pastLoading, setPastLoading] = useState(true)
+  const [elevSearch, setElevSearch] = useState('')
+  const [elevSortField, setElevSortField] = useState<SortField>('date')
+  const [elevSortDir, setElevSortDir] = useState<SortDir>('desc')
+  const [elevStatusFilter, setElevStatusFilter] = useState('all')
+
+  const filteredPastSessions = useMemo(() => {
+    let result = [...pastSessions]
+    if (elevSearch) {
+      const q = elevSearch.toLowerCase()
+      result = result.filter(
+        (s) =>
+          (s.sessionName || '').toLowerCase().includes(q) ||
+          s.module.toLowerCase().includes(q)
+      )
+    }
+    if (elevStatusFilter !== 'all') {
+      result = result.filter((s) =>
+        elevStatusFilter === 'completed' ? s.endedAt != null : s.endedAt == null
+      )
+    }
+    result.sort((a, b) => {
+      let cmp = 0
+      switch (elevSortField) {
+        case 'date':
+          cmp = new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime()
+          break
+        case 'name':
+          cmp = (a.sessionName || 'Session').localeCompare(b.sessionName || 'Session')
+          break
+        case 'duration':
+          cmp = (a.durationSec ?? 0) - (b.durationSec ?? 0)
+          break
+        case 'status':
+          cmp = (a.endedAt ? 'completed' : 'in_progress').localeCompare(b.endedAt ? 'completed' : 'in_progress')
+          break
+      }
+      return elevSortDir === 'asc' ? cmp : -cmp
+    })
+    return result
+  }, [pastSessions, elevSearch, elevSortField, elevSortDir, elevStatusFilter])
+
+  const elevateSortOptions: { value: SortField; label: string }[] = [
+    { value: 'date', label: 'Date' },
+    { value: 'name', label: 'Name' },
+    { value: 'duration', label: 'Duration' },
+    { value: 'status', label: 'Status' },
+  ]
+
+  const elevateStatusOptions = [
+    { value: 'all', label: 'All Statuses' },
+    { value: 'completed', label: 'Completed' },
+    { value: 'in_progress', label: 'In Progress' },
+  ]
+
+  useEffect(() => {
+    async function loadPastSessions() {
+      try {
+        setPastLoading(true)
+        const res = await fetch(`${API_BASE_URL}/sessions`, { headers: getAuthHeaders() })
+        if (res.ok) {
+          const data = await res.json()
+          setPastSessions(data.sessions || [])
+        }
+      } catch { /* non-critical */ }
+      finally { setPastLoading(false) }
+    }
+    loadPastSessions()
+  }, [])
   
   // Real-time metrics for active session
   const { currentMetrics, updateMetrics, resetMetrics } = useRealTimeMetrics()
@@ -267,6 +366,9 @@ export function Elevate() {
         body: JSON.stringify({
           id: newSessionId,
           module: 'elevate',
+          sessionName: elevateSessionName.trim() || null,
+          focusArea: focusArea || null,
+          focusContext: inboundContext || null,
           startedAt: new Date().toISOString()
         })
       })
@@ -331,8 +433,8 @@ export function Elevate() {
       }
     }
 
-    navigate('/')
-  }, [sessionId, clearMessages, resetMetrics, navigate])
+    navigate(cameFromHistory ? '/history?tab=elevate' : '/elevate')
+  }, [sessionId, clearMessages, resetMetrics, navigate, cameFromHistory])
 
   const handleResumeSession = useCallback(async () => {
     if (!previousSessionId) return
@@ -384,16 +486,136 @@ export function Elevate() {
       ? 'Live Session'
       : 'New Session'
 
+  // ── Session history view ──
+  if (showHistory && !joined && !viewSessionId && !showResumePrompt) {
+    const formatRelDate = (d: string) => {
+      const ms = Date.now() - new Date(d).getTime()
+      const m = Math.floor(ms / 60000), h = Math.floor(ms / 3600000), dy = Math.floor(ms / 86400000)
+      if (m < 1) return 'Just now'
+      if (m < 60) return `${m}m ago`
+      if (h < 24) return `${h}h ago`
+      if (dy < 7) return `${dy}d ago`
+      return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    }
+    const fmtDur = (s: number) => `${Math.floor(s / 60)}m ${s % 60}s`
+
+    return (
+      <div className="grid gap-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">Elevate</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Practice with a live AI coach and elevate your communication skills.
+            </p>
+          </div>
+          <Button onClick={() => setShowHistory(false)}>
+            + New Elevate Session
+          </Button>
+        </div>
+
+        {pastLoading && (
+          <div className="flex items-center justify-center py-16 text-muted-foreground">
+            Loading sessions...
+          </div>
+        )}
+
+        {!pastLoading && pastSessions.length > 0 && (
+          <SessionFilters
+            search={elevSearch}
+            onSearchChange={setElevSearch}
+            sortField={elevSortField}
+            sortDir={elevSortDir}
+            onSortChange={(f, d) => { setElevSortField(f); setElevSortDir(d) }}
+            sortOptions={elevateSortOptions}
+            statusFilter={elevStatusFilter}
+            onStatusFilterChange={setElevStatusFilter}
+            statusOptions={elevateStatusOptions}
+            totalCount={pastSessions.length}
+            filteredCount={filteredPastSessions.length}
+          />
+        )}
+
+        {!pastLoading && pastSessions.length === 0 && (
+          <Card>
+            <CardContent className="py-16 text-center">
+              <h3 className="text-lg font-medium">No Elevate sessions yet</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Start a live AI coaching session to practice and improve.
+              </p>
+              <Button className="mt-4" onClick={() => setShowHistory(false)}>
+                + Start Your First Session
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {!pastLoading && pastSessions.length > 0 && filteredPastSessions.length === 0 && (
+          <Card>
+            <CardContent className="py-10 text-center text-sm text-muted-foreground">
+              No sessions match your filters.
+            </CardContent>
+          </Card>
+        )}
+
+        {!pastLoading && filteredPastSessions.length > 0 && (
+          <div className="grid gap-3">
+            {filteredPastSessions.map((s) => {
+              const done = s.endedAt != null
+              return (
+                <Card key={s.id} className="transition-shadow hover:shadow-md">
+                  <CardContent className="flex items-center gap-4 py-4">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium truncate">
+                          {s.sessionName || `${s.module.charAt(0).toUpperCase() + s.module.slice(1)} Session`}
+                        </span>
+                        <Badge variant={done ? 'default' : 'secondary'}>
+                          {done ? 'Completed' : 'In Progress'}
+                        </Badge>
+                        {s.focusArea && (
+                          <Badge variant="outline" className="text-xs">
+                            {getFocusAreaLabel(s.focusArea)}
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
+                        <span>{formatRelDate(s.startedAt)}</span>
+                        {done && s.durationSec != null && <span>{fmtDur(s.durationSec)}</span>}
+                        {s.words != null && <span>{s.words} words</span>}
+                        {s.fillerRate != null && <span>{s.fillerRate.toFixed(1)}% fillers</span>}
+                      </div>
+                    </div>
+                    <Link to={`/elevate?session=${s.id}`}>
+                      <Button size="sm" variant="outline">
+                        {done ? 'View Results' : 'Resume'}
+                      </Button>
+                    </Link>
+                  </CardContent>
+                </Card>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="grid gap-6">
-      {/* Breadcrumbs */}
-      <nav className="flex items-center gap-1.5 text-sm text-muted-foreground">
-        <Link to="/" className="hover:text-foreground transition-colors">Home</Link>
-        <span>/</span>
-        <Link to="/elevate" className="hover:text-foreground transition-colors">Elevate</Link>
-        <span>/</span>
-        <span className="text-foreground font-medium">{breadcrumbLabel}</span>
-      </nav>
+      {/* Back navigation */}
+      {!joined && viewSessionId && cameFromHistory && (
+        <Link to="/history?tab=elevate" className="text-sm text-muted-foreground hover:text-foreground w-fit">
+          &larr; Back to My Sessions
+        </Link>
+      )}
+      {!joined && !viewSessionId && !showHistory && (
+        <button
+          onClick={() => setShowHistory(true)}
+          className="text-sm text-muted-foreground hover:text-foreground w-fit"
+        >
+          &larr; Back to sessions
+        </button>
+      )}
 
       {/* Resume Session Prompt */}
       {showResumePrompt && previousSessionId && (
@@ -407,10 +629,10 @@ export function Elevate() {
             </p>
             <div className="flex gap-2">
               <Button onClick={handleResumeSession} variant="default">
-                📖 Resume Session
+                Resume Session
               </Button>
               <Button onClick={handleStartNewSession} variant="outline">
-                🆕 Start New Session
+                Start New Session
               </Button>
             </div>
           </CardContent>
@@ -423,17 +645,54 @@ export function Elevate() {
         </CardHeader>
         <CardContent>
           {!joined && !viewSessionId ? (
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="sm:col-span-1">
-                <label className="text-sm text-muted-foreground">Your name</label>
-                <Input value={identity} onChange={(e) => setIdentity(e.target.value)} placeholder="e.g. neel" />
+            <div className="grid gap-3">
+              <div>
+                <label className="text-sm font-medium">Session Name *</label>
+                <Input
+                  value={elevateSessionName}
+                  onChange={(e) => setElevateSessionName(e.target.value)}
+                  placeholder="e.g. Interview Practice, Pitch Rehearsal"
+                  className="mt-1"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Give this session a memorable name so you can find it later.
+                </p>
               </div>
-              <div className="sm:col-span-1">
-                <label className="text-sm text-muted-foreground">Room (optional)</label>
-                <Input value={roomName} onChange={(e) => setRoomName(e.target.value)} placeholder="auto-generated" />
+              <div>
+                <label className="text-sm font-medium">Focus Area</label>
+                <select
+                  value={focusArea}
+                  onChange={(e) => setFocusArea(e.target.value)}
+                  className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <option value="">General practice (no specific focus)</option>
+                  {FOCUS_AREAS.map((a) => (
+                    <option key={a.id} value={a.id}>{a.label} — {a.description}</option>
+                  ))}
+                </select>
+                {inboundContext && (
+                  <p className="mt-1 rounded-md bg-primary/5 px-2 py-1.5 text-xs text-primary">
+                    From Replay: <span className="font-medium">{inboundContext}</span>
+                  </p>
+                )}
               </div>
-              <div className="sm:col-span-1 flex items-end">
-                <Button onClick={handleJoin} className="w-full">Join</Button>
+              <div className="flex gap-3 pt-2">
+                <Button
+                  variant="outline"
+                  size="lg"
+                  className="flex-1"
+                  onClick={() => navigate(-1)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="lg"
+                  className="flex-1"
+                  onClick={handleJoin}
+                  disabled={!elevateSessionName.trim()}
+                >
+                  Start Session
+                </Button>
               </div>
             </div>
           ) : !joined && viewSessionId ? (

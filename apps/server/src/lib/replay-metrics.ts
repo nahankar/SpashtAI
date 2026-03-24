@@ -41,7 +41,7 @@ function uniqueWords(text: string): Set<string> {
   )
 }
 
-function findMatchingSpeaker(segments: TranscriptSegment[], name: string): string | null {
+export function findMatchingSpeaker(segments: TranscriptSegment[], name: string): string | null {
   const needle = name.toLowerCase().trim()
   const speakers = [...new Set(segments.map((s) => s.speaker))]
 
@@ -55,6 +55,10 @@ function findMatchingSpeaker(segments: TranscriptSegment[], name: string): strin
     return lower.includes(needle) || needle.includes(lower)
   })
   return partial || null
+}
+
+export function getDetectedSpeakers(segments: TranscriptSegment[]): string[] {
+  return [...new Set(segments.map((s) => s.speaker))]
 }
 
 export function calculateReplayMetrics(

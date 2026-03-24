@@ -1,12 +1,16 @@
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
-import { Loader2, CheckCircle2, XCircle } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, AlertTriangle, User } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import type { ParticipantMismatch } from '@/hooks/useReplaySession'
 
 interface ProcessingStatusProps {
   status: string
   errorMessage?: string | null
+  participantMismatch?: ParticipantMismatch | null
   onViewResults?: () => void
+  onSelectSpeaker?: (speaker: string) => void
+  loading?: boolean
 }
 
 const STEPS = [
@@ -15,7 +19,56 @@ const STEPS = [
   { key: 'completed', label: 'Analysis complete', pct: 100 },
 ]
 
-export function ProcessingStatus({ status, errorMessage, onViewResults }: ProcessingStatusProps) {
+export function ProcessingStatus({
+  status,
+  errorMessage,
+  participantMismatch,
+  onViewResults,
+  onSelectSpeaker,
+  loading,
+}: ProcessingStatusProps) {
+  // Speaker mismatch takes priority over generic failure display
+  if (participantMismatch && onSelectSpeaker) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 text-yellow-500" />
+            Participant Not Found
+          </CardTitle>
+          <CardDescription>
+            "{participantMismatch.participantName}" was not found in the transcript.
+            Please select which speaker you are.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          <p className="text-sm text-muted-foreground">
+            We detected {participantMismatch.detectedSpeakers.length} speaker{participantMismatch.detectedSpeakers.length !== 1 ? 's' : ''} in your transcript:
+          </p>
+          <div className="grid gap-2">
+            {participantMismatch.detectedSpeakers.map((speaker) => (
+              <button
+                key={speaker}
+                disabled={loading}
+                onClick={() => onSelectSpeaker(speaker)}
+                className="flex items-center gap-3 rounded-lg border px-4 py-3 text-left text-sm font-medium transition-colors hover:border-primary hover:bg-primary/5 disabled:opacity-50"
+              >
+                <User className="h-4 w-4 shrink-0 text-muted-foreground" />
+                {speaker}
+              </button>
+            ))}
+          </div>
+          {loading && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Re-processing with selected speaker...
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    )
+  }
+
   const currentStep = STEPS.find((s) => s.key === status)
   const pct = status === 'failed' ? 0 : (currentStep?.pct ?? 10)
   const isFailed = status === 'failed'

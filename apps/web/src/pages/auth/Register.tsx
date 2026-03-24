@@ -46,7 +46,8 @@ export function Register() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
+        <CardHeader className="text-center space-y-3">
+          <img src="/spashtai_logo.svg" alt="SpashtAI" className="h-16 w-auto mx-auto" />
           <CardTitle className="text-2xl">Create an account</CardTitle>
           <CardDescription>Get started with SpashtAI</CardDescription>
         </CardHeader>

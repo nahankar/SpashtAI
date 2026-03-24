@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
-import { Badge } from '../ui/badge';
 import { Progress } from '../ui/progress';
 import { Clock, MessageSquare, Zap, TrendingUp, Download, RefreshCw } from 'lucide-react';
 import { Button } from '../ui/button';
@@ -81,30 +80,63 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript }: Ses
     );
   }
 
-  const getWpmStatus = (wpm: number) => {
-    if (wpm >= 140) return { status: 'excellent', color: 'bg-green-500' };
-    if (wpm >= 120) return { status: 'good', color: 'bg-blue-500' };
-    if (wpm >= 100) return { status: 'average', color: 'bg-yellow-500' };
-    return { status: 'needs improvement', color: 'bg-red-500' };
-  };
+  type Rating = { label: string; textColor: string; bgColor: string }
 
-  const getFillerRateStatus = (rate: number) => {
-    if (rate <= 2) return { status: 'excellent', color: 'bg-green-500' };
-    if (rate <= 5) return { status: 'good', color: 'bg-blue-500' };
-    if (rate <= 8) return { status: 'average', color: 'bg-yellow-500' };
-    return { status: 'needs improvement', color: 'bg-red-500' };
-  };
+  const GOOD: Rating = { label: 'good', textColor: 'text-green-700', bgColor: 'bg-green-100 border-green-200' }
+  const AVERAGE: Rating = { label: 'average', textColor: 'text-amber-700', bgColor: 'bg-amber-100 border-amber-200' }
+  const NEEDS_WORK: Rating = { label: 'needs improvement', textColor: 'text-red-700', bgColor: 'bg-red-100 border-red-200' }
 
-  const getLatencyStatus = (latency: number) => {
-    if (latency <= 1.0) return { status: 'excellent', color: 'bg-green-500' };
-    if (latency <= 2.0) return { status: 'good', color: 'bg-blue-500' };
-    if (latency <= 3.0) return { status: 'average', color: 'bg-yellow-500' };
-    return { status: 'needs improvement', color: 'bg-red-500' };
-  };
+  const rateWpm = (wpm: number): Rating => {
+    if (wpm >= 120) return GOOD
+    if (wpm >= 80) return AVERAGE
+    return NEEDS_WORK
+  }
 
-  const wpmStatus = getWpmStatus(metrics.userWpm);
-  const fillerStatus = getFillerRateStatus(metrics.userFillerRate);
-  const latencyStatus = getLatencyStatus(metrics.conversationLatencyAvg);
+  const rateFillerRate = (rate: number): Rating => {
+    if (rate <= 3) return GOOD
+    if (rate <= 6) return AVERAGE
+    return NEEDS_WORK
+  }
+
+  const rateLatency = (latency: number): Rating => {
+    if (latency <= 2.0) return GOOD
+    if (latency <= 4.0) return AVERAGE
+    return NEEDS_WORK
+  }
+
+  const rateVocabDiversity = (diversity: number): Rating => {
+    if (diversity >= 60) return GOOD
+    if (diversity >= 40) return AVERAGE
+    return NEEDS_WORK
+  }
+
+  const rateResponseTime = (time: number): Rating => {
+    if (time <= 3.0) return GOOD
+    if (time <= 8.0) return AVERAGE
+    return NEEDS_WORK
+  }
+
+  const rateSpeakingRatio = (ratio: number): Rating => {
+    if (ratio >= 30 && ratio <= 70) return GOOD
+    if (ratio >= 20 && ratio <= 80) return AVERAGE
+    return NEEDS_WORK
+  }
+
+  const wpmRating = rateWpm(metrics.userWpm)
+  const fillerRating = rateFillerRate(metrics.userFillerRate)
+  const latencyRating = rateLatency(metrics.conversationLatencyAvg)
+  const vocabRating = rateVocabDiversity(metrics.userVocabDiversity)
+  const responseTimeRating = rateResponseTime(metrics.userResponseTimeAvg)
+  const speakingRatio = (metrics.userSpeakingTime + metrics.assistantSpeakingTime) > 0
+    ? (metrics.userSpeakingTime / (metrics.userSpeakingTime + metrics.assistantSpeakingTime)) * 100
+    : 0
+  const speakingRatioRating = rateSpeakingRatio(speakingRatio)
+
+  const RatingBadge = ({ rating }: { rating: Rating }) => (
+    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${rating.bgColor} ${rating.textColor}`}>
+      {rating.label}
+    </span>
+  )
 
   return (
     <div className="space-y-6">
@@ -171,9 +203,7 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript }: Ses
             <div>
               <div className="flex justify-between items-center mb-2">
                 <span className="text-sm font-medium">Words Per Minute</span>
-                <Badge variant={wpmStatus.status === 'excellent' ? 'default' : 'secondary'}>
-                  {wpmStatus.status}
-                </Badge>
+                <RatingBadge rating={wpmRating} />
               </div>
               <div className="text-2xl font-bold">{metrics.userWpm.toFixed(0)} WPM</div>
               <Progress value={Math.min((metrics.userWpm / 200) * 100, 100)} className="mt-2" />
@@ -182,9 +212,7 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript }: Ses
             <div>
               <div className="flex justify-between items-center mb-2">
                 <span className="text-sm font-medium">Filler Word Rate</span>
-                <Badge variant={fillerStatus.status === 'excellent' ? 'default' : 'secondary'}>
-                  {fillerStatus.status}
-                </Badge>
+                <RatingBadge rating={fillerRating} />
               </div>
               <div className="text-2xl font-bold">{metrics.userFillerRate.toFixed(1)}%</div>
               <div className="text-sm text-muted-foreground">
@@ -195,6 +223,7 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript }: Ses
             <div>
               <div className="flex justify-between items-center mb-2">
                 <span className="text-sm font-medium">Vocabulary Diversity</span>
+                <RatingBadge rating={vocabRating} />
               </div>
               <div className="text-2xl font-bold">{metrics.userVocabDiversity.toFixed(1)}%</div>
               <Progress value={metrics.userVocabDiversity} className="mt-2" />
@@ -214,6 +243,7 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript }: Ses
             <div>
               <div className="flex justify-between items-center mb-2">
                 <span className="text-sm font-medium">Response Time</span>
+                <RatingBadge rating={responseTimeRating} />
               </div>
               <div className="text-2xl font-bold">{metrics.userResponseTimeAvg.toFixed(1)}s</div>
               <div className="text-sm text-muted-foreground">
@@ -224,9 +254,7 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript }: Ses
             <div>
               <div className="flex justify-between items-center mb-2">
                 <span className="text-sm font-medium">Conversation Latency</span>
-                <Badge variant={latencyStatus.status === 'excellent' ? 'default' : 'secondary'}>
-                  {latencyStatus.status}
-                </Badge>
+                <RatingBadge rating={latencyRating} />
               </div>
               <div className="text-2xl font-bold">{metrics.conversationLatencyAvg.toFixed(2)}s</div>
               <div className="text-sm text-muted-foreground">
@@ -278,12 +306,9 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript }: Ses
             <div>
               <div className="flex justify-between items-center mb-2">
                 <span className="text-sm font-medium">Speaking Time Ratio</span>
+                <RatingBadge rating={speakingRatioRating} />
               </div>
-              <div className="text-2xl font-bold">
-                {(metrics.userSpeakingTime + metrics.assistantSpeakingTime) > 0
-                  ? ((metrics.userSpeakingTime / (metrics.userSpeakingTime + metrics.assistantSpeakingTime)) * 100).toFixed(0)
-                  : 0}%
-              </div>
+              <div className="text-2xl font-bold">{speakingRatio.toFixed(0)}%</div>
               <div className="text-sm text-muted-foreground">
                 You vs Assistant
               </div>

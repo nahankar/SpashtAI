@@ -42,6 +42,10 @@ model User {
   replaySessions ReplaySession[]
   activityLogs   UserActivity[]
   featureUsage   FeatureUsage[]
+  skillProgress  SkillProgress[]
+  tickets          Ticket[]        @relation("UserTickets")
+  assignedTickets  Ticket[]        @relation("AssignedTickets")
+  ticketComments   TicketComment[]
 
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -126,6 +130,9 @@ model Session {
   user        User     @relation(fields: [userId], references: [id])
   userId      String
   module      String   // elevate | pitch | fluency
+  sessionName String?
+  focusArea   String?  // e.g. clarity, confidence, filler_words
+  focusContext String? // free-text context from Replay C2A or user input
   startedAt   DateTime @default(now())
   endedAt     DateTime?
   durationSec Int?
@@ -222,6 +229,7 @@ model ReplaySession {
   user        User     @relation(fields: [userId], references: [id])
   userId      String
 
+  sessionName      String?
   meetingType      String
   userRole         String
   focusAreas       String[]
@@ -302,5 +310,105 @@ model ReplayResult {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// ── Skill Progress Tracking ──
+
+model SkillProgress {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  skill     String   // clarity, confidence, filler_words, engagement, pacing, structure, conciseness, action_items
+  score     Float    // 0-10 scale
+  source    String   // 'replay' | 'elevate'
+  sessionId String?  // references the originating session (Replay or Elevate)
+
+  metadata  Json?    // extra context (e.g. wpm, fillerRate, raw metric values)
+
+  recordedAt DateTime @default(now())
+
+  @@index([userId, skill, recordedAt])
+  @@index([userId, recordedAt])
+}
+
+// ── Ticketing Feature ──
+
+enum TicketCategory {
+  BUG
+  FEATURE_REQUEST
+  ACCOUNT_ISSUE
+  BILLING
+  OTHER
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  AWAITING_USER
+  RESOLVED
+  CLOSED
+}
+
+model Ticket {
+  id           String   @id @default(cuid())
+  ticketNumber String   @unique
+
+  userId       String
+  user         User     @relation("UserTickets", fields: [userId], references: [id])
+
+  assignedToId String?
+  assignedTo   User?    @relation("AssignedTickets", fields: [assignedToId], references: [id])
+
+  subject      String
+  description  String   @db.Text
+  category     TicketCategory
+  priority     TicketPriority @default(MEDIUM)
+  status       TicketStatus   @default(OPEN)
+
+  attachments  TicketAttachment[]
+  comments     TicketComment[]
+
+  resolvedAt   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([assignedToId, status])
+  @@index([status, priority])
+}
+
+model TicketAttachment {
+  id           String   @id @default(cuid())
+  ticketId     String
+  ticket       Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  originalName String
+  storedPath   String
+  fileSize     Int
+  mimeType     String
+
+  createdAt    DateTime @default(now())
+}
+
+model TicketComment {
+  id        String   @id @default(cuid())
+  ticketId  String
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+
+  content   String   @db.Text
+  isAdmin   Boolean  @default(false)
+
+  createdAt DateTime @default(now())
 }
 
