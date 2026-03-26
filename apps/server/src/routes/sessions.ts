@@ -221,8 +221,12 @@ export async function deleteSession(req: Request, res: Response) {
       return res.status(404).json({ error: 'Session not found' })
     }
     
+    // Remove associated Progress Pulse entries
+    await prisma.progressPulse.deleteMany({
+      where: { sessionId: id, source: 'elevate' },
+    })
+
     // Delete the session (cascade will handle related data)
-    // The schema has onDelete: Cascade for metrics, transcript, and recordings
     await prisma.session.delete({
       where: { id }
     })

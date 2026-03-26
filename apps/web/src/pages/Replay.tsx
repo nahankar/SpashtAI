@@ -6,8 +6,9 @@ import { ContextForm } from '@/components/replay/ContextForm'
 import { UploadZone } from '@/components/replay/UploadZone'
 import { ProcessingStatus } from '@/components/replay/ProcessingStatus'
 import { useReplaySession } from '@/hooks/useReplaySession'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import {
   Plus,
@@ -20,6 +21,8 @@ import {
   AlertCircle,
   CheckSquare,
   Square,
+  CheckCircle2,
+  MinusCircle,
 } from 'lucide-react'
 import { getAuthHeaders } from '@/lib/api-client'
 import { SessionFilters, type SortField, type SortDir } from '@/components/SessionFilters'
@@ -35,6 +38,7 @@ interface ReplaySessionSummary {
   status: string
   createdAt: string
   meetingDate?: string | null
+  progressPulseStatus?: string | null
   result?: {
     overallScore: number
     transcriptionSource: string
@@ -71,7 +75,7 @@ const STATUS_BADGE: Record<string, { variant: 'default' | 'secondary' | 'destruc
   failed: { variant: 'destructive', label: 'Failed' },
 }
 
-type Step = 'history' | 'context' | 'upload' | 'processing'
+type Step = 'history' | 'context' | 'upload' | 'meetingDate' | 'processing'
 
 export function Replay() {
   const navigate = useNavigate()
@@ -86,6 +90,7 @@ export function Replay() {
   const [sortField, setSortField] = useState<SortField>('date')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
   const [statusFilter, setStatusFilter] = useState('all')
+  const [flowMeetingDate, setFlowMeetingDate] = useState('')
 
   const {
     sessionId,
@@ -95,6 +100,7 @@ export function Replay() {
     participantMismatch,
     createSession,
     uploadFiles,
+    patchReplaySession,
     startProcessing,
     retryWithSpeaker,
   } = useReplaySession()
@@ -119,7 +125,11 @@ export function Replay() {
   useEffect(() => { loadSessions() }, [loadSessions])
 
   const handleDelete = async (id: string) => {
-    const ok = await confirm({ title: 'Delete Session', description: 'Delete this replay session? This cannot be undone.', confirmLabel: 'Delete', variant: 'destructive' })
+    const session = sessions.find((s) => s.id === id)
+    const pulseWarning = session?.progressPulseStatus === 'tracked'
+      ? ' This session is tracked in My Progress Pulse — its scores will also be removed.'
+      : ''
+    const ok = await confirm({ title: 'Delete Session', description: `Delete this replay session? This cannot be undone.${pulseWarning}`, confirmLabel: 'Delete', variant: 'destructive' })
     if (!ok) return
     try {
       await fetch(`${API_BASE_URL}/api/replay/sessions/${id}`, {
@@ -136,7 +146,11 @@ export function Replay() {
 
   const handleDeleteSelected = async () => {
     if (selectedReplay.size === 0) return
-    const ok = await confirm({ title: 'Delete Sessions', description: `Delete ${selectedReplay.size} session(s)? This cannot be undone.`, confirmLabel: 'Delete All', variant: 'destructive' })
+    const trackedCount = sessions.filter((s) => selectedReplay.has(s.id) && s.progressPulseStatus === 'tracked').length
+    const pulseWarning = trackedCount > 0
+      ? ` ${trackedCount} of these are tracked in My Progress Pulse — their scores will also be removed.`
+      : ''
+    const ok = await confirm({ title: 'Delete Sessions', description: `Delete ${selectedReplay.size} session(s)? This cannot be undone.${pulseWarning}`, confirmLabel: 'Delete All', variant: 'destructive' })
     if (!ok) return
     try {
       await Promise.all(
@@ -157,12 +171,8 @@ export function Replay() {
 
   const handleContextSubmit = async (data: {
     sessionName?: string
-    meetingType: string
-    userRole: string
-    focusAreas: string[]
-    meetingGoal?: string
     meetingDate?: string
-    participantName?: string
+    participantName: string
   }) => {
     await createSession(data)
     setStep('upload')
@@ -174,9 +184,41 @@ export function Replay() {
     text?: string
   }) => {
     if (!sessionId) return
-    await uploadFiles(sessionId, files)
-    setStep('processing')
-    await startProcessing(sessionId)
+    try {
+      const res = await uploadFiles(sessionId, files)
+      if (res.meetingDateAutoFilled) {
+        toast.success('Meeting date set from your transcript', {
+          description:
+            'Parsed from the file name (e.g. Zoom GMT…) or a date in the VTT header. Subtitle timestamps are not used for the calendar date.',
+        })
+      }
+      if (res.meetingDateMissing) {
+        setFlowMeetingDate('')
+        setStep('meetingDate')
+        return
+      }
+      setStep('processing')
+      await startProcessing(sessionId)
+    } catch {
+      /* uploadFiles sets error */
+    }
+  }
+
+  const handleConfirmFlowMeetingDate = async () => {
+    if (!sessionId || !flowMeetingDate.trim()) {
+      toast.error('Meeting date is required', {
+        description:
+          'My Progress Pulse uses the real meeting date to order improving and declining trends — not the day you upload.',
+      })
+      return
+    }
+    try {
+      await patchReplaySession(sessionId, { meetingDate: flowMeetingDate.trim() })
+      setStep('processing')
+      await startProcessing(sessionId)
+    } catch {
+      /* patch/start sets error */
+    }
   }
 
   const filteredSessions = useMemo(() => {
@@ -236,12 +278,12 @@ export function Replay() {
     return (
       <div>
         {/* Back to history */}
-        {step === 'context' && (
+        {(step === 'context' || step === 'meetingDate') && (
           <button
-            onClick={() => setStep('history')}
+            onClick={() => setStep(step === 'meetingDate' ? 'upload' : 'history')}
             className="mb-4 text-sm text-muted-foreground hover:text-foreground"
           >
-            &larr; Back to sessions
+            &larr; {step === 'meetingDate' ? 'Back to upload' : 'Back to sessions'}
           </button>
         )}
 
@@ -249,10 +291,13 @@ export function Replay() {
         <div className="mb-6 flex items-center gap-2 text-sm">
           {(['context', 'upload', 'processing'] as const).map((s, i) => {
             const labels = ['Context', 'Upload', 'Analysis']
-            const isActive = s === step
+            const isActive =
+              (s === 'context' && step === 'context') ||
+              (s === 'upload' && step === 'upload') ||
+              (s === 'processing' && (step === 'processing' || step === 'meetingDate'))
             const isDone =
               (s === 'context' && step !== 'context') ||
-              (s === 'upload' && step === 'processing')
+              (s === 'upload' && (step === 'meetingDate' || step === 'processing'))
             return (
               <div key={s} className="flex items-center gap-2">
                 {i > 0 && <div className="h-px w-6 bg-border" />}
@@ -291,6 +336,35 @@ export function Replay() {
 
         {step === 'upload' && (
           <UploadZone onSubmit={handleUploadSubmit} loading={loading} />
+        )}
+
+        {step === 'meetingDate' && (
+          <Card>
+            <CardHeader>
+              <CardTitle>When did this meeting happen?</CardTitle>
+              <CardDescription>
+                We could not find a calendar date in your transcript file name or header (VTT cue times like
+                00:01:15 are only positions in the recording, not the real-world date). This date is{' '}
+                <strong>required</strong> so <strong>My Progress Pulse</strong> can line up sessions in the right order
+                for improving / declining trends.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="flowMeetingDate">Meeting date</Label>
+                <input
+                  id="flowMeetingDate"
+                  type="date"
+                  value={flowMeetingDate}
+                  onChange={(e) => setFlowMeetingDate(e.target.value)}
+                  className="flex h-10 w-full max-w-xs rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+              </div>
+              <Button className="w-full sm:w-auto" size="lg" onClick={handleConfirmFlowMeetingDate} disabled={loading}>
+                Continue to analysis
+              </Button>
+            </CardContent>
+          </Card>
         )}
 
         {step === 'processing' && (
@@ -454,6 +528,16 @@ export function Replay() {
                         </span>
                       )}
                       <span>{s.userRole}</span>
+                      {s.progressPulseStatus === 'tracked' && (
+                        <span className="flex items-center gap-0.5 text-green-600" title="Tracked in My Progress Pulse">
+                          <CheckCircle2 className="h-3 w-3" />
+                        </span>
+                      )}
+                      {s.progressPulseStatus === 'skipped' && (
+                        <span className="flex items-center gap-0.5 text-muted-foreground/50" title="Not considered for My Progress Pulse">
+                          <MinusCircle className="h-3 w-3" />
+                        </span>
+                      )}
                     </div>
                   </div>
 

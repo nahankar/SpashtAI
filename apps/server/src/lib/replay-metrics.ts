@@ -4,15 +4,33 @@ export interface ReplayMetrics {
   wordsPerMinute: number
   fillerWordCount: number
   fillerWordRate: number
+  hedgingCount: number
+  hedgingRate: number
   avgSentenceLength: number
   vocabularyDiversity: number
   totalTurns: number
   speakingPercentage: number
+  interruptionCount: number
+  longestMonologueSec: number
+  questionsAsked: number
+  repetitionRequests: number
+  avgResponseTimeSec: number | null
 }
 
-const FILLER_WORDS = [
-  'um', 'uh', 'like', 'you know', 'basically', 'actually',
-  'literally', 'so', 'well', 'right', 'I mean',
+// True fillers: words/phrases that add no meaning and are verbal crutches
+const SIMPLE_FILLERS = ['um', 'uh', 'erm', 'ah']
+const PHRASE_FILLERS = ['you know', 'I mean', 'basically', 'actually', 'literally']
+
+// Context-dependent fillers: only count in filler positions
+// "right?" at end of clause = tag question filler
+// "so" at start of sentence = filler; mid-sentence = normal conjunction
+// "like" not preceded by "would/looks/feels" = filler usage
+// "well" at start of a clause = filler
+
+const HEDGING_PHRASES = [
+  'I think', 'I guess', 'maybe', 'probably', 'sort of', 'kind of',
+  'perhaps', 'it seems', 'I suppose', 'not sure', 'might be',
+  'could be', 'I believe', 'in my opinion', 'more or less',
 ]
 
 function countWords(text: string): number {
@@ -26,8 +44,35 @@ function countSentences(text: string): number {
 
 function countFillers(text: string): number {
   const lower = text.toLowerCase()
-  return FILLER_WORDS.reduce((count, filler) => {
+  let count = 0
+
+  // Simple fillers: always count
+  for (const filler of SIMPLE_FILLERS) {
     const regex = new RegExp(`\\b${filler}\\b`, 'gi')
+    count += (lower.match(regex) || []).length
+  }
+
+  // Phrase fillers: always count
+  for (const filler of PHRASE_FILLERS) {
+    const regex = new RegExp(`\\b${filler}\\b`, 'gi')
+    count += (lower.match(regex) || []).length
+  }
+
+  // "right?" as tag question (end of clause)
+  count += (lower.match(/,\s*right\s*\?/g) || []).length
+  count += (lower.match(/\bright\s*\?\s*$/gm) || []).length
+
+  // "so" at start of sentence/clause (filler "so")
+  count += (lower.match(/(^|[.!?]\s+)so\b/gm) || []).length
+  count += (lower.match(/,\s*so\b/g) || []).length
+
+  return count
+}
+
+function countHedging(text: string): number {
+  const lower = text.toLowerCase()
+  return HEDGING_PHRASES.reduce((count, phrase) => {
+    const regex = new RegExp(`\\b${phrase}\\b`, 'gi')
     return count + (lower.match(regex) || []).length
   }, 0)
 }
@@ -64,7 +109,8 @@ export function getDetectedSpeakers(segments: TranscriptSegment[]): string[] {
 export function calculateReplayMetrics(
   segments: TranscriptSegment[],
   primarySpeaker?: string,
-  durationSec?: number
+  durationSec?: number,
+  transcriptionSource?: string
 ): ReplayMetrics {
   // Resolve primary speaker via case-insensitive matching when a name is provided
   if (primarySpeaker) {
@@ -99,6 +145,7 @@ export function calculateReplayMetrics(
     0
   )
   const primaryFillerCount = countFillers(primaryText)
+  const primaryHedgingCount = countHedging(primaryText)
   const primaryUnique = uniqueWords(primaryText)
 
   // Duration: use timestamps if available, else estimate at 150 WPM
@@ -120,6 +167,9 @@ export function calculateReplayMetrics(
   const fillerRate = primaryWordCount > 0
     ? (primaryFillerCount / primaryWordCount) * 100
     : 0
+  const hedgingRate = primaryWordCount > 0
+    ? (primaryHedgingCount / primaryWordCount) * 100
+    : 0
   const avgSentLen = primarySentenceCount > 0
     ? primaryWordCount / primarySentenceCount
     : 0
@@ -140,13 +190,111 @@ export function calculateReplayMetrics(
     }
   }
 
+  // Interruptions: only reliable when we have audio-level timestamps (AWS Transcribe).
+  // Uploaded VTT/text transcripts have imprecise, overlapping timestamps from the
+  // transcription tool — not actual interruptions. Skip for non-audio sources.
+  let interruptionCount = 0
+  const hasReliableTimestamps = transcriptionSource === 'aws_transcribe'
+  if (hasReliableTimestamps) {
+    const INTERRUPTION_OVERLAP_THRESHOLD = 1.5
+    for (let i = 1; i < segments.length; i++) {
+      const curr = segments[i]
+      const prev = segments[i - 1]
+      if (
+        curr.speaker !== prev.speaker &&
+        (curr.speaker === primarySpeaker || prev.speaker === primarySpeaker) &&
+        curr.startTime != null &&
+        prev.endTime != null
+      ) {
+        const overlap = prev.endTime - curr.startTime
+        if (overlap > INTERRUPTION_OVERLAP_THRESHOLD) {
+          interruptionCount++
+        }
+      }
+    }
+  }
+
+  // Longest monologue: longest contiguous block (by time or word count) from primary speaker
+  let longestMonologueSec = 0
+  let monoStart: number | null = null
+  let monoEnd: number | null = null
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i]
+    if (seg.speaker === primarySpeaker) {
+      if (monoStart == null && seg.startTime != null) monoStart = seg.startTime
+      if (seg.endTime != null) monoEnd = seg.endTime
+    } else {
+      if (monoStart != null && monoEnd != null) {
+        longestMonologueSec = Math.max(longestMonologueSec, monoEnd - monoStart)
+      }
+      monoStart = null
+      monoEnd = null
+    }
+  }
+  if (monoStart != null && monoEnd != null) {
+    longestMonologueSec = Math.max(longestMonologueSec, monoEnd - monoStart)
+  }
+
+  // Questions asked by the primary speaker
+  const questionsAsked = primarySegments.reduce((count, seg) => {
+    const questions = seg.text.match(/\?/g)
+    return count + (questions ? questions.length : 0)
+  }, 0)
+
+  // Repetition requests: only count when another speaker asks the primary speaker
+  // to repeat, and only if it follows the primary speaker's turn (contextual check).
+  const REPEAT_PATTERNS = [
+    /\bcan you repeat\b/i, /\bcould you repeat\b/i, /\brepeat that\b/i,
+    /\bsay that again\b/i, /\bwhat did you (just )?say\b/i,
+    /\bdidn'?t (catch|hear|get) (that|what you)\b/i,
+    /\bcome again\b/i, /\bone more time\b/i,
+  ]
+  let repetitionRequests = 0
+  for (let i = 1; i < segments.length; i++) {
+    const curr = segments[i]
+    const prev = segments[i - 1]
+    if (
+      curr.speaker !== primarySpeaker &&
+      prev.speaker === primarySpeaker &&
+      REPEAT_PATTERNS.some((pat) => pat.test(curr.text))
+    ) {
+      repetitionRequests++
+    }
+  }
+
+  // Average response time: gap between other speaker ending and primary speaker starting
+  const responseTimes: number[] = []
+  for (let i = 1; i < segments.length; i++) {
+    const curr = segments[i]
+    const prev = segments[i - 1]
+    if (
+      curr.speaker === primarySpeaker &&
+      prev.speaker !== primarySpeaker &&
+      curr.startTime != null &&
+      prev.endTime != null &&
+      curr.startTime >= prev.endTime
+    ) {
+      responseTimes.push(curr.startTime - prev.endTime)
+    }
+  }
+  const avgResponseTimeSec = responseTimes.length > 0
+    ? Math.round((responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length) * 10) / 10
+    : null
+
   return {
     wordsPerMinute: wpm,
     fillerWordCount: primaryFillerCount,
     fillerWordRate: Math.round(fillerRate * 100) / 100,
+    hedgingCount: primaryHedgingCount,
+    hedgingRate: Math.round(hedgingRate * 100) / 100,
     avgSentenceLength: Math.round(avgSentLen * 10) / 10,
     vocabularyDiversity: Math.round(vocabDiv * 10) / 10,
     totalTurns: turns,
     speakingPercentage: Math.round(speakingPct * 10) / 10,
+    interruptionCount,
+    longestMonologueSec: Math.round(longestMonologueSec),
+    questionsAsked,
+    repetitionRequests,
+    avgResponseTimeSec,
   }
 }

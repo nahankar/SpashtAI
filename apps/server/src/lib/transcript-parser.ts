@@ -120,6 +120,105 @@ function extractSpeakerFromVTTText(raw: string): { speaker: string; text: string
   return { speaker: 'Speaker', text: raw }
 }
 
+/** Lines before the first subtitle cue (no `-->`), for metadata scanning. */
+function transcriptHeaderLinesBeforeFirstCue(content: string, maxLines = 80): string[] {
+  const lines = content.split('\n')
+  const out: string[] = []
+  for (const line of lines) {
+    const t = line.trim()
+    if (!t) continue
+    if (/-->/.test(t)) break
+    if (out.length >= maxLines) break
+    out.push(t)
+  }
+  return out
+}
+
+function utcNoonDate(y: number, m: number, d: number): Date | null {
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null
+  const dt = new Date(Date.UTC(y, m - 1, d, 12, 0, 0))
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return null
+  return dt
+}
+
+/**
+ * Try to infer calendar meeting date from VTT/SRT-style transcript text and/or original filename.
+ * Cue timestamps (00:00:01 -->) are relative to the recording — they are not used here.
+ * Supports: Zoom-style filenames (GMT20240315-...), ISO dates in headers/NOTE lines, common "Date:" prefixes.
+ */
+export function extractMeetingDateFromTranscript(content: string, originalFileName?: string): Date | null {
+  const tryYmd = (y: string, mo: string, da: string): Date | null => {
+    const yi = parseInt(y, 10)
+    const mi = parseInt(mo, 10)
+    const di = parseInt(da, 10)
+    if (yi < 1990 || yi > 2100) return null
+    return utcNoonDate(yi, mi, di)
+  }
+
+  const name = originalFileName || ''
+
+  // Zoom recording: GMT20240315-120000
+  const zoomGmt = name.match(/GMT(\d{4})(\d{2})(\d{2})/i)
+  if (zoomGmt) {
+    const d = tryYmd(zoomGmt[1], zoomGmt[2], zoomGmt[3])
+    if (d) return d
+  }
+
+  // Filename: 2024-03-15 or 20240315 (word boundary)
+  const isoInName = name.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/)
+  if (isoInName) {
+    const d = tryYmd(isoInName[1], isoInName[2], isoInName[3])
+    if (d) return d
+  }
+  const compactInName = name.match(/\b(20\d{2})(\d{2})(\d{2})\b/)
+  if (compactInName && compactInName[0].length === 8) {
+    const d = tryYmd(compactInName[1], compactInName[2], compactInName[3])
+    if (d) return d
+  }
+
+  const trimmed = content.trim()
+  if (!trimmed) return null
+
+  const header =
+    trimmed.startsWith('WEBVTT') || trimmed.includes('-->')
+      ? transcriptHeaderLinesBeforeFirstCue(trimmed)
+      : trimmed.split('\n').slice(0, 40).map((l) => l.trim()).filter(Boolean)
+
+  const headerText = header.join('\n')
+
+  // ISO dates in header / NOTE blocks
+  const isoGlobal = headerText.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/g)
+  if (isoGlobal?.length) {
+    for (const iso of isoGlobal) {
+      const p = iso.match(/^(20\d{2})-(\d{2})-(\d{2})$/)
+      if (p) {
+        const d = tryYmd(p[1], p[2], p[3])
+        if (d) return d
+      }
+    }
+  }
+
+  // "Date:" or "Meeting date:" lines (case-insensitive)
+  const dateLine = headerText.match(
+    /(?:date|meeting\s*date|recorded\s*(?:on|at))\s*[:]\s*(20\d{2}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/20\d{2})/i
+  )
+  if (dateLine) {
+    const v = dateLine[1].trim()
+    const iso = v.match(/^(20\d{2})-(\d{2})-(\d{2})$/)
+    if (iso) {
+      const d = tryYmd(iso[1], iso[2], iso[3])
+      if (d) return d
+    }
+    const us = v.match(/^(\d{1,2})\/(\d{1,2})\/(20\d{2})$/)
+    if (us) {
+      const d = tryYmd(us[3], us[1], us[2])
+      if (d) return d
+    }
+  }
+
+  return null
+}
+
 export function parseJSON(content: string): ParsedTranscript {
   const data = JSON.parse(content)
 
@@ -360,6 +459,90 @@ function finalize(segments: TranscriptSegment[]): ParsedTranscript {
     fullText: merged.map((s) => s.text).join(' '),
     speakerCount: speakers.size || 1,
   }
+}
+
+/**
+ * Build a speaker-labeled transcript string for AI analysis.
+ * Format: "[Speaker Name]: text here" — one block per merged segment.
+ */
+export function buildSpeakerLabeledText(segments: TranscriptSegment[]): string {
+  return segments.map((s) => `[${s.speaker}]: ${s.text}`).join('\n\n')
+}
+
+/**
+ * Post-process AI-generated annotated transcript to correct speaker attribution.
+ * Matches each annotated segment's text against the original parsed segments
+ * and replaces the speaker with the correct one from the source data.
+ */
+export function correctAnnotatedSpeakers(
+  annotations: { speaker: string; text: string; annotations?: string[] }[],
+  segments: TranscriptSegment[]
+): { speaker: string; text: string; annotations?: string[] }[] {
+  if (!annotations?.length || !segments?.length) return annotations || []
+
+  return annotations.map((ann) => {
+    const correctedSpeaker = findSpeakerForText(ann.text, segments)
+    return {
+      ...ann,
+      speaker: correctedSpeaker || ann.speaker,
+    }
+  })
+}
+
+function findSpeakerForText(annotatedText: string, segments: TranscriptSegment[]): string | null {
+  if (!annotatedText) return null
+
+  const normalized = annotatedText.toLowerCase().replace(/[.,!?;:'"]/g, '').replace(/\s+/g, ' ').trim()
+  const words = normalized.split(' ')
+  if (words.length < 3) return null
+
+  // Try to find a significant substring (first 8+ words) in segment texts
+  const searchPhrase = words.slice(0, Math.min(words.length, 12)).join(' ')
+
+  let bestMatch: { speaker: string; score: number } | null = null
+
+  for (const seg of segments) {
+    const segNorm = seg.text.toLowerCase().replace(/[.,!?;:'"]/g, '').replace(/\s+/g, ' ').trim()
+
+    if (segNorm.includes(searchPhrase)) {
+      return seg.speaker
+    }
+
+    // Partial match: count shared words from the start
+    const segWords = segNorm.split(' ')
+    let matchCount = 0
+    for (const w of words) {
+      if (segWords.includes(w)) matchCount++
+    }
+
+    const score = matchCount / words.length
+    if (score > 0.6 && (!bestMatch || score > bestMatch.score)) {
+      bestMatch = { speaker: seg.speaker, score }
+    }
+  }
+
+  return bestMatch?.speaker || null
+}
+
+/**
+ * Filter annotated transcript to only include segments from the analyzed participant.
+ * Uses fuzzy first-name matching to handle slight name variations.
+ */
+export function filterParticipantAnnotations(
+  annotations: { speaker: string; text: string; annotations?: string[] }[],
+  segments: TranscriptSegment[],
+  participantName?: string
+): { speaker: string; text: string; annotations?: string[] }[] {
+  if (!participantName || !annotations?.length) return annotations || []
+
+  const nameParts = participantName.toLowerCase().split(/\s+/)
+  const firstName = nameParts[0]
+  const lastName = nameParts[nameParts.length - 1]
+
+  return annotations.filter((ann) => {
+    const speaker = ann.speaker?.toLowerCase() || ''
+    return speaker.includes(firstName) || speaker.includes(lastName)
+  })
 }
 
 export function detectFormatAndParse(

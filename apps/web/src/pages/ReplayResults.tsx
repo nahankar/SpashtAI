@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, Link, useSearchParams } from 'react-router-dom'
+import { toast } from 'sonner'
 import { getAuthHeaders } from '@/lib/api-client'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -36,6 +37,18 @@ import type { ReplayResultData } from '@/hooks/useReplaySession'
 import { inferFocusArea } from '@/lib/focus-areas'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
+
+/** When user picks YYYY-MM-DD, anchor at local noon so calendar day is stable across time zones. */
+function recordedAtFromDateInput(isoDate: string): string {
+  return new Date(`${isoDate}T12:00:00`).toISOString()
+}
+
+function recordedAtFromSessionMeetingDate(meetingDate: string | null | undefined): string | null {
+  if (!meetingDate) return null
+  const d = new Date(meetingDate)
+  if (Number.isNaN(d.getTime())) return null
+  return d.toISOString()
+}
 
 function getScoreTheme(score: number) {
   if (score >= 10) return { ring: '#22c55e', gap: '#dcfce7', micro: 'Excellent', target: 10 }
@@ -128,18 +141,135 @@ function rateMetric(key: string, raw: number): MetricRating {
       if (raw < 10) return 'good'
       if (raw <= 30) return 'average'
       return 'bad'
+    case 'interruptionCount':
+      if (raw === 0) return 'good'
+      if (raw <= 3) return 'average'
+      return 'bad'
+    case 'longestMonologueSec':
+      if (raw <= 60) return 'good'
+      if (raw <= 120) return 'average'
+      return 'bad'
+    case 'questionsAsked':
+      if (raw >= 3) return 'good'
+      if (raw >= 1) return 'average'
+      return 'bad'
+    case 'repetitionRequests':
+      if (raw === 0) return 'good'
+      if (raw <= 1) return 'average'
+      return 'bad'
+    case 'avgResponseTimeSec':
+      if (raw <= 2) return 'good'
+      if (raw <= 5) return 'average'
+      return 'bad'
+    case 'hedgingRate':
+      if (raw < 1.5) return 'good'
+      if (raw <= 3) return 'average'
+      return 'bad'
     default:
       return null
   }
 }
 
+const METRIC_TIPS: Record<string, Record<NonNullable<MetricRating>, string>> = {
+  wpm: {
+    good: 'Your pace is comfortable and easy to follow.',
+    average: 'Pace is slightly off — aim for 120-180 WPM for natural delivery.',
+    bad: 'Your pace may make it hard for listeners. Practice speaking at a steady 140 WPM.',
+  },
+  fillerRate: {
+    good: 'Minimal filler usage — your speech sounds polished.',
+    average: 'Some filler words detected. Try pausing silently instead of "um" or "uh".',
+    bad: 'Frequent fillers weaken your message. Practice replacing them with 1-second pauses.',
+  },
+  hedgingRate: {
+    good: 'You sound confident and decisive.',
+    average: 'Some hedging detected. Replace "I think" with direct statements when you\'re sure.',
+    bad: 'Frequent hedging ("maybe", "I guess") reduces perceived confidence. State conclusions directly.',
+  },
+  avgSentenceLength: {
+    good: 'Sentence length is clear and digestible.',
+    average: 'Sentences could be more concise. Aim for 12-20 words per sentence.',
+    bad: 'Sentences are too long or too short. Target 15 words for clarity.',
+  },
+  vocabularyDiversity: {
+    good: 'Rich vocabulary — varied and engaging word choices.',
+    average: 'Some word repetition. Try varying your phrasing to keep listeners engaged.',
+    bad: 'Limited vocabulary range. Prepare varied phrases for key points beforehand.',
+  },
+  fillerWordCount: {
+    good: 'Very few fillers — your speech sounds clean and confident.',
+    average: 'Noticeable filler usage. Practice pausing silently instead of saying "um" or "you know".',
+    bad: 'High filler count weakens your message. Try recording yourself and catching fillers in practice.',
+  },
+  speakingPercentage: {
+    good: 'Balanced contribution — you\'re sharing space well.',
+    average: 'Your share of the conversation is slightly unbalanced.',
+    bad: 'You may be dominating or too passive. Aim for balanced participation.',
+  },
+  interruptionCount: {
+    good: 'You listen well before responding.',
+    average: 'A few interruptions. Try pausing 1 second after others finish before speaking.',
+    bad: 'Frequent interruptions reduce collaboration. Let others finish their points completely.',
+  },
+  longestMonologueSec: {
+    good: 'You keep your contributions concise.',
+    average: 'Some long stretches. Consider breaking points into shorter chunks.',
+    bad: 'Extended monologues may lose listeners. Pause and check for engagement every 30-45 seconds.',
+  },
+  questionsAsked: {
+    good: 'Great engagement — you ask questions that drive the conversation.',
+    average: 'Asking more questions can boost collaboration and show active listening.',
+    bad: 'No questions asked. Try engaging others with "What do you think?" or clarifying questions.',
+  },
+  repetitionRequests: {
+    good: 'Others understood you clearly.',
+    average: 'Someone asked you to repeat. Slow down and enunciate on key points.',
+    bad: 'Multiple repetition requests suggest clarity issues. Speak slower and structure key points.',
+  },
+  avgResponseTimeSec: {
+    good: 'Quick and attentive responses.',
+    average: 'Slight delay in responses. Stay engaged to respond within 1-2 seconds.',
+    bad: 'Slow responses may signal disengagement. Focus on active listening to respond promptly.',
+  },
+}
+
+function getMetricTip(key: string, rating: MetricRating): string | null {
+  if (!rating) return null
+  return METRIC_TIPS[key]?.[rating] ?? null
+}
+
+type ConfidenceLevel = 'high' | 'medium' | 'low'
+
+const CONFIDENCE_STYLES: Record<ConfidenceLevel, { icon: string; label: string; className: string }> = {
+  high: { icon: '●', label: 'High confidence', className: 'text-green-500' },
+  medium: { icon: '◐', label: 'Estimated from text', className: 'text-amber-500' },
+  low: { icon: '○', label: 'Low confidence — audio needed', className: 'text-muted-foreground/50' },
+}
+
+const METRIC_CONFIDENCE: Record<string, ConfidenceLevel> = {
+  wpm: 'high',
+  fillerRate: 'high',
+  hedgingRate: 'high',
+  fillerWordCount: 'high',
+  avgSentenceLength: 'high',
+  vocabularyDiversity: 'high',
+  speakingPercentage: 'high',
+  questionsAsked: 'high',
+  interruptionCount: 'low',
+  repetitionRequests: 'medium',
+  avgResponseTimeSec: 'medium',
+  longestMonologueSec: 'medium',
+}
+
 function MetricCard({
+  metricKey,
   label,
   value,
   unit,
   optimal,
   rating,
 }: {
+  metricKey?: string
   label: string
   value: string | number
   unit?: string
@@ -147,6 +277,9 @@ function MetricCard({
   rating?: MetricRating
 }) {
   const style = rating ? RATING_STYLES[rating] : null
+  const tip = metricKey ? getMetricTip(metricKey, rating ?? null) : null
+  const confidence = metricKey ? METRIC_CONFIDENCE[metricKey] : undefined
+  const confStyle = confidence ? CONFIDENCE_STYLES[confidence] : null
   return (
     <div className={`rounded-lg border p-3 ${style?.bg || ''}`}>
       <div className="flex items-center justify-between">
@@ -162,6 +295,15 @@ function MetricCard({
         {unit && <span className="text-sm font-normal text-muted-foreground"> {unit}</span>}
       </p>
       {optimal && <p className="mt-0.5 text-[11px] text-muted-foreground">Optimal: {optimal}</p>}
+      {value === 'N/A' && metricKey === 'interruptionCount' && (
+        <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground/80 italic">Requires audio upload for reliable detection. Text transcripts have imprecise timestamps.</p>
+      )}
+      {tip && <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground/80 italic">{tip}</p>}
+      {confStyle && (
+        <p className={`mt-1 text-[10px] ${confStyle.className}`} title={confStyle.label}>
+          <span className="mr-0.5">{confStyle.icon}</span> {confStyle.label}
+        </p>
+      )}
     </div>
   )
 }
@@ -420,6 +562,104 @@ export function ReplayResults() {
   const { dialogOpen, setDialogOpen, reanalyzing, reanalyzeError, startReanalyze } =
     useReanalyze(id, loadResults)
 
+  const [pulseStatus, setPulseStatus] = useState<string | null>(null)
+  const [pulseLoading, setPulseLoading] = useState(false)
+  const [pulseMeetingDate, setPulseMeetingDate] = useState('')
+
+  useEffect(() => {
+    if (data?.session?.progressPulseStatus) {
+      setPulseStatus(data.session.progressPulseStatus)
+    }
+  }, [data])
+
+  useEffect(() => {
+    const md = data?.session?.meetingDate
+    if (!md) {
+      setPulseMeetingDate('')
+      return
+    }
+    const s = typeof md === 'string' ? md : String(md)
+    setPulseMeetingDate(s.includes('T') ? s.slice(0, 10) : s)
+  }, [data?.session?.meetingDate])
+
+  const handleTrackPulse = async () => {
+    if (!data || !id) return
+    const { session, result } = data
+    setPulseLoading(true)
+    try {
+      let recordedAt = recordedAtFromSessionMeetingDate(session.meetingDate)
+      if (!recordedAt && pulseMeetingDate.trim()) {
+        const patchRes = await fetch(`${API_BASE_URL}/api/replay/sessions/${id}`, {
+          method: 'PATCH',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ meetingDate: pulseMeetingDate.trim() }),
+        })
+        if (!patchRes.ok) {
+          const err = await patchRes.json().catch(() => ({}))
+          throw new Error(err.error || 'Failed to save meeting date')
+        }
+        recordedAt = recordedAtFromDateInput(pulseMeetingDate.trim())
+        setData((prev) =>
+          prev
+            ? {
+                ...prev,
+                session: { ...prev.session, meetingDate: pulseMeetingDate.trim() },
+              }
+            : prev
+        )
+      }
+      if (!recordedAt) {
+        toast.error(
+          'Add the date this meeting happened. My Progress Pulse uses it to order improving / declining trends — not the day you uploaded.'
+        )
+        return
+      }
+
+      const entries: { skill: string; score: number }[] = []
+
+      if (result.clarityScore > 0) entries.push({ skill: 'clarity', score: result.clarityScore })
+      if (result.confidenceScore > 0) entries.push({ skill: 'confidence', score: result.confidenceScore })
+      if (result.engagementScore > 0) entries.push({ skill: 'engagement', score: result.engagementScore })
+      if (result.fillerWordRate != null) {
+        entries.push({ skill: 'filler_words', score: Math.max(0, Math.min(10, 10 - result.fillerWordRate * 2)) })
+      }
+      if (result.wordsPerMinute) {
+        const wpm = result.wordsPerMinute
+        entries.push({ skill: 'pacing', score: wpm >= 120 && wpm <= 180 ? 9 : wpm >= 100 && wpm <= 200 ? 7 : 5 })
+      }
+
+      await fetch(`${API_BASE_URL}/api/progress-pulse`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ entries, sessionId: id, source: 'replay', recordedAt }),
+      })
+      setPulseStatus('tracked')
+      toast.success('Session tracked in My Progress Pulse')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to track session')
+    } finally {
+      setPulseLoading(false)
+    }
+  }
+
+  const handleSkipPulse = async () => {
+    if (!id) return
+    setPulseLoading(true)
+    try {
+      await fetch(`${API_BASE_URL}/api/progress-pulse/skip`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ sessionId: id, source: 'replay' }),
+      })
+      setPulseStatus('skipped')
+      toast.info('Session skipped from progress tracking')
+    } catch {
+      toast.error('Failed to update')
+    } finally {
+      setPulseLoading(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-24 text-muted-foreground">
@@ -460,6 +700,13 @@ export function ReplayResults() {
         avgSentenceLength: result.avgSentenceLength,
         totalTurns: result.totalTurns,
         speakingPercentage: result.speakingPercentage,
+        hedgingCount: result.hedgingCount,
+        hedgingRate: result.hedgingRate,
+        interruptionCount: result.interruptionCount,
+        longestMonologueSec: result.longestMonologueSec,
+        questionsAsked: result.questionsAsked,
+        repetitionRequests: result.repetitionRequests,
+        avgResponseTimeSec: result.avgResponseTimeSec,
       },
       scores: {
         overall: result.overallScore,
@@ -549,6 +796,60 @@ export function ReplayResults() {
                 <ScoreRing score={result.engagementScore} label="Engagement" />
               </CardContent>
             </Card>
+
+            {/* Progress Pulse Prompt */}
+            {!pulseStatus && (
+              <Card className="border-primary/30 bg-primary/5">
+                <CardContent className="flex flex-col gap-4 py-5">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <p className="font-medium">Track this session in My Progress Pulse?</p>
+                      <p className="text-sm text-muted-foreground">
+                        Trends (improving / declining) are ordered by the <strong>meeting date</strong>, not when you
+                        upload or click track — so backfilled recordings still show a correct timeline.
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 gap-2">
+                      <Button variant="outline" size="sm" onClick={handleSkipPulse} disabled={pulseLoading}>
+                        Skip — won't be added later
+                      </Button>
+                      <Button size="sm" onClick={handleTrackPulse} disabled={pulseLoading}>
+                        {pulseLoading ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
+                        Yes, track this
+                      </Button>
+                    </div>
+                  </div>
+                  {!session.meetingDate && (
+                    <div className="rounded-md border border-amber-200 bg-amber-50/80 px-3 py-3 text-sm dark:bg-amber-950/20">
+                      <Label htmlFor="pulseMeetingDate" className="text-foreground">
+                        Meeting date (required for this older session)
+                      </Label>
+                      <input
+                        id="pulseMeetingDate"
+                        type="date"
+                        value={pulseMeetingDate}
+                        onChange={(e) => setPulseMeetingDate(e.target.value)}
+                        className="mt-2 flex h-10 w-full max-w-xs rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        New Replay sessions ask for this up front. Set it here once, then track — we save it on your
+                        session.
+                      </p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+            {pulseStatus === 'tracked' && (
+              <div className="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 px-4 py-2.5 text-sm text-green-700">
+                <CheckCircle2 className="h-4 w-4" /> This session is tracked in My Progress Pulse.
+              </div>
+            )}
+            {pulseStatus === 'skipped' && (
+              <div className="flex items-center gap-2 rounded-md border border-muted px-4 py-2.5 text-sm text-muted-foreground">
+                <AlertCircle className="h-4 w-4" /> This session was not included in progress tracking.
+              </div>
+            )}
 
             {/* Strengths & Improvements */}
             <div className="grid gap-4 md:grid-cols-2">
@@ -645,49 +946,68 @@ export function ReplayResults() {
 
         {/* Metrics */}
         <TabsContent value="metrics">
-          <Card>
-            <CardHeader>
-              <CardTitle>Speaking Metrics</CardTitle>
-              <CardDescription>Quantitative analysis of the conversation</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-                <MetricCard label="Words Per Minute" value={result.wordsPerMinute} unit="WPM" optimal="120-180" rating={rateMetric('wpm', result.wordsPerMinute)} />
-                <MetricCard label="Filler Words" value={result.fillerWordCount} rating={rateMetric('fillerWordCount', result.fillerWordCount)} />
-                <MetricCard label="Filler Rate" value={`${result.fillerWordRate.toFixed(1)}%`} optimal="< 2%" rating={rateMetric('fillerRate', result.fillerWordRate)} />
-                <MetricCard label="Avg Sentence Length" value={result.avgSentenceLength.toFixed(1)} unit="words" optimal="12-20" rating={rateMetric('avgSentenceLength', result.avgSentenceLength)} />
-                <MetricCard label="Vocabulary Diversity" value={`${result.vocabularyDiversity.toFixed(1)}%`} optimal="> 30%" rating={rateMetric('vocabularyDiversity', result.vocabularyDiversity)} />
-                <MetricCard label="Total Turns" value={result.totalTurns} />
-                <MetricCard label="Speaking Percentage" value={`${result.speakingPercentage.toFixed(1)}%`} optimal="25-60%" rating={rateMetric('speakingPercentage', result.speakingPercentage)} />
-                <MetricCard label="Speakers Detected" value={result.speakerCount} />
-                <MetricCard label="Transcription Source" value={result.transcriptionSource.replace('_', ' ')} />
-              </div>
-            </CardContent>
-          </Card>
+          <div className="grid gap-6">
+            {/* AI Scores */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">AI Assessment Scores</CardTitle>
+                <CardDescription>LLM-evaluated communication quality</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-wrap items-center justify-around gap-6">
+                <ScoreRing score={result.clarityScore} label="Clarity" />
+                <ScoreRing score={result.confidenceScore} label="Confidence" />
+                <ScoreRing score={result.engagementScore} label="Engagement" />
+              </CardContent>
+            </Card>
 
-          <Card className="mt-4">
-            <CardHeader>
-              <CardTitle>Processing Info</CardTitle>
-            </CardHeader>
-            <CardContent className="grid grid-cols-2 gap-4 text-sm md:grid-cols-4">
-              <div>
-                <p className="text-muted-foreground">Model</p>
-                <p className="font-medium">{result.modelUsed || 'N/A'}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Prompt Tokens</p>
-                <p className="font-medium">{result.promptTokens.toLocaleString()}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Completion Tokens</p>
-                <p className="font-medium">{result.completionTokens.toLocaleString()}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Processing Time</p>
-                <p className="font-medium">{(result.processingTimeMs / 1000).toFixed(1)}s</p>
-              </div>
-            </CardContent>
-          </Card>
+            {/* Delivery Quality */}
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="h-2.5 w-2.5 rounded-full bg-green-500" />
+                  <CardTitle className="text-base">Delivery Quality</CardTitle>
+                </div>
+                <CardDescription>How you speak — pace, clarity, vocabulary, and confidence signals</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+                  <MetricCard metricKey="wpm" label="Words Per Minute" value={result.wordsPerMinute} unit="WPM" optimal="120-180" rating={rateMetric('wpm', result.wordsPerMinute)} />
+                  <MetricCard metricKey="fillerRate" label="Filler Rate" value={`${result.fillerWordRate.toFixed(1)}%`} optimal="< 2%" rating={rateMetric('fillerRate', result.fillerWordRate)} />
+                  <MetricCard metricKey="hedgingRate" label="Hedging Language" value={`${(result.hedgingRate ?? 0).toFixed(1)}%`} optimal="< 1.5%" rating={rateMetric('hedgingRate', result.hedgingRate ?? 0)} />
+                  <MetricCard metricKey="avgSentenceLength" label="Avg Sentence Length" value={result.avgSentenceLength.toFixed(1)} unit="words" optimal="12-20" rating={rateMetric('avgSentenceLength', result.avgSentenceLength)} />
+                  <MetricCard metricKey="vocabularyDiversity" label="Vocabulary Diversity" value={`${result.vocabularyDiversity.toFixed(1)}%`} optimal="> 30%" rating={rateMetric('vocabularyDiversity', result.vocabularyDiversity)} />
+                  <MetricCard metricKey="fillerWordCount" label="Filler Words" value={result.fillerWordCount} optimal="< 10" rating={rateMetric('fillerWordCount', result.fillerWordCount)} />
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Collaboration & Interaction */}
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="h-2.5 w-2.5 rounded-full bg-amber-500" />
+                  <CardTitle className="text-base">Collaboration & Interaction</CardTitle>
+                </div>
+                <CardDescription>How you behave in conversation — listening, turn-taking, and engagement</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+                  <MetricCard metricKey="speakingPercentage" label="Speaking Share" value={`${result.speakingPercentage.toFixed(1)}%`} optimal="25-60%" rating={rateMetric('speakingPercentage', result.speakingPercentage)} />
+                  <MetricCard
+                    metricKey="interruptionCount"
+                    label="Interruptions"
+                    value={result.transcriptionSource === 'aws_transcribe' ? (result.interruptionCount ?? 0) : 'N/A'}
+                    optimal={result.transcriptionSource === 'aws_transcribe' ? '0' : undefined}
+                    rating={result.transcriptionSource === 'aws_transcribe' ? rateMetric('interruptionCount', result.interruptionCount ?? 0) : null}
+                  />
+                  <MetricCard metricKey="questionsAsked" label="Questions Asked" value={result.questionsAsked ?? 0} optimal="3+" rating={rateMetric('questionsAsked', result.questionsAsked ?? 0)} />
+                  <MetricCard metricKey="avgResponseTimeSec" label="Avg Response Time" value={result.avgResponseTimeSec != null ? `${result.avgResponseTimeSec.toFixed(1)}s` : '—'} optimal="< 2s" rating={result.avgResponseTimeSec != null ? rateMetric('avgResponseTimeSec', result.avgResponseTimeSec) : null} />
+                  <MetricCard metricKey="longestMonologueSec" label="Longest Monologue" value={result.longestMonologueSec ? `${Math.floor(result.longestMonologueSec / 60)}m ${result.longestMonologueSec % 60}s` : '—'} optimal="< 1 min" rating={rateMetric('longestMonologueSec', result.longestMonologueSec ?? 0)} />
+                  <MetricCard metricKey="repetitionRequests" label="Repetition Requests" value={result.repetitionRequests ?? 0} optimal="0" rating={rateMetric('repetitionRequests', result.repetitionRequests ?? 0)} />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
 
         {/* AI Insights */}
@@ -774,31 +1094,39 @@ export function ReplayResults() {
             <CardContent>
               {(result.annotatedTranscript as any[])?.length > 0 ? (
                 <div className="grid gap-3">
+                  <p className="text-xs text-muted-foreground italic">
+                    Showing the most notable segments from {session.participantName || 'the participant'}. The full conversation is analyzed for scores and insights above.
+                  </p>
                   {(result.annotatedTranscript as any[]).map((seg: any, i: number) => (
-                    <div key={i} className="rounded-md border p-3">
-                      <div className="mb-1 flex items-center gap-2">
-                        <span className="text-xs font-semibold text-muted-foreground">
-                          {seg.speaker}
-                        </span>
-                        {seg.annotations?.map((a: string) => (
-                          <span
-                            key={a}
-                            className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                              a === 'strong_statement'
-                                ? 'bg-green-100 text-green-700'
-                                : a === 'filler_word'
-                                  ? 'bg-yellow-100 text-yellow-700'
-                                  : a === 'hedging'
-                                    ? 'bg-orange-100 text-orange-700'
-                                    : 'bg-blue-100 text-blue-700'
-                            }`}
-                          >
-                            {a.replace('_', ' ')}
+                      <div key={i} className="rounded-md border p-3">
+                        <div className="mb-1 flex items-center gap-2">
+                          <span className="text-xs font-semibold text-foreground">
+                            {seg.speaker}
                           </span>
-                        ))}
+                          {seg.annotations?.map((a: string) => {
+                            const colorMap: Record<string, string> = {
+                              strong_statement: 'bg-green-100 text-green-700',
+                              filler_word: 'bg-yellow-100 text-yellow-700',
+                              hedging: 'bg-orange-100 text-orange-700',
+                              key_point: 'bg-blue-100 text-blue-700',
+                              action_item: 'bg-purple-100 text-purple-700',
+                              decision: 'bg-emerald-100 text-emerald-700',
+                              clarification: 'bg-sky-100 text-sky-700',
+                              recommendation: 'bg-indigo-100 text-indigo-700',
+                              update: 'bg-slate-100 text-slate-700',
+                            }
+                            return (
+                              <span
+                                key={a}
+                                className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${colorMap[a] || 'bg-gray-100 text-gray-700'}`}
+                              >
+                                {a.replace(/_/g, ' ')}
+                              </span>
+                            )
+                          })}
+                        </div>
+                        <p className="text-sm">{seg.text}</p>
                       </div>
-                      <p className="text-sm">{seg.text}</p>
-                    </div>
                   ))}
                 </div>
               ) : (

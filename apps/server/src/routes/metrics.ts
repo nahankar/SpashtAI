@@ -89,42 +89,6 @@ export async function saveSessionMetrics(req: Request, res: Response) {
       }
     })
 
-    // Auto-record skill progress from Elevate metrics
-    try {
-      const userWpm = metricsData.userMetrics?.words_per_minute || 0
-      const fillerRate = metricsData.userMetrics?.filler_word_rate || 0
-      const vocabDiv = metricsData.userMetrics?.vocabulary_diversity || 0
-
-      const entries: { skill: string; score: number }[] = []
-
-      if (userWpm > 0) {
-        const wpmScore = userWpm >= 120 && userWpm <= 180 ? 9
-          : userWpm >= 100 && userWpm <= 200 ? 7 : 5
-        entries.push({ skill: 'pacing', score: wpmScore })
-      }
-      if (fillerRate >= 0) {
-        entries.push({ skill: 'filler_words', score: Math.max(0, Math.min(10, 10 - fillerRate * 2)) })
-      }
-      if (vocabDiv > 0) {
-        const vScore = vocabDiv >= 50 ? 9 : vocabDiv >= 30 ? 7 : 5
-        entries.push({ skill: 'conciseness', score: vScore })
-      }
-
-      if (entries.length > 0) {
-        await prisma.skillProgress.createMany({
-          data: entries.map((e) => ({
-            userId: session.userId,
-            skill: e.skill,
-            score: e.score,
-            source: 'elevate',
-            sessionId,
-          })),
-        })
-      }
-    } catch (err) {
-      console.warn('Non-critical: failed to record skill progress from Elevate', err)
-    }
-
     res.json({ success: true, metrics })
   } catch (error) {
     console.error('Error saving session metrics:', error)

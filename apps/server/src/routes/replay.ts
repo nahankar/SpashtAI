@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express'
 import multer from 'multer'
-import { readFile, mkdir, unlink } from 'fs/promises'
+import { readFile, writeFile, mkdir, unlink } from 'fs/promises'
 import { existsSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -8,8 +8,14 @@ import { prisma } from '../lib/prisma'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
-import { detectFormatAndParse } from '../lib/transcript-parser'
-import { calculateReplayMetrics, findMatchingSpeaker, getDetectedSpeakers } from '../lib/replay-metrics'
+import {
+  detectFormatAndParse,
+  buildSpeakerLabeledText,
+  correctAnnotatedSpeakers,
+  filterParticipantAnnotations,
+  extractMeetingDateFromTranscript,
+} from '../lib/transcript-parser'
+import { calculateReplayMetrics, findMatchingSpeaker } from '../lib/replay-metrics'
 import { analyzeTranscript } from '../lib/aws-bedrock'
 import {
   uploadToS3,
@@ -17,9 +23,66 @@ import {
   pollTranscriptionJob,
   fetchTranscriptionResult,
   mediaFormatFromMime,
+  type TranscriptionResult,
 } from '../lib/aws-transcribe'
+// DEV-ONLY: streaming transcription — remove before production
+import { transcribeStreamingFromFile } from '../lib/aws-transcribe-streaming'
 
 const isDev = process.env.NODE_ENV !== 'production'
+
+// ── Transcription cache helpers ──
+
+function transcriptionCachePath(sessionId: string): string {
+  return path.join(UPLOAD_DIR, `${sessionId}_transcription.json`)
+}
+
+async function loadCachedTranscription(sessionId: string): Promise<TranscriptionResult | null> {
+  const cachePath = transcriptionCachePath(sessionId)
+  if (!existsSync(cachePath)) return null
+  try {
+    const raw = await readFile(cachePath, 'utf-8')
+    const cached = JSON.parse(raw) as TranscriptionResult & { source?: string }
+    console.log(`[cache] Loaded cached transcription for session ${sessionId}: ${cached.segments.length} segments, ${cached.speakerCount} speakers`)
+    return cached
+  } catch (err: any) {
+    console.warn(`[cache] Failed to load cached transcription: ${err.message}`)
+    return null
+  }
+}
+
+async function saveTranscriptionCache(
+  sessionId: string,
+  result: TranscriptionResult,
+  source: string
+): Promise<void> {
+  const cachePath = transcriptionCachePath(sessionId)
+  try {
+    await writeFile(cachePath, JSON.stringify({ ...result, source }, null, 2), 'utf-8')
+    console.log(`[cache] Saved transcription to ${cachePath}`)
+  } catch (err: any) {
+    console.warn(`[cache] Failed to save transcription cache: ${err.message}`)
+  }
+}
+
+function countWords(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length
+}
+
+function getDominantSpeaker(segments: { speaker: string; text: string }[]): string {
+  const bySpeaker = new Map<string, number>()
+  for (const seg of segments) {
+    bySpeaker.set(seg.speaker, (bySpeaker.get(seg.speaker) || 0) + countWords(seg.text))
+  }
+  let topSpeaker = 'Speaker'
+  let topWords = -1
+  for (const [speaker, words] of bySpeaker.entries()) {
+    if (words > topWords) {
+      topWords = words
+      topSpeaker = speaker
+    }
+  }
+  return topSpeaker
+}
 
 // Dev: store under the spashtai project folder.  Prod: configurable via env.
 const UPLOAD_DIR = path.resolve(
@@ -56,8 +119,15 @@ router.post('/sessions', async (req: Request, res: Response) => {
   try {
     const { sessionName, meetingType, userRole, focusAreas, meetingGoal, meetingDate, participantName } = req.body
 
-    if (!meetingType || !userRole) {
-      return res.status(400).json({ error: 'meetingType and userRole are required' })
+    let parsedMeeting: Date | null = null
+    if (meetingDate != null && meetingDate !== '') {
+      if (typeof meetingDate !== 'string') {
+        return res.status(400).json({ error: 'meetingDate must be a string' })
+      }
+      parsedMeeting = new Date(meetingDate)
+      if (Number.isNaN(parsedMeeting.getTime())) {
+        return res.status(400).json({ error: 'meetingDate must be a valid date' })
+      }
     }
 
     const userId = req.user!.userId
@@ -66,11 +136,11 @@ router.post('/sessions', async (req: Request, res: Response) => {
       data: {
         userId,
         sessionName: sessionName?.trim() || null,
-        meetingType,
-        userRole,
+        meetingType: meetingType?.trim() || 'General Meeting',
+        userRole: userRole?.trim() || 'Participant',
         focusAreas: focusAreas || [],
         meetingGoal: meetingGoal || null,
-        meetingDate: meetingDate ? new Date(meetingDate) : null,
+        meetingDate: parsedMeeting,
         participantName: participantName?.trim() || null,
       },
     })
@@ -155,7 +225,43 @@ router.post(
         return res.status(400).json({ error: 'No files or text provided' })
       }
 
-      res.json({ uploads })
+      const hadMeetingDate = !!session.meetingDate
+      let meetingDateAutoFilled = false
+
+      // Calendar date from VTT/SRT header or filename (e.g. Zoom GMT20240315-…). Cue timestamps are ignored.
+      if (!session.meetingDate) {
+        let inferred: Date | null = null
+        if (files?.transcript?.[0]) {
+          const f = files.transcript[0]
+          try {
+            const txt = await readFile(f.path, 'utf-8')
+            inferred = extractMeetingDateFromTranscript(txt, f.originalname)
+          } catch {
+            /* ignore read errors */
+          }
+        }
+        if (!inferred && pastedText?.trim()) {
+          inferred = extractMeetingDateFromTranscript(pastedText.trim(), 'pasted-transcript.vtt')
+        }
+        if (inferred) {
+          await prisma.replaySession.update({
+            where: { id },
+            data: { meetingDate: inferred },
+          })
+          meetingDateAutoFilled = true
+        }
+      }
+
+      const fresh = await prisma.replaySession.findUnique({
+        where: { id },
+        select: { meetingDate: true },
+      })
+
+      res.json({
+        uploads,
+        meetingDateMissing: !fresh?.meetingDate,
+        meetingDateAutoFilled: meetingDateAutoFilled && !hadMeetingDate,
+      })
     } catch (error) {
       console.error('Error uploading files:', error)
       res.status(500).json({ error: 'Failed to upload files' })
@@ -174,6 +280,14 @@ router.post('/sessions/:id/process', async (req: Request, res: Response) => {
     })
     if (!session) return res.status(404).json({ error: 'Replay session not found' })
 
+    if (!session.meetingDate) {
+      return res.status(400).json({
+        code: 'MEETING_DATE_REQUIRED',
+        error:
+          'When did this meeting happen? Set a meeting date so My Progress Pulse can order improving and declining trends correctly. We try to read it from your VTT (filename or header); if it is missing, add it on the previous step.',
+      })
+    }
+
     if (session.status === 'transcribing' || session.status === 'analyzing') {
       return res.status(400).json({
         error: `Session is currently ${session.status}`,
@@ -186,10 +300,15 @@ router.post('/sessions/:id/process', async (req: Request, res: Response) => {
       await prisma.replayResult.deleteMany({ where: { replaySessionId: id } })
     }
 
-    // Mark as processing (clear any previous error)
+    // Reset Progress Pulse for this session so user gets prompted again with new scores
+    if (session.progressPulseStatus === 'tracked') {
+      await prisma.progressPulse.deleteMany({ where: { sessionId: id, source: 'replay' } })
+    }
+
+    // Mark as processing (clear any previous error, reset pulse status)
     await prisma.replaySession.update({
       where: { id },
-      data: { status: 'transcribing', errorMessage: null },
+      data: { status: 'transcribing', errorMessage: null, progressPulseStatus: null },
     })
 
     // Fire-and-forget processing — respond immediately
@@ -232,7 +351,7 @@ async function processReplaySession(sessionId: string): Promise<void> {
   let transcriptionSource = 'uploaded'
   let durationSec: number | undefined
 
-  // ── Step 1: Get transcript text ──
+  // ── Step 1: Get transcript text (check cache first) ──
 
   if (audioFile) {
     await prisma.replaySession.update({
@@ -240,13 +359,34 @@ async function processReplaySession(sessionId: string): Promise<void> {
       data: { status: 'transcribing' },
     })
 
-    if (isDev) {
-      // Dev mode: skip S3 + AWS Transcribe (requires a real S3 bucket).
-      // Audio file stays on disk; analysis falls through to text-based path.
-      console.log(
-        `[dev] Skipping AWS Transcribe for audio file "${audioFile.originalName}". ` +
-        `Provide a transcript or pasted text alongside audio for analysis in dev mode.`
-      )
+    // Check for cached transcription from a previous run
+    const cached = await loadCachedTranscription(sessionId)
+    if (cached) {
+      fullText = cached.fullText
+      structuredTranscript = cached.segments
+      speakerCount = cached.speakerCount
+      durationSec = cached.segments.length > 0
+        ? Math.max(...cached.segments.map((s) => s.endTime))
+        : undefined
+      transcriptionSource = (cached as any).source || 'cached'
+    } else if (isDev) {
+      // DEV-ONLY: Use Transcribe Streaming (no S3 needed). Remove before production.
+      try {
+        const result = await transcribeStreamingFromFile(
+          audioFile.storedPath,
+          audioFile.mimeType
+        )
+        fullText = result.fullText
+        structuredTranscript = result.segments
+        speakerCount = result.speakerCount
+        durationSec = result.segments.length > 0
+          ? Math.max(...result.segments.map((s) => s.endTime))
+          : undefined
+        transcriptionSource = 'aws_transcribe_streaming'
+        await saveTranscriptionCache(sessionId, result, transcriptionSource)
+      } catch (streamingError: any) {
+        console.error('[dev] Streaming transcription failed, falling back to text:', streamingError.message)
+      }
     } else {
       // Production: upload to S3 and use AWS Transcribe
       const s3Key = `replay/${sessionId}/${path.basename(audioFile.storedPath)}`
@@ -266,6 +406,7 @@ async function processReplaySession(sessionId: string): Promise<void> {
           ? Math.max(...result.segments.map((s) => s.endTime))
           : undefined
         transcriptionSource = 'aws_transcribe'
+        await saveTranscriptionCache(sessionId, result, transcriptionSource)
       } catch (transcribeError: any) {
         console.error('AWS Transcribe failed, checking for text fallback:', transcribeError.message)
       }
@@ -284,7 +425,7 @@ async function processReplaySession(sessionId: string): Promise<void> {
   }
 
   // Also merge uploaded transcript if audio was primary
-  if (audioFile && (transcriptFile || textFile) && transcriptionSource === 'aws_transcribe') {
+  if (audioFile && (transcriptFile || textFile) && (transcriptionSource === 'aws_transcribe' || transcriptionSource === 'aws_transcribe_streaming')) {
     // Audio transcription succeeded; merge uploaded text as supplementary context
     const file = transcriptFile || textFile!
     const content = await readFile(file.storedPath, 'utf-8')
@@ -298,22 +439,28 @@ async function processReplaySession(sessionId: string): Promise<void> {
     throw new Error('No transcript text could be extracted from the uploaded files')
   }
 
-  // ── Step 1b: Validate participant match ──
+  // ── Step 1b: Resolve participant speaker ──
 
   const segments = Array.isArray(structuredTranscript)
     ? structuredTranscript
     : [{ speaker: 'Speaker', text: fullText }]
 
-  if (session.participantName) {
+  let resolvedParticipantSpeaker: string | undefined
+  if (session.participantName?.trim()) {
     const matched = findMatchingSpeaker(segments, session.participantName)
-    if (!matched) {
-      const detectedSpeakers = getDetectedSpeakers(segments)
-      throw new Error(JSON.stringify({
-        code: 'PARTICIPANT_NOT_FOUND',
-        participantName: session.participantName,
-        detectedSpeakers,
-      }))
+    if (matched) {
+      resolvedParticipantSpeaker = matched
+    } else {
+      resolvedParticipantSpeaker = getDominantSpeaker(segments)
+      console.log(
+        `[replay] Participant "${session.participantName}" not found. Falling back to dominant speaker "${resolvedParticipantSpeaker}".`
+      )
     }
+  } else {
+    resolvedParticipantSpeaker = getDominantSpeaker(segments)
+    console.log(
+      `[replay] No participant provided. Using dominant speaker "${resolvedParticipantSpeaker}".`
+    )
   }
 
   // ── Step 2: Calculate metrics ──
@@ -323,17 +470,23 @@ async function processReplaySession(sessionId: string): Promise<void> {
     data: { status: 'analyzing' },
   })
 
-  const metrics = calculateReplayMetrics(segments, session.participantName || undefined, durationSec)
+  const metrics = calculateReplayMetrics(
+    segments,
+    resolvedParticipantSpeaker,
+    durationSec,
+    transcriptionSource
+  )
 
   // ── Step 3: AI analysis via Bedrock ──
 
   const startMs = Date.now()
-  const aiResult = await analyzeTranscript(fullText, {
+  const speakerLabeledText = buildSpeakerLabeledText(segments)
+  const aiResult = await analyzeTranscript(speakerLabeledText, {
     meetingType: session.meetingType,
     userRole: session.userRole,
     focusAreas: session.focusAreas,
     meetingGoal: session.meetingGoal || undefined,
-    participantName: session.participantName || undefined,
+    participantName: resolvedParticipantSpeaker,
     speakerCount,
     durationEstimate: durationSec,
   })
@@ -352,10 +505,17 @@ async function processReplaySession(sessionId: string): Promise<void> {
       wordsPerMinute: metrics.wordsPerMinute,
       fillerWordCount: metrics.fillerWordCount,
       fillerWordRate: metrics.fillerWordRate,
+      hedgingCount: metrics.hedgingCount,
+      hedgingRate: metrics.hedgingRate,
       avgSentenceLength: metrics.avgSentenceLength,
       vocabularyDiversity: metrics.vocabularyDiversity,
       totalTurns: metrics.totalTurns,
       speakingPercentage: metrics.speakingPercentage,
+      interruptionCount: metrics.interruptionCount,
+      longestMonologueSec: metrics.longestMonologueSec,
+      questionsAsked: metrics.questionsAsked,
+      repetitionRequests: metrics.repetitionRequests,
+      avgResponseTimeSec: metrics.avgResponseTimeSec,
 
       overallScore: aiResult.overallScore,
       clarityScore: aiResult.clarityScore,
@@ -367,7 +527,11 @@ async function processReplaySession(sessionId: string): Promise<void> {
       recommendations: aiResult.recommendations,
       contextSpecificFeedback: aiResult.contextSpecificFeedback,
       keyMoments: aiResult.keyMoments,
-      annotatedTranscript: aiResult.annotatedTranscript,
+      annotatedTranscript: filterParticipantAnnotations(
+        correctAnnotatedSpeakers(aiResult.annotatedTranscript, segments),
+        segments,
+        resolvedParticipantSpeaker
+      ),
 
       modelUsed: process.env.BEDROCK_REPLAY_MODEL_ID || 'amazon.nova-pro-v1:0',
       promptTokens: aiResult.promptTokens,
@@ -381,42 +545,6 @@ async function processReplaySession(sessionId: string): Promise<void> {
     data: { status: 'completed' },
   })
 
-  // Auto-record skill progress from Replay scores
-  try {
-    const skillEntries = [
-      { skill: 'clarity', score: aiResult.clarityScore },
-      { skill: 'confidence', score: aiResult.confidenceScore },
-      { skill: 'engagement', score: aiResult.engagementScore },
-    ].filter((e) => e.score > 0)
-
-    if (metrics.fillerWordRate != null) {
-      const fillerScore = Math.max(0, Math.min(10, 10 - metrics.fillerWordRate * 2))
-      skillEntries.push({ skill: 'filler_words', score: fillerScore })
-    }
-    if (metrics.wordsPerMinute) {
-      const wpmScore = metrics.wordsPerMinute >= 120 && metrics.wordsPerMinute <= 180
-        ? 9
-        : metrics.wordsPerMinute >= 100 && metrics.wordsPerMinute <= 200
-          ? 7
-          : 5
-      skillEntries.push({ skill: 'pacing', score: wpmScore })
-    }
-
-    if (skillEntries.length > 0) {
-      await prisma.skillProgress.createMany({
-        data: skillEntries.map((e) => ({
-          userId: session.userId,
-          skill: e.skill,
-          score: e.score,
-          source: 'replay',
-          sessionId,
-        })),
-      })
-    }
-  } catch (err) {
-    console.warn('Non-critical: failed to record skill progress from Replay', err)
-  }
-
   console.log(`Replay session ${sessionId} processing completed in ${processingTimeMs}ms`)
 }
 
@@ -425,17 +553,35 @@ async function processReplaySession(sessionId: string): Promise<void> {
 router.patch('/sessions/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params
-    const { participantName } = req.body
+    const { participantName, meetingDate } = req.body
 
     const session = await prisma.replaySession.findUnique({ where: { id } })
     if (!session) return res.status(404).json({ error: 'Replay session not found' })
 
+    const data: { participantName?: string | null; meetingDate?: Date | null } = {}
+    if (participantName !== undefined) {
+      data.participantName = participantName?.trim() || null
+    }
+    if (meetingDate !== undefined) {
+      if (meetingDate === null || meetingDate === '') {
+        data.meetingDate = null
+      } else {
+        const d = new Date(meetingDate)
+        if (Number.isNaN(d.getTime())) {
+          return res.status(400).json({ error: 'meetingDate must be a valid date' })
+        }
+        data.meetingDate = d
+      }
+    }
+
+    if (Object.keys(data).length === 0) {
+      return res.status(400).json({ error: 'Send participantName and/or meetingDate to update' })
+    }
+
     const updated = await prisma.replaySession.update({
       where: { id },
-      data: {
-        participantName: participantName?.trim() || null,
-      },
-      select: { id: true, participantName: true, status: true },
+      data,
+      select: { id: true, participantName: true, meetingDate: true, status: true },
     })
 
     res.json(updated)
@@ -500,6 +646,7 @@ router.get('/sessions/:id/results', async (req: Request, res: Response) => {
         meetingDate: session.meetingDate,
         participantName: session.participantName,
         status: session.status,
+        progressPulseStatus: session.progressPulseStatus,
         createdAt: session.createdAt,
       },
       uploads: session.uploadedFiles,
@@ -550,7 +697,7 @@ router.delete('/sessions/:id', async (req: Request, res: Response) => {
     })
     if (!session) return res.status(404).json({ error: 'Replay session not found' })
 
-    // Delete uploaded files from disk
+    // Delete uploaded files and transcription cache from disk
     for (const file of session.uploadedFiles) {
       try {
         await unlink(file.storedPath)
@@ -558,6 +705,16 @@ router.delete('/sessions/:id', async (req: Request, res: Response) => {
         // file may already be gone
       }
     }
+    try {
+      await unlink(transcriptionCachePath(id))
+    } catch {
+      // cache file may not exist
+    }
+
+    // Remove associated Progress Pulse entries
+    await prisma.progressPulse.deleteMany({
+      where: { sessionId: id, source: 'replay' },
+    })
 
     await prisma.replaySession.delete({ where: { id } })
     res.json({ message: 'Replay session deleted' })

@@ -22,9 +22,11 @@ import { AdvancedInsights } from '@/components/analytics/AdvancedInsights'
 import { useRealTimeMetrics, useSessionMetrics } from '@/hooks/useSessionMetrics'
 import { useConversationPersistence } from '@/hooks/useConversationPersistence'
 import { AgentVisualizer } from '@/components/layout/AgentVisualizer'
+import { toast } from 'sonner'
 import { getAuthHeaders } from '@/lib/api-client'
 import { FOCUS_AREAS, getFocusAreaLabel } from '@/lib/focus-areas'
 import { useAuth } from '@/hooks/useAuth'
+import { useConfirm } from '@/hooks/useConfirm'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 
@@ -61,6 +63,7 @@ export function Elevate() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const { user } = useAuth()
+  const confirmDialog = useConfirm()
   const viewSessionId = searchParams.get('session')
   const cameFromHistory = searchParams.get('from') === 'history'
   const inboundFocus = searchParams.get('focus') || ''
@@ -416,6 +419,7 @@ export function Elevate() {
     localStorage.removeItem('spashtai_active_session')
     localStorage.removeItem('spashtai_session_timestamp')
 
+    let metricsData: any = null
     if (currentSessionId) {
       try {
         await fetch(`${API_BASE_URL}/sessions/${currentSessionId}/end`, {
@@ -428,13 +432,69 @@ export function Elevate() {
           method: 'POST',
           headers: getAuthHeaders()
         })
+
+        const metricsRes = await fetch(`${API_BASE_URL}/sessions/${currentSessionId}/metrics`, {
+          headers: getAuthHeaders(),
+        })
+        if (metricsRes.ok) {
+          metricsData = await metricsRes.json()
+        }
       } catch (err) {
         console.warn('Failed to finalize session:', err)
+      }
+
+      // Ask user whether to track this session in Progress Pulse
+      const trackIt = await confirmDialog({
+        title: 'Track in My Progress Pulse?',
+        description: 'Would you like to include this session\'s scores in your progress tracking?',
+        confirmLabel: 'Yes, track this',
+        cancelLabel: 'Skip — won\'t be added later',
+      })
+
+      if (trackIt && metricsData?.metrics) {
+        try {
+          const m = metricsData.metrics
+          const entries: { skill: string; score: number }[] = []
+          const userWpm = m.userWpm || 0
+          const fillerRate = m.userFillerRate || 0
+          const vocabDiv = m.userVocabDiversity || 0
+
+          if (userWpm > 0) {
+            entries.push({ skill: 'pacing', score: userWpm >= 120 && userWpm <= 180 ? 9 : userWpm >= 100 && userWpm <= 200 ? 7 : 5 })
+          }
+          if (fillerRate >= 0) {
+            entries.push({ skill: 'filler_words', score: Math.max(0, Math.min(10, 10 - fillerRate * 2)) })
+          }
+          if (vocabDiv > 0) {
+            entries.push({ skill: 'conciseness', score: vocabDiv >= 50 ? 9 : vocabDiv >= 30 ? 7 : 5 })
+          }
+
+          if (entries.length > 0) {
+            await fetch(`${API_BASE_URL}/api/progress-pulse`, {
+              method: 'POST',
+              headers: getAuthHeaders(),
+              body: JSON.stringify({ entries, sessionId: currentSessionId, source: 'elevate' }),
+            })
+            toast.success('Session tracked in My Progress Pulse')
+          }
+        } catch {
+          toast.error('Failed to track session')
+        }
+      } else {
+        try {
+          await fetch(`${API_BASE_URL}/api/progress-pulse/skip`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ sessionId: currentSessionId, source: 'elevate' }),
+          })
+        } catch {
+          // non-critical
+        }
       }
     }
 
     navigate(cameFromHistory ? '/history?tab=elevate' : '/elevate')
-  }, [sessionId, clearMessages, resetMetrics, navigate, cameFromHistory])
+  }, [sessionId, clearMessages, resetMetrics, navigate, cameFromHistory, confirmDialog])
 
   const handleResumeSession = useCallback(async () => {
     if (!previousSessionId) return

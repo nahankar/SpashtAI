@@ -5,12 +5,15 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000
 
 export interface ReplayContext {
   sessionName?: string
-  meetingType: string
-  userRole: string
-  focusAreas: string[]
-  meetingGoal?: string
+  /** Optional here if we infer from VTT/filename on upload; required before analysis runs. */
   meetingDate?: string
-  participantName?: string
+  participantName: string
+}
+
+export interface ReplayUploadResponse {
+  uploads: unknown[]
+  meetingDateMissing?: boolean
+  meetingDateAutoFilled?: boolean
 }
 
 export interface ReplaySessionStatus {
@@ -130,6 +133,28 @@ export function useReplaySession() {
           body: form,
         })
         if (!res.ok) throw new Error((await res.json()).error || 'Upload failed')
+        return (await res.json()) as ReplayUploadResponse
+      } catch (e: any) {
+        setError(e.message)
+        throw e
+      } finally {
+        setLoading(false)
+      }
+    },
+    []
+  )
+
+  const patchReplaySession = useCallback(
+    async (sid: string, body: { meetingDate: string }) => {
+      setError(null)
+      setLoading(true)
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/replay/sessions/${sid}`, {
+          method: 'PATCH',
+          headers: getAuthHeaders(),
+          body: JSON.stringify(body),
+        })
+        if (!res.ok) throw new Error((await res.json()).error || 'Failed to update session')
         return await res.json()
       } catch (e: any) {
         setError(e.message)
@@ -149,7 +174,14 @@ export function useReplaySession() {
           method: 'POST',
           headers: getAuthHeaders(),
         })
-        if (!res.ok) throw new Error((await res.json()).error || 'Failed to start processing')
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({} as { error?: string; code?: string }))
+          const err = new Error(errBody.error || 'Failed to start processing') as Error & {
+            code?: string
+          }
+          if (errBody.code) err.code = errBody.code
+          throw err
+        }
 
         // Begin polling
         pollRef.current = setInterval(async () => {
@@ -263,6 +295,7 @@ export function useReplaySession() {
     participantMismatch,
     createSession,
     uploadFiles,
+    patchReplaySession,
     startProcessing,
     fetchResults,
     retryWithSpeaker,

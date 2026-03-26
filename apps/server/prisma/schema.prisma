@@ -42,7 +42,7 @@ model User {
   replaySessions ReplaySession[]
   activityLogs   UserActivity[]
   featureUsage   FeatureUsage[]
-  skillProgress  SkillProgress[]
+  progressPulse  ProgressPulse[]
   tickets          Ticket[]        @relation("UserTickets")
   assignedTickets  Ticket[]        @relation("AssignedTickets")
   ticketComments   TicketComment[]
@@ -139,7 +139,9 @@ model Session {
 
   viewCount    Int       @default(0)
   lastViewedAt DateTime?
-  
+
+  progressPulseStatus String? // 'tracked' | 'skipped' | null (not yet decided)
+
   // Relations
   metrics     SessionMetrics?
   transcript  SessionTranscript?
@@ -244,6 +246,8 @@ model ReplaySession {
   viewCount    Int       @default(0)
   exportCount  Int       @default(0)
 
+  progressPulseStatus String? // 'tracked' | 'skipped' | null (not yet decided)
+
   uploadedFiles ReplayUpload[]
   result        ReplayResult?
 
@@ -288,6 +292,17 @@ model ReplayResult {
   totalTurns          Int     @default(0)
   speakingPercentage  Float   @default(0)
 
+  // Confidence signals
+  hedgingCount        Int     @default(0)
+  hedgingRate         Float   @default(0)
+
+  // Behavioral metrics
+  interruptionCount   Int     @default(0)
+  longestMonologueSec Int     @default(0)
+  questionsAsked      Int     @default(0)
+  repetitionRequests  Int     @default(0)
+  avgResponseTimeSec  Float?
+
   // AI scores (1-10)
   overallScore    Float @default(0)
   clarityScore    Float @default(0)
@@ -312,9 +327,9 @@ model ReplayResult {
   updatedAt DateTime @updatedAt
 }
 
-// ── Skill Progress Tracking ──
+// ── My Progress Pulse ──
 
-model SkillProgress {
+model ProgressPulse {
   id        String   @id @default(cuid())
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)

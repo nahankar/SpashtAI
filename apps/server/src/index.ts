@@ -39,10 +39,11 @@ import {
   getAdvancedMetrics
 } from './routes/advanced-metrics'
 import {
-  getSkillProgress,
-  getSkillSummary,
-  recordSkillProgress
-} from './routes/skill-progress'
+  getProgressPulse,
+  getProgressPulseSummary,
+  recordProgressPulse,
+  skipProgressPulse
+} from './routes/progress-pulse'
 import downloadsRouter from './routes/downloads'
 import replayRouter from './routes/replay'
 import authRouter from './routes/auth'
@@ -131,10 +132,11 @@ app.get('/audio/analytics', requireAuth, getAudioAnalytics)
 app.post('/sessions/:sessionId/advanced-metrics', requireAuth, saveAdvancedMetrics)
 app.get('/sessions/:sessionId/advanced-metrics', requireAuth, getAdvancedMetrics)
 
-// Protected: skill progress tracking
-app.get('/api/skill-progress', requireAuth, getSkillProgress)
-app.get('/api/skill-progress/summary', requireAuth, getSkillSummary)
-app.post('/api/skill-progress', requireAuth, recordSkillProgress)
+// Protected: My Progress Pulse
+app.get('/api/progress-pulse', requireAuth, getProgressPulse)
+app.get('/api/progress-pulse/summary', requireAuth, getProgressPulseSummary)
+app.post('/api/progress-pulse', requireAuth, recordProgressPulse)
+app.post('/api/progress-pulse/skip', requireAuth, skipProgressPulse)
 
 // Protected: downloads and replay
 app.use('/api/downloads', requireAuth, downloadsRouter)

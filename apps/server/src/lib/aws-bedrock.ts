@@ -77,7 +77,7 @@ export async function analyzeTranscript(
   const contextCriteria = buildContextCriteria(context)
 
   const participantDirective = context.participantName
-    ? `Focus your entire analysis and coaching on "${context.participantName}"'s communication. Evaluate only their speech patterns, strengths, and areas for improvement. Other speakers are context only.`
+    ? `Focus your analysis and coaching on "${context.participantName}"'s communication. Evaluate their speech patterns, strengths, and areas for improvement. Other speakers provide context. CRITICAL: In the annotatedTranscript, you MUST use the EXACT original speaker name from the transcript for each segment. Do NOT attribute other speakers' words to ${context.participantName}. If another speaker says something directed at ${context.participantName} (e.g. asking them to confirm something), use that OTHER speaker's name, not ${context.participantName}'s name.`
     : 'Analyze the primary speaker based on their role.'
 
   const prompt = `You are an expert communication coach analyzing a ${context.meetingType} conversation.
@@ -119,14 +119,19 @@ Analyze this conversation and provide your assessment. You MUST respond with val
     { "text": "<description of moment>", "type": "strength|weakness|turning_point" }
   ],
   "annotatedTranscript": [
-    { "speaker": "<speaker label>", "text": "<segment text>", "annotations": ["filler_word", "strong_statement", "hedging", "key_point"] }
+    { "speaker": "<EXACT speaker name from transcript - never change or reassign>", "text": "<segment text>", "annotations": ["filler_word", "strong_statement", "hedging", "key_point", "action_item", "decision", "clarification", "recommendation", "update"] }
   ]
 }
 
 CONTEXT-SPECIFIC EVALUATION CRITERIA:
 ${contextCriteria}
 
-Provide 3-5 strengths, 3-5 improvements, and 3 recommendations. Keep annotatedTranscript to the 15 most notable segments.`
+Provide 3-5 strengths, 3-5 improvements, and 3 recommendations. Keep annotatedTranscript to the 15 most notable segments.
+IMPORTANT for annotatedTranscript:
+- ONLY include segments spoken by the participant being analyzed (${context.participantName || 'the primary speaker'}). Do NOT include segments from other speakers.
+- Always preserve the ORIGINAL speaker name exactly as it appears in the transcript.
+- Focus on SUBSTANTIVE segments: key points, decisions, action items, strong statements, recommendations, important questions, and notable speech patterns (filler words, hedging).
+- Do NOT waste slots on trivial acknowledgments like "Right", "OK", "Yeah", "Next one", "Thank you, bye", or single-word confirmations. Only include these if they demonstrate a significant communication pattern.`
 
   const body = JSON.stringify({
     messages: [{ role: 'user', content: [{ text: prompt }] }],

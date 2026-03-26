@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Upload, Mic, History } from 'lucide-react';
-import { SkillProgressCard } from '@/components/analytics/SkillProgressCard';
+import { ProgressPulseCard } from '@/components/analytics/ProgressPulseCard';
 
 export function Home() {
   return (
@@ -78,7 +78,7 @@ export function Home() {
         </div>
       </section>
 
-      <SkillProgressCard />
+      <ProgressPulseCard />
     </div>
   );
 }

@@ -20,6 +20,8 @@ import {
   ArrowLeft,
   CheckSquare,
   Square,
+  CheckCircle2,
+  MinusCircle,
 } from 'lucide-react'
 import { getAuthHeaders } from '@/lib/api-client'
 import { SessionFilters, type SortField, type SortDir } from '@/components/SessionFilters'
@@ -35,6 +37,7 @@ interface ReplaySummary {
   status: string
   createdAt: string
   meetingDate?: string | null
+  progressPulseStatus?: string | null
   result?: { overallScore: number; transcriptionSource: string } | null
   uploadedFiles: { fileType: string; originalName: string }[]
 }
@@ -45,6 +48,7 @@ interface ElevateSession {
   sessionName?: string | null
   startedAt: string
   endedAt?: string
+  progressPulseStatus?: string | null
   durationSec?: number
   words?: number
   fillerRate?: number
@@ -242,7 +246,11 @@ export function History() {
   }
 
   async function deleteReplaySession(id: string) {
-    const ok = await confirm({ title: 'Delete Session', description: 'Delete this replay session? This cannot be undone.', confirmLabel: 'Delete', variant: 'destructive' })
+    const session = replaySessions.find((s) => s.id === id)
+    const pulseWarning = session?.progressPulseStatus === 'tracked'
+      ? ' This session is tracked in My Progress Pulse — its scores will also be removed.'
+      : ''
+    const ok = await confirm({ title: 'Delete Session', description: `Delete this replay session? This cannot be undone.${pulseWarning}`, confirmLabel: 'Delete', variant: 'destructive' })
     if (!ok) return
     try {
       await fetch(`${API_BASE_URL}/api/replay/sessions/${id}`, { method: 'DELETE', headers: getAuthHeaders() })
@@ -256,7 +264,11 @@ export function History() {
 
   async function deleteSelectedReplay() {
     if (selectedReplay.size === 0) return
-    const ok = await confirm({ title: 'Delete Sessions', description: `Delete ${selectedReplay.size} session(s)? This cannot be undone.`, confirmLabel: 'Delete All', variant: 'destructive' })
+    const trackedCount = replaySessions.filter((s) => selectedReplay.has(s.id) && s.progressPulseStatus === 'tracked').length
+    const pulseWarning = trackedCount > 0
+      ? ` ${trackedCount} of these are tracked in My Progress Pulse — their scores will also be removed.`
+      : ''
+    const ok = await confirm({ title: 'Delete Sessions', description: `Delete ${selectedReplay.size} session(s)? This cannot be undone.${pulseWarning}`, confirmLabel: 'Delete All', variant: 'destructive' })
     if (!ok) return
     try {
       await Promise.all(
@@ -273,7 +285,11 @@ export function History() {
   }
 
   async function deleteElevateSession(id: string) {
-    const ok = await confirm({ title: 'Delete Session', description: 'Delete this session? This cannot be undone.', confirmLabel: 'Delete', variant: 'destructive' })
+    const session = elevateSessions.find((s) => s.id === id)
+    const pulseWarning = session?.progressPulseStatus === 'tracked'
+      ? ' This session is tracked in My Progress Pulse — its scores will also be removed.'
+      : ''
+    const ok = await confirm({ title: 'Delete Session', description: `Delete this session? This cannot be undone.${pulseWarning}`, confirmLabel: 'Delete', variant: 'destructive' })
     if (!ok) return
     try {
       await fetch(`${API_BASE_URL}/sessions/${id}`, { method: 'DELETE', headers: getAuthHeaders() })
@@ -287,7 +303,11 @@ export function History() {
 
   async function deleteSelectedElevate() {
     if (selectedElevate.size === 0) return
-    const ok = await confirm({ title: 'Delete Sessions', description: `Delete ${selectedElevate.size} session(s)? This cannot be undone.`, confirmLabel: 'Delete All', variant: 'destructive' })
+    const trackedCount = elevateSessions.filter((s) => selectedElevate.has(s.id) && s.progressPulseStatus === 'tracked').length
+    const pulseWarning = trackedCount > 0
+      ? ` ${trackedCount} of these are tracked in My Progress Pulse — their scores will also be removed.`
+      : ''
+    const ok = await confirm({ title: 'Delete Sessions', description: `Delete ${selectedElevate.size} session(s)? This cannot be undone.${pulseWarning}`, confirmLabel: 'Delete All', variant: 'destructive' })
     if (!ok) return
     try {
       await Promise.all(
@@ -443,6 +463,16 @@ export function History() {
                             </span>
                           )}
                           <span>{s.userRole}</span>
+                          {s.progressPulseStatus === 'tracked' && (
+                            <span className="flex items-center gap-0.5 text-green-600" title="Tracked in My Progress Pulse">
+                              <CheckCircle2 className="h-3 w-3" />
+                            </span>
+                          )}
+                          {s.progressPulseStatus === 'skipped' && (
+                            <span className="flex items-center gap-0.5 text-muted-foreground/50" title="Not considered for My Progress Pulse">
+                              <MinusCircle className="h-3 w-3" />
+                            </span>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5">
@@ -587,6 +617,16 @@ export function History() {
                             <span className="flex items-center gap-1">
                               <TrendingUp className="h-3 w-3" />
                               {session.fillerRate.toFixed(1)}% fillers
+                            </span>
+                          )}
+                          {session.progressPulseStatus === 'tracked' && (
+                            <span className="flex items-center gap-0.5 text-green-600" title="Tracked in My Progress Pulse">
+                              <CheckCircle2 className="h-3 w-3" />
+                            </span>
+                          )}
+                          {session.progressPulseStatus === 'skipped' && (
+                            <span className="flex items-center gap-0.5 text-muted-foreground/50" title="Not considered for My Progress Pulse">
+                              <MinusCircle className="h-3 w-3" />
                             </span>
                           )}
                         </div>
