@@ -309,6 +309,64 @@ EXERCISE_TEMPLATES: dict[str, dict] = {
 }
 
 
+def _get_focus_metrics(focus_area: str, metrics: dict) -> list[str]:
+    """Return formatted metric strings most relevant to the focus area."""
+    result = []
+    wpm = metrics.get("wordsPerMinute")
+    fillers = metrics.get("fillerWordCount")
+    filler_rate = metrics.get("fillerWordRate", 0)
+    hedging = metrics.get("hedgingCount")
+    hedging_rate = metrics.get("hedgingRate", 0)
+    avg_sent = metrics.get("avgSentenceLength")
+    questions = metrics.get("questionsAsked")
+    speaking_pct = metrics.get("speakingPercentage")
+
+    if focus_area == "pacing":
+        if wpm: result.append(f"Speaking pace: {wpm:.0f} WPM (ideal: 120-160)")
+        if speaking_pct: result.append(f"Speaking share: {speaking_pct:.0f}%")
+    elif focus_area == "clarity":
+        if avg_sent: result.append(f"Avg sentence length: {avg_sent:.1f} words")
+        if wpm: result.append(f"Speaking pace: {wpm:.0f} WPM")
+    elif focus_area in ("confidence", "filler_words"):
+        if hedging: result.append(f"Hedging phrases: {hedging} ({hedging_rate:.1%} rate)")
+        if fillers: result.append(f"Filler words: {fillers} ({filler_rate:.1%} rate)")
+    elif focus_area == "conciseness":
+        if avg_sent: result.append(f"Avg sentence length: {avg_sent:.1f} words")
+        if fillers: result.append(f"Filler words: {fillers}")
+    elif focus_area == "engagement":
+        if questions: result.append(f"Questions asked: {questions}")
+        if speaking_pct: result.append(f"Speaking share: {speaking_pct:.0f}%")
+    elif focus_area == "structure":
+        if avg_sent: result.append(f"Avg sentence length: {avg_sent:.1f} words")
+    return result
+
+
+def _get_other_metrics(focus_area: str, metrics: dict) -> list[str]:
+    """Return formatted metric strings NOT directly related to the focus area."""
+    result = []
+    wpm = metrics.get("wordsPerMinute")
+    fillers = metrics.get("fillerWordCount")
+    filler_rate = metrics.get("fillerWordRate", 0)
+    hedging = metrics.get("hedgingCount")
+    hedging_rate = metrics.get("hedgingRate", 0)
+    avg_sent = metrics.get("avgSentenceLength")
+    questions = metrics.get("questionsAsked")
+    speaking_pct = metrics.get("speakingPercentage")
+
+    if focus_area != "pacing":
+        if wpm: result.append(f"Speaking pace: {wpm:.0f} WPM")
+    if focus_area not in ("confidence", "filler_words"):
+        if fillers: result.append(f"Filler words: {fillers} ({filler_rate:.1%} rate)")
+        if hedging: result.append(f"Hedging phrases: {hedging}")
+    if focus_area not in ("clarity", "conciseness", "structure"):
+        if avg_sent: result.append(f"Avg sentence length: {avg_sent:.1f} words")
+    if focus_area != "engagement":
+        if questions: result.append(f"Questions asked: {questions}")
+    if focus_area != "pacing":
+        if speaking_pct: result.append(f"Speaking share: {speaking_pct:.0f}%")
+    return result
+
+
 def get_exercise_instructions(
     focus_area: str,
     replay_context: str | None = None,
@@ -335,47 +393,44 @@ def get_exercise_instructions(
         lines.append("You MUST reference these specific numbers and examples in your coaching.")
         lines.append("When the user asks if you have their data, say YES and cite the specifics below.")
         lines.append("")
-        lines.append("USER PROFILE (from their recent meeting analyses):")
-        lines.append("")
 
-        # Skill scores overview
+        # 1) FOCUS AREA DATA FIRST — this is what the session is about
         skill_summaries = coaching_context.get("skillSummaries", {})
-        if skill_summaries:
-            lines.append("Current skill levels:")
-            for skill, data in skill_summaries.items():
-                current = data.get("current", 0)
-                prev = data.get("previous")
-                trend = ""
-                if prev is not None:
-                    diff = current - prev
-                    trend = f" ({'improving' if diff > 0 else 'declining'}, was {prev})"
-                lines.append(f"  - {skill}: {current}/10{trend}")
+        focus_data = skill_summaries.get(focus_area)
+        if focus_data:
+            current = focus_data.get("current", 0)
+            prev = focus_data.get("previous")
+            trend = ""
+            if prev is not None:
+                diff = current - prev
+                trend_word = 'improving' if diff > 0 else ('stable' if diff == 0 else 'declining')
+                trend = f" ({trend_word}, was {prev})"
+            lines.append(f"PRIMARY FOCUS — {focus_area.upper()} SCORE: {current}/10{trend}")
+            lines.append(f"This is the skill they came to practice. Lead with this in your greeting.")
+            lines.append(f"Example greeting: 'Your {focus_area} score is {current} out of 10 — let's work on getting that up.'")
             lines.append("")
 
-        # Replay-specific insights
+        # Focus-specific metrics (surface the most relevant ones first)
         replay = coaching_context.get("replayInsights")
         if replay:
             metrics = replay.get("metrics", {})
-            if metrics:
-                lines.append("From their last meeting:")
-                if metrics.get("fillerWordCount"):
-                    lines.append(f"  - Filler words used: {metrics['fillerWordCount']} ({metrics.get('fillerWordRate', 0):.1%} rate)")
-                if metrics.get("hedgingCount"):
-                    lines.append(f"  - Hedging phrases: {metrics['hedgingCount']} ({metrics.get('hedgingRate', 0):.1%} rate)")
-                if metrics.get("wordsPerMinute"):
-                    lines.append(f"  - Speaking pace: {metrics['wordsPerMinute']:.0f} WPM")
-                if metrics.get("avgSentenceLength"):
-                    lines.append(f"  - Average sentence length: {metrics['avgSentenceLength']:.1f} words")
-                if metrics.get("questionsAsked"):
-                    lines.append(f"  - Questions asked: {metrics['questionsAsked']}")
-                if metrics.get("speakingPercentage"):
-                    lines.append(f"  - Speaking share: {metrics['speakingPercentage']:.0f}%")
+            focus_metrics = _get_focus_metrics(focus_area, metrics)
+            if focus_metrics:
+                lines.append(f"Key metrics related to {focus_area}:")
+                for m in focus_metrics:
+                    lines.append(f"  - {m}")
+                lines.append("")
+
+            # Replay trigger (why they're here)
+            trigger = replay.get("replayTrigger")
+            if trigger:
+                lines.append(f"Why they started this session: \"{trigger}\"")
                 lines.append("")
 
             # Focus-specific improvements from AI
             focus_imps = replay.get("focusImprovements", [])
             if focus_imps:
-                lines.append("AI-identified areas for this skill:")
+                lines.append(f"AI-identified improvement areas for {focus_area}:")
                 for imp in focus_imps[:3]:
                     point = imp.get("point", "")
                     suggestion = imp.get("suggestion", "")
@@ -384,28 +439,7 @@ def get_exercise_instructions(
                         lines.append(f"    Tip: {suggestion}")
                 lines.append("")
 
-            # Strengths (so the coach can acknowledge what's working)
-            strengths = replay.get("strengths", [])
-            if strengths:
-                lines.append("Their strengths (acknowledge these):")
-                for s in strengths[:3]:
-                    lines.append(f"  - {s.get('point', '')}")
-                lines.append("")
-
-            hedging = replay.get("hedgingPhrases")
-            if hedging and isinstance(hedging, list):
-                lines.append(f"Their most-used hedging phrases: {', '.join(hedging[:5])}")
-                lines.append("")
-
-            fillers_by_type = replay.get("fillersByType")
-            if fillers_by_type and isinstance(fillers_by_type, dict):
-                top_fillers = sorted(fillers_by_type.items(), key=lambda x: x[1], reverse=True)[:5]
-                if top_fillers:
-                    filler_str = ", ".join(f'"{w}" ({c}x)' for w, c in top_fillers)
-                    lines.append(f"Their most-used filler words: {filler_str}")
-                    lines.append("")
-
-            # Real example phrases from their meeting (very powerful coaching anchors)
+            # Real example phrases from their meeting
             examples = replay.get("examplePhrases", [])
             if examples:
                 lines.append("ACTUAL PHRASES from their meeting you can reference:")
@@ -414,25 +448,97 @@ def get_exercise_instructions(
                 lines.append("Use these as coaching material — ask them to rephrase, shorten, or deliver more confidently.")
                 lines.append("")
 
-            # Replay trigger (why they're here)
-            trigger = replay.get("replayTrigger")
-            if trigger:
-                lines.append(f"Why they started this session: \"{trigger}\"")
-                lines.append("Reference this in your greeting to show you understand their goal.")
-                lines.append("")
-
-        # Previous practice sessions for continuity
-        prev_sessions = coaching_context.get("previousElevateSessions", [])
-        if prev_sessions:
-            lines.append(f"They have practiced this focus area {len(prev_sessions)} time(s) before.")
-            lines.append("Build on previous practice — acknowledge their commitment and progress.")
+        # 2) FULL SKILL OVERVIEW (secondary — for context, not the focus)
+        if skill_summaries:
+            lines.append("Full skill overview (for context, NOT your primary focus):")
+            for skill, data in skill_summaries.items():
+                if skill == focus_area:
+                    continue
+                current = data.get("current", 0)
+                prev = data.get("previous")
+                trend = ""
+                if prev is not None:
+                    diff = current - prev
+                    trend_word = 'improving' if diff > 0 else ('stable' if diff == 0 else 'declining')
+                    trend = f" ({trend_word}, was {prev})"
+                lines.append(f"  - {skill}: {current}/10{trend}")
             lines.append("")
 
-        lines.append(
-            "Use this profile data to personalize your coaching. Reference their actual numbers, "
-            "acknowledge their strengths, and focus exercises on their specific weaknesses. "
-            "Do NOT recite this data back as a list — weave it naturally into your coaching."
-        )
+        # 3) Supporting detail from replay
+        if replay:
+            metrics = replay.get("metrics", {})
+            other_metrics = _get_other_metrics(focus_area, metrics)
+            if other_metrics:
+                lines.append("Other meeting metrics (reference only if relevant):")
+                for m in other_metrics:
+                    lines.append(f"  - {m}")
+                lines.append("")
+
+            strengths = replay.get("strengths", [])
+            if strengths:
+                lines.append("Their strengths (acknowledge briefly, then refocus on practice):")
+                for s in strengths[:3]:
+                    lines.append(f"  - {s.get('point', '')}")
+                lines.append("")
+
+            hedging = replay.get("hedgingPhrases")
+            if hedging and isinstance(hedging, list):
+                lines.append(f"Hedging phrases they overuse: {', '.join(hedging[:5])}")
+                lines.append("")
+
+            fillers_by_type = replay.get("fillersByType")
+            if fillers_by_type and isinstance(fillers_by_type, dict):
+                top_fillers = sorted(fillers_by_type.items(), key=lambda x: x[1], reverse=True)[:5]
+                if top_fillers:
+                    filler_str = ", ".join(f'"{w}" ({c}x)' for w, c in top_fillers)
+                    lines.append(f"Their filler words: {filler_str}")
+                    lines.append("")
+
+        # Last practice session summary (compact coaching continuity)
+        lps = coaching_context.get("lastPracticeSummary")
+        session_count = coaching_context.get("elevateSessionCount", 0)
+        if lps:
+            date_str = ""
+            raw_date = lps.get("date", "")
+            if raw_date:
+                try:
+                    from datetime import datetime as _dt
+                    d = _dt.fromisoformat(str(raw_date).replace("Z", "+00:00"))
+                    date_str = d.strftime("%b %d")
+                except Exception:
+                    date_str = str(raw_date)[:10]
+
+            lines.append(f"LAST PRACTICE SESSION ({focus_area}, {date_str}):")
+            if lps.get("topStrength"):
+                lines.append(f"  Top strength: {lps['topStrength']}")
+            if lps.get("primaryImprovement"):
+                lines.append(f"  Improvement area: {lps['primaryImprovement']}")
+
+            focus_score = lps.get("focusSkillScore")
+            replay_score = lps.get("replaySkillScore")
+            delta = lps.get("improvementDelta")
+            if focus_score is not None and replay_score is not None and delta is not None:
+                direction = "improving" if delta > 0 else ("declining" if delta < 0 else "same")
+                lines.append(f"  {focus_area} score in practice: {focus_score}/10 (vs {replay_score}/10 in meeting — {direction}, delta {delta:+.1f})")
+            elif focus_score is not None:
+                lines.append(f"  {focus_area} score in practice: {focus_score}/10")
+
+            if lps.get("exampleQuote"):
+                lines.append(f'  Example from practice: "{lps["exampleQuote"]}"')
+
+            lines.append("  Build on this progress. Reference what they practiced. Don't repeat the same advice.")
+            lines.append("")
+        elif session_count > 0:
+            lines.append(f"They have practiced {focus_area} {session_count} time(s) before.")
+            lines.append("Acknowledge their commitment to practice.")
+            lines.append("")
+
+        lines.append("COACHING RULES:")
+        lines.append(f"1. ALWAYS lead with {focus_area} — that is the reason they are here.")
+        lines.append(f"2. In your greeting, mention their {focus_area} score and what you'll work on.")
+        lines.append("3. Only mention other skills briefly to acknowledge strengths or connect to the focus area.")
+        lines.append("4. When the user asks about their data, lead with the focus skill first, then other scores.")
+        lines.append("5. Do NOT recite all data as a list — weave it naturally into coaching.")
         lines.append("")
     elif replay_context:
         lines.append(f"CONTEXT FROM REPLAY ANALYSIS: \"{replay_context}\"")

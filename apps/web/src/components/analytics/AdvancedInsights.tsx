@@ -18,6 +18,8 @@ import {
   Activity
 } from 'lucide-react';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '../ui/accordion';
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
 import { getAuthHeaders } from '@/lib/api-client';
 
 interface AdvancedInsightsProps {
@@ -101,7 +103,7 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
     setError(null);
     
     try {
-      const response = await fetch(`http://localhost:4000/sessions/${sessionId}/advanced-metrics`, {
+      const response = await fetch(`${API_BASE_URL}/sessions/${sessionId}/advanced-metrics`, {
         headers: getAuthHeaders(),
       });
       

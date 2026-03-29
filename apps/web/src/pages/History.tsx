@@ -99,6 +99,8 @@ export function History() {
   const [elevateSessions, setElevateSessions] = useState<ElevateSession[]>([])
   const [replayLoading, setReplayLoading] = useState(true)
   const [elevateLoading, setElevateLoading] = useState(true)
+  const [replayError, setReplayError] = useState<string | null>(null)
+  const [elevateError, setElevateError] = useState<string | null>(null)
   const [selectedReplay, setSelectedReplay] = useState<Set<string>>(new Set())
   const [selectedElevate, setSelectedElevate] = useState<Set<string>>(new Set())
 
@@ -220,12 +222,13 @@ export function History() {
   async function fetchReplay() {
     try {
       setReplayLoading(true)
+      setReplayError(null)
       const res = await fetch(`${API_BASE_URL}/api/replay/sessions`, { headers: getAuthHeaders() })
-      if (!res.ok) throw new Error()
+      if (!res.ok) throw new Error('Failed to load replay sessions')
       const data = await res.json()
       setReplaySessions(data.sessions || [])
-    } catch {
-      // handled inline
+    } catch (err) {
+      setReplayError(err instanceof Error ? err.message : 'Something went wrong')
     } finally {
       setReplayLoading(false)
     }
@@ -234,12 +237,13 @@ export function History() {
   async function fetchElevate() {
     try {
       setElevateLoading(true)
+      setElevateError(null)
       const res = await fetch(`${API_BASE_URL}/sessions`, { headers: getAuthHeaders() })
-      if (!res.ok) throw new Error()
+      if (!res.ok) throw new Error('Failed to load elevate sessions')
       const data = await res.json()
       setElevateSessions(data.sessions || [])
-    } catch {
-      // handled inline
+    } catch (err) {
+      setElevateError(err instanceof Error ? err.message : 'Something went wrong')
     } finally {
       setElevateLoading(false)
     }
@@ -370,7 +374,17 @@ export function History() {
             </div>
           )}
 
-          {!replayLoading && replaySessions.length > 0 && (
+          {!replayLoading && replayError && (
+            <Card>
+              <CardContent className="py-10 text-center">
+                <AlertCircle className="mx-auto mb-3 h-10 w-10 text-destructive" />
+                <p className="text-sm text-destructive">{replayError}</p>
+                <Button variant="outline" size="sm" className="mt-4" onClick={fetchReplay}>Retry</Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {!replayLoading && !replayError && replaySessions.length > 0 && (
             <div className="mb-4">
               <SessionFilters
                 search={rSearch}
@@ -388,7 +402,7 @@ export function History() {
             </div>
           )}
 
-          {!replayLoading && replaySessions.length === 0 && (
+          {!replayLoading && !replayError && replaySessions.length === 0 && (
             <Card>
               <CardContent className="py-16 text-center">
                 <FileText className="mx-auto mb-3 h-12 w-12 text-muted-foreground" />
@@ -403,7 +417,7 @@ export function History() {
             </Card>
           )}
 
-          {!replayLoading && replaySessions.length > 0 && filteredReplay.length === 0 && (
+          {!replayLoading && !replayError && replaySessions.length > 0 && filteredReplay.length === 0 && (
             <Card>
               <CardContent className="py-10 text-center text-sm text-muted-foreground">
                 No sessions match your filters.
@@ -411,7 +425,7 @@ export function History() {
             </Card>
           )}
 
-          {!replayLoading && filteredReplay.length > 0 && (
+          {!replayLoading && !replayError && filteredReplay.length > 0 && (
             <div className="grid gap-3">
               {filteredReplay.map((s) => {
                 const badge = REPLAY_STATUS_BADGE[s.status] || REPLAY_STATUS_BADGE.pending
@@ -518,7 +532,17 @@ export function History() {
             </div>
           )}
 
-          {!elevateLoading && elevateSessions.length > 0 && (
+          {!elevateLoading && elevateError && (
+            <Card>
+              <CardContent className="py-10 text-center">
+                <AlertCircle className="mx-auto mb-3 h-10 w-10 text-destructive" />
+                <p className="text-sm text-destructive">{elevateError}</p>
+                <Button variant="outline" size="sm" className="mt-4" onClick={fetchElevate}>Retry</Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {!elevateLoading && !elevateError && elevateSessions.length > 0 && (
             <div className="mb-4">
               <SessionFilters
                 search={eSearch}
@@ -536,7 +560,7 @@ export function History() {
             </div>
           )}
 
-          {!elevateLoading && elevateSessions.length === 0 && (
+          {!elevateLoading && !elevateError && elevateSessions.length === 0 && (
             <Card>
               <CardContent className="py-16 text-center">
                 <MessageSquare className="mx-auto mb-3 h-12 w-12 text-muted-foreground" />
@@ -551,7 +575,7 @@ export function History() {
             </Card>
           )}
 
-          {!elevateLoading && elevateSessions.length > 0 && filteredElevate.length === 0 && (
+          {!elevateLoading && !elevateError && elevateSessions.length > 0 && filteredElevate.length === 0 && (
             <Card>
               <CardContent className="py-10 text-center text-sm text-muted-foreground">
                 No sessions match your filters.
@@ -559,7 +583,7 @@ export function History() {
             </Card>
           )}
 
-          {!elevateLoading && filteredElevate.length > 0 && (
+          {!elevateLoading && !elevateError && filteredElevate.length > 0 && (
             <div className="grid gap-3">
               {filteredElevate.map((session) => {
                 const isSelected = selectedElevate.has(session.id)

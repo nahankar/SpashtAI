@@ -5,6 +5,8 @@ import { Clock, MessageSquare, Zap, TrendingUp, Download, RefreshCw, FileText, L
 import { Button } from '../ui/button';
 import { getAuthHeaders } from '@/lib/api-client';
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
+
 interface SessionMetricsProps {
   sessionId: string;
   metrics?: {
@@ -45,7 +47,7 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExp
     setReprocessStatus('Starting reprocessing...');
     
     try {
-      const response = await fetch(`http://localhost:4000/sessions/${sessionId}/reprocess`, {
+      const response = await fetch(`${API_BASE_URL}/sessions/${sessionId}/reprocess`, {
         method: 'POST',
         headers: getAuthHeaders()
       });

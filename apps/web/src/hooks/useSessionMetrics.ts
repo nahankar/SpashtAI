@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { getAuthHeaders } from '@/lib/api-client';
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
+
 interface SessionMetrics {
   // LiveKit metrics
   totalLlmTokens: number;
@@ -57,7 +59,7 @@ export function useSessionMetrics(sessionId: string | null): UseSessionMetricsRe
 
   const fetchConversationMessageCount = async (id: string): Promise<number> => {
     try {
-      const response = await fetch(`http://localhost:4000/sessions/${id}/conversation`, {
+      const response = await fetch(`${API_BASE_URL}/sessions/${id}/conversation`, {
         headers: getAuthHeaders(),
       });
       if (!response.ok) return 0;
@@ -90,7 +92,7 @@ export function useSessionMetrics(sessionId: string | null): UseSessionMetricsRe
     setError(null);
 
     try {
-      const response = await fetch(`http://localhost:4000/sessions/${sessionId}/metrics`, {
+      const response = await fetch(`${API_BASE_URL}/sessions/${sessionId}/metrics`, {
         headers: getAuthHeaders(),
       });
       
@@ -104,11 +106,11 @@ export function useSessionMetrics(sessionId: string | null): UseSessionMetricsRe
       if (shouldRecomputeFromTranscript(data, messageCount)) {
         try {
           const calcResponse = await fetch(
-            `http://localhost:4000/sessions/${sessionId}/calculate-text-metrics`,
+            `${API_BASE_URL}/sessions/${sessionId}/calculate-text-metrics`,
             { method: 'POST', headers: getAuthHeaders() }
           );
           if (calcResponse.ok) {
-            const refreshed = await fetch(`http://localhost:4000/sessions/${sessionId}/metrics`, {
+            const refreshed = await fetch(`${API_BASE_URL}/sessions/${sessionId}/metrics`, {
               headers: getAuthHeaders(),
             });
             if (refreshed.ok) {
@@ -134,7 +136,7 @@ export function useSessionMetrics(sessionId: string | null): UseSessionMetricsRe
 
     try {
       const response = await fetch(
-        `http://localhost:4000/sessions/${sessionId}/transcript/download?format=${format}`,
+        `${API_BASE_URL}/sessions/${sessionId}/transcript/download?format=${format}`,
         { headers: getAuthHeaders() }
       );
 

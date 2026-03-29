@@ -114,6 +114,15 @@ async def fetch_session_history(session_id: str, max_messages: int = 12) -> list
         return []
 
 
+def _debug_log(msg: str):
+    """Write debug messages to a file so they're visible even from child processes."""
+    try:
+        with open("/tmp/spashtai_agent_debug.log", "a") as f:
+            f.write(f"[{datetime.now().isoformat()}] {msg}\n")
+    except Exception:
+        pass
+
+
 async def fetch_coaching_context(session_id: str, focus_area: str, max_retries: int = 3) -> dict | None:
     """
     Fetch rich coaching context (skill scores, metrics, example phrases, etc.)
@@ -121,6 +130,7 @@ async def fetch_coaching_context(session_id: str, focus_area: str, max_retries: 
     Retries on failure since the session DB record may not exist yet.
     """
     url = f"{SERVER_URL}/internal/coaching-context"
+    _debug_log(f"fetch_coaching_context called: session_id={session_id}, focus_area={focus_area}, url={url}")
     for attempt in range(max_retries):
         try:
             async with aiohttp.ClientSession() as session:
@@ -130,12 +140,15 @@ async def fetch_coaching_context(session_id: str, focus_area: str, max_retries: 
                     headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
                     timeout=aiohttp.ClientTimeout(total=5.0),
                 ) as response:
+                    _debug_log(f"Response status: {response.status} (attempt {attempt+1}/{max_retries})")
                     if response.status == 404 and attempt < max_retries - 1:
                         logger.info("⏳ Session not found yet, retrying in %ds... (attempt %d/%d)",
                             attempt + 1, attempt + 1, max_retries)
                         await asyncio.sleep(attempt + 1)
                         continue
                     if response.status != 200:
+                        body = await response.text()
+                        _debug_log(f"Non-200 response body: {body[:500]}")
                         logger.warning("⚠️ Coaching context fetch failed: HTTP %s (attempt %d/%d)",
                             response.status, attempt + 1, max_retries)
                         if attempt < max_retries - 1:
@@ -145,16 +158,19 @@ async def fetch_coaching_context(session_id: str, focus_area: str, max_retries: 
                     data = await response.json()
                     skills = data.get("skillSummaries", {})
                     replay = data.get("replayInsights")
+                    _debug_log(f"SUCCESS: {len(skills)} skills, replay={'yes' if replay else 'no'}")
                     logger.info("📊 Coaching context loaded: %d skills, replay=%s, examples=%d",
                         len(skills),
                         "yes" if replay else "no",
                         len(replay.get("examplePhrases", [])) if replay else 0)
                     return data
         except Exception as e:
+            _debug_log(f"Exception: {e}")
             logger.warning("⚠️ Coaching context fetch error (attempt %d/%d): %s",
                 attempt + 1, max_retries, e)
             if attempt < max_retries - 1:
                 await asyncio.sleep(attempt + 1)
+    _debug_log("All retries exhausted, returning None")
     return None
 
 
@@ -290,21 +306,32 @@ class EgressRecorder:
             filename = f"{self.participant_type}_{participant_label}_{self.session_id}_{timestamp}.mp4"
             filepath = f"/out/{filename}"  # Egress container path
             
-            # Create ParticipantEgressRequest (NO CHROME RENDERING!)
-            if not self.use_s3:
+            if self.use_s3:
+                s3_path = f"s3://your-bucket/participant_{self.participant_type}_{self.session_id}_{timestamp}.mp4"
                 request = lk_api.ParticipantEgressRequest(
                     room_name=self.room_name,
-                    identity=self.participant_identity,  # The user's participant ID
+                    identity=self.participant_identity,
                     file_outputs=[
                         lk_api.EncodedFileOutput(
-                            filepath=filepath,  # Must include /out/ prefix
+                            filepath=s3_path,
+                            file_type=lk_api.EncodedFileType.MP4
+                        )
+                    ]
+                )
+                self.file_path = s3_path
+            else:
+                request = lk_api.ParticipantEgressRequest(
+                    room_name=self.room_name,
+                    identity=self.participant_identity,
+                    file_outputs=[
+                        lk_api.EncodedFileOutput(
+                            filepath=filepath,
                             file_type=lk_api.EncodedFileType.MP4
                         )
                     ]
                 )
                 self.file_path = filepath
             
-            # Create Egress service client and start recording
             async with aiohttp.ClientSession() as session:
                 egress_service = EgressService(
                     session=session,
@@ -446,11 +473,21 @@ class TrackEgressRecorder:
             filename = f"{self.participant_type}_track_{track_label}_{self.session_id}_{timestamp}.mp4"
             filepath = f"/out/{filename}"
             
-            # Create TrackEgressRequest - records specific audio track
-            if not self.use_s3:
+            if self.use_s3:
+                s3_path = f"s3://your-bucket/track_{self.participant_type}_{self.session_id}_{timestamp}.mp4"
                 request = lk_api.TrackEgressRequest(
                     room_name=self.room_name,
-                    track_id=self.track_id,  # Specific track to record
+                    track_id=self.track_id,
+                    file=lk_api.DirectFileOutput(
+                        filepath=s3_path,
+                        disable_manifest=True
+                    )
+                )
+                self.file_path = s3_path
+            else:
+                request = lk_api.TrackEgressRequest(
+                    room_name=self.room_name,
+                    track_id=self.track_id,
                     file=lk_api.DirectFileOutput(
                         filepath=filepath,
                         disable_manifest=True
@@ -1017,13 +1054,32 @@ async def entrypoint(ctx: JobContext):
 
         # Fetch rich coaching context from server API
         coaching_context = None
-        if focus_area and session_id:
+        _debug_log(f"ENTRYPOINT coaching context check: session_id={session_id}, focus_area={focus_area}, persistence={persistence_enabled}")
+        _debug_log(f"Room metadata keys: {list(room_meta.keys())}, values: {room_meta}")
+        logger.info(f"🔍 Coaching context check: session_id={session_id}, focus_area={focus_area}")
+        if focus_area and session_id and not session_id.startswith("ephemeral_"):
+            logger.info(f"📡 Fetching coaching context for session={session_id}, focus={focus_area}")
+            _debug_log(f"CALLING fetch_coaching_context...")
             coaching_context = await fetch_coaching_context(session_id, focus_area)
+            if coaching_context:
+                logger.info(f"✅ Coaching context received: {len(coaching_context.get('skillSummaries', {}))} skills")
+                _debug_log(f"Coaching context keys: {list(coaching_context.keys())}")
+            else:
+                logger.warning("❌ Coaching context fetch returned None")
+                _debug_log("Coaching context returned None!")
+        else:
+            reason = []
+            if not focus_area: reason.append("no focus_area")
+            if not session_id: reason.append("no session_id")
+            if session_id and session_id.startswith("ephemeral_"): reason.append("ephemeral session")
+            logger.warning(f"⏭️ Skipping coaching context: {', '.join(reason)}")
+            _debug_log(f"SKIPPED coaching context: {', '.join(reason)}")
 
         # Session scope: adapt based on how the user arrived
         exercise_instructions = ""
         if focus_area:
             exercise_instructions = get_exercise_instructions(focus_area, focus_context, coaching_context)
+            _debug_log(f"Exercise instructions length: {len(exercise_instructions)}, has coaching data: {'USER DATA' in exercise_instructions}")
 
         if exercise_instructions:
             base_instructions += f"\n\n{exercise_instructions}"
@@ -1314,12 +1370,14 @@ async def entrypoint(ctx: JobContext):
                 # 4. Generates performance insights
                 logger.info("🎯 Finalizing comprehensive session analysis...")
                 
-                # Convert Egress container path to local file path
                 local_user_audio_path = None
                 if user_file_path:
-                    # Convert /out/ path to actual audio_storage path
-                    audio_manager = AudioFileManager(session_id)
-                    local_user_audio_path = audio_manager.to_local_path(user_file_path)
+                    base_name = os.path.basename(user_file_path)
+                    local_user_audio_path = os.path.join(
+                        os.path.dirname(__file__), "audio_storage", base_name
+                    )
+                    if not os.path.exists(local_user_audio_path):
+                        local_user_audio_path = user_file_path
                     logger.info(f"📁 Using user audio file for delivery analysis: {local_user_audio_path}")
                 
                 await advanced_metrics.finalize_session(user_audio_file_path=local_user_audio_path)

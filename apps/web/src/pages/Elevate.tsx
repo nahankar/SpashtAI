@@ -998,11 +998,8 @@ export function Elevate() {
                 <div className="rounded-md border border-blue-400 bg-blue-50 px-4 py-3 text-sm text-blue-800 flex items-center justify-between">
                   <span>Session paused due to inactivity. Your conversation is saved.</span>
                   <Button size="sm" onClick={() => {
-                    setPreviousSessionId(sessionId)
-                    setSessionId(null)
-                    setShowResumePrompt(false)
-                    // Trigger resume flow with current sessionId
                     const resumeSessionId = sessionId
+                    setSessionId(null)
                     ;(async () => {
                       try {
                         const newRoomName = `room_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`

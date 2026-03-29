@@ -11,9 +11,16 @@ apps/*/node_modules
 .git-test
 .git_backup_*/
 .git_corrupt_backup_*/
-=0.2.0
+# Stale pip install artifacts
+=*
+
+# Logs
+*.log
 
 # Local storage (dev uploads, audio recordings)
 storage/
 replay_uploads/
 audio_storage/
+
+# Agent archive (old dev iterations)
+apps/agent/archive/

@@ -31,7 +31,13 @@ export async function getProgressPulseSummary(req: Request, res: Response) {
     const userId = req.user!.userId
 
     const latestPerSkill = await prisma.$queryRaw<
-      { skill: string; latest_score: number; prev_score: number | null; count: number }[]
+      {
+        skill: string
+        latest_score: number
+        baseline_avg: number | null
+        first_score: number | null
+        count: number
+      }[]
     >`
       WITH ranked AS (
         SELECT
@@ -49,10 +55,15 @@ export async function getProgressPulseSummary(req: Request, res: Response) {
       SELECT
         r1.skill,
         r1.score AS latest_score,
-        r2.score AS prev_score,
+        (SELECT AVG(r3.score) FROM ranked r3
+         WHERE r3.skill = r1.skill AND r3.rn BETWEEN 2 AND 4
+        ) AS baseline_avg,
+        (SELECT r4.score FROM ranked r4
+         WHERE r4.skill = r1.skill
+         ORDER BY r4.rn DESC LIMIT 1
+        ) AS first_score,
         r1.cnt::int AS count
       FROM ranked r1
-      LEFT JOIN ranked r2 ON r1.skill = r2.skill AND r2.rn = 2
       WHERE r1.rn = 1
       ORDER BY r1.skill
     `
@@ -74,14 +85,23 @@ export async function getProgressPulseSummary(req: Request, res: Response) {
       arr.push({ score: Number(row.score), date: row.recordedAt.toISOString().slice(0, 10) })
     }
 
-    const summary = latestPerSkill.map((row) => ({
-      skill: row.skill,
-      currentScore: Number(row.latest_score),
-      previousScore: row.prev_score != null ? Number(row.prev_score) : null,
-      delta: row.prev_score != null ? Number(row.latest_score) - Number(row.prev_score) : null,
-      totalSessions: Number(row.count),
-      history: (historyBySkill[row.skill] || []).slice(-10),
-    }))
+    const summary = latestPerSkill.map((row) => {
+      const latest = Number(row.latest_score)
+      const baseline = row.baseline_avg != null ? Number(row.baseline_avg) : null
+      const first = row.first_score != null ? Number(row.first_score) : null
+      const count = Number(row.count)
+      return {
+        skill: row.skill,
+        currentScore: latest,
+        previousScore: baseline,
+        delta: baseline != null ? Math.round((latest - baseline) * 10) / 10 : null,
+        longTermDelta: first != null && count >= 3
+          ? Math.round((latest - first) * 10) / 10
+          : null,
+        totalSessions: count,
+        history: (historyBySkill[row.skill] || []).slice(-10),
+      }
+    })
 
     res.json({ summary })
   } catch (error) {
@@ -316,8 +336,8 @@ async function buildCoachingContext(userId: string, focusArea: string, replaySes
       }
     }
 
-    // 3. Previous Elevate sessions for this focus area (for continuity)
-    const previousElevateSessions = await prisma.session.findMany({
+    // 3. Most recent Elevate session for this focus area (detailed, for coaching continuity)
+    const lastElevateSession = await prisma.session.findFirst({
       where: {
         userId,
         module: 'elevate',
@@ -325,7 +345,6 @@ async function buildCoachingContext(userId: string, focusArea: string, replaySes
         endedAt: { not: null },
       },
       orderBy: { startedAt: 'desc' },
-      take: 3,
       select: {
         id: true,
         sessionName: true,
@@ -337,8 +356,62 @@ async function buildCoachingContext(userId: string, focusArea: string, replaySes
             userWpm: true,
             userFillerCount: true,
             userFillerRate: true,
+            userAvgSentenceLength: true,
+            userSpeakingTime: true,
+            coachingInsights: true,
+            skillScores: true,
           },
         },
+        transcript: {
+          select: { conversationData: true },
+        },
+      },
+    })
+
+    // Build compact last-practice summary
+    let lastPracticeSummary: any = null
+    if (lastElevateSession?.metrics) {
+      const insights = lastElevateSession.metrics.coachingInsights as any
+      const practiceSkills = lastElevateSession.metrics.skillScores as any
+      const practiceScore = practiceSkills?.scores?.[focusArea] ?? null
+      const replayScore = replayInsights?.skillScores?.[focusArea] ?? null
+
+      // Extract one substantive user quote from the practice transcript
+      let exampleQuote: string | null = null
+      const convData = lastElevateSession.transcript?.conversationData as any
+      const msgs = Array.isArray(convData?.messages) ? convData.messages : []
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const m = msgs[i]
+        if (m.role === 'user' && m.content && m.content.length > 20) {
+          const text = m.content.trim()
+          if (!/^(hi|hello|hey|thanks|thank you|bye|goodbye)/i.test(text)) {
+            exampleQuote = text.length > 100 ? text.slice(0, 97) + '...' : text
+            break
+          }
+        }
+      }
+
+      lastPracticeSummary = {
+        date: lastElevateSession.startedAt,
+        durationSec: lastElevateSession.durationSec,
+        primaryImprovement: insights?.primaryImprovement || null,
+        topStrength: insights?.topStrength || null,
+        focusSkillScore: practiceScore,
+        replaySkillScore: replayScore,
+        improvementDelta: practiceScore != null && replayScore != null
+          ? Math.round((practiceScore - replayScore) * 10) / 10
+          : null,
+        exampleQuote,
+      }
+    }
+
+    // 4. Count of previous Elevate sessions for this focus area
+    const elevateSessionCount = await prisma.session.count({
+      where: {
+        userId,
+        module: 'elevate',
+        focusArea: focusArea || undefined,
+        endedAt: { not: null },
       },
     })
 
@@ -346,13 +419,8 @@ async function buildCoachingContext(userId: string, focusArea: string, replaySes
       focusArea,
       skillSummaries,
       replayInsights,
-      previousElevateSessions: previousElevateSessions.map((s) => ({
-        sessionName: s.sessionName,
-        focusArea: s.focusArea,
-        date: s.startedAt,
-        durationSec: s.durationSec,
-        metrics: s.metrics,
-      })),
+      lastPracticeSummary,
+      elevateSessionCount,
     }
 }
 

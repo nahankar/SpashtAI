@@ -17,6 +17,7 @@ interface PulseSummaryItem {
   currentScore: number
   previousScore: number | null
   delta: number | null
+  longTermDelta?: number | null
   totalSessions: number
   history?: PulseHistoryPoint[]
 }
@@ -34,9 +35,10 @@ function scoreBg(score: number): string {
 }
 
 function statusLabel(score: number, delta: number | null): { text: string; className: string } {
-  if (delta != null && delta > 0.3) return { text: 'Improving', className: 'text-green-600' }
+  if (delta != null && delta > 0.5) return { text: 'Improving', className: 'text-green-600' }
   if (score >= 8) return { text: 'Strong', className: 'text-green-600' }
-  if (delta != null && delta < -0.3) return { text: 'Declining', className: 'text-red-500' }
+  if (delta != null && delta < -0.5) return { text: 'Declining', className: 'text-red-500' }
+  if (delta != null && Math.abs(delta) <= 0.5) return { text: 'Stable', className: 'text-blue-600' }
   if (score >= 5) return { text: 'Developing', className: 'text-amber-600' }
   return { text: 'Needs Focus', className: 'text-red-500' }
 }
@@ -45,7 +47,7 @@ function buildPulseSummary(items: PulseSummaryItem[]): string {
   if (items.length === 0) return ''
 
   const improving = items
-    .filter((i) => i.delta != null && i.delta > 0.2)
+    .filter((i) => i.delta != null && i.delta > 0.5)
     .sort((a, b) => (b.delta ?? 0) - (a.delta ?? 0))
   const needsFocus = items
     .filter((i) => i.currentScore < 6)
@@ -100,7 +102,7 @@ function getFocusSkill(items: PulseSummaryItem[]): string | null {
 
 function DeltaBadge({ delta }: { delta: number | null }) {
   if (delta == null) return null
-  if (Math.abs(delta) < 0.1) {
+  if (Math.abs(delta) <= 0.3) {
     return (
       <span className="inline-flex items-center gap-0.5 text-xs text-muted-foreground">
         <Minus className="h-3 w-3" /> Steady
@@ -117,6 +119,16 @@ function DeltaBadge({ delta }: { delta: number | null }) {
   return (
     <span className="inline-flex items-center gap-0.5 text-xs text-red-500">
       <TrendingDown className="h-3 w-3" /> {delta.toFixed(1)}
+    </span>
+  )
+}
+
+function LongTermDelta({ delta, sessions }: { delta: number | null | undefined; sessions: number }) {
+  if (delta == null || sessions < 3) return null
+  const color = delta > 0 ? 'text-green-600' : delta < 0 ? 'text-red-500' : 'text-muted-foreground'
+  return (
+    <span className={`text-[10px] ${color}`}>
+      Since first session: {delta > 0 ? '+' : ''}{delta.toFixed(1)}
     </span>
   )
 }
@@ -146,24 +158,27 @@ function Sparkline({ points, color, width = 80, height = 28 }: { points: number[
 export function ProgressPulseCard() {
   const [summary, setSummary] = useState<PulseSummaryItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const loadSummary = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const res = await fetch(`${API_BASE_URL}/api/progress-pulse/summary`, {
+        headers: getAuthHeaders(),
+      })
+      if (!res.ok) throw new Error('Failed to load progress data')
+      const data = await res.json()
+      setSummary(data.summary || [])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
-    async function load() {
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/progress-pulse/summary`, {
-          headers: getAuthHeaders(),
-        })
-        if (res.ok) {
-          const data = await res.json()
-          setSummary(data.summary || [])
-        }
-      } catch {
-        // non-critical
-      } finally {
-        setLoading(false)
-      }
-    }
-    load()
+    loadSummary()
   }, [])
 
   if (loading) {
@@ -171,6 +186,25 @@ export function ProgressPulseCard() {
       <Card>
         <CardContent className="py-8 text-center text-sm text-muted-foreground">
           Loading progress...
+        </CardContent>
+      </Card>
+    )
+  }
+
+  if (error) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">My Progress Pulse</CardTitle>
+        </CardHeader>
+        <CardContent className="py-4 text-center">
+          <p className="text-sm text-destructive">{error}</p>
+          <button
+            onClick={loadSummary}
+            className="mt-3 text-xs font-medium text-primary hover:underline"
+          >
+            Retry
+          </button>
         </CardContent>
       </Card>
     )
@@ -201,9 +235,8 @@ export function ProgressPulseCard() {
       <CardHeader className="pb-3">
         <CardTitle className="text-base">My Progress Pulse</CardTitle>
         <CardDescription>
-          {summary.length} skill{summary.length !== 1 ? 's' : ''} tracked across your sessions. Improving / declining
-          compares your latest vs previous score per skill, ordered by the <strong>meeting date</strong> you set when
-          tracking Replay (not upload order).
+          {summary.length} skill{summary.length !== 1 ? 's' : ''} tracked across your sessions. Trends compare your
+          latest score against the average of your last 3 sessions to filter out noise.
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4">
@@ -261,14 +294,17 @@ export function ProgressPulseCard() {
                   </div>
                 </div>
                 {item.history && item.history.length >= 2 && (
-                  <div className="flex items-center gap-2 pt-1 border-t border-border/50">
-                    <Sparkline
-                      points={item.history.map((h) => h.score)}
-                      color={item.currentScore >= 8 ? '#22c55e' : item.currentScore >= 5 ? '#f59e0b' : '#ef4444'}
-                    />
-                    <span className="text-[10px] text-muted-foreground whitespace-nowrap">
-                      {item.history[0].date} \u2192 {item.history[item.history.length - 1].date}
-                    </span>
+                  <div className="flex flex-col gap-0.5 pt-1 border-t border-border/50">
+                    <div className="flex items-center gap-2">
+                      <Sparkline
+                        points={item.history.map((h) => h.score)}
+                        color={item.currentScore >= 8 ? '#22c55e' : item.currentScore >= 5 ? '#f59e0b' : '#ef4444'}
+                      />
+                      <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                        {item.history[0].date} \u2192 {item.history[item.history.length - 1].date}
+                      </span>
+                    </div>
+                    <LongTermDelta delta={item.longTermDelta} sessions={item.totalSessions} />
                   </div>
                 )}
                 <Link
