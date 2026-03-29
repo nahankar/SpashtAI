@@ -50,7 +50,8 @@ import {
   getProgressPulse,
   getProgressPulseSummary,
   recordProgressPulse,
-  skipProgressPulse
+  skipProgressPulse,
+  getCoachingContext
 } from './routes/progress-pulse'
 import downloadsRouter from './routes/downloads'
 import replayRouter from './routes/replay'
@@ -153,6 +154,7 @@ app.get('/api/progress-pulse', requireAuth, getProgressPulse)
 app.get('/api/progress-pulse/summary', requireAuth, getProgressPulseSummary)
 app.post('/api/progress-pulse', requireAuth, recordProgressPulse)
 app.post('/api/progress-pulse/skip', requireAuth, skipProgressPulse)
+app.get('/api/coaching-context', requireAuth, getCoachingContext)
 
 // Protected: downloads and replay
 app.use('/api/downloads', requireAuth, downloadsRouter)

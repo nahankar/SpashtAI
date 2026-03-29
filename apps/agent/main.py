@@ -971,10 +971,20 @@ async def entrypoint(ctx: JobContext):
                 "or wrapping up a topic."
             )
 
+        # Parse rich coaching context if available
+        coaching_context = None
+        raw_coaching_ctx = room_meta.get('coachingContext', '').strip()
+        if raw_coaching_ctx:
+            try:
+                coaching_context = json.loads(raw_coaching_ctx)
+                logger.info(f"📊 Rich coaching context loaded for focus: {focus_area}")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to parse coaching context: {e}")
+
         # Session scope: adapt based on how the user arrived
         exercise_instructions = ""
         if focus_area:
-            exercise_instructions = get_exercise_instructions(focus_area, focus_context)
+            exercise_instructions = get_exercise_instructions(focus_area, focus_context, coaching_context)
 
         if exercise_instructions:
             base_instructions += f"\n\n{exercise_instructions}"

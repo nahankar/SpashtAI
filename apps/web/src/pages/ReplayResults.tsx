@@ -36,7 +36,7 @@ import {
   CalendarDays,
 } from 'lucide-react'
 import type { ReplayResultData } from '@/hooks/useReplaySession'
-import { inferFocusArea } from '@/lib/focus-areas'
+import { inferFocusArea, EXERCISE_PREVIEWS, getFocusAreaLabel } from '@/lib/focus-areas'
 import { generateSessionPdf, type SessionReport } from '@/lib/generate-session-pdf'
 import { FileText } from 'lucide-react'
 
@@ -1478,38 +1478,53 @@ export function ReplayResults() {
                     </Link>
                   </div>
 
-                  {/* Structured Practice Plan */}
-                  {data.coachingInsights.practicePlan?.length > 0 && (
-                    <div className="mt-4 border-t pt-4">
-                      <p className="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                        3-Step Practice Plan
-                      </p>
-                      <div className="grid gap-3 sm:grid-cols-3">
-                        {data.coachingInsights.practicePlan.map((ex: any, i: number) => (
-                          <div key={i} className="rounded-lg border bg-card p-3">
-                            <div className="flex items-center gap-2">
-                              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-bold text-primary">
-                                {i + 1}
-                              </span>
-                              <p className="text-sm font-medium leading-tight">{ex.title}</p>
+                  {/* Exercise Preview */}
+                  {(() => {
+                    const focusId = inferFocusArea(data.coachingInsights.primaryImprovement)
+                    const preview = EXERCISE_PREVIEWS[focusId]
+                    const skillScores = data.skillScores?.scores as Record<string, number> | undefined
+                    const currentScore = skillScores?.[focusId === 'filler_words' ? 'conciseness' : focusId]
+                    const projectedScore = currentScore ? Math.min(10, Math.round((currentScore + 0.8) * 10) / 10) : null
+                    if (!preview) return null
+                    return (
+                      <div className="mt-4 border-t pt-4">
+                        <div className="rounded-lg border bg-muted/30 p-4">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Practice Exercise</p>
+                              <p className="mt-0.5 text-sm font-semibold">{preview.name}</p>
                             </div>
-                            <p className="mt-1.5 text-xs text-muted-foreground">{ex.description}</p>
-                            {ex.focusSkill && (
-                              <span className="mt-2 inline-block rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                                {ex.focusSkill}
+                            <div className="flex items-center gap-3">
+                              <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+                                {preview.duration}
                               </span>
-                            )}
-                            <Link
-                              to={`/elevate?focus=${inferFocusArea(ex.focusSkill || ex.title)}&context=${encodeURIComponent(ex.description)}&newSession=true`}
-                              className="mt-2 flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-                            >
-                              <Mic className="h-3 w-3" /> Practice this
-                            </Link>
+                              <span className="rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary">
+                                {getFocusAreaLabel(focusId)}
+                              </span>
+                            </div>
                           </div>
-                        ))}
+                          <ol className="mt-3 grid gap-1.5">
+                            {preview.steps.map((step, i) => (
+                              <li key={i} className="flex items-start gap-2 text-xs text-muted-foreground">
+                                <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary">
+                                  {i + 1}
+                                </span>
+                                {step}
+                              </li>
+                            ))}
+                          </ol>
+                          {currentScore != null && projectedScore != null && (
+                            <p className="mt-3 text-xs text-muted-foreground">
+                              Completing this exercise could improve your{' '}
+                              <span className="font-medium text-foreground">{getFocusAreaLabel(focusId)}</span> score from{' '}
+                              <span className="font-semibold text-foreground">{currentScore}</span> to{' '}
+                              <span className="font-semibold text-primary">\u2248{projectedScore}</span>
+                            </p>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )
+                  })()}
                 </CardContent>
               </Card>
             )}

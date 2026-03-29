@@ -309,7 +309,11 @@ EXERCISE_TEMPLATES: dict[str, dict] = {
 }
 
 
-def get_exercise_instructions(focus_area: str, replay_context: str | None = None) -> str:
+def get_exercise_instructions(
+    focus_area: str,
+    replay_context: str | None = None,
+    coaching_context: dict | None = None,
+) -> str:
     """Build structured exercise instructions for the AI coach."""
     template = EXERCISE_TEMPLATES.get(focus_area)
     if not template:
@@ -325,7 +329,108 @@ def get_exercise_instructions(focus_area: str, replay_context: str | None = None
         "",
     ]
 
-    if replay_context:
+    # Rich coaching context from Replay analysis + Progress Pulse
+    if coaching_context:
+        lines.append("USER PROFILE (from their recent meeting analyses):")
+        lines.append("")
+
+        # Skill scores overview
+        skill_summaries = coaching_context.get("skillSummaries", {})
+        if skill_summaries:
+            lines.append("Current skill levels:")
+            for skill, data in skill_summaries.items():
+                current = data.get("current", 0)
+                prev = data.get("previous")
+                trend = ""
+                if prev is not None:
+                    diff = current - prev
+                    trend = f" ({'improving' if diff > 0 else 'declining'}, was {prev})"
+                lines.append(f"  - {skill}: {current}/10{trend}")
+            lines.append("")
+
+        # Replay-specific insights
+        replay = coaching_context.get("replayInsights")
+        if replay:
+            metrics = replay.get("metrics", {})
+            if metrics:
+                lines.append("From their last meeting:")
+                if metrics.get("fillerWordCount"):
+                    lines.append(f"  - Filler words used: {metrics['fillerWordCount']} ({metrics.get('fillerWordRate', 0):.1%} rate)")
+                if metrics.get("hedgingCount"):
+                    lines.append(f"  - Hedging phrases: {metrics['hedgingCount']} ({metrics.get('hedgingRate', 0):.1%} rate)")
+                if metrics.get("wordsPerMinute"):
+                    lines.append(f"  - Speaking pace: {metrics['wordsPerMinute']:.0f} WPM")
+                if metrics.get("avgSentenceLength"):
+                    lines.append(f"  - Average sentence length: {metrics['avgSentenceLength']:.1f} words")
+                if metrics.get("questionsAsked"):
+                    lines.append(f"  - Questions asked: {metrics['questionsAsked']}")
+                if metrics.get("speakingPercentage"):
+                    lines.append(f"  - Speaking share: {metrics['speakingPercentage']:.0f}%")
+                lines.append("")
+
+            # Focus-specific improvements from AI
+            focus_imps = replay.get("focusImprovements", [])
+            if focus_imps:
+                lines.append("AI-identified areas for this skill:")
+                for imp in focus_imps[:3]:
+                    point = imp.get("point", "")
+                    suggestion = imp.get("suggestion", "")
+                    lines.append(f"  - {point}")
+                    if suggestion:
+                        lines.append(f"    Tip: {suggestion}")
+                lines.append("")
+
+            # Strengths (so the coach can acknowledge what's working)
+            strengths = replay.get("strengths", [])
+            if strengths:
+                lines.append("Their strengths (acknowledge these):")
+                for s in strengths[:3]:
+                    lines.append(f"  - {s.get('point', '')}")
+                lines.append("")
+
+            hedging = replay.get("hedgingPhrases")
+            if hedging and isinstance(hedging, list):
+                lines.append(f"Their most-used hedging phrases: {', '.join(hedging[:5])}")
+                lines.append("")
+
+            fillers_by_type = replay.get("fillersByType")
+            if fillers_by_type and isinstance(fillers_by_type, dict):
+                top_fillers = sorted(fillers_by_type.items(), key=lambda x: x[1], reverse=True)[:5]
+                if top_fillers:
+                    filler_str = ", ".join(f'"{w}" ({c}x)' for w, c in top_fillers)
+                    lines.append(f"Their most-used filler words: {filler_str}")
+                    lines.append("")
+
+            # Real example phrases from their meeting (very powerful coaching anchors)
+            examples = replay.get("examplePhrases", [])
+            if examples:
+                lines.append("ACTUAL PHRASES from their meeting you can reference:")
+                for i, ex in enumerate(examples[:4], 1):
+                    lines.append(f'  {i}. "{ex}"')
+                lines.append("Use these as coaching material — ask them to rephrase, shorten, or deliver more confidently.")
+                lines.append("")
+
+            # Replay trigger (why they're here)
+            trigger = replay.get("replayTrigger")
+            if trigger:
+                lines.append(f"Why they started this session: \"{trigger}\"")
+                lines.append("Reference this in your greeting to show you understand their goal.")
+                lines.append("")
+
+        # Previous practice sessions for continuity
+        prev_sessions = coaching_context.get("previousElevateSessions", [])
+        if prev_sessions:
+            lines.append(f"They have practiced this focus area {len(prev_sessions)} time(s) before.")
+            lines.append("Build on previous practice — acknowledge their commitment and progress.")
+            lines.append("")
+
+        lines.append(
+            "Use this profile data to personalize your coaching. Reference their actual numbers, "
+            "acknowledge their strengths, and focus exercises on their specific weaknesses. "
+            "Do NOT recite this data back as a list — weave it naturally into your coaching."
+        )
+        lines.append("")
+    elif replay_context:
         lines.append(f"CONTEXT FROM REPLAY ANALYSIS: \"{replay_context}\"")
         lines.append(
             "Use this context to personalize your scenarios and examples. "
