@@ -51,7 +51,8 @@ import {
   getProgressPulseSummary,
   recordProgressPulse,
   skipProgressPulse,
-  getCoachingContext
+  getCoachingContext,
+  getCoachingContextForAgent
 } from './routes/progress-pulse'
 import downloadsRouter from './routes/downloads'
 import replayRouter from './routes/replay'
@@ -128,6 +129,7 @@ app.post('/sessions/:sessionId/messages', requireAuth, addConversationMessage)
 app.get('/sessions/:sessionId/conversation', requireAuth, getConversation)
 app.post('/internal/sessions/:sessionId/messages', addConversationMessageForAgent)
 app.get('/internal/sessions/:sessionId/conversation', getConversationForAgent)
+app.get('/internal/coaching-context', getCoachingContextForAgent)
 app.post('/sessions/:sessionId/state', requireAuth, updateSessionState)
 app.get('/conversations/search', requireAuth, searchConversations)
 

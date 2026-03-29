@@ -510,19 +510,6 @@ export function Elevate() {
       // 2. Generate unique room name per session to avoid conflicts on hard refresh
       const uniqueRoomName = roomName || `room_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
 
-      // 2b. Fetch rich coaching context (non-blocking — ok if it fails)
-      let coachingContextJson = ''
-      if (focusArea) {
-        try {
-          const ctxUrl = new URL(`${API_BASE_URL}/api/coaching-context`)
-          ctxUrl.searchParams.set('focusArea', focusArea)
-          const ctxRes = await fetch(ctxUrl.toString(), { headers: getAuthHeaders() })
-          if (ctxRes.ok) {
-            coachingContextJson = JSON.stringify(await ctxRes.json())
-          }
-        } catch { /* coaching context is optional */ }
-      }
-      
       // 3. Get LiveKit token with session context
       const u = new URL(`${API_BASE_URL}/livekit/token`)
       u.searchParams.set('identity', identity)
@@ -532,7 +519,6 @@ export function Elevate() {
       if (focusArea) u.searchParams.set('focusArea', focusArea)
       if (inboundContext) u.searchParams.set('focusContext', inboundContext)
       if (elevateSessionName.trim()) u.searchParams.set('sessionName', elevateSessionName.trim())
-      if (coachingContextJson) u.searchParams.set('coachingContext', coachingContextJson)
       const res = await fetch(u.toString())
       if (!res.ok) throw new Error('Failed to get token')
       const json = await res.json()

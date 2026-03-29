@@ -114,6 +114,33 @@ async def fetch_session_history(session_id: str, max_messages: int = 12) -> list
         return []
 
 
+async def fetch_coaching_context(session_id: str, focus_area: str) -> dict | None:
+    """
+    Fetch rich coaching context (skill scores, metrics, example phrases, etc.)
+    from the server for personalized Elevate exercises.
+    """
+    url = f"{SERVER_URL}/internal/coaching-context"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                url,
+                params={"sessionId": session_id, "focusArea": focus_area},
+                headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
+                timeout=aiohttp.ClientTimeout(total=5.0),
+            ) as response:
+                if response.status != 200:
+                    logger.warning("⚠️ Coaching context fetch failed: HTTP %s", response.status)
+                    return None
+                data = await response.json()
+                logger.info("📊 Coaching context fetched: %d skill summaries, replay=%s",
+                    len(data.get("skillSummaries", {})),
+                    "yes" if data.get("replayInsights") else "no")
+                return data
+    except Exception as e:
+        logger.warning("⚠️ Failed to fetch coaching context: %s", e)
+        return None
+
+
 def build_resume_context(history_messages: list[dict]) -> str:
     """Build a compact resume context string from prior messages."""
     if not history_messages:
@@ -971,15 +998,10 @@ async def entrypoint(ctx: JobContext):
                 "or wrapping up a topic."
             )
 
-        # Parse rich coaching context if available
+        # Fetch rich coaching context from server API
         coaching_context = None
-        raw_coaching_ctx = room_meta.get('coachingContext', '').strip()
-        if raw_coaching_ctx:
-            try:
-                coaching_context = json.loads(raw_coaching_ctx)
-                logger.info(f"📊 Rich coaching context loaded for focus: {focus_area}")
-            except Exception as e:
-                logger.warning(f"⚠️ Failed to parse coaching context: {e}")
+        if focus_area and session_id:
+            coaching_context = await fetch_coaching_context(session_id, focus_area)
 
         # Session scope: adapt based on how the user arrived
         exercise_instructions = ""

@@ -19,7 +19,7 @@ function hasActiveDispatchJobs(dispatches: any[] | undefined): boolean {
 
 export async function getLivekitToken(req: Request, res: Response) {
   try {
-    const { identity, room, sessionId, userName, focusArea, focusContext, sessionName, coachingContext } = req.query as Record<string, string | undefined>
+    const { identity, room, sessionId, userName, focusArea, focusContext, sessionName } = req.query as Record<string, string | undefined>
     if (!identity || !room) {
       return res.status(400).json({ error: 'identity and room are required' })
     }
@@ -40,7 +40,6 @@ export async function getLivekitToken(req: Request, res: Response) {
         focusArea,
         focusContext,
         sessionName,
-        coachingContext,
       }
       await roomService.createRoom({
         name: room,

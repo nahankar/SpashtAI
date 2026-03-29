@@ -212,11 +212,7 @@ export async function skipProgressPulse(req: Request, res: Response) {
  * - User's specific examples (filler phrases, hedging phrases, etc.)
  * - Previous Elevate practice sessions for the same focus area
  */
-export async function getCoachingContext(req: Request, res: Response) {
-  try {
-    const userId = req.user!.userId
-    const focusArea = (req.query.focusArea as string) || ''
-    const replaySessionId = req.query.replaySessionId as string | undefined
+async function buildCoachingContext(userId: string, focusArea: string, replaySessionId?: string) {
 
     // 1. All Progress Pulse scores (latest per skill + trend)
     const allSkills = ['clarity', 'conciseness', 'confidence', 'structure', 'engagement', 'pacing']
@@ -346,7 +342,7 @@ export async function getCoachingContext(req: Request, res: Response) {
       },
     })
 
-    res.json({
+    return {
       focusArea,
       skillSummaries,
       replayInsights,
@@ -357,9 +353,69 @@ export async function getCoachingContext(req: Request, res: Response) {
         durationSec: s.durationSec,
         metrics: s.metrics,
       })),
-    })
+    }
+}
+
+/** Authenticated endpoint for the frontend */
+export async function getCoachingContext(req: Request, res: Response) {
+  try {
+    const userId = req.user!.userId
+    const focusArea = (req.query.focusArea as string) || ''
+    const replaySessionId = req.query.replaySessionId as string | undefined
+    const result = await buildCoachingContext(userId, focusArea, replaySessionId)
+    res.json(result)
   } catch (error) {
     console.error('Error fetching coaching context:', error)
+    res.status(500).json({ error: 'Failed to fetch coaching context' })
+  }
+}
+
+/**
+ * Internal endpoint for the Python agent (no user auth — uses session ID to find user).
+ * GET /internal/coaching-context?sessionId=xxx&focusArea=yyy
+ */
+export async function getCoachingContextForAgent(req: Request, res: Response) {
+  try {
+    const token = req.header('x-internal-agent-token')
+    const expected = process.env.INTERNAL_AGENT_TOKEN || 'dev-internal-agent-token'
+    if (!token || token !== expected) {
+      return res.status(401).json({ error: 'Unauthorized internal agent request' })
+    }
+
+    const sessionId = req.query.sessionId as string
+    const focusArea = (req.query.focusArea as string) || ''
+
+    if (!sessionId) {
+      return res.status(400).json({ error: 'sessionId is required' })
+    }
+
+    // Look up the user from the session (Elevate session or Replay session)
+    let userId: string | null = null
+
+    const elevateSession = await prisma.session.findUnique({
+      where: { id: sessionId },
+      select: { userId: true },
+    })
+    if (elevateSession) {
+      userId = elevateSession.userId
+    }
+
+    if (!userId) {
+      const replaySession = await prisma.replaySession.findUnique({
+        where: { id: sessionId },
+        select: { userId: true },
+      })
+      if (replaySession) userId = replaySession.userId
+    }
+
+    if (!userId) {
+      return res.status(404).json({ error: 'Session not found' })
+    }
+
+    const result = await buildCoachingContext(userId, focusArea)
+    res.json(result)
+  } catch (error) {
+    console.error('Error fetching coaching context for agent:', error)
     res.status(500).json({ error: 'Failed to fetch coaching context' })
   }
 }
