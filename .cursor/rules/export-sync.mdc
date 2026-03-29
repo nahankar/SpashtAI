@@ -1,0 +1,34 @@
+---
+description: Enforce that Export PDF and Export JSON stay in sync with feature/analytics changes
+globs: apps/web/src/pages/ReplayResults.tsx,apps/web/src/pages/Elevate.tsx,apps/web/src/components/analytics/SessionMetrics.tsx,apps/web/src/lib/generate-session-pdf.ts,apps/server/src/analytics/**,apps/server/src/routes/replay.ts,apps/server/src/routes/sessions.ts
+alwaysApply: false
+---
+
+# Export Sync Rule
+
+Whenever you add, rename, or remove analytics fields (skill scores, coaching insights, communication signals, metrics, session metadata), you MUST update ALL of the following:
+
+1. **SessionReport interface** (`apps/web/src/lib/generate-session-pdf.ts`)
+   - Ensure the interface reflects any new or renamed data shapes.
+   - Update the PDF rendering logic if new sections/data are added.
+
+2. **Replay Export JSON** (`ReplayResults.tsx` — `handleDownload`)
+   - The JSON export must include all current analytics data.
+
+3. **Replay Export PDF** (`ReplayResults.tsx` — `handleExportPdf`)
+   - The `SessionReport` object built here must include the new data.
+
+4. **Elevate Export PDF** (`Elevate.tsx` — `handleElevateExportPdf`)
+   - Same: keep the `SessionReport` in sync with available Elevate data.
+
+5. **Elevate Export JSON** (if added in SessionMetrics `onDownloadTranscript`)
+   - Ensure the transcript/JSON download includes all analytics.
+
+## Checklist on any analytics change
+
+- [ ] `SessionReport` interface updated?
+- [ ] `generate-session-pdf.ts` rendering handles the new fields?
+- [ ] `ReplayResults.tsx` JSON export includes the new data?
+- [ ] `ReplayResults.tsx` PDF export includes the new data?
+- [ ] `Elevate.tsx` PDF export includes the new data?
+- [ ] Progress Pulse data reflected if applicable?

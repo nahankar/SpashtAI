@@ -1,0 +1,37 @@
+---
+description: Avoid unescaped apostrophes and special characters in JSX strings
+globs: **/*.tsx
+alwaysApply: false
+---
+
+# JSX String Safety
+
+Never use unescaped apostrophes or quotes inside JSX string literals — they break the Babel/Vite parser.
+
+## The Problem
+
+```tsx
+// ❌ BAD — the apostrophe in "it's" terminates the string early
+{'We extracted this date. Please confirm it's correct.'}
+
+// ❌ BAD — escaped with backslash still fails in JSX expression strings
+{'We couldn\'t find a date.'}
+```
+
+## Solutions
+
+```tsx
+// ✅ Use Unicode curly apostrophe (\u2019)
+{'Please confirm it\u2019s correct.'}
+
+// ✅ Use HTML entity
+{"Please confirm it&apos;s correct."}
+
+// ✅ Use template literal (backticks don't conflict)
+{`Please confirm it's correct.`}
+
+// ✅ Use double-quoted string with apostrophe inside
+{"We couldn't find a calendar date."}
+```
+
+**Preferred approach**: Use template literals (backticks) for any JSX string containing apostrophes, quotes, or other special characters.

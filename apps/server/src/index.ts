@@ -21,7 +21,9 @@ import {
 } from './routes/metrics'
 import {
   addConversationMessage,
+  addConversationMessageForAgent,
   getConversation,
+  getConversationForAgent,
   updateSessionState,
   searchConversations,
   setWebSocketServer,
@@ -38,6 +40,12 @@ import {
   saveAdvancedMetrics,
   getAdvancedMetrics
 } from './routes/advanced-metrics'
+import {
+  analyzeSession,
+  getSkillScores,
+  getCoachingInsights,
+  getCommunicationSignals
+} from './routes/analytics'
 import {
   getProgressPulse,
   getProgressPulseSummary,
@@ -117,6 +125,8 @@ app.post('/sessions/:sessionId/calculate-text-metrics', requireAuth, calculateTe
 // Protected: conversations
 app.post('/sessions/:sessionId/messages', requireAuth, addConversationMessage)
 app.get('/sessions/:sessionId/conversation', requireAuth, getConversation)
+app.post('/internal/sessions/:sessionId/messages', addConversationMessageForAgent)
+app.get('/internal/sessions/:sessionId/conversation', getConversationForAgent)
 app.post('/sessions/:sessionId/state', requireAuth, updateSessionState)
 app.get('/conversations/search', requireAuth, searchConversations)
 
@@ -131,6 +141,12 @@ app.get('/audio/analytics', requireAuth, getAudioAnalytics)
 // Protected: advanced metrics
 app.post('/sessions/:sessionId/advanced-metrics', requireAuth, saveAdvancedMetrics)
 app.get('/sessions/:sessionId/advanced-metrics', requireAuth, getAdvancedMetrics)
+
+// Protected: analytics engine v2
+app.post('/sessions/:sessionId/analyze', requireAuth, analyzeSession)
+app.get('/sessions/:sessionId/skill-scores', requireAuth, getSkillScores)
+app.get('/sessions/:sessionId/coaching-insights', requireAuth, getCoachingInsights)
+app.get('/sessions/:sessionId/communication-signals', requireAuth, getCommunicationSignals)
 
 // Protected: My Progress Pulse
 app.get('/api/progress-pulse', requireAuth, getProgressPulse)

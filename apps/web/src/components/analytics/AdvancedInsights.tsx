@@ -536,31 +536,16 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
         </TabsContent>
       </Tabs>
 
-      {/* Processing Status */}
-      <Card className="border-muted">
-        <CardContent className="pt-6">
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Processing Status:</span>
-            <div className="flex gap-2">
-              <Badge variant={metrics.content_processed ? "default" : "secondary"}>
-                Content {metrics.content_processed ? '✓' : '⏳'}
-              </Badge>
-              <Badge variant={metrics.audio_processed ? "default" : "secondary"}>
-                Audio {metrics.audio_processed ? '✓' : '⏳'}
-              </Badge>
-              <Badge variant={metrics.insights_generated ? "default" : "secondary"}>
-                Insights {metrics.insights_generated ? '✓' : '⏳'}
-              </Badge>
-            </div>
-          </div>
-          {metrics.processing_errors && metrics.processing_errors.length > 0 && (
-            <div className="mt-3 text-xs text-yellow-600">
+      {metrics.processing_errors && metrics.processing_errors.length > 0 && (
+        <Card className="border-muted">
+          <CardContent className="pt-6">
+            <div className="text-xs text-yellow-600">
               <AlertCircle className="h-3 w-3 inline mr-1" />
               Some processing warnings occurred
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

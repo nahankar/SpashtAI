@@ -10,6 +10,22 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogFooter,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import {
   Plus,
   Calendar,
@@ -23,6 +39,10 @@ import {
   Square,
   CheckCircle2,
   MinusCircle,
+  MoreVertical,
+  Pencil,
+  Download,
+  RefreshCw,
 } from 'lucide-react'
 import { getAuthHeaders } from '@/lib/api-client'
 import { SessionFilters, type SortField, type SortDir } from '@/components/SessionFilters'
@@ -43,7 +63,7 @@ interface ReplaySessionSummary {
     overallScore: number
     transcriptionSource: string
   } | null
-  uploadedFiles: { fileType: string; originalName: string }[]
+  uploadedFiles: { id: string; fileType: string; originalName: string }[]
 }
 
 function formatRelativeDate(dateString: string): string {
@@ -77,6 +97,101 @@ const STATUS_BADGE: Record<string, { variant: 'default' | 'secondary' | 'destruc
 
 type Step = 'history' | 'context' | 'upload' | 'meetingDate' | 'processing'
 
+function EditSessionDialog({
+  open,
+  onOpenChange,
+  session,
+  onSaved,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  session: ReplaySessionSummary | null
+  onSaved: (updated: Partial<ReplaySessionSummary>) => void
+}) {
+  const [name, setName] = useState('')
+  const [participant, setParticipant] = useState('')
+  const [date, setDate] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (open && session) {
+      setName(session.sessionName || '')
+      setParticipant(session.participantName || '')
+      setDate(session.meetingDate ? new Date(session.meetingDate).toISOString().slice(0, 10) : '')
+    }
+  }, [open, session])
+
+  const handleSave = async () => {
+    if (!session) return
+    setSaving(true)
+    try {
+      const body: Record<string, string> = {}
+      if (name !== (session.sessionName || '')) body.sessionName = name
+      if (participant !== (session.participantName || '')) body.participantName = participant
+      const origDate = session.meetingDate ? new Date(session.meetingDate).toISOString().slice(0, 10) : ''
+      if (date !== origDate) body.meetingDate = date
+
+      if (Object.keys(body).length === 0) {
+        onOpenChange(false)
+        return
+      }
+
+      const res = await fetch(`${API_BASE_URL}/api/replay/sessions/${session.id}`, {
+        method: 'PATCH',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error((await res.json()).error || 'Failed to update')
+      const updated = await res.json()
+      onSaved(updated)
+      onOpenChange(false)
+      toast.success('Session updated')
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to update session')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Edit Session</DialogTitle>
+          <DialogDescription>Update session details. Changes take effect immediately.</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4 py-2">
+          <div className="grid gap-2">
+            <Label htmlFor="edit-name">Session Name</Label>
+            <Input id="edit-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Q1 Client Review" />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="edit-participant">Participant Name</Label>
+            <Input id="edit-participant" value={participant} onChange={(e) => setParticipant(e.target.value)} placeholder="e.g. Neelesh, Speaker 1" />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="edit-date">Meeting Date</Label>
+            <input
+              id="edit-date"
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={handleSave} disabled={saving}>
+            {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Save Changes
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export function Replay() {
   const navigate = useNavigate()
   const confirm = useConfirm()
@@ -91,9 +206,12 @@ export function Replay() {
   const [sortDir, setSortDir] = useState<SortDir>('desc')
   const [statusFilter, setStatusFilter] = useState('all')
   const [flowMeetingDate, setFlowMeetingDate] = useState('')
+  const [editSession, setEditSession] = useState<ReplaySessionSummary | null>(null)
+  const [editOpen, setEditOpen] = useState(false)
 
   const {
     sessionId,
+    setSessionId,
     status,
     error,
     loading,
@@ -105,9 +223,9 @@ export function Replay() {
     retryWithSpeaker,
   } = useReplaySession()
 
-  const loadSessions = useCallback(async () => {
+  const loadSessions = useCallback(async (background = false) => {
     try {
-      setSessionsLoading(true)
+      if (!background) setSessionsLoading(true)
       const res = await fetch(`${API_BASE_URL}/api/replay/sessions`, {
         headers: getAuthHeaders(),
       })
@@ -116,13 +234,23 @@ export function Replay() {
       setSessions(data.sessions || [])
       setSessionsError(null)
     } catch (e: any) {
-      setSessionsError(e.message)
+      if (!background) setSessionsError(e.message)
     } finally {
-      setSessionsLoading(false)
+      if (!background) setSessionsLoading(false)
     }
   }, [])
 
   useEffect(() => { loadSessions() }, [loadSessions])
+
+  // Auto-refresh list while any sessions are processing (silent, no spinner)
+  useEffect(() => {
+    const hasProcessing = sessions.some(
+      (s) => s.status === 'transcribing' || s.status === 'analyzing'
+    )
+    if (!hasProcessing) return
+    const interval = setInterval(() => loadSessions(true), 5000)
+    return () => clearInterval(interval)
+  }, [sessions, loadSessions])
 
   const handleDelete = async (id: string) => {
     const session = sessions.find((s) => s.id === id)
@@ -169,9 +297,131 @@ export function Replay() {
     }
   }
 
+  const [reprocessing, setReprocessing] = useState<Set<string>>(new Set())
+
+  const handleReprocess = async (id: string) => {
+    const session = sessions.find((s) => s.id === id)
+    if (!session) return
+    if (!session.meetingDate) {
+      toast.error('Meeting date is required', {
+        description: 'Set a meeting date via Edit Details before reprocessing.',
+      })
+      return
+    }
+    setReprocessing((prev) => new Set(prev).add(id))
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/replay/sessions/${id}/process`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      })
+      if (!res.ok) {
+        const body = await res.json()
+        throw new Error(body.error || 'Failed to start reprocessing')
+      }
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === id ? { ...s, status: 'transcribing', progressPulseStatus: null } : s
+        )
+      )
+      toast.success('Reprocessing started', {
+        description: session.sessionName || session.meetingType,
+      })
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to reprocess session')
+    } finally {
+      setReprocessing((prev) => { const n = new Set(prev); n.delete(id); return n })
+    }
+  }
+
+  const handleReprocessSelected = async () => {
+    const ids = Array.from(selectedReplay)
+    const eligible = sessions.filter((s) => ids.includes(s.id) && (s.status === 'completed' || s.status === 'failed'))
+    const missingDate = eligible.filter((s) => !s.meetingDate)
+    if (missingDate.length > 0) {
+      toast.error(`${missingDate.length} session(s) are missing a meeting date`, {
+        description: 'Set meeting dates via Edit Details before reprocessing.',
+      })
+      return
+    }
+    if (eligible.length === 0) {
+      toast.info('No completed or failed sessions selected to reprocess')
+      return
+    }
+    const ok = await confirm({
+      title: 'Reprocess Sessions',
+      description: `Re-run AI analysis on ${eligible.length} session(s)? Previous results will be replaced with fresh analysis using the latest analytics engine.`,
+      confirmLabel: `Reprocess ${eligible.length}`,
+    })
+    if (!ok) return
+    for (const s of eligible) {
+      await handleReprocess(s.id)
+    }
+    setSelectedReplay(new Set())
+  }
+
+  const handleReprocessAll = async () => {
+    const eligible = sessions.filter((s) => s.status === 'completed' || s.status === 'failed')
+    const missingDate = eligible.filter((s) => !s.meetingDate)
+    if (eligible.length === 0) {
+      toast.info('No completed or failed sessions to reprocess')
+      return
+    }
+    const ok = await confirm({
+      title: 'Reprocess All Sessions',
+      description: `Re-run AI analysis on ${eligible.length} session(s)?${missingDate.length > 0 ? ` ${missingDate.length} session(s) without a meeting date will be skipped.` : ''} Previous results will be replaced with fresh analysis using the latest analytics engine.`,
+      confirmLabel: `Reprocess ${eligible.length - missingDate.length}`,
+    })
+    if (!ok) return
+    const toProcess = eligible.filter((s) => s.meetingDate)
+    for (const s of toProcess) {
+      await handleReprocess(s.id)
+    }
+  }
+
+  const handleContinue = (s: ReplaySessionSummary) => {
+    setSessionId(s.id)
+    if (s.meetingDate) {
+      setFlowMeetingDate(new Date(s.meetingDate).toISOString().slice(0, 10))
+    } else {
+      setFlowMeetingDate('')
+    }
+    setStep('meetingDate')
+  }
+
+  const handleEditSaved = (updated: Partial<ReplaySessionSummary>) => {
+    setSessions((prev) =>
+      prev.map((s) => (s.id === updated.id ? { ...s, ...updated } : s))
+    )
+  }
+
+  const handleDownloadTranscript = async (s: ReplaySessionSummary) => {
+    const transcriptFile = s.uploadedFiles.find(
+      (f) => f.fileType === 'transcript' || f.fileType === 'text'
+    )
+    if (!transcriptFile) {
+      toast.error('No transcript file found for this session')
+      return
+    }
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/replay/sessions/${s.id}/download/${transcriptFile.id}`,
+        { headers: getAuthHeaders() }
+      )
+      if (!res.ok) throw new Error('Download failed')
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = transcriptFile.originalName
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      toast.error('Failed to download transcript')
+    }
+  }
+
   const handleContextSubmit = async (data: {
     sessionName?: string
-    meetingDate?: string
     participantName: string
   }) => {
     await createSession(data)
@@ -186,19 +436,12 @@ export function Replay() {
     if (!sessionId) return
     try {
       const res = await uploadFiles(sessionId, files)
-      if (res.meetingDateAutoFilled) {
-        toast.success('Meeting date set from your transcript', {
-          description:
-            'Parsed from the file name (e.g. Zoom GMT…) or a date in the VTT header. Subtitle timestamps are not used for the calendar date.',
-        })
-      }
-      if (res.meetingDateMissing) {
+      if (res.meetingDate) {
+        setFlowMeetingDate(res.meetingDate)
+      } else {
         setFlowMeetingDate('')
-        setStep('meetingDate')
-        return
       }
-      setStep('processing')
-      await startProcessing(sessionId)
+      setStep('meetingDate')
     } catch {
       /* uploadFiles sets error */
     }
@@ -208,7 +451,7 @@ export function Replay() {
     if (!sessionId || !flowMeetingDate.trim()) {
       toast.error('Meeting date is required', {
         description:
-          'My Progress Pulse uses the real meeting date to order improving and declining trends — not the day you upload.',
+          'Progress Pulse needs the real meeting date to track your skill trends accurately.',
       })
       return
     }
@@ -341,12 +584,14 @@ export function Replay() {
         {step === 'meetingDate' && (
           <Card>
             <CardHeader>
-              <CardTitle>When did this meeting happen?</CardTitle>
+              <CardTitle>
+                {flowMeetingDate ? 'Confirm meeting date' : 'When did this meeting happen?'}
+              </CardTitle>
               <CardDescription>
-                We could not find a calendar date in your transcript file name or header (VTT cue times like
-                00:01:15 are only positions in the recording, not the real-world date). This date is{' '}
-                <strong>required</strong> so <strong>My Progress Pulse</strong> can line up sessions in the right order
-                for improving / declining trends.
+                {flowMeetingDate
+                  ? 'We extracted this date from your transcript. Please confirm it\u2019s correct, or change it if needed.'
+                  : 'We couldn\u2019t find a calendar date in your transcript file name or header. Please enter the date this meeting took place.'}
+                {' '}Progress Pulse uses the real meeting date to track your skill trends over time.
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4">
@@ -360,8 +605,13 @@ export function Replay() {
                   className="flex h-10 w-full max-w-xs rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 />
               </div>
-              <Button className="w-full sm:w-auto" size="lg" onClick={handleConfirmFlowMeetingDate} disabled={loading}>
-                Continue to analysis
+              <Button
+                className="w-full sm:w-auto"
+                size="lg"
+                onClick={handleConfirmFlowMeetingDate}
+                disabled={loading || !flowMeetingDate}
+              >
+                {flowMeetingDate ? 'Confirm & continue' : 'Continue to analysis'}
               </Button>
             </CardContent>
           </Card>
@@ -393,6 +643,13 @@ export function Replay() {
 
   return (
     <div>
+      <EditSessionDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        session={editSession}
+        onSaved={handleEditSaved}
+      />
+
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Replay</h1>
@@ -400,9 +657,16 @@ export function Replay() {
             Upload transcripts and get AI-powered analysis of your conversations.
           </p>
         </div>
-        <Button onClick={() => setStep('context')}>
-          <Plus className="mr-2 h-4 w-4" /> New Analysis
-        </Button>
+        <div className="flex items-center gap-2">
+          {sessions.some((s) => s.status === 'completed' || s.status === 'failed') && (
+            <Button variant="outline" onClick={handleReprocessAll}>
+              <RefreshCw className="mr-2 h-4 w-4" /> Reprocess All
+            </Button>
+          )}
+          <Button onClick={() => setStep('context')}>
+            <Plus className="mr-2 h-4 w-4" /> New Analysis
+          </Button>
+        </div>
       </div>
 
       {sessionsLoading && (
@@ -421,6 +685,9 @@ export function Replay() {
 
       {selectedReplay.size > 0 && (
         <div className="mb-4 flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={handleReprocessSelected}>
+            <RefreshCw className="mr-2 h-4 w-4" /> Reprocess {selectedReplay.size} Selected
+          </Button>
           <Button variant="destructive" size="sm" onClick={handleDeleteSelected}>
             <Trash2 className="mr-2 h-4 w-4" /> Delete {selectedReplay.size} Selected
           </Button>
@@ -555,15 +822,44 @@ export function Replay() {
                           Details <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
                         </Button>
                       </Link>
+                    ) : s.status === 'pending' ? (
+                      <Button size="sm" variant="outline" onClick={() => handleContinue(s)}>
+                        Continue <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+                      </Button>
                     ) : null}
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                      onClick={() => handleDelete(s.id)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground">
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => { setEditSession(s); setEditOpen(true) }}>
+                          <Pencil className="mr-2 h-4 w-4" /> Edit Details
+                        </DropdownMenuItem>
+                        {s.uploadedFiles.some((f) => f.fileType === 'transcript' || f.fileType === 'text') && (
+                          <DropdownMenuItem onClick={() => handleDownloadTranscript(s)}>
+                            <Download className="mr-2 h-4 w-4" /> Download Transcript
+                          </DropdownMenuItem>
+                        )}
+                        {(s.status === 'completed' || s.status === 'failed') && (
+                          <DropdownMenuItem
+                            onClick={() => handleReprocess(s.id)}
+                            disabled={reprocessing.has(s.id)}
+                          >
+                            <RefreshCw className={`mr-2 h-4 w-4 ${reprocessing.has(s.id) ? 'animate-spin' : ''}`} />
+                            {reprocessing.has(s.id) ? 'Reprocessing...' : 'Reprocess'}
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          className="text-destructive focus:text-destructive"
+                          onClick={() => handleDelete(s.id)}
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" /> Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 </CardContent>
               </Card>

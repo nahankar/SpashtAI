@@ -148,22 +148,35 @@ export function calculateReplayMetrics(
   const primaryHedgingCount = countHedging(primaryText)
   const primaryUnique = uniqueWords(primaryText)
 
-  // Duration: use timestamps if available, else estimate at 150 WPM
-  let duration = durationSec
-  if (!duration) {
+  // Meeting duration (wall-clock) for non-WPM metrics
+  let meetingDuration = durationSec
+  if (!meetingDuration) {
     const lastEnd = Math.max(
       ...segments.filter((s) => s.endTime != null).map((s) => s.endTime!),
       0
     )
     if (lastEnd > 0) {
-      duration = lastEnd
+      meetingDuration = lastEnd
     } else {
-      duration = (totalWordCount / 150) * 60
+      meetingDuration = (totalWordCount / 150) * 60
     }
   }
-  duration = Math.max(duration, 1)
+  meetingDuration = Math.max(meetingDuration, 1)
 
-  const wpm = Math.min(Math.round((primaryWordCount / duration) * 60), 250)
+  // WPM: use primary speaker's cumulative speaking time when timestamps exist
+  let primarySpeakingSec = 0
+  for (const seg of primarySegments) {
+    if (seg.startTime != null && seg.endTime != null && seg.endTime > seg.startTime) {
+      primarySpeakingSec += seg.endTime - seg.startTime
+    }
+  }
+  // Fallback: estimate speaking time from word count (~2.5 words/sec for natural speech)
+  if (primarySpeakingSec <= 0) {
+    primarySpeakingSec = primaryWordCount / 2.5
+  }
+  primarySpeakingSec = Math.max(primarySpeakingSec, 1)
+
+  const wpm = Math.min(Math.round((primaryWordCount / primarySpeakingSec) * 60), 250)
   const fillerRate = primaryWordCount > 0
     ? (primaryFillerCount / primaryWordCount) * 100
     : 0

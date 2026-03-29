@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -32,9 +33,12 @@ import {
   User,
   Mic,
   ArrowRight,
+  CalendarDays,
 } from 'lucide-react'
 import type { ReplayResultData } from '@/hooks/useReplaySession'
 import { inferFocusArea } from '@/lib/focus-areas'
+import { generateSessionPdf, type SessionReport } from '@/lib/generate-session-pdf'
+import { FileText } from 'lucide-react'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 
@@ -308,6 +312,442 @@ function MetricCard({
   )
 }
 
+function RadarChart({ skills, size = 260 }: { skills: { label: string; score: number }[]; size?: number }) {
+  if (skills.length < 3) return null
+  const cx = size / 2
+  const cy = size / 2
+  const maxR = size * 0.38
+  const levels = [2, 4, 6, 8, 10]
+  const n = skills.length
+  const angleStep = (2 * Math.PI) / n
+  const offset = -Math.PI / 2
+
+  const pointAt = (i: number, r: number) => ({
+    x: cx + r * Math.cos(offset + i * angleStep),
+    y: cy + r * Math.sin(offset + i * angleStep),
+  })
+
+  const dataPoints = skills.map((s, i) => pointAt(i, (s.score / 10) * maxR))
+  const polygon = dataPoints.map((p) => `${p.x},${p.y}`).join(' ')
+
+  return (
+    <div className="flex flex-col items-center">
+      <svg width={size} height={size} className="overflow-visible">
+        {levels.map((lv) => {
+          const r = (lv / 10) * maxR
+          const pts = skills.map((_, i) => pointAt(i, r))
+          return (
+            <polygon
+              key={lv}
+              points={pts.map((p) => `${p.x},${p.y}`).join(' ')}
+              fill="none"
+              stroke="currentColor"
+              className="text-border"
+              strokeWidth={lv === 10 ? 1.5 : 0.5}
+            />
+          )
+        })}
+        {skills.map((_, i) => {
+          const end = pointAt(i, maxR)
+          return <line key={i} x1={cx} y1={cy} x2={end.x} y2={end.y} stroke="currentColor" className="text-border" strokeWidth={0.5} />
+        })}
+        <polygon points={polygon} fill="hsl(var(--primary) / 0.15)" stroke="hsl(var(--primary))" strokeWidth={2} />
+        {dataPoints.map((p, i) => (
+          <circle key={i} cx={p.x} cy={p.y} r={3.5} fill="hsl(var(--primary))" />
+        ))}
+        {skills.map((s, i) => {
+          const labelR = maxR + 18
+          const pt = pointAt(i, labelR)
+          const anchor = pt.x < cx - 5 ? 'end' : pt.x > cx + 5 ? 'start' : 'middle'
+          return (
+            <text key={i} x={pt.x} y={pt.y} textAnchor={anchor} dominantBaseline="central" className="fill-foreground text-[11px] font-medium">
+              {s.label} ({s.score.toFixed(1)})
+            </text>
+          )
+        })}
+      </svg>
+    </div>
+  )
+}
+
+function PacingInsight({ wpm }: { wpm: number }) {
+  const idealMin = 120
+  const idealMax = 160
+  const idealMid = 140
+  if (wpm >= idealMin && wpm <= idealMax) return null
+  const diff = Math.abs(wpm - idealMid)
+  const pctDiff = Math.round((diff / idealMid) * 100)
+  const direction = wpm < idealMin ? 'slower' : 'faster'
+  return (
+    <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm">
+      <p className="font-medium text-amber-900">
+        Speech speed: {wpm} WPM &middot; Recommended: {idealMin}\u2013{idealMax} WPM
+      </p>
+      <p className="mt-1 text-xs text-amber-700">
+        Your speech was ~{pctDiff}% {direction} than ideal.
+        {direction === 'slower'
+          ? ' This can make meetings feel slow or hesitant. Try increasing your pace slightly on straightforward points.'
+          : ' This can make it hard for listeners to follow. Try pausing between key points.'}
+      </p>
+    </div>
+  )
+}
+
+function MeetingSummaryCard({ summary }: { summary: { topicsDiscussed?: string[]; keyOutcomes?: string[]; openQuestions?: string[] } }) {
+  const hasTopics = summary.topicsDiscussed && summary.topicsDiscussed.length > 0
+  const hasOutcomes = summary.keyOutcomes && summary.keyOutcomes.length > 0
+  const hasQuestions = summary.openQuestions && summary.openQuestions.length > 0
+  if (!hasTopics && !hasOutcomes && !hasQuestions) return null
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Lightbulb className="h-4 w-4 text-blue-500" /> Meeting Summary
+        </CardTitle>
+        <CardDescription>AI-generated overview of the conversation</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="grid gap-4 sm:grid-cols-3">
+          {hasTopics && (
+            <div>
+              <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">Topics Discussed</p>
+              <ul className="space-y-1">
+                {summary.topicsDiscussed!.map((t, i) => (
+                  <li key={i} className="flex items-start gap-1.5 text-sm">
+                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-400" />
+                    {t}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {hasOutcomes && (
+            <div>
+              <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">Key Outcomes</p>
+              <ul className="space-y-1">
+                {summary.keyOutcomes!.map((o, i) => (
+                  <li key={i} className="flex items-start gap-1.5 text-sm">
+                    <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-green-500" />
+                    {o}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {hasQuestions && (
+            <div>
+              <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">Open Questions</p>
+              <ul className="space-y-1">
+                {summary.openQuestions!.map((q, i) => (
+                  <li key={i} className="flex items-start gap-1.5 text-sm">
+                    <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+                    {q}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function DecisionClarityCard({
+  decisions,
+  actionItems,
+  decisionsList,
+  actionItemsList,
+  summary,
+}: {
+  decisions: number
+  actionItems: number
+  decisionsList?: string[]
+  actionItemsList?: string[]
+  summary?: string
+}) {
+  const hasIssue = decisions === 0 && actionItems === 0
+  return (
+    <Card className={hasIssue ? 'border-amber-200 bg-amber-50/50' : ''}>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Target className="h-4 w-4 text-blue-500" /> Decision Clarity
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="flex gap-6 mb-3">
+          <div className="text-center">
+            <p className={`text-2xl font-bold ${decisions > 0 ? 'text-green-600' : 'text-amber-600'}`}>{decisions}</p>
+            <p className="text-xs text-muted-foreground">Decisions</p>
+          </div>
+          <div className="text-center">
+            <p className={`text-2xl font-bold ${actionItems > 0 ? 'text-green-600' : 'text-amber-600'}`}>{actionItems}</p>
+            <p className="text-xs text-muted-foreground">Action Items</p>
+          </div>
+        </div>
+        {summary && <p className="text-sm text-muted-foreground mb-3">{summary}</p>}
+        {decisionsList && decisionsList.length > 0 && (
+          <div className="mb-2">
+            <p className="text-xs font-medium text-emerald-700 mb-1">Decisions</p>
+            <ul className="space-y-1">
+              {decisionsList.map((d, i) => (
+                <li key={i} className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                  <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-emerald-500" />
+                  <span>{d}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {actionItemsList && actionItemsList.length > 0 && (
+          <div className="mb-2">
+            <p className="text-xs font-medium text-purple-700 mb-1">Action Items</p>
+            <ul className="space-y-1">
+              {actionItemsList.map((a, i) => (
+                <li key={i} className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                  <ArrowRight className="mt-0.5 h-3 w-3 shrink-0 text-purple-500" />
+                  <span>{a}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {hasIssue && (
+          <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-100/60 p-2.5 text-xs text-amber-800">
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>No clear decisions or action items were captured. Try closing meetings with explicit next steps and owners.</span>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function TopCoachingActions({ result, coachingInsights }: { result: any; coachingInsights: any }) {
+  const actions: { text: string; detail: string; metric?: string }[] = []
+
+  if (coachingInsights?.primaryImprovement) {
+    actions.push({
+      text: coachingInsights.primaryImprovement,
+      detail: coachingInsights.actionableAdvice || '',
+    })
+  }
+
+  if (result.fillerWordRate > 2 && actions.length < 3) {
+    const targetCount = Math.max(0, Math.round(result.fillerWordCount * 0.3))
+    actions.push({
+      text: `Reduce filler words from ${result.fillerWordCount} to ~${targetCount}`,
+      detail: `Currently ${result.fillerWordRate.toFixed(1)}% of your words are fillers. Try pausing silently instead of saying "um", "like", or "you know".`,
+      metric: `${result.fillerWordCount} \u2192 ${targetCount}`,
+    })
+  }
+
+  if (result.wordsPerMinute < 80 && actions.length < 3) {
+    actions.push({
+      text: `Increase speaking speed from ${result.wordsPerMinute} to 120+ WPM`,
+      detail: `Your speech is ${Math.round(((120 - result.wordsPerMinute) / 120) * 100)}% slower than the ideal 120\u2013160 WPM range. This can make meetings feel hesitant.`,
+      metric: `${result.wordsPerMinute} \u2192 120 WPM`,
+    })
+  } else if (result.wordsPerMinute > 180 && actions.length < 3) {
+    actions.push({
+      text: `Slow down from ${result.wordsPerMinute} to ~150 WPM`,
+      detail: 'Aim for 120\u2013160 WPM. Pause after key points to let ideas land.',
+      metric: `${result.wordsPerMinute} \u2192 150 WPM`,
+    })
+  }
+
+  const hedging = result.hedgingRate ?? 0
+  if (hedging > 2 && actions.length < 3) {
+    const hedgingCount = result.hedgingCount ?? 0
+    const targetHedge = Math.max(0, Math.round(hedgingCount * 0.4))
+    actions.push({
+      text: `Reduce hedging from ${hedgingCount} to ~${targetHedge} instances`,
+      detail: `Currently ${hedging.toFixed(1)}% hedging rate. Replace "I think", "maybe", "probably" with direct statements when confident.`,
+      metric: `${hedgingCount} \u2192 ${targetHedge}`,
+    })
+  }
+
+  if (result.questionsAsked < 3 && actions.length < 3) {
+    actions.push({
+      text: `Ask more questions (${result.questionsAsked} \u2192 5+ per session)`,
+      detail: `You asked only ${result.questionsAsked} question${result.questionsAsked !== 1 ? 's' : ''}. Try "What do you think?" or clarifying questions to boost engagement.`,
+      metric: `${result.questionsAsked} \u2192 5+`,
+    })
+  }
+
+  if (actions.length === 0) return null
+
+  return (
+    <Card className="border-2 border-blue-200 bg-blue-50/30">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Lightbulb className="h-4 w-4 text-blue-500" /> What Would Improve Your Score Fastest
+        </CardTitle>
+        <CardDescription>Data-driven actions ranked by impact</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        {actions.slice(0, 3).map((a, i) => (
+          <div key={i} className="flex gap-3">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-700">
+              {i + 1}
+            </span>
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-medium">{a.text}</p>
+                {a.metric && (
+                  <span className="inline-flex shrink-0 items-center rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">
+                    {a.metric}
+                  </span>
+                )}
+              </div>
+              {a.detail && <p className="mt-0.5 text-xs text-muted-foreground">{a.detail}</p>}
+            </div>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  )
+}
+
+function computeMeetingImpact(result: any, coachingInsights: any) {
+  const dc = coachingInsights?.decisionClarity
+  const decisionScore = dc
+    ? Math.min(10, (dc.decisionsDetected ?? 0) * 2.5 + (dc.actionItemsDetected ?? 0) * 1.5)
+    : 0
+  const sp = result.speakingPercentage ?? 0
+  const participationScore = sp >= 25 && sp <= 60 ? 10 : sp >= 15 && sp <= 75 ? 7 : sp >= 5 ? 4 : 2
+  const qr = result.questionsAsked ?? 0
+  const engagementScore = qr >= 10 ? 10 : qr >= 5 ? 8 : qr >= 2 ? 6 : qr >= 1 ? 4 : 2
+  const score = Math.round(((decisionScore * 0.4) + (participationScore * 0.3) + (engagementScore * 0.3)) * 10) / 10
+  const label = score >= 8 ? 'Highly Effective' : score >= 6 ? 'Effective' : score >= 4 ? 'Moderate' : 'Needs Improvement'
+  return { score, label, decisionScore, participationScore, engagementScore }
+}
+
+const ANNOTATION_COLORS: Record<string, { bg: string; dot: string }> = {
+  strong_statement: { bg: 'bg-green-100', dot: 'bg-green-500' },
+  filler_word: { bg: 'bg-yellow-100', dot: 'bg-yellow-500' },
+  hedging: { bg: 'bg-orange-100', dot: 'bg-orange-500' },
+  key_point: { bg: 'bg-blue-100', dot: 'bg-blue-500' },
+  action_item: { bg: 'bg-purple-100', dot: 'bg-purple-500' },
+  decision: { bg: 'bg-emerald-100', dot: 'bg-emerald-500' },
+  clarification: { bg: 'bg-sky-100', dot: 'bg-sky-500' },
+  recommendation: { bg: 'bg-indigo-100', dot: 'bg-indigo-500' },
+  suggestion: { bg: 'bg-teal-100', dot: 'bg-teal-500' },
+  conversation_control: { bg: 'bg-gray-100', dot: 'bg-gray-400' },
+  update: { bg: 'bg-slate-100', dot: 'bg-slate-500' },
+}
+
+function CommunicationTimeline({
+  segments,
+  onSelect,
+  activeIndex,
+}: {
+  segments: any[]
+  onSelect: (index: number) => void
+  activeIndex: number | null
+}) {
+  if (!segments?.length) return null
+
+  const typeCounts: Record<string, number> = {}
+  segments.forEach((seg: any) => {
+    seg.annotations?.forEach((a: string) => {
+      typeCounts[a] = (typeCounts[a] || 0) + 1
+    })
+  })
+
+  return (
+    <div className="mb-4">
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-xs font-medium text-muted-foreground">Communication Timeline</p>
+        <p className="text-[10px] text-muted-foreground">{segments.length} segments</p>
+      </div>
+      <div className="flex h-8 w-full items-center gap-px rounded-md border bg-muted/30 px-1">
+        {segments.map((seg: any, i: number) => {
+          const primary = seg.annotations?.[0] || 'update'
+          const color = ANNOTATION_COLORS[primary] || ANNOTATION_COLORS.update
+          const isActive = activeIndex === i
+          return (
+            <button
+              key={i}
+              onClick={() => onSelect(i)}
+              title={`${seg.speaker}: ${(seg.annotations || []).map((a: string) => a.replace(/_/g, ' ')).join(', ')}`}
+              className={`flex-1 h-5 min-w-[3px] rounded-sm transition-all cursor-pointer hover:opacity-80 ${color.dot} ${isActive ? 'ring-2 ring-primary ring-offset-1 scale-y-125' : 'opacity-60'}`}
+            />
+          )
+        })}
+      </div>
+      <div className="mt-1.5 flex flex-wrap gap-2">
+        {Object.entries(typeCounts)
+          .sort(([, a], [, b]) => b - a)
+          .map(([type, count]) => {
+            const color = ANNOTATION_COLORS[type] || ANNOTATION_COLORS.update
+            return (
+              <span key={type} className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                <span className={`inline-block h-2 w-2 rounded-full ${color.dot}`} />
+                {type.replace(/_/g, ' ')} ({count})
+              </span>
+            )
+          })}
+      </div>
+    </div>
+  )
+}
+
+function MeetingImpactCard({ result, coachingInsights }: { result: any; coachingInsights: any }) {
+  const mi = computeMeetingImpact(result, coachingInsights)
+  const { score: impact, decisionScore, participationScore, engagementScore } = mi
+  const impactColor = impact >= 7 ? 'text-green-600' : impact >= 4 ? 'text-amber-600' : 'text-red-500'
+
+  const dc = coachingInsights?.decisionClarity
+  const sp = result.speakingPercentage ?? 0
+  const qr = result.questionsAsked ?? 0
+
+  const items = [
+    { label: 'Decision Clarity', score: decisionScore, detail: `${dc?.decisionsDetected ?? 0} decisions, ${dc?.actionItemsDetected ?? 0} action items captured` },
+    { label: 'Conversation Participation', score: participationScore, detail: `${sp.toFixed(0)}% speaking share (ideal: 25\u201360%)` },
+    { label: 'Conversation Engagement', score: engagementScore, detail: `${qr} questions asked to drive discussion` },
+  ]
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <TrendingUp className="h-4 w-4 text-blue-500" /> Meeting Impact Score
+        </CardTitle>
+        <CardDescription>Did this meeting drive outcomes, not just good communication?</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="flex items-center gap-6 mb-4">
+          <div className="text-center">
+            <p className={`text-3xl font-bold ${impactColor}`}>{impact.toFixed(1)}</p>
+            <p className="text-xs text-muted-foreground">/10</p>
+          </div>
+          <div>
+            <p className={`text-sm font-medium ${impactColor}`}>{mi.label}</p>
+            <p className="text-xs text-muted-foreground">Decision clarity \u00b7 Conversation participation \u00b7 Conversation engagement</p>
+          </div>
+        </div>
+        <div className="grid gap-2">
+          {items.map((it) => {
+            const barColor = it.score >= 7 ? 'bg-green-500' : it.score >= 4 ? 'bg-amber-500' : 'bg-red-500'
+            return (
+              <div key={it.label} className="flex items-center gap-3">
+                <div className="w-36 text-xs font-medium text-muted-foreground">{it.label}</div>
+                <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+                  <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${it.score * 10}%` }} />
+                </div>
+                <div className="w-8 text-right text-xs font-medium">{it.score.toFixed(1)}</div>
+                <div className="w-40 text-[10px] text-muted-foreground truncate">{it.detail}</div>
+              </div>
+            )
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 function RatingBadge({ rating }: { rating?: string }) {
   if (!rating) return null
   const map: Record<string, string> = {
@@ -340,17 +780,20 @@ function useReanalyze(sessionId: string | undefined, onComplete: () => void) {
   useEffect(() => () => stopPolling(), [stopPolling])
 
   const startReanalyze = useCallback(
-    async (participantName: string | null) => {
+    async (participantName: string | null, meetingDate: string | null) => {
       if (!sessionId) return
       setReanalyzeError(null)
       setReanalyzing('transcribing')
       setDialogOpen(false)
 
       try {
+        const patchBody: Record<string, string> = { participantName: participantName || '' }
+        if (meetingDate) patchBody.meetingDate = meetingDate
+
         await fetch(`${API_BASE_URL}/api/replay/sessions/${sessionId}`, {
           method: 'PATCH',
           headers: getAuthHeaders(),
-          body: JSON.stringify({ participantName: participantName || '' }),
+          body: JSON.stringify(patchBody),
         })
 
         const processRes = await fetch(
@@ -401,20 +844,26 @@ function ReanalyzeDialog({
   open,
   onOpenChange,
   currentParticipant,
+  currentMeetingDate,
   detectedSpeakers,
   onConfirm,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   currentParticipant: string
+  currentMeetingDate: string
   detectedSpeakers: string[]
-  onConfirm: (name: string | null) => void
+  onConfirm: (name: string | null, meetingDate: string | null) => void
 }) {
   const [name, setName] = useState(currentParticipant)
+  const [meetingDate, setMeetingDate] = useState(currentMeetingDate)
 
   useEffect(() => {
-    if (open) setName(currentParticipant)
-  }, [open, currentParticipant])
+    if (open) {
+      setName(currentParticipant)
+      setMeetingDate(currentMeetingDate)
+    }
+  }, [open, currentParticipant, currentMeetingDate])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -436,6 +885,24 @@ function ReanalyzeDialog({
               onChange={(e) => setName(e.target.value)}
             />
           </div>
+
+          {!currentMeetingDate && (
+            <div className="grid gap-2 rounded-md border border-amber-200 bg-amber-50/80 p-3">
+              <Label htmlFor="reanalyze-meeting-date" className="text-sm font-medium">
+                Meeting Date <span className="text-amber-600">(missing)</span>
+              </Label>
+              <input
+                id="reanalyze-meeting-date"
+                type="date"
+                value={meetingDate}
+                onChange={(e) => setMeetingDate(e.target.value)}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+              <p className="text-xs text-muted-foreground">
+                Required for Progress Pulse trend tracking. When did this meeting happen?
+              </p>
+            </div>
+          )}
 
           {detectedSpeakers.length > 0 && (
             <div className="grid gap-2">
@@ -463,7 +930,10 @@ function ReanalyzeDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={() => onConfirm(name.trim() || null)}>
+          <Button
+            disabled={!currentMeetingDate && !meetingDate.trim()}
+            onClick={() => onConfirm(name.trim() || null, meetingDate.trim() || null)}
+          >
             <RefreshCw className="mr-2 h-4 w-4" />
             Re-analyze
           </Button>
@@ -565,6 +1035,32 @@ export function ReplayResults() {
   const [pulseStatus, setPulseStatus] = useState<string | null>(null)
   const [pulseLoading, setPulseLoading] = useState(false)
   const [pulseMeetingDate, setPulseMeetingDate] = useState('')
+  const [nudgeDate, setNudgeDate] = useState('')
+  const [nudgeSaving, setNudgeSaving] = useState(false)
+  const [nudgeDismissed, setNudgeDismissed] = useState(false)
+  const [pdfLoading, setPdfLoading] = useState(false)
+  const [activeSegmentIndex, setActiveSegmentIndex] = useState<number | null>(null)
+  const segmentRefs = useRef<(HTMLDivElement | null)[]>([])
+
+  const saveNudgeDate = async () => {
+    if (!nudgeDate || !id) return
+    setNudgeSaving(true)
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/replay/sessions/${id}`, {
+        method: 'PATCH',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ meetingDate: nudgeDate }),
+      })
+      if (!res.ok) throw new Error('Failed to save')
+      toast.success('Meeting date saved — Progress Pulse can now track this session.')
+      setNudgeDismissed(true)
+      loadResults()
+    } catch {
+      toast.error('Failed to save meeting date')
+    } finally {
+      setNudgeSaving(false)
+    }
+  }
 
   useEffect(() => {
     if (data?.session?.progressPulseStatus) {
@@ -617,15 +1113,28 @@ export function ReplayResults() {
 
       const entries: { skill: string; score: number }[] = []
 
-      if (result.clarityScore > 0) entries.push({ skill: 'clarity', score: result.clarityScore })
-      if (result.confidenceScore > 0) entries.push({ skill: 'confidence', score: result.confidenceScore })
-      if (result.engagementScore > 0) entries.push({ skill: 'engagement', score: result.engagementScore })
-      if (result.fillerWordRate != null) {
-        entries.push({ skill: 'filler_words', score: Math.max(0, Math.min(10, 10 - result.fillerWordRate * 2)) })
-      }
-      if (result.wordsPerMinute) {
-        const wpm = result.wordsPerMinute
-        entries.push({ skill: 'pacing', score: wpm >= 120 && wpm <= 180 ? 9 : wpm >= 100 && wpm <= 200 ? 7 : 5 })
+      // Use new skill-based scores when available; fall back to legacy Bedrock scores
+      const skillScores = data.skillScores?.scores
+      if (skillScores) {
+        if (skillScores.clarity != null) entries.push({ skill: 'clarity', score: skillScores.clarity })
+        if (skillScores.conciseness != null) entries.push({ skill: 'conciseness', score: skillScores.conciseness })
+        if (skillScores.confidence != null) entries.push({ skill: 'confidence', score: skillScores.confidence })
+        if (skillScores.structure != null) entries.push({ skill: 'structure', score: skillScores.structure })
+        if (skillScores.engagement != null) entries.push({ skill: 'engagement', score: skillScores.engagement })
+        if (skillScores.pacing != null) entries.push({ skill: 'pacing', score: skillScores.pacing })
+        if (skillScores.delivery != null) entries.push({ skill: 'delivery', score: skillScores.delivery })
+        if (skillScores.emotionalControl != null) entries.push({ skill: 'emotional_control', score: skillScores.emotionalControl })
+      } else {
+        if (result.clarityScore > 0) entries.push({ skill: 'clarity', score: result.clarityScore })
+        if (result.confidenceScore > 0) entries.push({ skill: 'confidence', score: result.confidenceScore })
+        if (result.engagementScore > 0) entries.push({ skill: 'engagement', score: result.engagementScore })
+        if (result.fillerWordRate != null) {
+          entries.push({ skill: 'filler_words', score: Math.max(0, Math.min(10, 10 - result.fillerWordRate * 2)) })
+        }
+        if (result.wordsPerMinute) {
+          const wpm = result.wordsPerMinute
+          entries.push({ skill: 'pacing', score: wpm >= 120 && wpm <= 180 ? 9 : wpm >= 100 && wpm <= 200 ? 7 : 5 })
+        }
       }
 
       await fetch(`${API_BASE_URL}/api/progress-pulse`, {
@@ -693,40 +1202,130 @@ export function ReplayResults() {
   const handleDownload = () => {
     const report = {
       session,
+      skillScores: data.skillScores ?? null,
+      coachingInsights: data.coachingInsights ?? null,
       metrics: {
-        wordsPerMinute: result.wordsPerMinute,
-        fillerWordRate: result.fillerWordRate,
-        vocabularyDiversity: result.vocabularyDiversity,
-        avgSentenceLength: result.avgSentenceLength,
-        totalTurns: result.totalTurns,
-        speakingPercentage: result.speakingPercentage,
-        hedgingCount: result.hedgingCount,
-        hedgingRate: result.hedgingRate,
-        interruptionCount: result.interruptionCount,
-        longestMonologueSec: result.longestMonologueSec,
-        questionsAsked: result.questionsAsked,
-        repetitionRequests: result.repetitionRequests,
-        avgResponseTimeSec: result.avgResponseTimeSec,
+        deliveryQuality: {
+          wordsPerMinute: result.wordsPerMinute,
+          fillerWordCount: result.fillerWordCount,
+          fillerWordRate: result.fillerWordRate,
+          hedgingCount: result.hedgingCount,
+          hedgingRate: result.hedgingRate,
+          avgSentenceLength: result.avgSentenceLength,
+          vocabularyDiversity: result.vocabularyDiversity,
+        },
+        collaborationInteraction: {
+          totalTurns: result.totalTurns,
+          speakingPercentage: result.speakingPercentage,
+          interruptionCount: result.interruptionCount,
+          questionsAsked: result.questionsAsked,
+          avgResponseTimeSec: result.avgResponseTimeSec,
+          longestMonologueSec: result.longestMonologueSec,
+          repetitionRequests: result.repetitionRequests,
+        },
+        speakerCount: result.speakerCount,
+        transcriptionSource: result.transcriptionSource,
       },
-      scores: {
+      aiAssessmentScores: {
         overall: result.overallScore,
         clarity: result.clarityScore,
         confidence: result.confidenceScore,
         engagement: result.engagementScore,
       },
+      aiInsights: {
+        contextSpecificFeedback: result.contextSpecificFeedback ?? [],
+        keyMoments: result.keyMoments ?? [],
+      },
       strengths: result.strengths,
       improvements: result.improvements,
       recommendations: result.recommendations,
       transcript: result.transcriptText,
+      structuredTranscript: result.structuredTranscript ?? null,
+      annotatedTranscript: result.annotatedTranscript ?? null,
+      meetingImpact: computeMeetingImpact(result, data.coachingInsights),
+      processingInfo: {
+        modelUsed: result.modelUsed ?? null,
+        promptTokens: result.promptTokens,
+        completionTokens: result.completionTokens,
+        processingTimeMs: result.processingTimeMs,
+      },
       exportedAt: new Date().toISOString(),
     }
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `replay-${id}.json`
+    const safeName = (session.sessionName || session.meetingType || 'replay').replace(/[^a-zA-Z0-9]/g, '-')
+    a.download = `${safeName}-${id?.slice(0, 8)}.json`
     a.click()
     URL.revokeObjectURL(url)
+  }
+
+  const handleExportPdf = async () => {
+    if (!data) return
+    setPdfLoading(true)
+    try {
+      const { session: s, result: r } = data
+      const pdfReport: SessionReport = {
+        title: s.sessionName || s.meetingType,
+        subtitle: `${s.meetingType} — ${s.userRole}`,
+        source: 'replay',
+        metadata: [
+          ...(s.participantName ? [{ label: 'Participant', value: s.participantName }] : []),
+          ...(s.meetingDate ? [{ label: 'Meeting Date', value: new Date(s.meetingDate).toLocaleDateString() }] : []),
+          { label: 'Role', value: s.userRole },
+          { label: 'Status', value: s.status },
+        ],
+        overallScore: r.overallScore,
+        skillScores: data.skillScores ?? null,
+        coachingInsights: data.coachingInsights ?? null,
+        legacyScores: [
+          { label: 'Clarity', score: r.clarityScore },
+          { label: 'Confidence', score: r.confidenceScore },
+          { label: 'Engagement', score: r.engagementScore },
+        ],
+        metrics: [
+          {
+            section: 'Delivery Quality',
+            items: [
+              { label: 'Words Per Minute', value: String(r.wordsPerMinute), unit: 'WPM' },
+              { label: 'Filler Words', value: String(r.fillerWordCount) },
+              { label: 'Filler Rate', value: `${r.fillerWordRate.toFixed(1)}`, unit: '%' },
+              { label: 'Hedging Language', value: `${(r.hedgingRate ?? 0).toFixed(1)}`, unit: '%' },
+              { label: 'Avg Sentence Length', value: String(r.avgSentenceLength), unit: 'words' },
+              { label: 'Vocabulary Diversity', value: `${r.vocabularyDiversity.toFixed(1)}`, unit: '%' },
+            ],
+          },
+          {
+            section: 'Collaboration & Interaction',
+            items: [
+              { label: 'Speaking Share', value: `${r.speakingPercentage.toFixed(0)}`, unit: '%' },
+              { label: 'Questions Asked', value: String(r.questionsAsked) },
+              { label: 'Interruptions', value: String(r.interruptionCount) },
+              ...(r.avgResponseTimeSec != null ? [{ label: 'Avg Response Time', value: `${r.avgResponseTimeSec.toFixed(1)}`, unit: 's' }] : []),
+              ...(r.longestMonologueSec ? [{ label: 'Longest Monologue', value: `${Math.floor(r.longestMonologueSec / 60)}m ${r.longestMonologueSec % 60}s` }] : []),
+              { label: 'Repetition Requests', value: String(r.repetitionRequests) },
+            ],
+          },
+        ],
+        contextSpecificFeedback: (r.contextSpecificFeedback as { label: string; detail: string; rating?: string }[]) ?? [],
+        keyMoments: (r.keyMoments as { text: string; type: string }[]) ?? [],
+        strengths: r.strengths,
+        improvements: r.improvements,
+        recommendations: r.recommendations,
+        transcript: r.transcriptText,
+        structuredTranscript: Array.isArray(r.structuredTranscript)
+          ? (r.structuredTranscript as { speaker: string; text: string }[])
+          : undefined,
+        meetingImpact: computeMeetingImpact(r, data.coachingInsights),
+      }
+      await generateSessionPdf(pdfReport)
+    } catch (e) {
+      toast.error('Failed to generate PDF')
+      console.error(e)
+    } finally {
+      setPdfLoading(false)
+    }
   }
 
   return (
@@ -739,6 +1338,7 @@ export function ReplayResults() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         currentParticipant={session.participantName || ''}
+        currentMeetingDate={session.meetingDate ? new Date(session.meetingDate).toISOString().slice(0, 10) : ''}
         detectedSpeakers={detectedSpeakers}
         onConfirm={startReanalyze}
       />
@@ -749,7 +1349,7 @@ export function ReplayResults() {
           <Link to={backTo} className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
             <ArrowLeft className="h-3.5 w-3.5" /> {backLabel}
           </Link>
-          <h1 className="text-2xl font-bold">Replay Results</h1>
+          <h1 className="text-2xl font-bold">{session.sessionName || 'Replay Results'}</h1>
           {session.participantName && (
             <p className="mt-0.5 text-sm font-medium text-primary">
               Analysis for: {session.participantName}
@@ -767,8 +1367,36 @@ export function ReplayResults() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {pulseLoading ? (
+            <Button variant="outline" size="sm" disabled>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Updating...
+            </Button>
+          ) : pulseStatus === 'tracked' ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-green-300 bg-green-50 text-green-700 hover:bg-green-100"
+              onClick={handleSkipPulse}
+            >
+              <CheckCircle2 className="mr-2 h-4 w-4" /> Tracked in Pulse
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleTrackPulse}
+              disabled={!session.meetingDate}
+              title={!session.meetingDate ? 'Set a meeting date first' : 'Track this session in Progress Pulse'}
+            >
+              <TrendingUp className="mr-2 h-4 w-4" /> {pulseStatus === 'skipped' ? 'Track in Pulse' : 'Track in Pulse'}
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={() => setDialogOpen(true)}>
             <RefreshCw className="mr-2 h-4 w-4" /> Re-analyze
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleExportPdf} disabled={pdfLoading}>
+            {pdfLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
+            Export PDF
           </Button>
           <Button variant="outline" size="sm" onClick={handleDownload}>
             <Download className="mr-2 h-4 w-4" /> Export JSON
@@ -776,83 +1404,215 @@ export function ReplayResults() {
         </div>
       </div>
 
+      {/* Missing meeting date nudge */}
+      {!session.meetingDate && !nudgeDismissed && (
+        <div className="mb-4 flex flex-col gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex gap-3">
+            <CalendarDays className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+            <div>
+              <p className="text-sm font-medium text-amber-900">Meeting date missing</p>
+              <p className="text-xs text-amber-700">
+                Required for Progress Pulse trend tracking and re-analysis. When did this meeting happen?
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={nudgeDate}
+              onChange={(e) => setNudgeDate(e.target.value)}
+              className="h-9 rounded-md border border-amber-300 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+            <Button size="sm" disabled={!nudgeDate || nudgeSaving} onClick={saveNudgeDate}>
+              {nudgeSaving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+              Save
+            </Button>
+          </div>
+        </div>
+      )}
+
       <Tabs defaultValue="overview">
         <TabsList className="mb-4 w-full justify-start">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="metrics">Metrics</TabsTrigger>
           <TabsTrigger value="insights">AI Insights</TabsTrigger>
           <TabsTrigger value="transcript">Transcript</TabsTrigger>
+          <TabsTrigger value="impact">Meeting Impact</TabsTrigger>
         </TabsList>
 
         {/* Overview */}
         <TabsContent value="overview">
           <div className="grid gap-6">
-            {/* Scores */}
-            <Card>
-              <CardContent className="flex flex-wrap items-center justify-around gap-6 pt-6">
-                <ScoreRing score={result.overallScore} label="Overall" size={96} />
-                <ScoreRing score={result.clarityScore} label="Clarity" />
-                <ScoreRing score={result.confidenceScore} label="Confidence" />
-                <ScoreRing score={result.engagementScore} label="Engagement" />
-              </CardContent>
-            </Card>
-
-            {/* Progress Pulse Prompt */}
-            {!pulseStatus && (
-              <Card className="border-primary/30 bg-primary/5">
-                <CardContent className="flex flex-col gap-4 py-5">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <p className="font-medium">Track this session in My Progress Pulse?</p>
-                      <p className="text-sm text-muted-foreground">
-                        Trends (improving / declining) are ordered by the <strong>meeting date</strong>, not when you
-                        upload or click track — so backfilled recordings still show a correct timeline.
-                      </p>
+            {/* Next Improvement — primary improvement + practice plan */}
+            {data.coachingInsights && !data.coachingInsights.error && data.coachingInsights.primaryImprovement && (
+              <Card className="border-2 border-primary/30 bg-gradient-to-r from-primary/5 to-transparent">
+                <CardContent className="py-5">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="flex gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                        <Target className="h-5 w-5 text-primary" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Next Improvement</p>
+                        <p className="mt-1 font-medium">{data.coachingInsights.primaryImprovement}</p>
+                        {!data.coachingInsights.practicePlan?.length && data.coachingInsights.practiceExercise && (
+                          <p className="mt-2 text-sm text-muted-foreground">
+                            <span className="font-medium text-foreground">Practice: </span>
+                            {data.coachingInsights.practiceExercise}
+                          </p>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex shrink-0 gap-2">
-                      <Button variant="outline" size="sm" onClick={handleSkipPulse} disabled={pulseLoading}>
-                        Skip — won't be added later
+                    <Link
+                      to={`/elevate?focus=${
+                        inferFocusArea(data.coachingInsights.primaryImprovement)
+                      }&context=${encodeURIComponent(
+                        data.coachingInsights.practicePlan?.[0]?.description || data.coachingInsights.practiceExercise || data.coachingInsights.primaryImprovement
+                      )}&newSession=true`}
+                      className="shrink-0"
+                    >
+                      <Button>
+                        <Mic className="mr-2 h-4 w-4" /> Start Practice
+                        <ArrowRight className="ml-2 h-4 w-4" />
                       </Button>
-                      <Button size="sm" onClick={handleTrackPulse} disabled={pulseLoading}>
-                        {pulseLoading ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
-                        Yes, track this
-                      </Button>
-                    </div>
+                    </Link>
                   </div>
-                  {!session.meetingDate && (
-                    <div className="rounded-md border border-amber-200 bg-amber-50/80 px-3 py-3 text-sm dark:bg-amber-950/20">
-                      <Label htmlFor="pulseMeetingDate" className="text-foreground">
-                        Meeting date (required for this older session)
-                      </Label>
-                      <input
-                        id="pulseMeetingDate"
-                        type="date"
-                        value={pulseMeetingDate}
-                        onChange={(e) => setPulseMeetingDate(e.target.value)}
-                        className="mt-2 flex h-10 w-full max-w-xs rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      />
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        New Replay sessions ask for this up front. Set it here once, then track — we save it on your
-                        session.
+
+                  {/* Structured Practice Plan */}
+                  {data.coachingInsights.practicePlan?.length > 0 && (
+                    <div className="mt-4 border-t pt-4">
+                      <p className="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                        3-Step Practice Plan
                       </p>
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        {data.coachingInsights.practicePlan.map((ex: any, i: number) => (
+                          <div key={i} className="rounded-lg border bg-card p-3">
+                            <div className="flex items-center gap-2">
+                              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-bold text-primary">
+                                {i + 1}
+                              </span>
+                              <p className="text-sm font-medium leading-tight">{ex.title}</p>
+                            </div>
+                            <p className="mt-1.5 text-xs text-muted-foreground">{ex.description}</p>
+                            {ex.focusSkill && (
+                              <span className="mt-2 inline-block rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                {ex.focusSkill}
+                              </span>
+                            )}
+                            <Link
+                              to={`/elevate?focus=${inferFocusArea(ex.focusSkill || ex.title)}&context=${encodeURIComponent(ex.description)}&newSession=true`}
+                              className="mt-2 flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                            >
+                              <Mic className="h-3 w-3" /> Practice this
+                            </Link>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </CardContent>
               </Card>
             )}
-            {pulseStatus === 'tracked' && (
-              <div className="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 px-4 py-2.5 text-sm text-green-700">
-                <CheckCircle2 className="h-4 w-4" /> This session is tracked in My Progress Pulse.
-              </div>
-            )}
-            {pulseStatus === 'skipped' && (
-              <div className="flex items-center gap-2 rounded-md border border-muted px-4 py-2.5 text-sm text-muted-foreground">
-                <AlertCircle className="h-4 w-4" /> This session was not included in progress tracking.
-              </div>
-            )}
 
-            {/* Strengths & Improvements */}
-            <div className="grid gap-4 md:grid-cols-2">
+            {/* Unified Communication Score */}
+            <Card className="border-2 border-primary/20">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Communication Score</CardTitle>
+                <CardDescription>Click any skill to see what contributes to the score</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex flex-col gap-5 sm:flex-row sm:gap-8">
+                  {/* Overall score hero */}
+                  <div className="flex shrink-0 flex-col items-center justify-center">
+                    <ScoreRing score={result.overallScore} label="Overall" size={100} />
+                  </div>
+
+                  {/* Skill rows with inline accordions */}
+                  <div className="flex-1 min-w-0">
+                    {data.skillScores?.scores ? (
+                      <Accordion type="single" collapsible className="space-y-0">
+                        {[
+                          { key: 'clarity', label: 'Clarity' },
+                          { key: 'confidence', label: 'Confidence' },
+                          { key: 'conciseness', label: 'Conciseness' },
+                          { key: 'structure', label: 'Structure' },
+                          { key: 'engagement', label: 'Engagement' },
+                          { key: 'pacing', label: 'Pacing' },
+                          { key: 'delivery', label: 'Delivery' },
+                          { key: 'emotionalControl', label: 'Emotional Control' },
+                        ]
+                          .filter(({ key }) => {
+                            const v = (data.skillScores!.scores as any)[key]
+                            return v !== null && v !== undefined
+                          })
+                          .map(({ key, label }) => {
+                            const val = (data.skillScores!.scores as any)[key] as number
+                            const comp = data.skillScores!.components?.[key]
+                            const barColor = val >= 8 ? 'bg-green-500' : val >= 6 ? 'bg-blue-500' : val >= 4 ? 'bg-amber-500' : 'bg-red-500'
+                            const textColor = val >= 8 ? 'text-green-600' : val >= 6 ? 'text-blue-600' : val >= 4 ? 'text-amber-600' : 'text-red-500'
+                            return (
+                              <AccordionItem key={key} value={key} className="border-b-0">
+                                <AccordionTrigger className="py-2 hover:no-underline">
+                                  <div className="flex flex-1 items-center gap-3 pr-2">
+                                    <span className="w-28 text-left text-sm font-medium">{label}</span>
+                                    <span className={`w-8 text-right text-sm font-bold ${textColor}`}>{val.toFixed(1)}</span>
+                                    <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+                                      <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${val * 10}%` }} />
+                                    </div>
+                                  </div>
+                                </AccordionTrigger>
+                                {comp && (
+                                  <AccordionContent className="pb-2 pt-0 pl-2">
+                                    <div className="grid gap-1.5 rounded-md bg-muted/40 p-2.5">
+                                      {Object.entries(comp).map(([name, value]) => (
+                                        <div key={name} className="flex items-center justify-between text-xs">
+                                          <span className="text-muted-foreground capitalize">
+                                            {name.replace(/([A-Z])/g, ' $1').trim()}
+                                          </span>
+                                          <span className={val >= 6 ? 'text-foreground' : 'text-amber-600'}>{(value as number).toFixed(1)}/10</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </AccordionContent>
+                                )}
+                              </AccordionItem>
+                            )
+                          })}
+                      </Accordion>
+                    ) : (
+                      <div className="flex flex-wrap items-center justify-around gap-4">
+                        <ScoreRing score={result.clarityScore} label="Clarity" />
+                        <ScoreRing score={result.confidenceScore} label="Confidence" />
+                        <ScoreRing score={result.engagementScore} label="Engagement" />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Radar chart inline */}
+                {data.skillScores?.scores && (
+                  <div className="mt-5 border-t pt-4">
+                    <p className="mb-2 text-xs font-medium text-muted-foreground">Communication Radar</p>
+                    <div className="flex justify-center">
+                      <RadarChart
+                        skills={Object.entries(data.skillScores.scores)
+                          .filter(([, v]) => v !== null && v !== undefined)
+                          .map(([k, v]) => ({
+                            label: k.charAt(0).toUpperCase() + k.slice(1).replace(/([A-Z])/g, ' $1'),
+                            score: v as number,
+                          }))}
+                      />
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Top 3 Coaching Actions */}
+            <TopCoachingActions result={result} coachingInsights={data.coachingInsights} />
+
+            {/* Strengths, Improvements & Recommendations */}
+            <div className="grid gap-4 md:grid-cols-3">
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="flex items-center gap-2 text-base">
@@ -864,7 +1624,7 @@ export function ReplayResults() {
                     <div key={i} className="text-sm">
                       <p className="font-medium">{s.point}</p>
                       {s.example && (
-                        <p className="mt-0.5 text-xs text-muted-foreground italic">"{s.example}"</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground italic">&ldquo;{s.example}&rdquo;</p>
                       )}
                     </div>
                   ))}
@@ -882,14 +1642,14 @@ export function ReplayResults() {
                     const focus = inferFocusArea(imp.point + ' ' + (imp.suggestion || ''))
                     const ctx = encodeURIComponent(imp.point)
                     return (
-                      <div key={i} className="rounded-md border border-dashed p-3 text-sm">
+                      <div key={i} className="rounded-md border border-dashed p-2.5 text-sm">
                         <p className="font-medium">{imp.point}</p>
                         {imp.suggestion && (
                           <p className="mt-0.5 text-xs text-muted-foreground">{imp.suggestion}</p>
                         )}
                         <Link
                           to={`/elevate?focus=${focus}&context=${ctx}&newSession=true`}
-                          className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                          className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
                         >
                           <Mic className="h-3 w-3" /> Practice this in Elevate <ArrowRight className="h-3 w-3" />
                         </Link>
@@ -898,49 +1658,44 @@ export function ReplayResults() {
                   })}
                 </CardContent>
               </Card>
+
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Lightbulb className="h-4 w-4 text-blue-500" /> Recommendations
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ol className="grid gap-2.5 text-sm">
+                    {(result.recommendations as string[])?.map((r, i) => (
+                      <li key={i} className="flex gap-2">
+                        <span className="shrink-0 font-semibold text-muted-foreground">{i + 1}.</span>
+                        <span>{r}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </CardContent>
+              </Card>
             </div>
 
-            {/* Recommendations */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Lightbulb className="h-4 w-4 text-blue-500" /> Recommendations
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ol className="grid gap-2 text-sm">
-                  {(result.recommendations as string[])?.map((r, i) => (
-                    <li key={i} className="flex gap-2">
-                      <span className="font-semibold text-muted-foreground">{i + 1}.</span>
-                      {r}
-                    </li>
-                  ))}
-                </ol>
-              </CardContent>
-            </Card>
-
-            {/* Elevate CTA */}
-            <Card className="border-primary/30 bg-primary/5">
-              <CardContent className="flex flex-col items-center gap-3 py-6 sm:flex-row sm:justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
-                    <Mic className="h-5 w-5 text-primary" />
-                  </div>
-                  <div>
-                    <p className="font-semibold">Ready to improve?</p>
-                    <p className="text-sm text-muted-foreground">
-                      Practice with an AI coach in Elevate and work on your areas for improvement.
-                    </p>
-                  </div>
-                </div>
-                <Link to={`/elevate?focus=clarity&context=${encodeURIComponent('Practice areas from Replay analysis')}&newSession=true`}>
-                  <Button size="lg">
-                    <Mic className="mr-2 h-4 w-4" /> Start Elevate Session
-                    <ArrowRight className="ml-2 h-4 w-4" />
-                  </Button>
-                </Link>
-              </CardContent>
-            </Card>
+            {/* Elevate CTA (compact, since Next Improvement card is at the top) */}
+            <div className="flex items-center justify-between rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
+              <div className="flex items-center gap-2 text-sm">
+                <Mic className="h-4 w-4 text-primary" />
+                <span>Practice your areas for improvement with a live AI coaching session</span>
+              </div>
+              <Link to={`/elevate?focus=${
+                data.coachingInsights?.primaryImprovement
+                  ? inferFocusArea(data.coachingInsights.primaryImprovement)
+                  : 'clarity'
+              }&context=${encodeURIComponent(
+                data.coachingInsights?.practiceExercise || 'Practice areas from Replay analysis'
+              )}&newSession=true`}>
+                <Button size="sm">
+                  Open Elevate <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+                </Button>
+              </Link>
+            </div>
           </div>
         </TabsContent>
 
@@ -978,6 +1733,17 @@ export function ReplayResults() {
                   <MetricCard metricKey="vocabularyDiversity" label="Vocabulary Diversity" value={`${result.vocabularyDiversity.toFixed(1)}%`} optimal="> 30%" rating={rateMetric('vocabularyDiversity', result.vocabularyDiversity)} />
                   <MetricCard metricKey="fillerWordCount" label="Filler Words" value={result.fillerWordCount} optimal="< 10" rating={rateMetric('fillerWordCount', result.fillerWordCount)} />
                 </div>
+                <PacingInsight wpm={result.wordsPerMinute} />
+                {(result.hedgingRate ?? 0) > 1.5 && data.skillScores?.signals?.hedging?.phrases?.length > 0 && (
+                  <div className="mt-3 rounded-md border border-orange-200 bg-orange-50 p-3 text-sm">
+                    <p className="font-medium text-orange-900">Hedging phrases detected ({result.hedgingCount} total):</p>
+                    <p className="mt-1 text-xs text-orange-700 italic">
+                      {data.skillScores.signals.hedging.phrases.slice(0, 8).map((p: string) => `"${p}"`).join(', ')}
+                      {data.skillScores.signals.hedging.phrases.length > 8 ? ', ...' : ''}
+                    </p>
+                    <p className="mt-1.5 text-xs text-orange-700">Replace with direct statements when you are sure of your point.</p>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -1094,40 +1860,55 @@ export function ReplayResults() {
             <CardContent>
               {(result.annotatedTranscript as any[])?.length > 0 ? (
                 <div className="grid gap-3">
+                  <CommunicationTimeline
+                    segments={result.annotatedTranscript as any[]}
+                    activeIndex={activeSegmentIndex}
+                    onSelect={(i) => {
+                      setActiveSegmentIndex(i)
+                      segmentRefs.current[i]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                    }}
+                  />
                   <p className="text-xs text-muted-foreground italic">
                     Showing the most notable segments from {session.participantName || 'the participant'}. The full conversation is analyzed for scores and insights above.
                   </p>
-                  {(result.annotatedTranscript as any[]).map((seg: any, i: number) => (
-                      <div key={i} className="rounded-md border p-3">
+                  {(result.annotatedTranscript as any[]).map((seg: any, i: number) => {
+                    const colorMap: Record<string, string> = {
+                      strong_statement: 'bg-green-100 text-green-700',
+                      filler_word: 'bg-yellow-100 text-yellow-700',
+                      hedging: 'bg-orange-100 text-orange-700',
+                      key_point: 'bg-blue-100 text-blue-700',
+                      action_item: 'bg-purple-100 text-purple-700',
+                      decision: 'bg-emerald-100 text-emerald-700',
+                      clarification: 'bg-sky-100 text-sky-700',
+                      recommendation: 'bg-indigo-100 text-indigo-700',
+                      suggestion: 'bg-teal-100 text-teal-700',
+                      conversation_control: 'bg-gray-100 text-gray-600',
+                      update: 'bg-slate-100 text-slate-700',
+                    }
+                    return (
+                      <div
+                        key={i}
+                        ref={(el) => { segmentRefs.current[i] = el }}
+                        className={`rounded-md border p-3 transition-all ${activeSegmentIndex === i ? 'ring-2 ring-primary border-primary/50 bg-primary/5' : ''}`}
+                      >
                         <div className="mb-1 flex items-center gap-2">
+                          <span className="text-[10px] text-muted-foreground font-mono">#{i + 1}</span>
                           <span className="text-xs font-semibold text-foreground">
                             {seg.speaker}
                           </span>
-                          {seg.annotations?.map((a: string) => {
-                            const colorMap: Record<string, string> = {
-                              strong_statement: 'bg-green-100 text-green-700',
-                              filler_word: 'bg-yellow-100 text-yellow-700',
-                              hedging: 'bg-orange-100 text-orange-700',
-                              key_point: 'bg-blue-100 text-blue-700',
-                              action_item: 'bg-purple-100 text-purple-700',
-                              decision: 'bg-emerald-100 text-emerald-700',
-                              clarification: 'bg-sky-100 text-sky-700',
-                              recommendation: 'bg-indigo-100 text-indigo-700',
-                              update: 'bg-slate-100 text-slate-700',
-                            }
-                            return (
-                              <span
-                                key={a}
-                                className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${colorMap[a] || 'bg-gray-100 text-gray-700'}`}
-                              >
-                                {a.replace(/_/g, ' ')}
-                              </span>
-                            )
-                          })}
+                          {seg.annotations?.map((a: string) => (
+                            <span
+                              key={a}
+                              className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${colorMap[a] || 'bg-gray-100 text-gray-700'}`}
+                            >
+                              {a.replace(/_/g, ' ')}
+                            </span>
+                          ))}
                         </div>
                         <p className="text-sm">{seg.text}</p>
                       </div>
-                  ))}
+                    )
+                  })}
                 </div>
               ) : (
                 <div className="rounded-md border p-4">
@@ -1136,6 +1917,30 @@ export function ReplayResults() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Meeting Impact */}
+        <TabsContent value="impact">
+          <div className="grid gap-6">
+            {/* Meeting Summary */}
+            {data.coachingInsights?.meetingSummary && (
+              <MeetingSummaryCard summary={data.coachingInsights.meetingSummary} />
+            )}
+
+            {/* Meeting Impact Score */}
+            <MeetingImpactCard result={result} coachingInsights={data.coachingInsights} />
+
+            {/* Decision Clarity */}
+            {data.coachingInsights?.decisionClarity && (
+              <DecisionClarityCard
+                decisions={data.coachingInsights.decisionClarity.decisionsDetected ?? 0}
+                actionItems={data.coachingInsights.decisionClarity.actionItemsDetected ?? 0}
+                decisionsList={data.coachingInsights.decisionClarity.decisions}
+                actionItemsList={data.coachingInsights.decisionClarity.actionItems}
+                summary={data.coachingInsights.decisionClarity.summary}
+              />
+            )}
+          </div>
         </TabsContent>
       </Tabs>
     </div>

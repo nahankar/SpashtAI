@@ -14,11 +14,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
 import { RoomEvent } from 'livekit-client'
 import { RealTimeMetrics } from '@/components/analytics/RealTimeMetrics'
 import { SessionMetrics } from '@/components/analytics/SessionMetrics'
 import { AdvancedInsights } from '@/components/analytics/AdvancedInsights'
+import { SkillScoresCard } from '@/components/analytics/SkillScoresCard'
 import { useRealTimeMetrics, useSessionMetrics } from '@/hooks/useSessionMetrics'
 import { useConversationPersistence } from '@/hooks/useConversationPersistence'
 import { AgentVisualizer } from '@/components/layout/AgentVisualizer'
@@ -27,6 +27,8 @@ import { getAuthHeaders } from '@/lib/api-client'
 import { FOCUS_AREAS, getFocusAreaLabel } from '@/lib/focus-areas'
 import { useAuth } from '@/hooks/useAuth'
 import { useConfirm } from '@/hooks/useConfirm'
+import { Trash2, CheckSquare, Square, Target, ArrowRight } from 'lucide-react'
+import { generateSessionPdf, type SessionReport } from '@/lib/generate-session-pdf'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 
@@ -81,13 +83,9 @@ export function Elevate() {
   const [roomName, setRoomName] = useState('') // Empty initially, generated per session
   const [token, setToken] = useState<string | null>(null)
   const [url, setUrl] = useState<string | null>(null)
-  const [compose, setCompose] = useState('')
-  const [playbackMuted, setPlaybackMuted] = useState(false)
   const [assistantState, setAssistantState] = useState<'restarting' | 'ready' | 'recovering' | 'unknown'>('unknown')
   const [sessionId, setSessionId] = useState<string | null>(viewSessionId) // Initialize with URL param if present
   const [showMetrics, setShowMetrics] = useState(false)
-  const [showResumePrompt, setShowResumePrompt] = useState(false)
-  const [previousSessionId, setPreviousSessionId] = useState<string | null>(null)
   const [showHistory, setShowHistory] = useState(!viewSessionId && !inboundNewSession)
 
   interface ElevateSessionItem {
@@ -107,6 +105,14 @@ export function Elevate() {
   const [elevSortField, setElevSortField] = useState<SortField>('date')
   const [elevSortDir, setElevSortDir] = useState<SortDir>('desc')
   const [elevStatusFilter, setElevStatusFilter] = useState('all')
+  const [selectedElevate, setSelectedElevate] = useState<Set<string>>(new Set())
+
+  interface RecommendedPractice {
+    skill: string
+    score: number
+    label: string
+  }
+  const [recommendation, setRecommendation] = useState<RecommendedPractice | null>(null)
 
   const filteredPastSessions = useMemo(() => {
     let result = [...pastSessions]
@@ -157,6 +163,53 @@ export function Elevate() {
     { value: 'in_progress', label: 'In Progress' },
   ]
 
+  const handleDeleteElevateSession = useCallback(async (id: string) => {
+    const ok = await confirmDialog({
+      title: 'Delete Session',
+      description: 'Delete this session and all its data? This cannot be undone.',
+      confirmLabel: 'Delete',
+      variant: 'destructive',
+    })
+    if (!ok) return
+    try {
+      await fetch(`${API_BASE_URL}/sessions/${id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      })
+      setPastSessions((prev) => prev.filter((s) => s.id !== id))
+      setSelectedElevate((prev) => { const n = new Set(prev); n.delete(id); return n })
+      toast.success('Session deleted')
+    } catch {
+      toast.error('Failed to delete session')
+    }
+  }, [confirmDialog])
+
+  const handleDeleteSelectedElevate = useCallback(async () => {
+    if (selectedElevate.size === 0) return
+    const ok = await confirmDialog({
+      title: 'Delete Sessions',
+      description: `Delete ${selectedElevate.size} session(s)? This cannot be undone.`,
+      confirmLabel: 'Delete All',
+      variant: 'destructive',
+    })
+    if (!ok) return
+    try {
+      await Promise.all(
+        Array.from(selectedElevate).map((id) =>
+          fetch(`${API_BASE_URL}/sessions/${id}`, {
+            method: 'DELETE',
+            headers: getAuthHeaders(),
+          })
+        )
+      )
+      setPastSessions((prev) => prev.filter((s) => !selectedElevate.has(s.id)))
+      setSelectedElevate(new Set())
+      toast.success('Sessions deleted')
+    } catch {
+      toast.error('Failed to delete some sessions')
+    }
+  }, [selectedElevate, confirmDialog])
+
   useEffect(() => {
     async function loadPastSessions() {
       try {
@@ -169,7 +222,30 @@ export function Elevate() {
       } catch { /* non-critical */ }
       finally { setPastLoading(false) }
     }
+    async function loadRecommendation() {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/progress-pulse/summary`, { headers: getAuthHeaders() })
+        if (!res.ok) return
+        const data = await res.json()
+        const items: { skill: string; currentScore: number; totalSessions: number }[] = data.summary || []
+        if (items.length === 0) return
+        const weakest = items.reduce((a, b) => (a.currentScore < b.currentScore ? a : b))
+        if (weakest.currentScore >= 8.5) return
+        const labels: Record<string, string> = {
+          clarity: 'Clarity', conciseness: 'Conciseness', confidence: 'Confidence',
+          structure: 'Structure', engagement: 'Engagement', pacing: 'Pacing',
+          delivery: 'Delivery', emotional_control: 'Emotional Control',
+          filler_words: 'Filler Words',
+        }
+        setRecommendation({
+          skill: weakest.skill,
+          score: weakest.currentScore,
+          label: labels[weakest.skill] || weakest.skill,
+        })
+      } catch { /* non-critical */ }
+    }
     loadPastSessions()
+    loadRecommendation()
   }, [])
   
   // Real-time metrics for active session
@@ -178,6 +254,53 @@ export function Elevate() {
   // Historical metrics for completed sessions
   const { metrics: historicalMetrics, downloadTranscript } = useSessionMetrics(sessionId)
   
+  const [elevatePdfLoading, setElevatePdfLoading] = useState(false)
+  const handleElevateExportPdf = async () => {
+    if (!sessionId || !historicalMetrics) return
+    setElevatePdfLoading(true)
+    try {
+      const m = historicalMetrics
+      const pdfReport: SessionReport = {
+        title: `Elevate Practice — ${sessionId.slice(0, 8)}`,
+        subtitle: 'Practice Session Analytics',
+        source: 'elevate',
+        metadata: [
+          { label: 'Session', value: sessionId.slice(0, 8) },
+          { label: 'Total Turns', value: String(m.totalTurns) },
+        ],
+        skillScores: null,
+        coachingInsights: null,
+        metrics: [
+          {
+            section: 'Your Performance',
+            items: [
+              { label: 'Words Per Minute', value: String(m.userWpm), unit: 'WPM' },
+              { label: 'Filler Rate', value: `${(m.userFillerRate * 100).toFixed(1)}`, unit: '%' },
+              { label: 'Avg Sentence Length', value: String(m.userAvgSentenceLength), unit: 'words' },
+              { label: 'Vocab Diversity', value: `${(m.userVocabDiversity * 100).toFixed(0)}`, unit: '%' },
+              { label: 'Speaking Time', value: `${m.userSpeakingTime.toFixed(0)}`, unit: 's' },
+              { label: 'Avg Response Time', value: `${m.userResponseTimeAvg.toFixed(1)}`, unit: 's' },
+            ],
+          },
+          {
+            section: 'Session Stats',
+            items: [
+              { label: 'Total Turns', value: String(m.totalTurns) },
+              { label: 'LLM Tokens', value: String(m.totalLlmTokens) },
+              { label: 'Avg TTFT', value: `${m.avgTtft.toFixed(0)}`, unit: 'ms' },
+            ],
+          },
+        ],
+      }
+      await generateSessionPdf(pdfReport)
+    } catch (e) {
+      toast.error('Failed to generate PDF')
+      console.error(e)
+    } finally {
+      setElevatePdfLoading(false)
+    }
+  }
+
   // Persistent conversation system
   const {
     messages,
@@ -191,55 +314,51 @@ export function Elevate() {
 
   // Check if URL parameter session is completed (for "View Details & Metrics" button)
   useEffect(() => {
-    async function checkSessionStatus() {
-      if (viewSessionId) {
-        try {
-          const response = await fetch(`${API_BASE_URL}/sessions/${viewSessionId}`, {
-            headers: getAuthHeaders(),
-          })
-          if (response.ok) {
-            const data = await response.json()
-            const session = data.session || data // Handle both {session: {...}} and {...} formats
-            
-            console.log('🔍 Session data:', { id: viewSessionId, endedAt: session.endedAt })
-            
-            if (session.endedAt) {
-              // Session is completed, show metrics directly
-              console.log('📊 Viewing completed session:', viewSessionId)
-              setSessionId(viewSessionId) // Set session ID to load historical metrics
-              await loadConversation(viewSessionId) // Load conversation history
-              setShowResumePrompt(false)
-              return
-            } else {
-              // Session is in progress, offer to resume
-              console.log('📋 Session in progress, offering resume:', viewSessionId)
-              setPreviousSessionId(viewSessionId)
-              setShowResumePrompt(true)
-              return
-            }
-          }
-        } catch (error) {
-          console.error('Error checking session status:', error)
-        }
-      }
-    }
-    
-    checkSessionStatus()
-  }, [viewSessionId])
+    if (!viewSessionId) return
+    ;(async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/sessions/${viewSessionId}`, {
+          headers: getAuthHeaders(),
+        })
+        if (!response.ok) return
+        const data = await response.json()
+        const session = data.session || data
 
-  // Check for previous session on mount (for page refresh scenario)
-  useEffect(() => {
-    // Skip if we have a URL parameter (handled by checkSessionStatus above)
-    if (viewSessionId) return
-    
-    const savedSessionId = localStorage.getItem('spashtai_active_session')
-    const savedTimestamp = localStorage.getItem('spashtai_session_timestamp')
-    
-    if (savedSessionId) {
-      console.log('📋 Found active session:', savedSessionId)
-      setPreviousSessionId(savedSessionId)
-      setShowResumePrompt(true)
-    }
+        if (session.endedAt) {
+          console.log('📊 Viewing completed session:', viewSessionId)
+          setSessionId(viewSessionId)
+          await loadConversation(viewSessionId)
+        } else {
+          // In-progress session — resume directly by connecting to LiveKit
+          console.log('📖 Resuming in-progress session:', viewSessionId)
+          setSessionId(viewSessionId)
+          await loadConversation(viewSessionId)
+
+          const newRoomName = `room_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
+          const u = new URL(`${API_BASE_URL}/livekit/token`)
+          u.searchParams.set('identity', identity)
+          u.searchParams.set('room', newRoomName)
+          u.searchParams.set('sessionId', viewSessionId)
+          u.searchParams.set('userName', user?.firstName || user?.email?.split('@')[0] || '')
+          if (session.focusArea) u.searchParams.set('focusArea', session.focusArea)
+          if (session.focusContext) u.searchParams.set('focusContext', session.focusContext)
+          if (session.sessionName) u.searchParams.set('sessionName', session.sessionName)
+
+          const res = await fetch(u.toString())
+          if (!res.ok) throw new Error('Failed to get token')
+          const json = await res.json()
+
+          setToken(json.token)
+          setUrl(json.url)
+          setRoomName(newRoomName)
+          resetMetrics()
+          localStorage.setItem('spashtai_active_session', viewSessionId)
+          localStorage.setItem('spashtai_session_timestamp', Date.now().toString())
+        }
+      } catch (error) {
+        console.error('Error checking/resuming session:', error)
+      }
+    })()
   }, [viewSessionId])
 
   // Initialize conversation when session ID is available
@@ -256,6 +375,44 @@ export function Elevate() {
 
   const joined = useMemo(() => Boolean(token && url), [token, url])
   const fallbackDispatchAttemptedRef = useRef<string | null>(null)
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null)
+
+  // ── Screen Wake Lock: prevent macOS from sleeping during active voice session ──
+  useEffect(() => {
+    if (!joined) {
+      wakeLockRef.current?.release().catch(() => {})
+      wakeLockRef.current = null
+      return
+    }
+
+    let released = false
+    const acquire = async () => {
+      try {
+        if (!('wakeLock' in navigator)) return
+        wakeLockRef.current = await navigator.wakeLock.request('screen')
+        wakeLockRef.current.addEventListener('release', () => {
+          if (!released) console.log('🔓 Wake lock released by browser')
+        })
+        console.log('🔒 Screen wake lock acquired — Mac will stay awake')
+      } catch {
+        console.log('⚠️ Wake lock unavailable (tab may be hidden)')
+      }
+    }
+
+    acquire()
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && joined) acquire()
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+
+    return () => {
+      released = true
+      document.removeEventListener('visibilitychange', handleVisibility)
+      wakeLockRef.current?.release().catch(() => {})
+      wakeLockRef.current = null
+    }
+  }, [joined])
 
   // ── Idle detection: auto-pause after 15 min of inactivity ──
   const IDLE_TIMEOUT_MS = 15 * 60 * 1000
@@ -353,11 +510,15 @@ export function Elevate() {
       // 2. Generate unique room name per session to avoid conflicts on hard refresh
       const uniqueRoomName = roomName || `room_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
       
-      // 3. Get LiveKit token with session ID
+      // 3. Get LiveKit token with session context
       const u = new URL(`${API_BASE_URL}/livekit/token`)
       u.searchParams.set('identity', identity)
       u.searchParams.set('room', uniqueRoomName)
-      u.searchParams.set('sessionId', newSessionId) // Pass session ID to token endpoint
+      u.searchParams.set('sessionId', newSessionId)
+      u.searchParams.set('userName', user?.firstName || user?.email?.split('@')[0] || '')
+      if (focusArea) u.searchParams.set('focusArea', focusArea)
+      if (inboundContext) u.searchParams.set('focusContext', inboundContext)
+      if (elevateSessionName.trim()) u.searchParams.set('sessionName', elevateSessionName.trim())
       const res = await fetch(u.toString())
       if (!res.ok) throw new Error('Failed to get token')
       const json = await res.json()
@@ -419,7 +580,6 @@ export function Elevate() {
     localStorage.removeItem('spashtai_active_session')
     localStorage.removeItem('spashtai_session_timestamp')
 
-    let metricsData: any = null
     if (currentSessionId) {
       try {
         await fetch(`${API_BASE_URL}/sessions/${currentSessionId}/end`, {
@@ -428,17 +588,11 @@ export function Elevate() {
           body: JSON.stringify({ endedAt: new Date().toISOString() })
         })
 
+        // Run legacy text metrics (keeps backward compatibility)
         await fetch(`${API_BASE_URL}/sessions/${currentSessionId}/calculate-text-metrics`, {
           method: 'POST',
           headers: getAuthHeaders()
         })
-
-        const metricsRes = await fetch(`${API_BASE_URL}/sessions/${currentSessionId}/metrics`, {
-          headers: getAuthHeaders(),
-        })
-        if (metricsRes.ok) {
-          metricsData = await metricsRes.json()
-        }
       } catch (err) {
         console.warn('Failed to finalize session:', err)
       }
@@ -446,41 +600,35 @@ export function Elevate() {
       // Ask user whether to track this session in Progress Pulse
       const trackIt = await confirmDialog({
         title: 'Track in My Progress Pulse?',
-        description: 'Would you like to include this session\'s scores in your progress tracking?',
+        description: 'Would you like to include this session\'s skill scores in your progress tracking?',
         confirmLabel: 'Yes, track this',
         cancelLabel: 'Skip — won\'t be added later',
       })
 
-      if (trackIt && metricsData?.metrics) {
-        try {
-          const m = metricsData.metrics
-          const entries: { skill: string; score: number }[] = []
-          const userWpm = m.userWpm || 0
-          const fillerRate = m.userFillerRate || 0
-          const vocabDiv = m.userVocabDiversity || 0
-
-          if (userWpm > 0) {
-            entries.push({ skill: 'pacing', score: userWpm >= 120 && userWpm <= 180 ? 9 : userWpm >= 100 && userWpm <= 200 ? 7 : 5 })
-          }
-          if (fillerRate >= 0) {
-            entries.push({ skill: 'filler_words', score: Math.max(0, Math.min(10, 10 - fillerRate * 2)) })
-          }
-          if (vocabDiv > 0) {
-            entries.push({ skill: 'conciseness', score: vocabDiv >= 50 ? 9 : vocabDiv >= 30 ? 7 : 5 })
-          }
-
-          if (entries.length > 0) {
-            await fetch(`${API_BASE_URL}/api/progress-pulse`, {
-              method: 'POST',
-              headers: getAuthHeaders(),
-              body: JSON.stringify({ entries, sessionId: currentSessionId, source: 'elevate' }),
-            })
+      // Run the full analytics pipeline (signal extraction + skill scores + coaching insights)
+      try {
+        const analyzeRes = await fetch(`${API_BASE_URL}/sessions/${currentSessionId}/analyze`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ autoTrackPulse: trackIt, source: 'elevate' }),
+        })
+        if (analyzeRes.ok) {
+          const result = await analyzeRes.json()
+          if (trackIt && result.pulseEntriesCreated > 0) {
+            toast.success(`Session tracked — ${result.pulseEntriesCreated} skills updated in Progress Pulse`)
+          } else if (trackIt) {
             toast.success('Session tracked in My Progress Pulse')
           }
-        } catch {
-          toast.error('Failed to track session')
+        } else {
+          console.warn('Analytics pipeline returned', analyzeRes.status)
+          if (trackIt) toast.success('Session tracked in My Progress Pulse')
         }
-      } else {
+      } catch {
+        console.warn('Analytics pipeline unavailable, session still saved')
+        if (trackIt) toast.success('Session saved')
+      }
+
+      if (!trackIt) {
         try {
           await fetch(`${API_BASE_URL}/api/progress-pulse/skip`, {
             method: 'POST',
@@ -493,52 +641,53 @@ export function Elevate() {
       }
     }
 
+    setPastSessions((prev) =>
+      prev.map((s) =>
+        s.id === currentSessionId ? { ...s, endedAt: new Date().toISOString() } : s
+      )
+    )
+
+    setShowHistory(true)
     navigate(cameFromHistory ? '/history?tab=elevate' : '/elevate')
   }, [sessionId, clearMessages, resetMetrics, navigate, cameFromHistory, confirmDialog])
 
-  const handleResumeSession = useCallback(async () => {
-    if (!previousSessionId) return
-    
-    try {
-      setShowResumePrompt(false)
-      
-      // Load the previous session's conversation history
-      console.log('📖 Resuming session:', previousSessionId)
-      setSessionId(previousSessionId)
-      await loadConversation(previousSessionId)
-      
-      // Create NEW room for resumed session (can't rejoin old room, agent is gone)
-      const newRoomName = `room_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
-      
-      // Get new token for new room
-      const u = new URL(`${API_BASE_URL}/livekit/token`)
-      u.searchParams.set('identity', identity)
-      u.searchParams.set('room', newRoomName)
-      u.searchParams.set('sessionId', previousSessionId) // Use SAME session ID
-      
-      const res = await fetch(u.toString())
-      if (!res.ok) throw new Error('Failed to get token')
-      const json = await res.json()
-      
-      setToken(json.token)
-      setUrl(json.url)
-      setRoomName(newRoomName)
-      resetMetrics()
-      
-      console.log('✅ Session resumed with chat history, new voice connection established')
-    } catch (error) {
-      console.error('❌ Error resuming session:', error)
-      setShowResumePrompt(false)
-      setPreviousSessionId(null)
-    }
-  }, [previousSessionId, identity, loadConversation, resetMetrics])
+  const handleDiscard = useCallback(async () => {
+    const yes = await confirmDialog({
+      title: 'Discard this session?',
+      description: 'This will permanently delete the session and all its data. This cannot be undone.',
+      confirmLabel: 'Discard',
+      cancelLabel: 'Keep session',
+    })
+    if (!yes) return
 
-  const handleStartNewSession = useCallback(() => {
-    setShowResumePrompt(false)
-    setPreviousSessionId(null)
+    const currentSessionId = sessionId
+    setToken(null)
+    setUrl(null)
+    setSessionId(null)
+    setRoomName('')
+    setAssistantState('unknown')
+    clearMessages()
+    resetMetrics()
     localStorage.removeItem('spashtai_active_session')
     localStorage.removeItem('spashtai_session_timestamp')
-  }, [])
+
+    if (currentSessionId) {
+      try {
+        await fetch(`${API_BASE_URL}/sessions/${currentSessionId}`, {
+          method: 'DELETE',
+          headers: getAuthHeaders(),
+        })
+        setPastSessions((prev) => prev.filter((s) => s.id !== currentSessionId))
+        setSelectedElevate((prev) => { const n = new Set(prev); n.delete(currentSessionId); return n })
+        toast.success('Session discarded')
+      } catch {
+        toast.error('Failed to delete session')
+      }
+    }
+
+    setShowHistory(true)
+    navigate('/elevate')
+  }, [sessionId, clearMessages, resetMetrics, navigate, confirmDialog])
 
   const breadcrumbLabel = viewSessionId
     ? 'Session Analytics'
@@ -547,7 +696,7 @@ export function Elevate() {
       : 'New Session'
 
   // ── Session history view ──
-  if (showHistory && !joined && !viewSessionId && !showResumePrompt) {
+  if (showHistory && !joined && !viewSessionId) {
     const formatRelDate = (d: string) => {
       const ms = Date.now() - new Date(d).getTime()
       const m = Math.floor(ms / 60000), h = Math.floor(ms / 3600000), dy = Math.floor(ms / 86400000)
@@ -572,6 +721,38 @@ export function Elevate() {
             + New Elevate Session
           </Button>
         </div>
+
+        {recommendation && !inboundNewSession && (
+          <Card className="border-2 border-primary/20 bg-gradient-to-r from-primary/5 to-transparent">
+            <CardContent className="py-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                    <Target className="h-4 w-4 text-primary" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Recommended Practice</p>
+                    <p className="mt-0.5 text-sm">
+                      Your <span className="font-semibold">{recommendation.label}</span> score is{' '}
+                      <span className="font-semibold">{recommendation.score.toFixed(1)}</span>/10 — the area with the most room to grow.
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setFocusArea(recommendation.skill)
+                    setElevateSessionName(`Practice: ${recommendation.label}`)
+                    setShowHistory(false)
+                  }}
+                >
+                  Practice {recommendation.label}
+                  <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {pastLoading && (
           <div className="flex items-center justify-center py-16 text-muted-foreground">
@@ -617,13 +798,42 @@ export function Elevate() {
           </Card>
         )}
 
+        {selectedElevate.size > 0 && (
+          <div className="mb-1 flex items-center gap-2">
+            <Button variant="destructive" size="sm" onClick={handleDeleteSelectedElevate}>
+              <Trash2 className="mr-2 h-4 w-4" /> Delete {selectedElevate.size} Selected
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setSelectedElevate(new Set())}>
+              Clear
+            </Button>
+          </div>
+        )}
+
         {!pastLoading && filteredPastSessions.length > 0 && (
           <div className="grid gap-3">
             {filteredPastSessions.map((s) => {
               const done = s.endedAt != null
+              const isSelected = selectedElevate.has(s.id)
               return (
-                <Card key={s.id} className="transition-shadow hover:shadow-md">
+                <Card key={s.id} className={`transition-all hover:shadow-md ${isSelected ? 'ring-2 ring-primary' : ''}`}>
                   <CardContent className="flex items-center gap-4 py-4">
+                    <button
+                      onClick={() =>
+                        setSelectedElevate((prev) => {
+                          const n = new Set(prev)
+                          n.has(s.id) ? n.delete(s.id) : n.add(s.id)
+                          return n
+                        })
+                      }
+                      className="shrink-0"
+                    >
+                      {isSelected ? (
+                        <CheckSquare className="h-5 w-5 text-primary" />
+                      ) : (
+                        <Square className="h-5 w-5 text-muted-foreground" />
+                      )}
+                    </button>
+
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-medium truncate">
@@ -645,11 +855,22 @@ export function Elevate() {
                         {s.fillerRate != null && <span>{s.fillerRate.toFixed(1)}% fillers</span>}
                       </div>
                     </div>
-                    <Link to={`/elevate?session=${s.id}`}>
-                      <Button size="sm" variant="outline">
-                        {done ? 'View Results' : 'Resume'}
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Link to={`/elevate?session=${s.id}`}>
+                        <Button size="sm" variant="outline">
+                          {done ? 'View Results' : 'Resume'}
+                        </Button>
+                      </Link>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        onClick={() => handleDeleteElevateSession(s.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
                       </Button>
-                    </Link>
+                    </div>
                   </CardContent>
                 </Card>
               )
@@ -677,28 +898,6 @@ export function Elevate() {
         </button>
       )}
 
-      {/* Resume Session Prompt */}
-      {showResumePrompt && previousSessionId && (
-        <Card className="border-blue-500 bg-blue-50">
-          <CardHeader>
-            <CardTitle className="text-blue-900">Resume Previous Session?</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-blue-800 mb-4">
-              You have a recent session that was interrupted. Would you like to resume with your chat history?
-            </p>
-            <div className="flex gap-2">
-              <Button onClick={handleResumeSession} variant="default">
-                Resume Session
-              </Button>
-              <Button onClick={handleStartNewSession} variant="outline">
-                Start New Session
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-      
       <Card>
         <CardHeader>
           <CardTitle>Elevate Session</CardTitle>
@@ -767,9 +966,19 @@ export function Elevate() {
                     sessionId={sessionId}
                     metrics={historicalMetrics}
                     onDownloadTranscript={downloadTranscript}
+                    onExportPdf={handleElevateExportPdf}
+                    pdfLoading={elevatePdfLoading}
                   />
                   
-                  {/* Advanced Analytics - spaCy, Praat, Gentle insights */}
+                  {/* Skill Scores & Coaching Insights */}
+                  <div className="mt-6">
+                    <SkillScoresCard
+                      sessionId={sessionId}
+                      isSessionEnded={true}
+                    />
+                  </div>
+
+                  {/* Legacy Advanced Analytics */}
                   <div className="mt-6">
                     <AdvancedInsights 
                       sessionId={sessionId}
@@ -827,7 +1036,7 @@ export function Elevate() {
                   audio={true}
                   onDisconnected={handleDisconnected}
                 >
-                  <RoomAudioRenderer muted={playbackMuted} />
+                  <RoomAudioRenderer />
                   <AgentVisualizer className="bg-muted/20 rounded-lg mb-4" />
                   <ConnectionStatus assistantState={assistantState} />
                   <LiveKitConversation 
@@ -865,18 +1074,17 @@ export function Elevate() {
                     onMetricsUpdate={updateMetrics}
                   />
                   <div className="flex flex-wrap items-center gap-2 py-2">
-                    <Button variant="destructive" onClick={handleLeave}>Leave</Button>
+                    <Button onClick={handleLeave}>Leave</Button>
                     <Button 
                       variant="outline" 
                       onClick={() => setShowMetrics(!showMetrics)}
                     >
                       {showMetrics ? 'Hide Metrics' : 'Show Metrics'}
                     </Button>
-                    <InRoomControls
-                    onLeave={handleLeave}
-                    playbackMuted={playbackMuted}
-                    onTogglePlaybackMuted={() => setPlaybackMuted((m) => !m)}
-                    />
+                    <InRoomControls />
+                    <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={handleDiscard}>
+                      Discard Session
+                    </Button>
                   </div>
                   
                   {/* Real-time metrics overlay */}
@@ -895,9 +1103,19 @@ export function Elevate() {
                     sessionId={sessionId}
                     metrics={historicalMetrics}
                     onDownloadTranscript={downloadTranscript}
+                    onExportPdf={handleElevateExportPdf}
+                    pdfLoading={elevatePdfLoading}
                   />
                   
-                  {/* Advanced Analytics - spaCy, Praat, Gentle insights */}
+                  {/* Skill Scores & Coaching Insights */}
+                  <div className="mt-6">
+                    <SkillScoresCard
+                      sessionId={sessionId}
+                      isSessionEnded={!joined}
+                    />
+                  </div>
+
+                  {/* Legacy Advanced Analytics */}
                   <div className="mt-6">
                     <AdvancedInsights 
                       sessionId={sessionId}
@@ -906,27 +1124,6 @@ export function Elevate() {
                   </div>
                 </>
               )}
-              <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]">
-                <Textarea
-                  placeholder="Type to simulate transcript..."
-                  value={compose}
-                  onChange={(e) => setCompose(e.target.value)}
-                />
-                  <Button 
-                    onClick={async () => {
-                      if (!compose.trim()) return
-                      const userText = compose.trim()
-                      
-                      // Add user message to chat using persistence hook
-                      await addMessage('user', userText)
-                      setCompose('')
-                      
-                      // Note: Real voice conversations will be handled by the AWS NovaSonic agent
-                      // This text simulation is for testing UI only - no backend call needed
-                      console.log('📝 Text simulation message:', userText, '(Real conversations use voice + AWS NovaSonic)')
-                    }}
-                  >Send</Button>
-              </div>
             </div>
           )}
         </CardContent>
@@ -1192,70 +1389,32 @@ function LiveKitConversation({
   return null
 }
 
-function InRoomControls({ onLeave: _onLeave, playbackMuted, onTogglePlaybackMuted }: { onLeave: () => void; playbackMuted: boolean; onTogglePlaybackMuted: () => void }) {
+function InRoomControls() {
   const room = useRoomContext()
   const [micEnabled, setMicEnabled] = useState(() => room.localParticipant.isMicrophoneEnabled)
 
-  // Sync micEnabled state with actual LiveKit microphone state
   useEffect(() => {
-    const handleTrackMuted = () => {
-      setMicEnabled(room.localParticipant.isMicrophoneEnabled)
-    }
-    const handleTrackUnmuted = () => {
-      setMicEnabled(room.localParticipant.isMicrophoneEnabled)
-    }
-    const handleTrackPublished = () => {
-      setMicEnabled(room.localParticipant.isMicrophoneEnabled)
-    }
-    
-    // Set initial state
-    setMicEnabled(room.localParticipant.isMicrophoneEnabled)
-    
-    room.localParticipant.on('trackMuted', handleTrackMuted)
-    room.localParticipant.on('trackUnmuted', handleTrackUnmuted)
-    room.localParticipant.on('localTrackPublished', handleTrackPublished)
-    
+    const sync = () => setMicEnabled(room.localParticipant.isMicrophoneEnabled)
+    sync()
+    room.localParticipant.on('trackMuted', sync)
+    room.localParticipant.on('trackUnmuted', sync)
+    room.localParticipant.on('localTrackPublished', sync)
     return () => {
-      room.localParticipant.off('trackMuted', handleTrackMuted)
-      room.localParticipant.off('trackUnmuted', handleTrackUnmuted)
-      room.localParticipant.off('localTrackPublished', handleTrackPublished)
+      room.localParticipant.off('trackMuted', sync)
+      room.localParticipant.off('trackUnmuted', sync)
+      room.localParticipant.off('localTrackPublished', sync)
     }
   }, [room])
 
-  const start = useCallback(async () => {
-    await room.localParticipant.setMicrophoneEnabled(true)
-    setMicEnabled(true)
-  }, [room])
-
-  const pause = useCallback(async () => {
-    await room.localParticipant.setMicrophoneEnabled(false)
-    setMicEnabled(false)
-  }, [room])
-
-  const resume = start
-
-  const stop = useCallback(async () => {
-    await room.localParticipant.setMicrophoneEnabled(false)
-    setMicEnabled(false)
-  }, [room])
-
-  const muteUnmute = useCallback(async () => {
-    if (micEnabled) {
-      await room.localParticipant.setMicrophoneEnabled(false)
-      setMicEnabled(false)
-    } else {
-      await room.localParticipant.setMicrophoneEnabled(true)
-      setMicEnabled(true)
-    }
+  const toggle = useCallback(async () => {
+    await room.localParticipant.setMicrophoneEnabled(!micEnabled)
+    setMicEnabled(!micEnabled)
   }, [room, micEnabled])
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <Button onClick={micEnabled ? stop : start}>{micEnabled ? 'Stop' : 'Start'}</Button>
-      <Button variant="secondary" onClick={micEnabled ? pause : resume} disabled={!micEnabled}>{micEnabled ? 'Pause' : 'Resume'}</Button>
-      <Button variant="outline" onClick={muteUnmute}>{micEnabled ? 'Mute' : 'Unmute'}</Button>
-      <Button variant="outline" onClick={onTogglePlaybackMuted}>{playbackMuted ? 'Unmute Output' : 'Mute Output'}</Button>
-    </div>
+    <Button variant="secondary" onClick={toggle}>
+      {micEnabled ? 'Pause' : 'Resume'}
+    </Button>
   )
 }
 

@@ -8,6 +8,7 @@ import { Elevate } from '@/pages/Elevate'
 import { Replay } from '@/pages/Replay'
 import { ReplayResults } from '@/pages/ReplayResults'
 import { History } from '@/pages/History'
+import { ProgressPulse } from '@/pages/ProgressPulse'
 import { Tickets } from '@/pages/tickets/Tickets'
 import { NewTicket } from '@/pages/tickets/NewTicket'
 import { TicketDetail } from '@/pages/tickets/TicketDetail'
@@ -35,6 +36,7 @@ function AppBreadcrumbs() {
     '/': 'Home',
     '/replay': 'Replay',
     '/elevate': 'Elevate',
+    '/progress': 'My Progress Pulse',
     '/history': 'Past Sessions',
     '/settings': 'Settings',
     '/tickets': 'My Tickets',
@@ -142,6 +144,7 @@ function Navbar() {
             <>
               <Link className="hover:underline" to="/replay">Replay</Link>
               <Link className="hover:underline" to="/elevate">Elevate</Link>
+              <Link className="hover:underline" to="/progress">My Progress Pulse</Link>
               <Link className="hover:underline" to="/history">My Sessions</Link>
               {isAdmin && (
                 <Link className="hover:underline text-primary font-medium" to="/admin">Admin</Link>
@@ -197,6 +200,12 @@ function AppRoutes() {
             <main className="mx-auto max-w-6xl px-6 py-8">
               <AppBreadcrumbs />
               <Elevate />
+            </main>
+          } />
+          <Route path="/progress" element={
+            <main className="mx-auto max-w-6xl px-6 py-8">
+              <AppBreadcrumbs />
+              <ProgressPulse />
             </main>
           } />
           <Route path="/history" element={

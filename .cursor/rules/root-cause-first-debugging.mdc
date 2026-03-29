@@ -1,0 +1,37 @@
+---
+description: Enforce root-cause-first reasoning when debugging issues or implementing fixes
+alwaysApply: true
+---
+
+# Root-Cause-First Debugging
+
+When a user reports a bug, unexpected behavior, or asks for a fix, follow this checklist BEFORE writing any code.
+
+## 1. Ask "Why is this happening at all?"
+
+Do not jump to mitigating the symptom. First identify whether the problem should exist in the first place.
+
+- Bad: "The session disconnects when Mac locks → add a 5-min reconnect grace period"
+- Good: "The session disconnects when Mac locks → why is macOS locking during an active voice call? Other apps (Zoom, Meet) prevent this via wake lock."
+
+## 2. Check what production apps do
+
+Before proposing a custom solution, research how established products solve the same problem. Use web search if needed. Prefer standard APIs and proven patterns over custom state machines.
+
+- Bad: Build a heartbeat/ping system to keep connections alive
+- Good: Use the Screen Wake Lock API — the standards-based solution browsers provide for this exact use case
+
+## 3. Preventive fix over reactive fix
+
+If a problem can be prevented entirely (e.g. wake lock prevents disconnect), prefer that over handling the fallout (e.g. grace period after disconnect). Only add reactive handling if the preventive fix has known gaps.
+
+## 4. Environment check before code blame
+
+When something "stops working," check the runtime environment before assuming a code defect:
+- Are there duplicate/stale processes?
+- Is the correct service actually receiving requests?
+- Are there OS-level factors (sleep, network, permissions)?
+
+## 5. Proportional response
+
+Match the fix size to the problem. A 5-line browser API call that solves the root cause beats a 30-line server-side workaround that only masks it.

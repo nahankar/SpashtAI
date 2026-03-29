@@ -1,0 +1,364 @@
+"""
+Structured practice exercise templates for Elevate sessions.
+
+Each focus area has a structured exercise the AI coach runs when
+a user arrives from Replay (with specific improvement context).
+"""
+
+EXERCISE_TEMPLATES: dict[str, dict] = {
+    "clarity": {
+        "name": "Clarity Challenge",
+        "warmup": (
+            "I'm going to give you a technical or complex topic, and you'll explain it "
+            "to me as if I'm someone with no background in it. I'll evaluate how clear "
+            "and easy to follow your explanation is."
+        ),
+        "rounds": [
+            {
+                "instruction": (
+                    "Explain the concept I give you in under 60 seconds. "
+                    "Use simple language, avoid jargon, and structure your explanation "
+                    "with a clear beginning, middle, and end."
+                ),
+                "coaching_focus": [
+                    "Did you avoid jargon or explain it when used?",
+                    "Was there a clear logical flow?",
+                    "Could a non-expert follow your explanation?",
+                ],
+            },
+            {
+                "instruction": (
+                    "Now explain the same concept again, but this time use an analogy "
+                    "or real-world example to make it even clearer."
+                ),
+                "coaching_focus": [
+                    "Was the analogy effective and relatable?",
+                    "Did it make the concept more accessible?",
+                ],
+            },
+        ],
+        "wrap_up": (
+            "Summarize what you explained in one sentence. "
+            "This tests whether you can distill a complex idea into its essence."
+        ),
+    },
+    "confidence": {
+        "name": "Confidence Builder",
+        "warmup": (
+            "We're going to practice speaking with authority. I'll give you scenarios "
+            "where you need to make a recommendation or present a position. "
+            "The goal is to eliminate hedging language like 'I think', 'maybe', 'sort of' "
+            "and replace them with direct, assertive statements."
+        ),
+        "rounds": [
+            {
+                "instruction": (
+                    "I'll describe a situation. Present your recommendation as if "
+                    "you're advising a senior leader. Be direct and decisive — "
+                    "no 'I think' or 'maybe'. State your position clearly."
+                ),
+                "coaching_focus": [
+                    "Did you use hedging phrases? I'll flag each one.",
+                    "Was your recommendation stated as a clear position?",
+                    "Did your tone convey certainty?",
+                ],
+            },
+            {
+                "instruction": (
+                    "Now defend your recommendation when I push back. "
+                    "Maintain your position confidently while acknowledging the concern."
+                ),
+                "coaching_focus": [
+                    "Did you hold your ground without becoming defensive?",
+                    "Did you acknowledge the pushback constructively?",
+                ],
+            },
+        ],
+        "wrap_up": (
+            "Give me your final recommendation in two sentences. "
+            "Make it sound like you fully own it."
+        ),
+    },
+    "filler_words": {
+        "name": "Filler Word Elimination",
+        "warmup": (
+            "We're going to practice speaking without filler words — "
+            "no 'um', 'uh', 'like', 'you know', 'basically', or 'actually'. "
+            "I'll give you a topic and you speak for 90 seconds. "
+            "When you catch yourself using a filler, pause and restart the sentence. "
+            "Silence is better than a filler."
+        ),
+        "rounds": [
+            {
+                "instruction": (
+                    "Speak about the topic I give you for about 90 seconds. "
+                    "Focus on replacing fillers with brief pauses. "
+                    "If you notice a filler, stop, take a breath, and continue."
+                ),
+                "coaching_focus": [
+                    "Count of filler words used",
+                    "Did you self-correct when you caught a filler?",
+                    "Were your pauses effective replacements?",
+                ],
+            },
+            {
+                "instruction": (
+                    "Now repeat the exercise with a new topic. "
+                    "This time, try to cut your filler count in half. "
+                    "Slow down slightly — rushing causes fillers."
+                ),
+                "coaching_focus": [
+                    "Improvement from round 1",
+                    "Is the pacing more controlled?",
+                ],
+            },
+        ],
+        "wrap_up": (
+            "Summarize what you talked about in 30 seconds, filler-free. "
+            "Think of each pause as a power move, not a weakness."
+        ),
+    },
+    "engagement": {
+        "name": "Engagement Activator",
+        "warmup": (
+            "We're going to practice making your communication more engaging. "
+            "This means asking questions, using vivid examples, varying your tone, "
+            "and making the listener feel involved — not just talked at."
+        ),
+        "rounds": [
+            {
+                "instruction": (
+                    "Present an idea or update to me as if I'm your team. "
+                    "Include at least one question to the audience, one concrete example, "
+                    "and one moment where you check for understanding."
+                ),
+                "coaching_focus": [
+                    "Did you ask questions to involve the audience?",
+                    "Were your examples vivid and relatable?",
+                    "Did you check for understanding?",
+                ],
+            },
+            {
+                "instruction": (
+                    "Now imagine you're presenting the same thing but your audience looks bored. "
+                    "How do you re-engage them? Use a story, a surprising fact, or a direct question."
+                ),
+                "coaching_focus": [
+                    "Did you use a hook to recapture attention?",
+                    "Was your delivery more dynamic?",
+                ],
+            },
+        ],
+        "wrap_up": (
+            "Close your presentation with a call-to-action that makes "
+            "the audience want to do something specific."
+        ),
+    },
+    "pacing": {
+        "name": "Pacing Control",
+        "warmup": (
+            "We're going to work on your speaking pace. The ideal range is "
+            "120 to 160 words per minute. Too slow and you lose attention. "
+            "Too fast and people can't follow. We'll practice finding your "
+            "sweet spot and using strategic pauses for emphasis."
+        ),
+        "rounds": [
+            {
+                "instruction": (
+                    "Explain something you know well for about 60 seconds. "
+                    "Focus on maintaining a steady, moderate pace. "
+                    "Before each new point, take a deliberate one-second pause."
+                ),
+                "coaching_focus": [
+                    "Was the pace comfortable to follow?",
+                    "Were pauses used intentionally before key points?",
+                    "Did the pace stay consistent or speed up when excited?",
+                ],
+            },
+            {
+                "instruction": (
+                    "Now tell me something you're excited about — a project, an idea. "
+                    "The challenge: don't speed up. Keep the same measured pace. "
+                    "Use pauses to build anticipation instead of rushing."
+                ),
+                "coaching_focus": [
+                    "Did excitement cause you to speed up?",
+                    "Were pauses maintained even under excitement?",
+                ],
+            },
+        ],
+        "wrap_up": (
+            "Deliver one key takeaway slowly and deliberately, "
+            "as if it's the most important thing you'll say all day."
+        ),
+    },
+    "structure": {
+        "name": "Structure Sprint",
+        "warmup": (
+            "We're going to practice organizing your thoughts using frameworks. "
+            "I'll give you a question, and you'll answer using the PREP method: "
+            "Point, Reason, Example, Point. This keeps your responses focused and logical."
+        ),
+        "rounds": [
+            {
+                "instruction": (
+                    "Answer my question using PREP: Start with your main point, "
+                    "give one reason, provide a specific example, then restate your point. "
+                    "Keep it under 90 seconds."
+                ),
+                "coaching_focus": [
+                    "Did you state your point clearly upfront?",
+                    "Was the reason logical and supporting?",
+                    "Was the example specific and relevant?",
+                    "Did you circle back to your main point?",
+                ],
+            },
+            {
+                "instruction": (
+                    "Now I'll give you a more complex question. Use signposting: "
+                    "'There are three things to consider. First... Second... Third...' "
+                    "This makes multi-part answers easy to follow."
+                ),
+                "coaching_focus": [
+                    "Did you use clear signposting?",
+                    "Were the parts logically ordered?",
+                    "Could I easily count how many points you made?",
+                ],
+            },
+        ],
+        "wrap_up": (
+            "Give me a 30-second structured summary of everything we discussed, "
+            "using signposting to organize your thoughts."
+        ),
+    },
+    "conciseness": {
+        "name": "Conciseness Drill",
+        "warmup": (
+            "We're going to practice saying more with fewer words. "
+            "I'll ask you questions, and your goal is to give complete, "
+            "useful answers in as few words as possible — without losing meaning. "
+            "Think of it as verbal editing in real time."
+        ),
+        "rounds": [
+            {
+                "instruction": (
+                    "Answer my question completely but in under 30 seconds. "
+                    "Cut any word that doesn't add information. "
+                    "No throat-clearing phrases like 'So basically what I mean is...'"
+                ),
+                "coaching_focus": [
+                    "Were there unnecessary words or phrases?",
+                    "Did you start speaking right away or warm up first?",
+                    "Was the answer complete despite being brief?",
+                ],
+            },
+            {
+                "instruction": (
+                    "Now take your answer and cut it in half. "
+                    "Say the exact same thing in 15 seconds or less. "
+                    "This forces you to find the essence of your message."
+                ),
+                "coaching_focus": [
+                    "Did you preserve the key information?",
+                    "Were filler phrases eliminated?",
+                ],
+            },
+        ],
+        "wrap_up": (
+            "In one sentence, tell me the single most important thing "
+            "you want someone to take away from this conversation."
+        ),
+    },
+    "action_items": {
+        "name": "Decisive Closer",
+        "warmup": (
+            "We're going to practice closing conversations with clear decisions "
+            "and action items. Many meetings end without clear next steps. "
+            "Your job is to make sure every conversation has a clear outcome."
+        ),
+        "rounds": [
+            {
+                "instruction": (
+                    "I'll describe a meeting scenario. You close it by stating: "
+                    "what was decided, who owns what action, and by when. "
+                    "Be specific — no vague 'we'll follow up later'."
+                ),
+                "coaching_focus": [
+                    "Were decisions stated explicitly?",
+                    "Did each action have an owner and deadline?",
+                    "Was anything left ambiguous?",
+                ],
+            },
+            {
+                "instruction": (
+                    "Now I'll play a stakeholder who's trying to leave without committing. "
+                    "Your job is to diplomatically pin down the decision and next steps "
+                    "before the conversation ends."
+                ),
+                "coaching_focus": [
+                    "Did you redirect the conversation to decisions?",
+                    "Were you diplomatic but firm?",
+                ],
+            },
+        ],
+        "wrap_up": (
+            "Summarize our session as if you were sending a follow-up email: "
+            "decisions made, actions assigned, deadlines set."
+        ),
+    },
+}
+
+
+def get_exercise_instructions(focus_area: str, replay_context: str | None = None) -> str:
+    """Build structured exercise instructions for the AI coach."""
+    template = EXERCISE_TEMPLATES.get(focus_area)
+    if not template:
+        return ""
+
+    lines = [
+        f"SESSION TYPE: Guided Practice — \"{template['name']}\"",
+        "",
+        "Use the exercise below as your coaching GUIDE, not a rigid script.",
+        "Follow the general flow but adapt naturally based on the conversation.",
+        "If the user wants to explore something related, go with it — then gently steer back.",
+        "Your tone should feel like a real coach, not a quiz master reading from a checklist.",
+        "",
+    ]
+
+    if replay_context:
+        lines.append(f"CONTEXT FROM REPLAY ANALYSIS: \"{replay_context}\"")
+        lines.append(
+            "Use this context to personalize your scenarios and examples. "
+            "Reference the user's actual weakness from their meeting analysis."
+        )
+        lines.append("")
+
+    lines.append("SUGGESTED EXERCISE FLOW:")
+    lines.append("")
+    lines.append("START — WARM-UP")
+    lines.append(f"Set the stage: {template['warmup']}")
+    lines.append("Keep it conversational. Ask if they're ready before jumping in.")
+    lines.append("")
+
+    for i, round_data in enumerate(template["rounds"], 1):
+        lines.append(f"ROUND {i}")
+        lines.append(f"Prompt: {round_data['instruction']}")
+        lines.append("After they respond, give feedback on:")
+        for focus in round_data["coaching_focus"]:
+            lines.append(f"  - {focus}")
+        lines.append(
+            "Discuss the feedback conversationally — ask what they noticed, "
+            "what felt different. Then transition to the next round naturally."
+        )
+        lines.append("")
+
+    lines.append("WRAP-UP")
+    lines.append(f"{template['wrap_up']}")
+    lines.append("")
+    lines.append(
+        "End with a brief conversational assessment: "
+        "what improved during the session, one thing to keep practicing, "
+        "and genuine encouragement. Keep it natural, like a coach after a good workout."
+    )
+
+    return "\n".join(lines)

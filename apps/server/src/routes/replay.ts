@@ -17,6 +17,9 @@ import {
 } from '../lib/transcript-parser'
 import { calculateReplayMetrics, findMatchingSpeaker } from '../lib/replay-metrics'
 import { analyzeTranscript } from '../lib/aws-bedrock'
+import { calculateSkillScores, calculateWeightedOverallScore, type TextSignals } from '../analytics/skillScores'
+import { generateCoachingInsights } from '../analytics/insightGenerator'
+import { saveSkillScoresToPulse } from '../analytics/progressPulse'
 import {
   uploadToS3,
   startTranscriptionJob,
@@ -29,6 +32,85 @@ import {
 import { transcribeStreamingFromFile } from '../lib/aws-transcribe-streaming'
 
 const isDev = process.env.NODE_ENV !== 'production'
+
+const SIGNAL_API_URL = process.env.SIGNAL_API_URL || 'http://localhost:4001'
+const INTERNAL_AGENT_TOKEN = process.env.INTERNAL_AGENT_TOKEN || 'dev-internal-agent-token'
+
+/**
+ * Normalize multi-speaker transcript segments into the {role, content}[]
+ * format the analytics engine expects. The resolved participant becomes
+ * "user", everyone else becomes "assistant".
+ */
+function normalizeSegmentsForAnalytics(
+  segments: { speaker: string; text: string }[],
+  participantSpeaker: string,
+): { role: string; content: string }[] {
+  return segments
+    .filter((s) => s.text.trim().length > 0)
+    .map((s) => ({
+      role: s.speaker === participantSpeaker ? 'user' : 'assistant',
+      content: s.text,
+    }))
+}
+
+async function fetchSignals(
+  sessionId: string,
+  messages: { role: string; content: string }[],
+  durationSec: number,
+): Promise<TextSignals | null> {
+  try {
+    const res = await fetch(`${SIGNAL_API_URL}/extract-signals`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-internal-agent-token': INTERNAL_AGENT_TOKEN,
+      },
+      body: JSON.stringify({ sessionId, messages, durationSec }),
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    return data.signals as TextSignals
+  } catch {
+    return null
+  }
+}
+
+function buildFallbackSignals(
+  messages: { role: string; content: string }[],
+  _durationSec: number,
+): TextSignals {
+  const userMsgs = messages.filter((m) => m.role === 'user')
+  const userText = userMsgs.map((m) => m.content).join(' ')
+  const words = userText.split(/\s+/).filter(Boolean)
+  const totalWords = words.length
+
+  // Estimate user speaking time (~2.5 words/sec for natural speech)
+  const estimatedSpeakingSec = Math.max(totalWords / 2.5, 1)
+  const speakingMin = estimatedSpeakingSec / 60
+
+  const fillerRegex = /\b(um|uh|like|you know|basically|actually|literally|so|well|right|i mean|kind of|sort of)\b/gi
+  const fillerMatches = userText.match(fillerRegex) || []
+  const hedgingRegex = /\b(i think|maybe|probably|perhaps|kind of|sort of|i guess|not sure|might|could be)\b/gi
+  const hedgingMatches = userText.match(hedgingRegex) || []
+
+  const sentences = userText.split(/[.!?]+/).filter((s) => s.trim().length > 3)
+  const avgSentLen = sentences.length > 0 ? words.length / sentences.length : 0
+
+  const uniqueWords = new Set(words.map((w) => w.toLowerCase()).filter((w) => w.length > 2))
+
+  return {
+    speechRate: { wpm: Math.round(Math.min(250, totalWords / speakingMin)), variability: 0.2, totalWords },
+    fillers: { count: fillerMatches.length, rate: totalWords > 0 ? fillerMatches.length / totalWords : 0, byType: {} },
+    hedging: { count: hedgingMatches.length, rate: totalWords > 0 ? hedgingMatches.length / totalWords : 0, phrases: [...new Set(hedgingMatches.map((m) => m.toLowerCase()))] },
+    sentenceComplexity: { avgLength: Math.round(avgSentLen * 10) / 10, subordinateRatio: 0.25, readability: 60, fleschKincaid: 8, gunningFog: 10 },
+    vocabDiversity: { ratio: totalWords > 0 ? uniqueWords.size / totalWords : 0, uniqueWords: uniqueWords.size, totalWords, sophistication: 5 },
+    topicCoherence: { avgSimilarity: 0.75, driftCount: 0 },
+    questionHandling: { questionsReceived: 0, avgResponseTime: 0, relevanceScores: [] },
+    talkListenBalance: { userRatio: totalWords / Math.max(1, messages.reduce((s, m) => s + m.content.split(/\s+/).length, 0)) },
+    interactionSignals: { questionsAsked: userMsgs.filter((m) => m.content.includes('?')).length, participantReferences: 0, followUps: 0 },
+    ideaStructure: { markerCount: 0, markerTypes: {} },
+  }
+}
 
 // ── Transcription cache helpers ──
 
@@ -261,6 +343,7 @@ router.post(
         uploads,
         meetingDateMissing: !fresh?.meetingDate,
         meetingDateAutoFilled: meetingDateAutoFilled && !hadMeetingDate,
+        meetingDate: fresh?.meetingDate ? fresh.meetingDate.toISOString().slice(0, 10) : null,
       })
     } catch (error) {
       console.error('Error uploading files:', error)
@@ -284,7 +367,7 @@ router.post('/sessions/:id/process', async (req: Request, res: Response) => {
       return res.status(400).json({
         code: 'MEETING_DATE_REQUIRED',
         error:
-          'When did this meeting happen? Set a meeting date so My Progress Pulse can order improving and declining trends correctly. We try to read it from your VTT (filename or header); if it is missing, add it on the previous step.',
+          'A meeting date is required for Progress Pulse trend tracking. Please set one before processing.',
       })
     }
 
@@ -492,7 +575,38 @@ async function processReplaySession(sessionId: string): Promise<void> {
   })
   const processingTimeMs = Date.now() - startMs
 
-  // ── Step 4: Save results ──
+  // ── Step 4: Run shared analytics engine (signal extraction → skill scores → coaching) ──
+
+  const analyticsMessages = normalizeSegmentsForAnalytics(segments, resolvedParticipantSpeaker!)
+  const effectiveDurationSec = durationSec || processingTimeMs / 1000
+
+  let signals: TextSignals | null = await fetchSignals(sessionId, analyticsMessages, effectiveDurationSec)
+  if (!signals) {
+    console.log(`[replay] Python signal API unavailable for ${sessionId}, using fallback`)
+    signals = buildFallbackSignals(analyticsMessages, effectiveDurationSec)
+  }
+
+  const { scores: skillScores, components: skillComponents } = calculateSkillScores(signals, analyticsMessages.length)
+
+  let coachingInsights: any = null
+  try {
+    coachingInsights = await generateCoachingInsights({
+      skillScores,
+      signals,
+      sessionName: session.sessionName || undefined,
+      focusArea: session.focusAreas?.[0] || undefined,
+      totalMessages: analyticsMessages.length,
+      durationSec: effectiveDurationSec,
+    })
+  } catch (err: any) {
+    console.error(`[replay] Coaching insight generation failed for ${sessionId}:`, err.message)
+  }
+
+  const skillScoresJson = JSON.parse(JSON.stringify({ scores: skillScores, components: skillComponents }))
+  const signalsJson = JSON.parse(JSON.stringify(signals))
+  const coachingJson = coachingInsights ? JSON.parse(JSON.stringify(coachingInsights)) : null
+
+  // ── Step 5: Save results ──
 
   await prisma.replayResult.create({
     data: {
@@ -517,7 +631,7 @@ async function processReplaySession(sessionId: string): Promise<void> {
       repetitionRequests: metrics.repetitionRequests,
       avgResponseTimeSec: metrics.avgResponseTimeSec,
 
-      overallScore: aiResult.overallScore,
+      overallScore: calculateWeightedOverallScore(skillScores),
       clarityScore: aiResult.clarityScore,
       confidenceScore: aiResult.confidenceScore,
       engagementScore: aiResult.engagementScore,
@@ -533,12 +647,37 @@ async function processReplaySession(sessionId: string): Promise<void> {
         resolvedParticipantSpeaker
       ),
 
+      skillScores: skillScoresJson,
+      communicationSignals: signalsJson,
+      coachingInsights: coachingJson,
+
       modelUsed: process.env.BEDROCK_REPLAY_MODEL_ID || 'amazon.nova-pro-v1:0',
       promptTokens: aiResult.promptTokens,
       completionTokens: aiResult.completionTokens,
       processingTimeMs,
     },
   })
+
+  // ── Step 6: Auto-track Progress Pulse ──
+
+  if (session.meetingDate) {
+    try {
+      await saveSkillScoresToPulse(
+        session.userId,
+        sessionId,
+        'replay',
+        skillScores,
+        skillComponents,
+      )
+      await prisma.replaySession.update({
+        where: { id: sessionId },
+        data: { progressPulseStatus: 'tracked' },
+      })
+      console.log(`[replay] Progress Pulse auto-tracked for ${sessionId}`)
+    } catch (pulseErr: any) {
+      console.error(`[replay] Progress Pulse save failed for ${sessionId}:`, pulseErr.message)
+    }
+  }
 
   await prisma.replaySession.update({
     where: { id: sessionId },
@@ -553,12 +692,15 @@ async function processReplaySession(sessionId: string): Promise<void> {
 router.patch('/sessions/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params
-    const { participantName, meetingDate } = req.body
+    const { participantName, meetingDate, sessionName } = req.body
 
     const session = await prisma.replaySession.findUnique({ where: { id } })
     if (!session) return res.status(404).json({ error: 'Replay session not found' })
 
-    const data: { participantName?: string | null; meetingDate?: Date | null } = {}
+    const data: { participantName?: string | null; meetingDate?: Date | null; sessionName?: string | null } = {}
+    if (sessionName !== undefined) {
+      data.sessionName = sessionName?.trim() || null
+    }
     if (participantName !== undefined) {
       data.participantName = participantName?.trim() || null
     }
@@ -575,13 +717,13 @@ router.patch('/sessions/:id', async (req: Request, res: Response) => {
     }
 
     if (Object.keys(data).length === 0) {
-      return res.status(400).json({ error: 'Send participantName and/or meetingDate to update' })
+      return res.status(400).json({ error: 'Send sessionName, participantName and/or meetingDate to update' })
     }
 
     const updated = await prisma.replaySession.update({
       where: { id },
       data,
-      select: { id: true, participantName: true, meetingDate: true, status: true },
+      select: { id: true, sessionName: true, participantName: true, meetingDate: true, status: true },
     })
 
     res.json(updated)
@@ -639,6 +781,7 @@ router.get('/sessions/:id/results', async (req: Request, res: Response) => {
     res.json({
       session: {
         id: session.id,
+        sessionName: session.sessionName,
         meetingType: session.meetingType,
         userRole: session.userRole,
         focusAreas: session.focusAreas,
@@ -651,6 +794,8 @@ router.get('/sessions/:id/results', async (req: Request, res: Response) => {
       },
       uploads: session.uploadedFiles,
       result: session.result,
+      skillScores: session.result?.skillScores ?? null,
+      coachingInsights: session.result?.coachingInsights ?? null,
     })
   } catch (error) {
     console.error('Error fetching replay results:', error)
@@ -673,7 +818,7 @@ router.get('/sessions', async (req: Request, res: Response) => {
           },
         },
         uploadedFiles: {
-          select: { fileType: true, originalName: true },
+          select: { id: true, fileType: true, originalName: true },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -683,6 +828,27 @@ router.get('/sessions', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error listing replay sessions:', error)
     res.status(500).json({ error: 'Failed to list replay sessions' })
+  }
+})
+
+// ── GET /api/replay/sessions/:id/download/:fileId ──
+
+router.get('/sessions/:id/download/:fileId', async (req: Request, res: Response) => {
+  try {
+    const { id, fileId } = req.params
+    const file = await prisma.replayUpload.findFirst({
+      where: { id: fileId, replaySessionId: id },
+    })
+    if (!file) return res.status(404).json({ error: 'File not found' })
+
+    if (!existsSync(file.storedPath)) {
+      return res.status(404).json({ error: 'File no longer exists on disk' })
+    }
+
+    res.download(file.storedPath, file.originalName)
+  } catch (error) {
+    console.error('Error downloading file:', error)
+    res.status(500).json({ error: 'Failed to download file' })
   }
 })
 

@@ -14,6 +14,7 @@ export interface ReplayUploadResponse {
   uploads: unknown[]
   meetingDateMissing?: boolean
   meetingDateAutoFilled?: boolean
+  meetingDate?: string | null
 }
 
 export interface ReplaySessionStatus {
@@ -38,6 +39,7 @@ export interface ReplayUploadRecord {
 export interface ReplayResultData {
   session: {
     id: string
+    sessionName?: string | null
     meetingType: string
     userRole: string
     focusAreas: string[]
@@ -45,6 +47,7 @@ export interface ReplayResultData {
     meetingDate?: string | null
     participantName?: string | null
     status: string
+    progressPulseStatus?: string | null
     createdAt: string
   }
   uploads: ReplayUploadRecord[]
@@ -60,6 +63,13 @@ export interface ReplayResultData {
     vocabularyDiversity: number
     totalTurns: number
     speakingPercentage: number
+    hedgingCount: number
+    hedgingRate: number
+    interruptionCount: number
+    longestMonologueSec: number
+    questionsAsked: number
+    repetitionRequests: number
+    avgResponseTimeSec: number | null
     overallScore: number
     clarityScore: number
     confidenceScore: number
@@ -75,6 +85,33 @@ export interface ReplayResultData {
     completionTokens: number
     processingTimeMs: number
   }
+  skillScores?: {
+    scores: {
+      clarity: number
+      conciseness: number
+      confidence: number
+      structure: number
+      engagement: number
+      pacing: number
+      delivery: number | null
+      emotionalControl: number | null
+    }
+    components: Record<string, Record<string, number>>
+  } | null
+  coachingInsights?: {
+    topStrength: string
+    primaryImprovement: string
+    actionableAdvice: string
+    practiceExercise: string
+    decisionClarity?: {
+      decisionsDetected: number
+      actionItemsDetected: number
+      summary: string
+    }
+    topicFlow?: string
+    overallNarrative: string
+    error?: string
+  } | null
 }
 
 export function useReplaySession() {
@@ -288,6 +325,7 @@ export function useReplaySession() {
 
   return {
     sessionId,
+    setSessionId,
     status,
     results,
     error,

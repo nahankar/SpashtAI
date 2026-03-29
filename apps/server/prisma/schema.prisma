@@ -190,6 +190,11 @@ model SessionMetrics {
   deliveryMetrics      Json?   // Audio analysis: prosody, pauses, speech rate
   performanceInsights  Json?   // Comprehensive scoring and feedback
   processingStatus     Json?   // Track what's been processed
+
+  // Metrics Engine v2: skill-based scoring
+  skillScores          Json?   // 8 skill scores (clarity, confidence, etc.)
+  communicationSignals Json?   // Raw signal extraction output from spaCy/textstat
+  coachingInsights     Json?   // AI-generated coaching feedback
   
   createdAt            DateTime @default(now())
   updatedAt            DateTime @default(now()) @updatedAt
@@ -316,6 +321,11 @@ model ReplayResult {
   contextSpecificFeedback Json?
   keyMoments              Json?
   annotatedTranscript     Json?
+
+  // Metrics Engine v2: skill-based scoring (shared with Elevate)
+  skillScores          Json?
+  communicationSignals Json?
+  coachingInsights     Json?
 
   // Model / cost tracking
   modelUsed        String?

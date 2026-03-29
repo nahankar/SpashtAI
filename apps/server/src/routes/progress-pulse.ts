@@ -56,12 +56,30 @@ export async function getProgressPulseSummary(req: Request, res: Response) {
       ORDER BY r1.skill
     `
 
+    const skills = latestPerSkill.map((row) => row.skill)
+
+    const historyRows = skills.length > 0
+      ? await prisma.progressPulse.findMany({
+          where: { userId, skill: { in: skills } },
+          orderBy: { recordedAt: 'asc' },
+          select: { skill: true, score: true, recordedAt: true },
+          take: skills.length * 10,
+        })
+      : []
+
+    const historyBySkill: Record<string, { score: number; date: string }[]> = {}
+    for (const row of historyRows) {
+      const arr = historyBySkill[row.skill] || (historyBySkill[row.skill] = [])
+      arr.push({ score: Number(row.score), date: row.recordedAt.toISOString().slice(0, 10) })
+    }
+
     const summary = latestPerSkill.map((row) => ({
       skill: row.skill,
       currentScore: Number(row.latest_score),
       previousScore: row.prev_score != null ? Number(row.prev_score) : null,
       delta: row.prev_score != null ? Number(row.latest_score) - Number(row.prev_score) : null,
       totalSessions: Number(row.count),
+      history: (historyBySkill[row.skill] || []).slice(-10),
     }))
 
     res.json({ summary })

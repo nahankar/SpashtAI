@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Progress } from '../ui/progress';
-import { Clock, MessageSquare, Zap, TrendingUp, Download, RefreshCw } from 'lucide-react';
+import { Clock, MessageSquare, Zap, TrendingUp, Download, RefreshCw, FileText, Loader2 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { getAuthHeaders } from '@/lib/api-client';
 
@@ -32,9 +32,11 @@ interface SessionMetricsProps {
     totalTurns: number;
   };
   onDownloadTranscript?: (format: 'json' | 'txt') => void;
+  onExportPdf?: () => Promise<void>;
+  pdfLoading?: boolean;
 }
 
-export function SessionMetrics({ sessionId, metrics, onDownloadTranscript }: SessionMetricsProps) {
+export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExportPdf, pdfLoading }: SessionMetricsProps) {
   const [isReprocessing, setIsReprocessing] = useState(false);
   const [reprocessStatus, setReprocessStatus] = useState<string>('');
 
@@ -163,6 +165,17 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript }: Ses
                 <RefreshCw className={`h-4 w-4 mr-2 ${isReprocessing ? 'animate-spin' : ''}`} />
                 {isReprocessing ? 'Reprocessing...' : 'Reprocess Audio'}
               </Button>
+              {onExportPdf && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onExportPdf}
+                  disabled={pdfLoading}
+                >
+                  {pdfLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileText className="h-4 w-4 mr-2" />}
+                  Export PDF
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"

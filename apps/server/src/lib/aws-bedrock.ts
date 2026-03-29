@@ -119,7 +119,7 @@ Analyze this conversation and provide your assessment. You MUST respond with val
     { "text": "<description of moment>", "type": "strength|weakness|turning_point" }
   ],
   "annotatedTranscript": [
-    { "speaker": "<EXACT speaker name from transcript - never change or reassign>", "text": "<segment text>", "annotations": ["filler_word", "strong_statement", "hedging", "key_point", "action_item", "decision", "clarification", "recommendation", "update"] }
+    { "speaker": "<EXACT speaker name from transcript - never change or reassign>", "text": "<segment text>", "annotations": ["filler_word", "strong_statement", "hedging", "key_point", "action_item", "decision", "clarification", "recommendation", "suggestion", "conversation_control", "update"] }
   ]
 }
 
@@ -127,6 +127,38 @@ CONTEXT-SPECIFIC EVALUATION CRITERIA:
 ${contextCriteria}
 
 Provide 3-5 strengths, 3-5 improvements, and 3 recommendations. Keep annotatedTranscript to the 15 most notable segments.
+
+ANNOTATION CLASSIFICATION RULES (follow strictly):
+
+action_item — A clear task to be completed AFTER the meeting. Only use if ALL of these are present:
+  - A specific task or deliverable
+  - A future action (not immediate)
+  - Often an owner/responsible person
+  Examples: "Sai will send the architecture document.", "I'll check with DevOps and revert."
+  NOT action items (do NOT label these as action_item):
+  - "Scroll down" — this is conversation_control
+  - "You're on mute" — this is conversation_control
+  - "Let me stop recording" — this is conversation_control
+  - "Open the EC2 console" — this is conversation_control
+  - "Go to the next slide" — this is conversation_control
+
+conversation_control — Statements managing meeting flow, UI navigation, or screen-sharing instructions.
+  Examples: "You may want to scroll.", "Let me share my screen.", "Can everyone see this?", "Let's move on."
+
+suggestion — Ideas or recommendations without explicit task ownership or commitment.
+  Examples: "Maybe we should switch to EC2.", "You could send it in a table.", "It might be worth exploring Lambda."
+
+decision — An explicit or implicit agreement on direction.
+  Examples: "We'll go with option A.", "Let's proceed with the current plan."
+
+clarification — A question or statement seeking understanding or confirmation.
+strong_statement — A confident assertion, opinion, or recommendation backed by reasoning.
+hedging — Language showing uncertainty: "I think", "maybe", "probably", "sort of".
+key_point — An important substantive point in the discussion.
+recommendation — A specific suggestion for action or approach.
+filler_word — Excessive use of um, uh, like, you know, basically, etc.
+update — Status or progress updates.
+
 IMPORTANT for annotatedTranscript:
 - ONLY include segments spoken by the participant being analyzed (${context.participantName || 'the primary speaker'}). Do NOT include segments from other speakers.
 - Always preserve the ORIGINAL speaker name exactly as it appears in the transcript.

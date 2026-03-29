@@ -28,6 +28,7 @@ from livekit.agents import (
 )
 from livekit.agents import AgentSession, Agent
 from livekit.plugins import aws
+from exercise_templates import get_exercise_instructions
 
 # Import analytics components (includes basic + advanced metrics)
 try:
@@ -41,6 +42,20 @@ except ImportError as e:
     logger_init.warning(f"⚠️ Advanced analytics not available: {e}")
     logger_init.warning("⚠️ Install with: pip install spacy praat-parselmouth && python -m spacy download en_core_web_lg")
 
+# Start the Signal Extraction API (Metrics Engine v2)
+# Guard: only start in the main process (LiveKit dev mode spawns child processes via multiprocessing)
+import multiprocessing as _mp
+if _mp.current_process().name == "MainProcess":
+    try:
+        from analytics.signal_api import start_signal_api
+        start_signal_api(blocking=False)
+        logger_init = logging.getLogger("main")
+        logger_init.info("✅ Signal extraction API started (spaCy + textstat)")
+    except ImportError as e:
+        logger_init = logging.getLogger("main")
+        logger_init.warning(f"⚠️ Signal API not available: {e}")
+        logger_init.warning("⚠️ Install with: pip install spacy textstat && python -m spacy download en_core_web_md")
+
 load_dotenv()
 
 logger = logging.getLogger("spashtai-agent")
@@ -49,6 +64,7 @@ logger.setLevel(logging.INFO)
 # Server configuration
 SERVER_URL = os.getenv("SERVER_URL", "http://localhost:4000")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+INTERNAL_AGENT_TOKEN = os.getenv("INTERNAL_AGENT_TOKEN", "dev-internal-agent-token")
 
 # Timezone configuration - Indian Standard Time
 IST = pytz.timezone('Asia/Kolkata')
@@ -75,11 +91,16 @@ async def fetch_session_history(session_id: str, max_messages: int = 12) -> list
     Fetch prior conversation messages for a session from server.
     Returns the most recent messages in chronological order.
     """
-    url = f"{SERVER_URL}/sessions/{session_id}/conversation"
+    url = f"{SERVER_URL}/internal/sessions/{session_id}/conversation"
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=5.0)) as response:
+            async with session.get(
+                url,
+                headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
+                timeout=aiohttp.ClientTimeout(total=5.0),
+            ) as response:
                 if response.status != 200:
+                    logger.warning("⚠️ History lookup failed for %s: HTTP %s", session_id, response.status)
                     return []
                 payload = await response.json()
                 messages = payload.get("messages", [])
@@ -175,7 +196,8 @@ class ConversationLogger:
             }
             
             async with self.session.post(
-                f"{SERVER_URL}/sessions/{self.session_id}/messages",
+                f"{SERVER_URL}/internal/sessions/{self.session_id}/messages",
+                headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
                 json=payload,
                 timeout=aiohttp.ClientTimeout(total=5.0)
             ) as response:
@@ -809,10 +831,11 @@ async def entrypoint(ctx: JobContext):
     session_id = None
 
     # 1) Try room metadata first (most reliable for resume flows)
+    room_meta: dict = {}
     try:
         if hasattr(ctx, 'room') and getattr(ctx.room, 'metadata', None):
-            room_metadata = json.loads(ctx.room.metadata)
-            session_id = room_metadata.get('sessionId')
+            room_meta = json.loads(ctx.room.metadata)
+            session_id = room_meta.get('sessionId')
             if session_id:
                 logger.info(f"📦 Session ID loaded from room metadata: {session_id}")
     except Exception as e:
@@ -923,14 +946,60 @@ async def entrypoint(ctx: JobContext):
             "text_output_tokens": 0,
         }
         
-        # Create Agent with instructions (proven pattern)
+        # Build personalized agent instructions from room metadata
+        user_name = room_meta.get('userName', '').strip() or None
+        focus_area = room_meta.get('focusArea', '').strip() or None
+        focus_context = room_meta.get('focusContext', '').strip() or None
+        session_name = room_meta.get('sessionName', '').strip() or None
+
+        logger.info(f"👤 User name: {user_name or '(unknown)'}, focus: {focus_area or 'general'}, context: {focus_context or '(none)'}")
+
         base_instructions = (
-            "You are a voice assistant for SpashtAI, a platform for voice AI interviews. "
+            "You are a voice AI coach for SpashtAI, a platform that helps people become better communicators. "
             "Your interface with users will be voice. Use short and concise responses, "
-            "and avoid unpronounceable punctuation. Be helpful, encouraging, and professional. "
-            "When conducting interviews, ask thoughtful questions and provide constructive feedback. "
-            "You are powered by Amazon Nova Sonic."
+            "and avoid unpronounceable punctuation. Be warm, encouraging, and professional."
         )
+
+        # Personalization: use the user's name naturally
+        if user_name:
+            base_instructions += (
+                f"\n\nThe user's name is {user_name}. "
+                f"Greet them by name at the start (e.g. 'Hello {user_name}, welcome to SpashtAI!'). "
+                "Use their name naturally once in a while during the conversation — "
+                "like a real coach would — but don't overdo it. "
+                "For example, use it when giving praise, asking a reflective question, "
+                "or wrapping up a topic."
+            )
+
+        # Session scope: adapt based on how the user arrived
+        exercise_instructions = ""
+        if focus_area:
+            exercise_instructions = get_exercise_instructions(focus_area, focus_context)
+
+        if exercise_instructions:
+            base_instructions += f"\n\n{exercise_instructions}"
+        elif focus_context:
+            base_instructions += (
+                f"\n\nThis session was started from a Replay analysis recommendation. "
+                f"The specific area to work on is: \"{focus_context}\". "
+                "Focus the session on this topic. Your greeting should acknowledge "
+                "what they're here to practice (e.g. 'Let's work on your pacing today' "
+                "rather than a generic welcome). Ask targeted questions and provide "
+                "feedback specific to this skill area."
+            )
+        elif focus_area:
+            base_instructions += (
+                f"\n\nThe user chose \"{focus_area}\" as their focus area. "
+                "Tailor your coaching, questions, and feedback to this area. "
+                "Mention it in your greeting so they know you're aligned."
+            )
+        else:
+            base_instructions += (
+                "\n\nThis is a general practice session with no specific focus area. "
+                "Ask the user what they'd like to work on — it could be interview prep, "
+                "pitch practice, presentation skills, or anything communication-related. "
+                "Be open and let them guide the direction."
+            )
 
         combined_instructions = (
             f"{base_instructions}\n\n{resume_context}"

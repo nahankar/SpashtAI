@@ -7,12 +7,18 @@ import { getFocusAreaLabel } from '@/lib/focus-areas'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 
+interface PulseHistoryPoint {
+  score: number
+  date: string
+}
+
 interface PulseSummaryItem {
   skill: string
   currentScore: number
   previousScore: number | null
   delta: number | null
   totalSessions: number
+  history?: PulseHistoryPoint[]
 }
 
 function scoreColor(score: number): string {
@@ -67,6 +73,24 @@ function buildPulseSummary(items: PulseSummaryItem[]): string {
   return parts.join('. ') + '.'
 }
 
+function buildPredictiveInsight(items: PulseSummaryItem[]): string | null {
+  if (items.length < 3) return null
+
+  const sorted = [...items].sort((a, b) => a.currentScore - b.currentScore)
+  const weakest = sorted[0]
+  if (!weakest || weakest.currentScore >= 8) return null
+
+  const avgOthers = items
+    .filter((i) => i.skill !== weakest.skill)
+    .reduce((sum, i) => sum + i.currentScore, 0) / (items.length - 1)
+
+  const targetScore = Math.min(10, weakest.currentScore + 2)
+  const projectedOverall = ((avgOthers * (items.length - 1)) + targetScore) / items.length
+
+  const skillName = getFocusAreaLabel(weakest.skill).toLowerCase()
+  return `If your ${skillName} improves from ${weakest.currentScore.toFixed(1)} to ${targetScore.toFixed(1)}, your average communication score could reach ${projectedOverall.toFixed(1)}.`
+}
+
 function getFocusSkill(items: PulseSummaryItem[]): string | null {
   const needsFocus = items
     .filter((i) => i.currentScore < 7)
@@ -94,6 +118,28 @@ function DeltaBadge({ delta }: { delta: number | null }) {
     <span className="inline-flex items-center gap-0.5 text-xs text-red-500">
       <TrendingDown className="h-3 w-3" /> {delta.toFixed(1)}
     </span>
+  )
+}
+
+function Sparkline({ points, color, width = 80, height = 28 }: { points: number[]; color: string; width?: number; height?: number }) {
+  if (points.length < 2) return null
+  const min = Math.min(...points, 0)
+  const max = Math.max(...points, 10)
+  const range = max - min || 1
+  const pad = 2
+  const innerW = width - pad * 2
+  const innerH = height - pad * 2
+  const coords = points.map((v, i) => ({
+    x: pad + (i / (points.length - 1)) * innerW,
+    y: pad + innerH - ((v - min) / range) * innerH,
+  }))
+  const polyline = coords.map((c) => `${c.x},${c.y}`).join(' ')
+  const last = coords[coords.length - 1]
+  return (
+    <svg width={width} height={height} className="overflow-visible">
+      <polyline points={polyline} fill="none" stroke={color} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={last.x} cy={last.y} r={2.5} fill={color} />
+    </svg>
   )
 }
 
@@ -148,6 +194,7 @@ export function ProgressPulseCard() {
 
   const pulseSummary = buildPulseSummary(summary)
   const focusSkill = getFocusSkill(summary)
+  const predictiveInsight = buildPredictiveInsight(summary)
 
   return (
     <Card>
@@ -169,6 +216,12 @@ export function ProgressPulseCard() {
               <span className="text-xs font-medium text-primary">
                 Focus area: {getFocusAreaLabel(focusSkill)}
               </span>
+            </div>
+          )}
+          {predictiveInsight && (
+            <div className="mt-2 flex items-start gap-1.5 rounded-md border border-blue-200 bg-blue-50/60 px-3 py-2">
+              <TrendingUp className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-500" />
+              <p className="text-xs text-blue-800">{predictiveInsight}</p>
             </div>
           )}
         </div>
@@ -207,6 +260,17 @@ export function ProgressPulseCard() {
                     </p>
                   </div>
                 </div>
+                {item.history && item.history.length >= 2 && (
+                  <div className="flex items-center gap-2 pt-1 border-t border-border/50">
+                    <Sparkline
+                      points={item.history.map((h) => h.score)}
+                      color={item.currentScore >= 8 ? '#22c55e' : item.currentScore >= 5 ? '#f59e0b' : '#ef4444'}
+                    />
+                    <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                      {item.history[0].date} \u2192 {item.history[item.history.length - 1].date}
+                    </span>
+                  </div>
+                )}
                 <Link
                   to={`/elevate?focus=${item.skill}&newSession=true`}
                   className="flex items-center justify-center gap-1.5 rounded-md border border-primary/20 bg-primary/5 px-2 py-1.5 text-xs font-medium text-primary hover:bg-primary/10 transition-colors"
