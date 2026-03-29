@@ -199,3 +199,27 @@ Remove all development-only transcription code paths and revert to production-sa
 **Priority:** High (before production)
 
 - `RoomCompositeEgressRecorder` and `EgressRecorder` use placeholder `s3://your-bucket/` paths. Replace with actual S3 bucket name and configure IAM permissions.
+
+### 19) Refactor: Restructure Routes into Subdirectories
+
+**Priority:** Low (when route count exceeds ~15 files)
+
+- Current flat `routes/` folder has 8-9 files — still manageable.
+- When it grows, reorganize into `routes/replay/`, `routes/elevate/`, `routes/analytics/`, `routes/admin/`.
+- Update all imports in `index.ts`.
+
+### 20) Refactor: Extract ReplayService from replay.ts
+
+**Priority:** Medium (before adding second replay entry point)
+
+- `replay.ts` currently handles upload, transcription, parsing, signal extraction, scoring, insight generation, and DB writes.
+- Extract into a `ReplayService` or `ReplayPipeline` class that the route calls.
+- Makes logic reusable for future webhook or API-only replay triggers.
+
+### 21) Infrastructure: Async Replay Processing Queue
+
+**Priority:** Low (when concurrent users cause blocking)
+
+- Replay processing is synchronous (~30-60s). Fine for single-user, blocks at scale.
+- Move to background worker with job queue (e.g., BullMQ + Redis).
+- Route returns job ID immediately, frontend polls for status (already has status UI).

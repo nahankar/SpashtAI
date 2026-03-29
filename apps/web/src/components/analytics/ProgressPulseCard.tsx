@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { TrendingUp, TrendingDown, Minus, Mic, Target } from 'lucide-react'
+import { TrendingUp, TrendingDown, Minus, Mic, Target, Activity } from 'lucide-react'
 import { getAuthHeaders } from '@/lib/api-client'
 import { getFocusAreaLabel } from '@/lib/focus-areas'
 
@@ -195,7 +195,10 @@ export function ProgressPulseCard() {
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">My Progress Pulse</CardTitle>
+          <div className="flex items-center gap-3">
+            <Activity className="h-8 w-8 text-emerald-500 shrink-0" />
+            <CardTitle>My Progress Pulse</CardTitle>
+          </div>
         </CardHeader>
         <CardContent className="py-4 text-center">
           <p className="text-sm text-destructive">{error}</p>
@@ -214,7 +217,10 @@ export function ProgressPulseCard() {
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">My Progress Pulse</CardTitle>
+          <div className="flex items-center gap-3">
+            <Activity className="h-8 w-8 text-emerald-500 shrink-0" />
+            <CardTitle>My Progress Pulse</CardTitle>
+          </div>
           <CardDescription>
             Complete a Replay analysis or Elevate session and choose to track it.
           </CardDescription>
@@ -233,7 +239,10 @@ export function ProgressPulseCard() {
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-base">My Progress Pulse</CardTitle>
+        <div className="flex items-center gap-3">
+          <Activity className="h-8 w-8 text-emerald-500 shrink-0" />
+          <CardTitle>My Progress Pulse</CardTitle>
+        </div>
         <CardDescription>
           {summary.length} skill{summary.length !== 1 ? 's' : ''} tracked across your sessions. Trends compare your
           latest score against the average of your last 3 sessions to filter out noise.

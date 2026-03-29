@@ -19,8 +19,10 @@ export function Home() {
           {/* Replay Card */}
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader>
-              <Upload className="h-10 w-10 text-blue-500" />
-              <CardTitle className="mt-2">Replay</CardTitle>
+              <div className="flex items-center gap-3">
+                <Upload className="h-8 w-8 text-blue-500 shrink-0" />
+                <CardTitle>Replay</CardTitle>
+              </div>
               <CardDescription>
                 Upload past recordings or transcripts and get AI-powered analysis and feedback.
               </CardDescription>
@@ -49,8 +51,10 @@ export function Home() {
           {/* Elevate Card */}
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader>
-              <Mic className="h-10 w-10 text-indigo-500" />
-              <CardTitle className="mt-2">Elevate</CardTitle>
+              <div className="flex items-center gap-3">
+                <Mic className="h-8 w-8 text-indigo-500 shrink-0" />
+                <CardTitle>Elevate</CardTitle>
+              </div>
               <CardDescription>
                 Practice live with an AI coach and elevate your communication skills in real time.
               </CardDescription>
