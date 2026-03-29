@@ -114,31 +114,48 @@ async def fetch_session_history(session_id: str, max_messages: int = 12) -> list
         return []
 
 
-async def fetch_coaching_context(session_id: str, focus_area: str) -> dict | None:
+async def fetch_coaching_context(session_id: str, focus_area: str, max_retries: int = 3) -> dict | None:
     """
     Fetch rich coaching context (skill scores, metrics, example phrases, etc.)
     from the server for personalized Elevate exercises.
+    Retries on failure since the session DB record may not exist yet.
     """
     url = f"{SERVER_URL}/internal/coaching-context"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                url,
-                params={"sessionId": session_id, "focusArea": focus_area},
-                headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
-                timeout=aiohttp.ClientTimeout(total=5.0),
-            ) as response:
-                if response.status != 200:
-                    logger.warning("⚠️ Coaching context fetch failed: HTTP %s", response.status)
-                    return None
-                data = await response.json()
-                logger.info("📊 Coaching context fetched: %d skill summaries, replay=%s",
-                    len(data.get("skillSummaries", {})),
-                    "yes" if data.get("replayInsights") else "no")
-                return data
-    except Exception as e:
-        logger.warning("⚠️ Failed to fetch coaching context: %s", e)
-        return None
+    for attempt in range(max_retries):
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url,
+                    params={"sessionId": session_id, "focusArea": focus_area},
+                    headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
+                    timeout=aiohttp.ClientTimeout(total=5.0),
+                ) as response:
+                    if response.status == 404 and attempt < max_retries - 1:
+                        logger.info("⏳ Session not found yet, retrying in %ds... (attempt %d/%d)",
+                            attempt + 1, attempt + 1, max_retries)
+                        await asyncio.sleep(attempt + 1)
+                        continue
+                    if response.status != 200:
+                        logger.warning("⚠️ Coaching context fetch failed: HTTP %s (attempt %d/%d)",
+                            response.status, attempt + 1, max_retries)
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(attempt + 1)
+                            continue
+                        return None
+                    data = await response.json()
+                    skills = data.get("skillSummaries", {})
+                    replay = data.get("replayInsights")
+                    logger.info("📊 Coaching context loaded: %d skills, replay=%s, examples=%d",
+                        len(skills),
+                        "yes" if replay else "no",
+                        len(replay.get("examplePhrases", [])) if replay else 0)
+                    return data
+        except Exception as e:
+            logger.warning("⚠️ Coaching context fetch error (attempt %d/%d): %s",
+                attempt + 1, max_retries, e)
+            if attempt < max_retries - 1:
+                await asyncio.sleep(attempt + 1)
+    return None
 
 
 def build_resume_context(history_messages: list[dict]) -> str:

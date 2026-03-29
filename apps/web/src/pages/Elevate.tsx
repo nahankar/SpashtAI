@@ -504,26 +504,11 @@ export function Elevate() {
 
   const handleJoin = useCallback(async () => {
     try {
-      // 1. Create session ID first
+      // 1. Create session ID and room name
       const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-      
-      // 2. Generate unique room name per session to avoid conflicts on hard refresh
       const uniqueRoomName = roomName || `room_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
 
-      // 3. Get LiveKit token with session context
-      const u = new URL(`${API_BASE_URL}/livekit/token`)
-      u.searchParams.set('identity', identity)
-      u.searchParams.set('room', uniqueRoomName)
-      u.searchParams.set('sessionId', newSessionId)
-      u.searchParams.set('userName', user?.firstName || user?.email?.split('@')[0] || '')
-      if (focusArea) u.searchParams.set('focusArea', focusArea)
-      if (inboundContext) u.searchParams.set('focusContext', inboundContext)
-      if (elevateSessionName.trim()) u.searchParams.set('sessionName', elevateSessionName.trim())
-      const res = await fetch(u.toString())
-      if (!res.ok) throw new Error('Failed to get token')
-      const json = await res.json()
-      
-      // 3. Create session in database
+      // 2. Create session in database FIRST (agent needs this for coaching context lookup)
       const sessionResponse = await fetch(`${API_BASE_URL}/sessions`, {
         method: 'POST',
         headers: getAuthHeaders(),
@@ -540,12 +525,25 @@ export function Elevate() {
       if (!sessionResponse.ok) {
         console.warn('Failed to create session in database, continuing anyway')
       }
+
+      // 3. Get LiveKit token (creates room — agent will start after this)
+      const u = new URL(`${API_BASE_URL}/livekit/token`)
+      u.searchParams.set('identity', identity)
+      u.searchParams.set('room', uniqueRoomName)
+      u.searchParams.set('sessionId', newSessionId)
+      u.searchParams.set('userName', user?.firstName || user?.email?.split('@')[0] || '')
+      if (focusArea) u.searchParams.set('focusArea', focusArea)
+      if (inboundContext) u.searchParams.set('focusContext', inboundContext)
+      if (elevateSessionName.trim()) u.searchParams.set('sessionName', elevateSessionName.trim())
+      const res = await fetch(u.toString())
+      if (!res.ok) throw new Error('Failed to get token')
+      const json = await res.json()
       
       // 4. Set up LiveKit connection
       setToken(json.token)
       setUrl(json.url)
       setSessionId(newSessionId)
-      setRoomName(uniqueRoomName) // Store the generated room name
+      setRoomName(uniqueRoomName)
       resetMetrics()
     } catch (error) {
       console.error('Error joining session:', error)

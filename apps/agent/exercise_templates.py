@@ -331,6 +331,10 @@ def get_exercise_instructions(
 
     # Rich coaching context from Replay analysis + Progress Pulse
     if coaching_context:
+        lines.append("IMPORTANT: You DO have access to this user's communication data from their past meetings.")
+        lines.append("You MUST reference these specific numbers and examples in your coaching.")
+        lines.append("When the user asks if you have their data, say YES and cite the specifics below.")
+        lines.append("")
         lines.append("USER PROFILE (from their recent meeting analyses):")
         lines.append("")
 
