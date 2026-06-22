@@ -223,3 +223,37 @@ Remove all development-only transcription code paths and revert to production-sa
 - Replay processing is synchronous (~30-60s). Fine for single-user, blocks at scale.
 - Move to background worker with job queue (e.g., BullMQ + Redis).
 - Route returns job ID immediately, frontend polls for status (already has status UI).
+
+---
+
+## Categorized Backlog (Rolling)
+
+### Security & Access Control
+
+#### 22) Security: Scoped Internal JWT for Agent-to-Server Calls
+
+**Priority:** High
+
+- Replace broad shared `x-internal-agent-token` usage with short-lived signed internal JWTs.
+- Include narrow claims such as:
+  - `sessionId`
+  - allowed route/action scope (e.g. `metrics:write`, `transcript:write`, `audio:write`)
+  - `exp` (very short expiry)
+  - optional request nonce/jti for replay protection
+- Enforce claim checks at endpoint level to reduce blast radius if a token leaks.
+- Keep shared-secret fallback only for explicit local development paths.
+
+**Why this belongs here**
+- This is the concrete follow-up to item #5 ("Strengthen Internal Agent Token") and addresses token-leak blast-radius concerns.
+
+### Product & UX
+
+- Existing product work items remain in #13, #14, #15, #16, #17.
+
+### Infrastructure & Reliability
+
+- Existing infra work items remain in #10, #11, #12, #18, #21.
+
+### Refactor & Maintainability
+
+- Existing refactor/code-quality work items remain in #7, #8, #9, #19, #20.

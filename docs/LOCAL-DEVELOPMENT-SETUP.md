@@ -20,9 +20,9 @@ SpashtAI consists of **4 services** that need to be running for the full applica
            │ Prisma ORM               │ Agent Worker
            ▼                          ▼
 ┌──────────────────────┐   ┌──────────────────────────────┐
-│   PostgreSQL (Aiven)  │   │   LiveKit Agent (Python)     │
-│   Cloud-hosted DB     │   │   apps/agent/main.py         │
-│                       │   │   (AWS Bedrock / NovaSonic)  │
+│   PostgreSQL (Docker) │   │   LiveKit Agent (Python)     │
+│   localhost:5432      │   │   apps/agent/main.py         │
+│   infra/postgres      │   │   (local pipeline or Bedrock)│
 └───────────────────────┘   └──────────────────────────────┘
 ```
 
@@ -30,10 +30,42 @@ SpashtAI consists of **4 services** that need to be running for the full applica
 
 - **Node.js** >= 18 (v24 confirmed working)
 - **Python** 3.12 (for LiveKit agent)
-- **Docker Desktop** (or Rancher Desktop) for LiveKit server
+- **Docker Desktop** (or Colima) for LiveKit server and PostgreSQL
 - **npm** (comes with Node.js)
 
 ## Services & How to Start Each
+
+### 0. PostgreSQL (Docker)
+
+**What it does:** Primary database for users, sessions, Replay results, admin config, feature flags.
+
+**Start:**
+```bash
+npm run dev:postgres
+```
+
+Or manually:
+```bash
+docker compose -f infra/postgres/docker-compose.yml up -d
+```
+
+**Connection (default):** `postgresql://postgres:postgres@localhost:5432/spashtai?schema=public`
+
+Set this as `DATABASE_URL` in `apps/server/.env`. On first clone, apply the schema:
+```bash
+cd apps/server && npx prisma db push
+```
+
+**Default admin** (seeded on server start): `admin@spasht.ai` / `nimda` (or `ADMIN_PASSWORD` in `.env`).
+
+**Production:** Same Postgres + Prisma schema on **EC2** (or RDS later) — only change `DATABASE_URL` host/credentials.
+
+**Stop:**
+```bash
+npm run dev:postgres:stop
+```
+
+---
 
 ### 1. LiveKit Server (Docker container)
 
@@ -76,7 +108,7 @@ npm run dev:server
 **Key env vars:**
 | Variable | Purpose |
 |---|---|
-| `DATABASE_URL` | PostgreSQL connection (Aiven cloud) |
+| `DATABASE_URL` | Local PostgreSQL (`localhost:5432/spashtai`) |
 | `LIVEKIT_URL` | LiveKit server address |
 | `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | LiveKit auth |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | AWS Bedrock for Replay AI analysis |
@@ -149,9 +181,13 @@ INFO  livekit.agents  registered worker  {"id": "AW_...", "url": "ws://localhost
 
 ## Quick Start (All Services)
 
-Open **4 terminal tabs** and run:
+Open **5 terminal tabs** (or fewer if Docker services already running):
 
 ```bash
+# Terminal 0 — PostgreSQL (skip if spashtai-postgres already running)
+npm run dev:postgres
+cd apps/server && npx prisma db push   # first time only
+
 # Terminal 1 — LiveKit Server (skip if Docker container already running)
 docker start livekit-server
 
@@ -176,12 +212,12 @@ cd apps/agent && bash run_agent.sh
 
 ## Feature Dependency Matrix
 
-| Feature | Backend | Frontend | LiveKit Server | Agent Worker |
-|---|---|---|---|---|
-| **Login / Auth** | Required | Required | - | - |
-| **Replay** (transcript analysis) | Required | Required | - | - |
-| **Elevate** (live AI coaching) | Required | Required | Required | Required |
-| **History / My Sessions** | Required | Required | - | - |
+| Feature | Postgres | Backend | Frontend | LiveKit Server | Agent Worker |
+|---|---|---|---|---|---|
+| **Login / Auth** | Required | Required | Required | - | - |
+| **Replay** (transcript analysis) | Required | Required | Required | - | - |
+| **Elevate** (live AI coaching) | Required | Required | Required | Required | Required |
+| **History / My Sessions** | Required | Required | Required | - | - |
 
 ## Troubleshooting
 
@@ -206,12 +242,18 @@ cd apps/agent && bash run_agent.sh
    - `apps/agent/.env`
 
 ### Database issues
-The PostgreSQL database is hosted on Aiven cloud. Ensure you have internet connectivity. Connection string is in `apps/server/.env`.
+PostgreSQL runs locally in Docker (`spashtai-postgres` on port **5432**). Ensure the container is up:
+```bash
+npm run dev:postgres
+docker ps | grep spashtai-postgres
+```
 
-To push schema changes:
+Apply or update schema:
 ```bash
 cd apps/server && npx prisma db push
 ```
+
+Register new users at http://localhost:5173/auth/register — local DB is separate from any old cloud data.
 
 ### Frontend port conflict
 If port 5173 is taken, Vite auto-assigns the next available port (5174, etc.). Check the terminal output for the actual URL.

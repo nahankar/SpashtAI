@@ -24,6 +24,10 @@ import { FeatureAnalytics } from '@/pages/admin/FeatureAnalytics'
 import { SystemHealth } from '@/pages/admin/SystemHealth'
 import { AdminTickets } from '@/pages/admin/Tickets'
 import { AdminTicketDetail } from '@/pages/admin/AdminTicketDetail'
+import { VoiceBackend as AdminVoiceBackend } from '@/pages/admin/VoiceBackend'
+import { FeatureFlagsAdmin } from '@/pages/admin/FeatureFlags'
+import { FeatureFlagsProvider, useFeatureFlags } from '@/contexts/FeatureFlagsContext'
+import { FeatureGate } from '@/components/auth/FeatureGate'
 
 function AppBreadcrumbs() {
   const location = useLocation()
@@ -131,7 +135,8 @@ function UserDropdown() {
 }
 
 function Navbar() {
-  const { user, isAdmin, logout } = useAuth()
+  const { user, isAdmin } = useAuth()
+  const { isEnabled } = useFeatureFlags()
 
   return (
     <header className="border-b bg-card/50 backdrop-blur supports-[backdrop-filter]:bg-card/50">
@@ -142,8 +147,12 @@ function Navbar() {
         <nav className="flex items-center gap-4 text-sm">
           {user ? (
             <>
-              <Link className="hover:underline" to="/replay">Replay</Link>
-              <Link className="hover:underline" to="/elevate">Elevate</Link>
+              {isEnabled('replay') && (
+                <Link className="hover:underline" to="/replay">Replay</Link>
+              )}
+              {isEnabled('elevate') && (
+                <Link className="hover:underline" to="/elevate">Elevate</Link>
+              )}
               <Link className="hover:underline" to="/progress">My Progress Pulse</Link>
               <Link className="hover:underline" to="/history">My Sessions</Link>
               {isAdmin && (
@@ -187,19 +196,25 @@ function AppRoutes() {
           <Route path="/replay" element={
             <main className="mx-auto max-w-6xl px-6 py-8">
               <AppBreadcrumbs />
-              <Replay />
+              <FeatureGate feature="replay">
+                <Replay />
+              </FeatureGate>
             </main>
           } />
           <Route path="/replay/:id" element={
             <main className="mx-auto max-w-6xl px-6 py-8">
               <AppBreadcrumbs />
-              <ReplayResults />
+              <FeatureGate feature="replay">
+                <ReplayResults />
+              </FeatureGate>
             </main>
           } />
           <Route path="/elevate" element={
             <main className="mx-auto max-w-6xl px-6 py-8">
               <AppBreadcrumbs />
-              <Elevate />
+              <FeatureGate feature="elevate">
+                <Elevate />
+              </FeatureGate>
             </main>
           } />
           <Route path="/progress" element={
@@ -250,6 +265,8 @@ function AppRoutes() {
             <Route path="tickets/:id" element={<AdminTicketDetail />} />
             <Route path="analytics" element={<FeatureAnalytics />} />
             <Route path="system" element={<SystemHealth />} />
+            <Route path="voice-backend" element={<AdminVoiceBackend />} />
+            <Route path="features" element={<FeatureFlagsAdmin />} />
           </Route>
         </Route>
       </Routes>
@@ -260,11 +277,13 @@ function AppRoutes() {
 function App() {
   return (
     <BrowserRouter>
-      <AuthProvider>
-        <div className="min-h-screen bg-background text-foreground">
-          <AppRoutes />
-        </div>
-      </AuthProvider>
+      <FeatureFlagsProvider>
+        <AuthProvider>
+          <div className="min-h-screen bg-background text-foreground">
+            <AppRoutes />
+          </div>
+        </AuthProvider>
+      </FeatureFlagsProvider>
     </BrowserRouter>
   )
 }

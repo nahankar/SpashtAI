@@ -18,7 +18,10 @@ import {
 import { calculateReplayMetrics, findMatchingSpeaker } from '../lib/replay-metrics'
 import { analyzeTranscript } from '../lib/aws-bedrock'
 import { calculateSkillScores, calculateWeightedOverallScore, type TextSignals } from '../analytics/skillScores'
-import { generateCoachingInsights } from '../analytics/insightGenerator'
+import {
+  generateCoachingInsights,
+  resolveReplayUploadAudio,
+} from '../analytics/insightGenerator'
 import { saveSkillScoresToPulse } from '../analytics/progressPulse'
 import {
   uploadToS3,
@@ -34,7 +37,9 @@ import { transcribeStreamingFromFile } from '../lib/aws-transcribe-streaming'
 const isDev = process.env.NODE_ENV !== 'production'
 
 const SIGNAL_API_URL = process.env.SIGNAL_API_URL || 'http://localhost:4001'
-const INTERNAL_AGENT_TOKEN = process.env.INTERNAL_AGENT_TOKEN || 'dev-internal-agent-token'
+const INTERNAL_AGENT_TOKEN =
+  process.env.INTERNAL_AGENT_TOKEN?.trim() ||
+  (process.env.NODE_ENV !== 'production' ? 'dev-internal-agent-token' : '')
 
 /**
  * Normalize multi-speaker transcript segments into the {role, content}[]
@@ -589,6 +594,9 @@ async function processReplaySession(sessionId: string): Promise<void> {
   const { scores: skillScores, components: skillComponents } = calculateSkillScores(signals, analyticsMessages.length)
 
   let coachingInsights: any = null
+  const replayAudio = audioFile
+    ? resolveReplayUploadAudio(audioFile.storedPath, audioFile.mimeType)
+    : null
   try {
     coachingInsights = await generateCoachingInsights({
       skillScores,
@@ -597,6 +605,8 @@ async function processReplaySession(sessionId: string): Promise<void> {
       focusArea: session.focusAreas?.[0] || undefined,
       totalMessages: analyticsMessages.length,
       durationSec: effectiveDurationSec,
+      audioPath: replayAudio?.audioPath,
+      audioMime: replayAudio?.audioMime,
     })
   } catch (err: any) {
     console.error(`[replay] Coaching insight generation failed for ${sessionId}:`, err.message)

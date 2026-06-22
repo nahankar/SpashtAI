@@ -1,14 +1,20 @@
 import type { Request, Response } from 'express'
 import { prisma } from '../lib/prisma'
-import type { Prisma } from '@prisma/client'
+import { Prisma } from '@prisma/client'
+import { getEnabledFeatures, isFeatureEnabled, type PlatformFeature } from '../lib/featureFlags'
+
+function enabledSources(): Promise<PlatformFeature[]> {
+  return getEnabledFeatures()
+}
 
 export async function getProgressPulse(req: Request, res: Response) {
   try {
     const userId = req.user!.userId
     const { skill, limit: rawLimit } = req.query
     const take = Math.min(Number(rawLimit) || 50, 200)
+    const sources = await enabledSources()
 
-    const where: any = { userId }
+    const where: Prisma.ProgressPulseWhereInput = { userId, source: { in: sources } }
     if (skill && typeof skill === 'string') {
       where.skill = skill
     }
@@ -29,6 +35,11 @@ export async function getProgressPulse(req: Request, res: Response) {
 export async function getProgressPulseSummary(req: Request, res: Response) {
   try {
     const userId = req.user!.userId
+    const sources = await enabledSources()
+
+    if (sources.length === 0) {
+      return res.json({ summary: [], enabledFeatures: sources })
+    }
 
     const latestPerSkill = await prisma.$queryRaw<
       {
@@ -51,6 +62,7 @@ export async function getProgressPulseSummary(req: Request, res: Response) {
           COUNT(*) OVER (PARTITION BY skill) AS cnt
         FROM "ProgressPulse"
         WHERE "userId" = ${userId}
+          AND source IN (${Prisma.join(sources)})
       )
       SELECT
         r1.skill,
@@ -72,7 +84,7 @@ export async function getProgressPulseSummary(req: Request, res: Response) {
 
     const historyRows = skills.length > 0
       ? await prisma.progressPulse.findMany({
-          where: { userId, skill: { in: skills } },
+          where: { userId, skill: { in: skills }, source: { in: sources } },
           orderBy: { recordedAt: 'asc' },
           select: { skill: true, score: true, recordedAt: true },
           take: skills.length * 10,
@@ -103,7 +115,7 @@ export async function getProgressPulseSummary(req: Request, res: Response) {
       }
     })
 
-    res.json({ summary })
+    res.json({ summary, enabledFeatures: sources })
   } catch (error) {
     console.error('Error fetching progress pulse summary:', error)
     res.status(500).json({ error: 'Failed to fetch progress pulse summary' })
@@ -117,6 +129,15 @@ export async function recordProgressPulse(req: Request, res: Response) {
 
     if (!Array.isArray(entries) || entries.length === 0) {
       return res.status(400).json({ error: 'entries array is required' })
+    }
+
+    const pulseSource = (source || entries[0]?.source || 'replay') as PlatformFeature
+    if (!(await isFeatureEnabled(pulseSource))) {
+      return res.status(403).json({
+        error: 'Feature is not available',
+        feature: pulseSource,
+        code: 'FEATURE_DISABLED',
+      })
     }
 
     let replayMeetingDate: Date | null = null
@@ -233,14 +254,15 @@ export async function skipProgressPulse(req: Request, res: Response) {
  * - Previous Elevate practice sessions for the same focus area
  */
 async function buildCoachingContext(userId: string, focusArea: string, replaySessionId?: string) {
+    const enabled = await getEnabledFeatures()
 
-    // 1. All Progress Pulse scores (latest per skill + trend)
+    // 1. All Progress Pulse scores (latest per skill + trend) — enabled sources only
     const allSkills = ['clarity', 'conciseness', 'confidence', 'structure', 'engagement', 'pacing']
     const skillSummaries: Record<string, { current: number; previous: number | null; sessions: number }> = {}
 
     for (const skill of allSkills) {
       const records = await prisma.progressPulse.findMany({
-        where: { userId, skill },
+        where: { userId, skill, source: { in: enabled } },
         orderBy: { recordedAt: 'desc' },
         take: 5,
         select: { score: true },
@@ -256,6 +278,7 @@ async function buildCoachingContext(userId: string, focusArea: string, replaySes
 
     // 2. Latest Replay result for this user (or specific session if provided)
     let replayInsights: any = null
+    if (enabled.includes('replay')) {
     const replayWhere: Prisma.ReplaySessionWhereInput = replaySessionId
       ? { id: replaySessionId, userId }
       : { userId, status: 'completed' }
@@ -335,8 +358,12 @@ async function buildCoachingContext(userId: string, focusArea: string, replaySes
         replayTrigger: coaching?.primaryImprovement || focusImprovements?.[0]?.point || null,
       }
     }
+    }
 
     // 3. Most recent Elevate session for this focus area (detailed, for coaching continuity)
+    let lastPracticeSummary: any = null
+    let elevateSessionCount = 0
+    if (enabled.includes('elevate')) {
     const lastElevateSession = await prisma.session.findFirst({
       where: {
         userId,
@@ -369,7 +396,6 @@ async function buildCoachingContext(userId: string, focusArea: string, replaySes
     })
 
     // Build compact last-practice summary
-    let lastPracticeSummary: any = null
     if (lastElevateSession?.metrics) {
       const insights = lastElevateSession.metrics.coachingInsights as any
       const practiceSkills = lastElevateSession.metrics.skillScores as any
@@ -406,7 +432,7 @@ async function buildCoachingContext(userId: string, focusArea: string, replaySes
     }
 
     // 4. Count of previous Elevate sessions for this focus area
-    const elevateSessionCount = await prisma.session.count({
+    elevateSessionCount = await prisma.session.count({
       where: {
         userId,
         module: 'elevate',
@@ -414,6 +440,7 @@ async function buildCoachingContext(userId: string, focusArea: string, replaySes
         endedAt: { not: null },
       },
     })
+    }
 
     return {
       focusArea,
@@ -445,7 +472,9 @@ export async function getCoachingContext(req: Request, res: Response) {
 export async function getCoachingContextForAgent(req: Request, res: Response) {
   try {
     const token = req.header('x-internal-agent-token')
-    const expected = process.env.INTERNAL_AGENT_TOKEN || 'dev-internal-agent-token'
+    const expected =
+      process.env.INTERNAL_AGENT_TOKEN?.trim() ||
+      (process.env.NODE_ENV !== 'production' ? 'dev-internal-agent-token' : '')
     if (!token || token !== expected) {
       return res.status(401).json({ error: 'Unauthorized internal agent request' })
     }

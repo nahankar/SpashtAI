@@ -1,10 +1,13 @@
 import { Router, Request, Response } from 'express'
 import { prisma } from '../../lib/prisma'
+import { getEnabledFeatures, type PlatformFeature } from '../../lib/featureFlags'
+
 const router = Router()
 
 // GET /api/admin/analytics/overview
 router.get('/overview', async (_req: Request, res: Response) => {
   try {
+    const enabled = await getEnabledFeatures()
     const now = new Date()
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
     const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
@@ -24,20 +27,27 @@ router.get('/overview', async (_req: Request, res: Response) => {
       prisma.user.count({ where: { createdAt: { gte: todayStart } } }),
       prisma.user.count({ where: { createdAt: { gte: weekAgo } } }),
       prisma.user.count({ where: { lastActiveAt: { gte: weekAgo } } }),
-      prisma.session.count(),
-      prisma.replaySession.count(),
-      prisma.session.count({ where: { startedAt: { gte: monthAgo } } }),
-      prisma.replaySession.count({ where: { createdAt: { gte: monthAgo } } }),
+      enabled.includes('elevate') ? prisma.session.count() : Promise.resolve(0),
+      enabled.includes('replay') ? prisma.replaySession.count() : Promise.resolve(0),
+      enabled.includes('elevate')
+        ? prisma.session.count({ where: { startedAt: { gte: monthAgo } } })
+        : Promise.resolve(0),
+      enabled.includes('replay')
+        ? prisma.replaySession.count({ where: { createdAt: { gte: monthAgo } } })
+        : Promise.resolve(0),
     ])
+
+    const sessions: Record<string, unknown> = { enabledFeatures: enabled }
+    if (enabled.includes('elevate')) {
+      sessions.elevate = { total: totalElevateSessions, thisMonth: recentElevate }
+    }
+    if (enabled.includes('replay')) {
+      sessions.replay = { total: totalReplaySessions, thisMonth: recentReplay }
+    }
 
     res.json({
       users: { total: totalUsers, newToday: newUsersToday, newThisWeek: newUsersWeek, activeThisWeek: activeUsersWeek },
-      sessions: {
-        totalElevate: totalElevateSessions,
-        totalReplay: totalReplaySessions,
-        elevateThisMonth: recentElevate,
-        replayThisMonth: recentReplay,
-      },
+      sessions,
     })
   } catch (err) {
     console.error('Analytics overview error:', err)
@@ -48,18 +58,22 @@ router.get('/overview', async (_req: Request, res: Response) => {
 // GET /api/admin/analytics/features
 router.get('/features', async (req: Request, res: Response) => {
   try {
+    const enabled = await getEnabledFeatures()
     const days = Math.min(90, parseInt(req.query.days as string) || 30)
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+
+    const featureWhere =
+      enabled.length > 0 ? { feature: { in: enabled } } : { feature: { in: [] as string[] } }
 
     const usage = await prisma.featureUsage.groupBy({
       by: ['feature', 'action'],
       _count: { id: true },
-      where: { timestamp: { gte: since } },
+      where: { timestamp: { gte: since }, ...featureWhere },
       orderBy: { _count: { id: 'desc' } },
     })
 
     const recentUsage = await prisma.featureUsage.findMany({
-      where: { timestamp: { gte: since } },
+      where: { timestamp: { gte: since }, ...featureWhere },
       orderBy: { timestamp: 'desc' },
       take: 100,
       select: {
@@ -71,7 +85,7 @@ router.get('/features', async (req: Request, res: Response) => {
       },
     })
 
-    res.json({ usage, recentUsage })
+    res.json({ usage, recentUsage, enabledFeatures: enabled })
   } catch (err) {
     console.error('Feature analytics error:', err)
     res.status(500).json({ error: 'Failed to load feature analytics' })
@@ -81,7 +95,12 @@ router.get('/features', async (req: Request, res: Response) => {
 // GET /api/admin/analytics/users
 router.get('/users', async (_req: Request, res: Response) => {
   try {
+    const enabled = await getEnabledFeatures()
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+
+    const sessionCountSelect: { sessions?: boolean; replaySessions?: boolean } = {}
+    if (enabled.includes('elevate')) sessionCountSelect.sessions = true
+    if (enabled.includes('replay')) sessionCountSelect.replaySessions = true
 
     const [roleDistribution, recentRegistrations, topUsers] = await Promise.all([
       prisma.user.groupBy({
@@ -103,12 +122,14 @@ router.get('/users', async (_req: Request, res: Response) => {
           firstName: true,
           loginCount: true,
           lastActiveAt: true,
-          _count: { select: { sessions: true, replaySessions: true } },
+          ...(Object.keys(sessionCountSelect).length > 0
+            ? { _count: { select: sessionCountSelect } }
+            : {}),
         },
       }),
     ])
 
-    res.json({ roleDistribution, recentRegistrations, topUsers })
+    res.json({ roleDistribution, recentRegistrations, topUsers, enabledFeatures: enabled })
   } catch (err) {
     console.error('User analytics error:', err)
     res.status(500).json({ error: 'Failed to load user analytics' })

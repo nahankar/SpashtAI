@@ -21,13 +21,17 @@ interface RecentUsage {
 export function FeatureAnalytics() {
   const [usage, setUsage] = useState<FeatureUsageSummary[]>([])
   const [recent, setRecent] = useState<RecentUsage[]>([])
+  const [enabledFeatures, setEnabledFeatures] = useState<string[]>(['elevate', 'replay'])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    apiClient<{ usage: FeatureUsageSummary[]; recentUsage: RecentUsage[] }>('/api/admin/analytics/features')
+    apiClient<{ usage: FeatureUsageSummary[]; recentUsage: RecentUsage[]; enabledFeatures?: string[] }>(
+      '/api/admin/analytics/features',
+    )
       .then((data) => {
         setUsage(data.usage)
         setRecent(data.recentUsage)
+        setEnabledFeatures(data.enabledFeatures ?? ['elevate', 'replay'])
       })
       .catch(console.error)
       .finally(() => setLoading(false))
@@ -39,26 +43,42 @@ export function FeatureAnalytics() {
 
   const elevateCount = usage.filter((u) => u.feature === 'elevate').reduce((sum, u) => sum + u._count.id, 0)
   const replayCount = usage.filter((u) => u.feature === 'replay').reduce((sum, u) => sum + u._count.id, 0)
+  const showElevate = enabledFeatures.includes('elevate')
+  const showReplay = enabledFeatures.includes('replay')
 
   const chartData = [
-    { name: 'Elevate', elevate: elevateCount, replay: 0 },
-    { name: 'Replay', elevate: 0, replay: replayCount },
+    ...(showElevate ? [{ name: 'Elevate', elevate: elevateCount, replay: 0 }] : []),
+    ...(showReplay ? [{ name: 'Replay', elevate: 0, replay: replayCount }] : []),
   ]
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Feature Analytics</h1>
-        <p className="text-muted-foreground">Usage breakdown by feature (last 30 days)</p>
+        <p className="text-muted-foreground">Usage breakdown by enabled modules (last 30 days)</p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <MetricCard label="Elevate Usage" value={elevateCount} sublabel="Events tracked" />
-        <MetricCard label="Replay Usage" value={replayCount} sublabel="Events tracked" />
-        <MetricCard label="Total Events" value={elevateCount + replayCount} sublabel="All features" />
-      </div>
+      {showElevate || showReplay ? (
+        <>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {showElevate && (
+              <MetricCard label="Elevate Usage" value={elevateCount} sublabel="Events tracked" />
+            )}
+            {showReplay && (
+              <MetricCard label="Replay Usage" value={replayCount} sublabel="Events tracked" />
+            )}
+            <MetricCard label="Total Events" value={elevateCount + replayCount} sublabel="Enabled modules" />
+          </div>
 
-      <UsageChart title="Feature Usage" data={chartData} />
+          {chartData.length > 0 && <UsageChart title="Feature Usage" data={chartData} />}
+        </>
+      ) : (
+        <Card>
+          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+            All product modules are disabled. Enable features under Feature Flags to see usage analytics.
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

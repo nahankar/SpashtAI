@@ -1,0 +1,23 @@
+# Local dev PostgreSQL for SpashtAI (Prisma).
+# Prod: same Postgres engine on EC2 — only DATABASE_URL host changes.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: spashtai-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: spashtai
+    volumes:
+      - spashtai-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d spashtai"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  spashtai-postgres-data:

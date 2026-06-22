@@ -1,22 +1,24 @@
 /**
  * SpashtAI Coaching Prompt Builder
  *
- * Builds structured Bedrock prompts from skill scores and raw signals.
+ * Builds structured prompts from skill scores and raw signals.
  * Outputs natural language coaching insights, not raw metric numbers.
  */
 
-import type { SkillScores, TextSignals } from './skillScores'
+import type { CoachingContext } from './insightProviders/types'
 
-export interface CoachingContext {
-  skillScores: SkillScores
-  signals: TextSignals
-  sessionName?: string
-  focusArea?: string
-  totalMessages: number
-  durationSec: number
+export type { CoachingContext } from './insightProviders/types'
+
+export interface BuildCoachingPromptOptions {
+  /** When true, instruct the model to use attached session audio for delivery feedback */
+  includeAudioInstructions?: boolean
 }
 
-export function buildCoachingPrompt(ctx: CoachingContext): string {
+export function buildCoachingPrompt(
+  ctx: CoachingContext,
+  options: BuildCoachingPromptOptions = {},
+): string {
+  const includeAudio = options.includeAudioInstructions ?? false
   const { skillScores: s, signals: sig } = ctx
 
   const availableScores = Object.entries(s)
@@ -41,8 +43,18 @@ export function buildCoachingPrompt(ctx: CoachingContext): string {
     ? `The user was practicing: "${ctx.focusArea}". Tailor feedback to this area.`
     : ''
 
-  return `You are a communication coach for SpashtAI. Analyze this session and provide actionable coaching.
+  const audioBlock = includeAudio
+    ? `
+AUDIO ANALYSIS (IMPORTANT):
+You are given the user's actual voice recording from this session (attached as audio).
+Listen for delivery: pacing, pauses, filler sounds, vocal confidence, energy, and emotional tone.
+Combine what you hear with the text metrics below. Mention specific delivery behaviors in your feedback.
+Do not invent timestamps; describe patterns (e.g. "rushed openings", "long pause before answering").
+`
+    : ''
 
+  return `You are a communication coach for SpashtAI. Analyze this session and provide actionable coaching.
+${audioBlock}
 SKILL SCORES (0-10):
 ${availableScores}
 

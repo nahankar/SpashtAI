@@ -61,15 +61,13 @@ export function useAudioRecording(): AudioRecordingHook {
         
         setAudioUrl(url);
         setIsRecording(false);
+        mediaRecorderRef.current = null;
         
         console.log('✅ Recording stopped, size:', blob.size, 'bytes');
         resolve(blob);
       };
 
       mediaRecorder.stop();
-      
-      // Stop all tracks in the stream
-      mediaRecorder.stream.getTracks().forEach(track => track.stop());
     });
   }, []);
 

@@ -437,3 +437,41 @@ model TicketComment {
   createdAt DateTime @default(now())
 }
 
+// ── Platform feature flags (global until multi-tenant) ──
+model PlatformFeatureFlag {
+  feature     String   @unique // "elevate" | "replay"
+  label       String
+  description String?  @db.Text
+  enabled     Boolean  @default(true)
+  updatedBy   String?
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+}
+
+// ── Voice Backend Configuration ──
+// Admin-selectable backend powering the Elevate live coach.
+// Multiple presets are seeded; the row with isActive=true is what the agent uses.
+model VoiceConfig {
+  id          String  @id @default(cuid())
+  // "nova-sonic" | "pipeline-premium" (extensible)
+  backend     String  @unique
+  displayName String
+  description String? @db.Text
+
+  // Per-backend tuning (NULL when not applicable)
+  pipelineStt String? // e.g. "whisper-large-v3-turbo"
+  pipelineLlm String? // e.g. "qwen2.5:32b"
+  pipelineTts String? // e.g. "kokoro"
+  voiceName   String? // e.g. "tiffany" (Nova Sonic) | "af_bella" (Kokoro)
+
+  // Endpoints for local pipeline servers (only used by pipeline-* backends)
+  sttBaseUrl String? // e.g. "http://localhost:8001/v1"
+  llmBaseUrl String? // e.g. "http://localhost:11434/v1"
+  ttsBaseUrl String? // e.g. "http://localhost:8002/v1"
+
+  isActive  Boolean  @default(false)
+  updatedBy String? // admin user id who last changed it
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+}
+

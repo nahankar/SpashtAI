@@ -6,6 +6,8 @@ const links = [
   { to: '/admin/tickets', label: 'Tickets', end: false },
   { to: '/admin/analytics', label: 'Analytics', end: false },
   { to: '/admin/system', label: 'System', end: false },
+  { to: '/admin/voice-backend', label: 'Voice Backend', end: false },
+  { to: '/admin/features', label: 'Feature Flags', end: false },
 ]
 
 export function Sidebar() {

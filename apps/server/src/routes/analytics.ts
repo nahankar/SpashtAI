@@ -10,11 +10,16 @@
 import { Request, Response } from 'express'
 import { prisma } from '../lib/prisma'
 import { calculateSkillScores, type TextSignals } from '../analytics/skillScores'
-import { generateCoachingInsights } from '../analytics/insightGenerator'
+import {
+  generateCoachingInsights,
+  resolveElevateSessionAudio,
+} from '../analytics/insightGenerator'
 import { saveSkillScoresToPulse } from '../analytics/progressPulse'
 
 const SIGNAL_API_URL = process.env.SIGNAL_API_URL || 'http://localhost:4001'
-const INTERNAL_AGENT_TOKEN = process.env.INTERNAL_AGENT_TOKEN || 'dev-internal-agent-token'
+const INTERNAL_AGENT_TOKEN =
+  process.env.INTERNAL_AGENT_TOKEN?.trim() ||
+  (process.env.NODE_ENV !== 'production' ? 'dev-internal-agent-token' : '')
 
 /**
  * Run the full analytics pipeline for a session:
@@ -102,7 +107,8 @@ export async function analyzeSession(req: Request, res: Response) {
     // 3. Calculate skill scores
     const { scores, components } = calculateSkillScores(signals, messages.length)
 
-    // 4. Generate coaching insights via Bedrock
+    // 4. Generate coaching insights (provider: local-audio | bedrock-audio | bedrock-text)
+    const audioResolved = await resolveElevateSessionAudio(sessionId)
     let insights
     try {
       insights = await generateCoachingInsights({
@@ -112,6 +118,8 @@ export async function analyzeSession(req: Request, res: Response) {
         focusArea: session.focusArea || undefined,
         totalMessages: messages.length,
         durationSec,
+        audioPath: audioResolved?.audioPath,
+        audioMime: audioResolved?.audioMime,
       })
     } catch (insightErr: any) {
       console.error('Coaching insight generation failed:', insightErr.message)

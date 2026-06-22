@@ -14,12 +14,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { RoomEvent } from 'livekit-client'
+import { RoomEvent, Track } from 'livekit-client'
 import { RealTimeMetrics } from '@/components/analytics/RealTimeMetrics'
 import { SessionMetrics } from '@/components/analytics/SessionMetrics'
 import { AdvancedInsights } from '@/components/analytics/AdvancedInsights'
 import { SkillScoresCard } from '@/components/analytics/SkillScoresCard'
 import { useRealTimeMetrics, useSessionMetrics } from '@/hooks/useSessionMetrics'
+import { useAudioRecording } from '@/hooks/useAudioRecording'
 import { useConversationPersistence } from '@/hooks/useConversationPersistence'
 import { AgentVisualizer } from '@/components/layout/AgentVisualizer'
 import { toast } from 'sonner'
@@ -27,7 +28,7 @@ import { getAuthHeaders } from '@/lib/api-client'
 import { FOCUS_AREAS, getFocusAreaLabel } from '@/lib/focus-areas'
 import { useAuth } from '@/hooks/useAuth'
 import { useConfirm } from '@/hooks/useConfirm'
-import { Trash2, CheckSquare, Square, Target, ArrowRight } from 'lucide-react'
+import { Trash2, CheckSquare, Square, Target, ArrowRight, Info } from 'lucide-react'
 import { generateSessionPdf, type SessionReport } from '@/lib/generate-session-pdf'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
@@ -84,8 +85,11 @@ export function Elevate() {
   const [token, setToken] = useState<string | null>(null)
   const [url, setUrl] = useState<string | null>(null)
   const [assistantState, setAssistantState] = useState<'restarting' | 'ready' | 'recovering' | 'unknown'>('unknown')
+  const [isSessionPaused, setIsSessionPaused] = useState(false)
+  const [isCompletedSessionView, setIsCompletedSessionView] = useState(false)
   const [sessionId, setSessionId] = useState<string | null>(viewSessionId) // Initialize with URL param if present
   const [showMetrics, setShowMetrics] = useState(false)
+  const [turnMetricsByText, setTurnMetricsByText] = useState<Record<string, TurnMetrics>>({})
   const [showHistory, setShowHistory] = useState(!viewSessionId && !inboundNewSession)
 
   interface ElevateSessionItem {
@@ -315,6 +319,7 @@ export function Elevate() {
   // Check if URL parameter session is completed (for "View Details & Metrics" button)
   useEffect(() => {
     if (!viewSessionId) return
+    setIsCompletedSessionView(false)
     ;(async () => {
       try {
         const response = await fetch(`${API_BASE_URL}/sessions/${viewSessionId}`, {
@@ -326,11 +331,13 @@ export function Elevate() {
 
         if (session.endedAt) {
           console.log('📊 Viewing completed session:', viewSessionId)
+          setIsCompletedSessionView(true)
           setSessionId(viewSessionId)
           await loadConversation(viewSessionId)
         } else {
           // In-progress session — resume directly by connecting to LiveKit
           console.log('📖 Resuming in-progress session:', viewSessionId)
+          setIsCompletedSessionView(false)
           setSessionId(viewSessionId)
           await loadConversation(viewSessionId)
 
@@ -351,6 +358,7 @@ export function Elevate() {
           setToken(json.token)
           setUrl(json.url)
           setRoomName(newRoomName)
+          setIsSessionPaused(false)
           resetMetrics()
           localStorage.setItem('spashtai_active_session', viewSessionId)
           localStorage.setItem('spashtai_session_timestamp', Date.now().toString())
@@ -376,6 +384,33 @@ export function Elevate() {
   const joined = useMemo(() => Boolean(token && url), [token, url])
   const fallbackDispatchAttemptedRef = useRef<string | null>(null)
   const wakeLockRef = useRef<WakeLockSentinel | null>(null)
+
+  const pauseLiveSession = useCallback(() => {
+    setShowHistory(false)
+    setIsSessionPaused(true)
+    setToken(null)
+    setUrl(null)
+    setRoomName('')
+    setAssistantState('unknown')
+    resetMetrics()
+  }, [resetMetrics])
+
+  const resumeLiveSession = useCallback(async (resumeSessionId: string) => {
+    const newRoomName = `room_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
+    const u = new URL(`${API_BASE_URL}/livekit/token`)
+    u.searchParams.set('identity', identity)
+    u.searchParams.set('room', newRoomName)
+    u.searchParams.set('sessionId', resumeSessionId)
+    const res = await fetch(u.toString())
+    if (!res.ok) throw new Error('Failed to get token')
+    const json = await res.json()
+    setSessionId(resumeSessionId)
+    setToken(json.token)
+    setUrl(json.url)
+    setRoomName(newRoomName)
+    setIsSessionPaused(false)
+    resetMetrics()
+  }, [identity, resetMetrics])
 
   // ── Screen Wake Lock: prevent macOS from sleeping during active voice session ──
   useEffect(() => {
@@ -441,12 +476,9 @@ export function Elevate() {
         }).catch(() => {})
       }
       // Disconnect LiveKit but keep session resumable
-      setToken(null)
-      setUrl(null)
-      setRoomName('')
-      setAssistantState('unknown')
+      pauseLiveSession()
     }, IDLE_TIMEOUT_MS)
-  }, [joined, sessionId])
+  }, [joined, sessionId, pauseLiveSession])
 
   useEffect(() => {
     if (!joined) return
@@ -544,6 +576,7 @@ export function Elevate() {
       setUrl(json.url)
       setSessionId(newSessionId)
       setRoomName(uniqueRoomName)
+      setIsSessionPaused(false)
       resetMetrics()
     } catch (error) {
       console.error('Error joining session:', error)
@@ -555,12 +588,9 @@ export function Elevate() {
   // Does NOT end the session — leaves it resumable.
   const handleDisconnected = useCallback(() => {
     console.log('🔌 LiveKit disconnected — session remains resumable')
-    setToken(null)
-    setUrl(null)
-    setRoomName('')
-    setAssistantState('unknown')
+    pauseLiveSession()
     // Keep sessionId, localStorage, and messages intact so resume works
-  }, [])
+  }, [pauseLiveSession])
 
   // Called only when user explicitly clicks "Leave".
   // Ends the session permanently.
@@ -571,6 +601,7 @@ export function Elevate() {
     setUrl(null)
     setSessionId(null)
     setRoomName('')
+    setIsSessionPaused(false)
     setAssistantState('unknown')
     clearMessages()
     resetMetrics()
@@ -663,6 +694,7 @@ export function Elevate() {
     setUrl(null)
     setSessionId(null)
     setRoomName('')
+    setIsSessionPaused(false)
     setAssistantState('unknown')
     clearMessages()
     resetMetrics()
@@ -694,7 +726,7 @@ export function Elevate() {
       : 'New Session'
 
   // ── Session history view ──
-  if (showHistory && !joined && !viewSessionId) {
+  if (showHistory && !joined && !viewSessionId && !sessionId) {
     const formatRelDate = (d: string) => {
       const ms = Date.now() - new Date(d).getTime()
       const m = Math.floor(ms / 60000), h = Math.floor(ms / 3600000), dy = Math.floor(ms / 86400000)
@@ -887,7 +919,7 @@ export function Elevate() {
           &larr; Back to My Sessions
         </Link>
       )}
-      {!joined && !viewSessionId && !showHistory && (
+      {!joined && !viewSessionId && !showHistory && !sessionId && (
         <button
           onClick={() => setShowHistory(true)}
           className="text-sm text-muted-foreground hover:text-foreground w-fit"
@@ -901,7 +933,7 @@ export function Elevate() {
           <CardTitle>Elevate Session</CardTitle>
         </CardHeader>
         <CardContent>
-          {!joined && !viewSessionId ? (
+          {!joined && !viewSessionId && !sessionId ? (
             <div className="grid gap-3">
               <div>
                 <label className="text-sm font-medium">Session Name *</label>
@@ -952,10 +984,10 @@ export function Elevate() {
                 </Button>
               </div>
             </div>
-          ) : !joined && viewSessionId ? (
+          ) : !joined && viewSessionId && isCompletedSessionView ? (
             <div className="space-y-4">
               {/* Viewing completed session - show chat and metrics */}
-              <ChatPanel messages={messages} />
+              <ChatPanel messages={messages} turnMetricsByText={turnMetricsByText} />
               
               {/* Historical metrics display */}
               {sessionId && historicalMetrics && (
@@ -994,33 +1026,79 @@ export function Elevate() {
                   <Button size="sm" variant="outline" onClick={resetIdleTimer}>Stay Connected</Button>
                 </div>
               )}
-              {!token && !url && sessionId && (
+              {!token && !url && sessionId && !isSessionPaused && (
                 <div className="rounded-md border border-blue-400 bg-blue-50 px-4 py-3 text-sm text-blue-800 flex items-center justify-between">
-                  <span>Session paused due to inactivity. Your conversation is saved.</span>
+                  <span>
+                    {isSessionPaused
+                      ? 'Session paused. User and assistant are both paused.'
+                      : 'Session disconnected. Your conversation is saved.'}
+                  </span>
                   <Button size="sm" onClick={() => {
-                    const resumeSessionId = sessionId
-                    setSessionId(null)
-                    ;(async () => {
-                      try {
-                        const newRoomName = `room_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
-                        const u = new URL(`${API_BASE_URL}/livekit/token`)
-                        u.searchParams.set('identity', identity)
-                        u.searchParams.set('room', newRoomName)
-                        u.searchParams.set('sessionId', resumeSessionId)
-                        const res = await fetch(u.toString())
-                        if (!res.ok) throw new Error('Failed to get token')
-                        const json = await res.json()
-                        setSessionId(resumeSessionId)
-                        setToken(json.token)
-                        setUrl(json.url)
-                        setRoomName(newRoomName)
-                        resetMetrics()
-                      } catch (err) {
-                        console.error('Failed to resume after idle:', err)
-                      }
-                    })()
+                    if (!sessionId) return
+                    resumeLiveSession(sessionId).catch((err) => {
+                      console.error('Failed to resume session:', err)
+                    })
                   }}>Resume Session</Button>
                 </div>
+              )}
+              {!joined && isSessionPaused && (
+                <>
+                  <div className="bg-muted/20 rounded-lg mb-4">
+                    <div className="flex flex-col items-center justify-center p-6">
+                      <div className="w-full max-w-md h-32 flex items-center justify-center">
+                        <div className="flex items-center gap-6">
+                          <span className="h-8 w-4 rounded-full bg-muted-foreground/20" />
+                          <span className="h-8 w-4 rounded-full bg-muted-foreground/20" />
+                          <span className="h-8 w-4 rounded-full bg-muted-foreground/20" />
+                          <span className="h-10 w-4 rounded-full bg-muted-foreground/50" />
+                          <span className="h-8 w-4 rounded-full bg-muted-foreground/20" />
+                          <span className="h-8 w-4 rounded-full bg-muted-foreground/20" />
+                          <span className="h-8 w-4 rounded-full bg-muted-foreground/20" />
+                        </div>
+                      </div>
+                      <div className="mt-4 text-center font-medium">
+                        <div className="text-lg text-amber-600">Paused</div>
+                        <div className="text-xs text-muted-foreground mt-1">Click Resume to continue</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-green-600">Ready</span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 py-2">
+                    <Button onClick={handleLeave}>Leave</Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowMetrics(!showMetrics)}
+                    >
+                      {showMetrics ? 'Hide Metrics' : 'Show Metrics'}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        if (!sessionId) return
+                        resumeLiveSession(sessionId).catch((err) => {
+                          console.error('Failed to resume session:', err)
+                        })
+                      }}
+                    >
+                      Resume
+                    </Button>
+                    <Button variant="outline" disabled title="Resume session to record audio">
+                      Record My Audio
+                    </Button>
+                    <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={handleDiscard}>
+                      Discard Session
+                    </Button>
+                  </div>
+
+                  <RealTimeMetrics
+                    metrics={currentMetrics}
+                    isVisible={showMetrics && !isSessionPaused}
+                  />
+                </>
               )}
               {url && token && (
                 <LiveKitRoom
@@ -1032,11 +1110,16 @@ export function Elevate() {
                   onDisconnected={handleDisconnected}
                 >
                   <RoomAudioRenderer />
-                  <AgentVisualizer className="bg-muted/20 rounded-lg mb-4" />
+                  <AgentVisualizer className="bg-muted/20 rounded-lg mb-4" isPaused={isSessionPaused} />
                   <ConnectionStatus assistantState={assistantState} />
                   <LiveKitConversation 
                     sessionId={sessionId}
+                    isSessionPaused={isSessionPaused}
                     onNewMessage={(message) => {
+                      if (isSessionPaused) {
+                        console.log('⏸️ Dropping message while session is paused')
+                        return
+                      }
                       console.log('🎯 Adding message via LiveKit:', message)
                       
                       // Filter out empty or meaningless messages
@@ -1065,6 +1148,11 @@ export function Elevate() {
                     onRestart={() => {
                       clearMessages()
                       resetMetrics()
+                      setTurnMetricsByText({})
+                    }}
+                    onTurnMetrics={(text, metrics) => {
+                      const key = normalizeTurnText(text)
+                      setTurnMetricsByText((prev) => ({ ...prev, [key]: metrics }))
                     }}
                     onMetricsUpdate={updateMetrics}
                   />
@@ -1076,7 +1164,7 @@ export function Elevate() {
                     >
                       {showMetrics ? 'Hide Metrics' : 'Show Metrics'}
                     </Button>
-                    <InRoomControls />
+                    <InRoomControls sessionId={sessionId} onPauseSession={pauseLiveSession} />
                     <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={handleDiscard}>
                       Discard Session
                     </Button>
@@ -1089,10 +1177,10 @@ export function Elevate() {
                   />
                 </LiveKitRoom>
               )}
-              <ChatPanel messages={messages} />
+              <ChatPanel messages={messages} turnMetricsByText={turnMetricsByText} />
               
               {/* Historical metrics display */}
-              {!joined && sessionId && historicalMetrics && (
+              {!joined && sessionId && historicalMetrics && !isSessionPaused && (
                 <>
                   <SessionMetrics 
                     sessionId={sessionId}
@@ -1182,16 +1270,20 @@ function ConnectionStatus({ assistantState }: { assistantState: 'restarting' | '
 // Official LiveKit conversation component using built-in patterns
 function LiveKitConversation({
   sessionId,
+  isSessionPaused,
   onNewMessage,
   onStateChange,
   onRestart,
-  onMetricsUpdate
+  onMetricsUpdate,
+  onTurnMetrics,
 }: {
   sessionId: string | null
+  isSessionPaused: boolean
   onNewMessage: (message: ChatMessage) => void
   onStateChange: (state: 'restarting' | 'ready' | 'recovering' | 'unknown') => void
   onRestart: () => void
   onMetricsUpdate: (metrics: any) => void
+  onTurnMetrics?: (text: string, metrics: TurnMetrics) => void
 }) {
   const connectionState = useConnectionState()
   const room = useRoomContext()
@@ -1271,6 +1363,10 @@ function LiveKitConversation({
 
     const handleData = (payload: Uint8Array, participant: any, _kind: any, topic?: string) => {
       if (!topic) return
+
+      if (isSessionPaused) {
+        return
+      }
       
       const text = new TextDecoder().decode(payload)
       console.log(`📨 Data channel received on ${topic}:`, text)
@@ -1313,6 +1409,11 @@ function LiveKitConversation({
           try {
             const conversationData = JSON.parse(text)
             console.log('💬 Conversation data received:', conversationData)
+
+            if (conversationData.type === 'turn_metrics' && conversationData.text && conversationData.turnMetrics) {
+              onTurnMetrics?.(conversationData.text, conversationData.turnMetrics as TurnMetrics)
+              break
+            }
             
             // Handle direct conversation messages from agent (type: "user" or "assistant")
             if (conversationData.type === 'user' || conversationData.type === 'assistant') {
@@ -1376,7 +1477,7 @@ function LiveKitConversation({
     return () => {
       room.off(RoomEvent.DataReceived, handleData)
     }
-  }, [room, connectionState, processPayload, onStateChange, onRestart, onMetricsUpdate, sessionId])
+  }, [room, connectionState, processPayload, onStateChange, onRestart, onMetricsUpdate, onTurnMetrics, sessionId, isSessionPaused])
 
   // Remove duplicate - handled by first useEffect above
   // This second useEffect was causing messages to be missed!
@@ -1384,33 +1485,83 @@ function LiveKitConversation({
   return null
 }
 
-function InRoomControls() {
+function InRoomControls({
+  sessionId,
+  onPauseSession,
+}: {
+  sessionId: string | null
+  onPauseSession: () => void
+}) {
   const room = useRoomContext()
-  const [micEnabled, setMicEnabled] = useState(() => room.localParticipant.isMicrophoneEnabled)
-
-  useEffect(() => {
-    const sync = () => setMicEnabled(room.localParticipant.isMicrophoneEnabled)
-    sync()
-    room.localParticipant.on('trackMuted', sync)
-    room.localParticipant.on('trackUnmuted', sync)
-    room.localParticipant.on('localTrackPublished', sync)
-    return () => {
-      room.localParticipant.off('trackMuted', sync)
-      room.localParticipant.off('trackUnmuted', sync)
-      room.localParticipant.off('localTrackPublished', sync)
-    }
-  }, [room])
+  const { isRecording, startRecording, stopRecording } = useAudioRecording()
 
   const toggle = useCallback(async () => {
-    await room.localParticipant.setMicrophoneEnabled(!micEnabled)
-    setMicEnabled(!micEnabled)
-  }, [room, micEnabled])
+    try {
+      await room.localParticipant.setMicrophoneEnabled(false)
+    } catch (error) {
+      console.warn('Failed to mute microphone before pause:', error)
+      toast.error('Mic mute failed, but session is paused')
+    }
+    onPauseSession()
+  }, [room, onPauseSession])
+
+  const handleToggleRecording = useCallback(async () => {
+    if (isRecording) {
+      const blob = await stopRecording()
+      if (!blob) {
+        toast.error('No audio captured for download')
+        return
+      }
+
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+      const safeSessionId = sessionId || 'session'
+      const filename = `spashtai-user-audio-${safeSessionId}-${timestamp}.webm`
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+      toast.success('Audio downloaded. You can now validate WPM in external tools.')
+      return
+    }
+
+    const publications = Array.from(room.localParticipant.trackPublications.values())
+    const micPublication = publications.find((publication) => publication.source === Track.Source.Microphone)
+    const mediaStreamTrack = (micPublication?.track as any)?.mediaStreamTrack as MediaStreamTrack | undefined
+
+    if (!mediaStreamTrack) {
+      toast.error('Microphone track not ready yet. Please try again in a second.')
+      return
+    }
+
+    startRecording(new MediaStream([mediaStreamTrack]))
+    toast.success('Recording started')
+  }, [isRecording, room, sessionId, startRecording, stopRecording])
 
   return (
-    <Button variant="secondary" onClick={toggle}>
-      {micEnabled ? 'Pause' : 'Resume'}
-    </Button>
+    <>
+      <Button variant="secondary" onClick={toggle}>
+        Pause
+      </Button>
+      <Button variant={isRecording ? 'destructive' : 'outline'} onClick={handleToggleRecording}>
+        {isRecording ? 'Stop & Download Audio' : 'Record My Audio'}
+      </Button>
+    </>
   )
+}
+
+interface TurnMetrics {
+  word_count: number
+  filler_count: number
+  filler_rate: number
+  hedging_count: number
+  wpm?: number | null
+  speaking_seconds?: number | null
+  qualitative_pace?: string | null
+  coaching_tip?: string | null
 }
 
 interface ChatMessage {
@@ -1420,8 +1571,121 @@ interface ChatMessage {
   timestamp: string;
 }
 
-function ChatPanel({ messages }: { messages: ChatMessage[] }) {
+function normalizeTurnText(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().toLowerCase()
+}
+
+function lookupTurnMetrics(content: string, map: Record<string, TurnMetrics>): TurnMetrics | undefined {
+  const key = normalizeTurnText(content)
+  if (map[key]) return map[key]
+  for (const [k, v] of Object.entries(map)) {
+    if (key.includes(k) || k.includes(key)) return v
+  }
+  return undefined
+}
+
+function paceLabel(pace?: string | null): string {
+  if (!pace || pace === 'not-enough-data') return '—'
+  return pace.charAt(0).toUpperCase() + pace.slice(1)
+}
+
+function TurnMetricsPopover({ metrics }: { metrics: TurnMetrics }) {
+  return (
+    <div className="relative inline-flex group/metrics ml-1 align-middle">
+      <button
+        type="button"
+        className="inline-flex h-4 w-4 items-center justify-center rounded-full text-blue-100/90 hover:text-white focus:outline-none focus-visible:ring-1 focus-visible:ring-white/60"
+        aria-label="View turn metrics"
+      >
+        <Info className="h-3 w-3" />
+      </button>
+      <div
+        role="tooltip"
+        className="pointer-events-none absolute bottom-full right-0 z-20 mb-2 hidden w-56 rounded-lg border border-border bg-popover p-3 text-left text-popover-foreground shadow-lg group-hover/metrics:block group-focus-within/metrics:block"
+      >
+        <div className="text-[11px] font-semibold mb-2">This turn</div>
+        <dl className="space-y-1 text-[10px]">
+          <div className="flex justify-between gap-2">
+            <dt className="text-muted-foreground">WPM</dt>
+            <dd>{metrics.wpm != null ? metrics.wpm.toFixed(0) : '—'}</dd>
+          </div>
+          <div className="flex justify-between gap-2">
+            <dt className="text-muted-foreground">Fillers</dt>
+            <dd>{metrics.filler_count} ({metrics.filler_rate.toFixed(1)}%)</dd>
+          </div>
+          <div className="flex justify-between gap-2">
+            <dt className="text-muted-foreground">Hedging</dt>
+            <dd>{metrics.hedging_count}</dd>
+          </div>
+          <div className="flex justify-between gap-2">
+            <dt className="text-muted-foreground">Pace</dt>
+            <dd>{paceLabel(metrics.qualitative_pace)}</dd>
+          </div>
+        </dl>
+        {metrics.coaching_tip && (
+          <p className="mt-2 text-[10px] leading-snug text-muted-foreground border-t pt-2">
+            {metrics.coaching_tip}
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Stitch consecutive same-role messages from the same conversational pause into
+// a single bubble for display. Underlying `messages` array (and DB) is unchanged
+// — this is purely a render-time grouping so a user that pauses mid-sentence
+// doesn't get spammed with 10 separate bubbles for one logical turn.
+const STITCH_GAP_MS = 90_000 // 90 seconds gap = considered same turn
+
+interface ChatGroup {
+  id: string
+  role: string
+  content: string
+  timestamp: string // last message in the group (used for display)
+  count: number
+}
+
+function groupConsecutive(messages: ChatMessage[]): ChatGroup[] {
+  const groups: ChatGroup[] = []
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i]
+    const last = groups[groups.length - 1]
+    const ts = m.timestamp ? new Date(m.timestamp).getTime() : 0
+    const lastTs = last?.timestamp ? new Date(last.timestamp).getTime() : 0
+    const sameRole = last && last.role === m.role
+    const closeInTime = sameRole && ts - lastTs <= STITCH_GAP_MS
+
+    if (sameRole && closeInTime) {
+      // Append with a space; collapse if the previous fragment already ended
+      // with sentence-final punctuation so "Hello." + "How are you?" reads
+      // naturally as "Hello. How are you?".
+      const sep = /[.!?…]\s*$/.test(last.content) ? ' ' : ' '
+      last.content = `${last.content}${sep}${m.content}`.replace(/\s+/g, ' ').trim()
+      last.timestamp = m.timestamp || last.timestamp
+      last.count += 1
+    } else {
+      groups.push({
+        id: m.id || `g-${i}`,
+        role: m.role,
+        content: m.content,
+        timestamp: m.timestamp,
+        count: 1,
+      })
+    }
+  }
+  return groups
+}
+
+function ChatPanel({
+  messages,
+  turnMetricsByText = {},
+}: {
+  messages: ChatMessage[]
+  turnMetricsByText?: Record<string, TurnMetrics>
+}) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const groups = useMemo(() => groupConsecutive(messages), [messages])
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -1448,7 +1712,10 @@ function ChatPanel({ messages }: { messages: ChatMessage[] }) {
       <div className="border-b bg-muted/50 px-4 py-3">
         <div className="text-sm font-semibold">Conversation</div>
         <div className="text-xs text-muted-foreground mt-0.5">
-          {messages.length} {messages.length === 1 ? 'message' : 'messages'}
+          {groups.length} {groups.length === 1 ? 'turn' : 'turns'}
+          {messages.length !== groups.length && (
+            <span className="ml-1 opacity-60">({messages.length} fragments)</span>
+          )}
         </div>
       </div>
       
@@ -1463,38 +1730,42 @@ function ChatPanel({ messages }: { messages: ChatMessage[] }) {
           </div>
         ) : (
           <>
-            {messages.map((m, i) => (
+            {groups.map((g, i) => {
+              const turnMetrics =
+                g.role === 'user' ? lookupTurnMetrics(g.content, turnMetricsByText) : undefined
+              return (
               <div 
-                key={m.id || i} 
-                className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}
+                key={g.id || i} 
+                className={`flex ${g.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}
               >
-                <div className={`flex flex-col max-w-[80%] ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
-                  {/* Message Bubble */}
+                <div className={`flex flex-col max-w-[80%] ${g.role === 'user' ? 'items-end' : 'items-start'}`}>
+                  {/* Message Bubble (stitched from g.count fragments) */}
                   <div 
                     className={`rounded-2xl px-4 py-2.5 shadow-sm ${
-                      m.role === 'user' 
+                      g.role === 'user' 
                         ? 'bg-blue-500 text-white rounded-tr-sm' 
                         : 'bg-gray-100 text-gray-900 rounded-tl-sm border border-gray-200'
                     }`}
                   >
-                    <div className="text-[13px] leading-relaxed whitespace-pre-wrap break-words">
-                      {m.content}
+                    <div className="text-[13px] leading-relaxed whitespace-pre-wrap break-words inline">
+                      {g.content}
+                      {turnMetrics && <TurnMetricsPopover metrics={turnMetrics} />}
                     </div>
                   </div>
                   
-                  {/* Timestamp */}
+                  {/* Timestamp + fragment hint */}
                   <div 
-                    className={`text-[10px] mt-1 px-1 ${
-                      m.role === 'user' 
-                        ? 'text-muted-foreground' 
-                        : 'text-muted-foreground'
-                    }`}
+                    className="text-[10px] mt-1 px-1 text-muted-foreground"
+                    title={g.count > 1 ? `Stitched from ${g.count} fragments` : undefined}
                   >
-                    {formatTime(m.timestamp)}
+                    {formatTime(g.timestamp)}
+                    {g.count > 1 && (
+                      <span className="ml-1 opacity-60">· {g.count} fragments</span>
+                    )}
                   </div>
                 </div>
               </div>
-            ))}
+            )})}
             {/* Invisible div for auto-scroll anchor */}
             <div ref={messagesEndRef} />
           </>

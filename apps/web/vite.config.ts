@@ -9,5 +9,10 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, 'src')
     }
-  }
+  },
+  server: {
+    host: '0.0.0.0', // listen on IPv4 + IPv6 so Chrome and Cursor both work
+    port: 5173,
+    strictPort: true,
+  },
 })

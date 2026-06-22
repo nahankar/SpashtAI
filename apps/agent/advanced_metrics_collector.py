@@ -103,24 +103,31 @@ class AdvancedMetricsCollector:
     def on_metrics_collected(self, ev):
         """Handle basic LiveKit metrics events"""
         self.basic_collector.on_metrics_collected(ev)
+
+    def attach_pacing_tracker(self, tracker) -> None:
+        """Forward to basic collector so live publish uses real audio durations."""
+        self.basic_collector.attach_pacing_tracker(tracker)
+
+    async def publish_metrics_update(self, room, topic: str = "lk.metrics"):
+        """Forward live publish to basic collector (single source of truth)."""
+        await self.basic_collector.publish_metrics_update(room, topic)
     
-    def add_conversation_turn(self, speaker: str, text: str, timestamp: Optional[float] = None):
-        """Add conversation turn for all analysis types"""
-        if timestamp is None:
-            timestamp = time.time()
-        
-        # Add to basic collector
-        self.basic_collector.add_conversation_turn(speaker, text, timestamp)
-        
-        # Accumulate transcripts for content analysis
-        if speaker == 'user':
+    def ingest_conversation_fragment(self, speaker: str, text: str, timestamp: Optional[float] = None):
+        """Ingest a transcript fragment through the turn stitcher."""
+        self.basic_collector.ingest_conversation_fragment(speaker, text, timestamp)
+
+    def record_committed_turn(self, speaker: str, text: str) -> None:
+        """Track stitched turns for content/delivery analysis (not raw fragments)."""
+        if speaker == "user":
             self.user_transcript += f" {text}"
-            self.conversation_turns.append(('user', text, timestamp))
-        elif speaker == 'assistant':
+        elif speaker == "assistant":
             self.assistant_transcript += f" {text}"
-            self.conversation_turns.append(('assistant', text, timestamp))
-        
-        logger.debug(f"📝 Added {speaker} turn for advanced analysis: {len(text)} chars")
+        self.conversation_turns.append((speaker, text, time.time()))
+        logger.debug(f"📝 Committed {speaker} turn recorded: {len(text)} chars")
+
+    def add_conversation_turn(self, speaker: str, text: str, timestamp: Optional[float] = None):
+        """Legacy alias — routes through turn stitcher."""
+        self.ingest_conversation_fragment(speaker, text, timestamp)
     
     def add_audio_chunk(self, audio_data: bytes, duration: float):
         """Add audio data for delivery analysis"""
@@ -329,21 +336,14 @@ class AdvancedMetricsCollector:
             logger.error(f"❌ Error getting real-time metrics: {e}")
             return {}
     
-    async def publish_metrics_update(self, room, topic: str = "lk.metrics"):
-        """Publish enhanced real-time metrics to frontend"""
-        try:
-            metrics_update = self.get_real_time_metrics()
-            if metrics_update:
-                payload = json.dumps(metrics_update)
-                await room.local_participant.publish_data(
-                    payload.encode('utf-8'),
-                    reliable=True,
-                    topic=topic
-                )
-                logger.debug("📡 Enhanced metrics update published")
-        except Exception as e:
-            logger.error(f"❌ Error publishing enhanced metrics: {e}")
-    
+    # NOTE: The richer `publish_metrics_update` lives near the top of the
+    # class (around the `attach_pacing_tracker` forwarder). It delegates to
+    # `basic_collector.publish_metrics_update`, which has been upgraded to
+    # emit the live-pacing-grounded payload the frontend's RealTimeMetrics
+    # card expects. The previous implementation here was a duplicate that
+    # silently overrode the new one due to Python's last-def-wins method
+    # resolution — that's why the card was showing zeros.
+
     async def publish_final_insights(self, room, topic: str = "lk.session"):
         """Publish comprehensive final insights"""
         try:
@@ -375,6 +375,9 @@ class AdvancedMetricsCollector:
             import os
             
             SERVER_URL = os.getenv("SERVER_URL", "http://localhost:4000")
+            INTERNAL_AGENT_TOKEN = os.getenv("INTERNAL_AGENT_TOKEN", "dev-internal-agent-token")
+            # Server's `requireAuthOrAgent` accepts this header in lieu of a user JWT.
+            agent_headers = {"x-internal-agent-token": INTERNAL_AGENT_TOKEN}
             
             async with aiohttp.ClientSession() as http_session:
                 # 1. Save basic metrics first (includes token counts for billing)
@@ -391,9 +394,11 @@ class AdvancedMetricsCollector:
                         "totalEouDelay": basic.total_eou_delay,
                         "conversationLatencyAvg": basic.conversation_latency_avg,
                         
-                        # User metrics
+                        # User metrics — `total_words` is the raw signal the
+                        # server uses for canonical WPM recompute.
                         "userMetrics": {
                             "words_per_minute": basic.user_metrics.words_per_minute if basic.user_metrics else 0,
+                            "total_words": sum(t.word_count for t in basic.turns if t.speaker == 'user'),
                             "filler_word_count": basic.user_metrics.filler_word_count if basic.user_metrics else 0,
                             "filler_word_rate": basic.user_metrics.filler_word_rate if basic.user_metrics else 0,
                             "average_sentence_length": basic.user_metrics.average_sentence_length if basic.user_metrics else 0,
@@ -405,6 +410,7 @@ class AdvancedMetricsCollector:
                         # Assistant metrics
                         "assistantMetrics": {
                             "words_per_minute": basic.assistant_metrics.words_per_minute if basic.assistant_metrics else 0,
+                            "total_words": sum(t.word_count for t in basic.turns if t.speaker == 'assistant'),
                             "filler_word_count": basic.assistant_metrics.filler_word_count if basic.assistant_metrics else 0,
                             "filler_word_rate": basic.assistant_metrics.filler_word_rate if basic.assistant_metrics else 0,
                             "average_sentence_length": basic.assistant_metrics.average_sentence_length if basic.assistant_metrics else 0,
@@ -420,6 +426,7 @@ class AdvancedMetricsCollector:
                     async with http_session.post(
                         metrics_url,
                         json=basic_payload,
+                        headers=agent_headers,
                         timeout=aiohttp.ClientTimeout(total=10.0)
                     ) as response:
                         if response.status in [200, 201]:
@@ -461,6 +468,7 @@ class AdvancedMetricsCollector:
                 async with http_session.post(
                     advanced_url,
                     json=advanced_payload,
+                    headers=agent_headers,
                     timeout=aiohttp.ClientTimeout(total=10.0)
                 ) as response:
                     if response.status in [200, 201]:

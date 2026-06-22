@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express'
 import { AccessToken, RoomServiceClient, AgentDispatchClient } from 'livekit-server-sdk'
+import { prisma } from '../lib/prisma'
 
 function getLivekitConfig() {
   const apiKey = process.env.LIVEKIT_API_KEY
@@ -7,6 +8,27 @@ function getLivekitConfig() {
   const lkUrl = process.env.LIVEKIT_URL
   const httpUrl = lkUrl?.replace('ws://', 'http://').replace('wss://', 'https://') || ''
   return { apiKey, apiSecret, lkUrl, httpUrl }
+}
+
+// Fetch the currently active VoiceConfig (or fall back to nova-sonic defaults).
+// Embedded in room metadata so the agent worker picks the right backend.
+async function getActiveVoiceConfig() {
+  try {
+    const active = await prisma.voiceConfig.findFirst({ where: { isActive: true } })
+    if (active) return active
+  } catch (err) {
+    console.warn('voice-config lookup failed, using nova-sonic fallback:', err)
+  }
+  return {
+    backend: 'nova-sonic',
+    voiceName: 'tiffany',
+    pipelineStt: null,
+    pipelineLlm: null,
+    pipelineTts: null,
+    sttBaseUrl: null,
+    llmBaseUrl: null,
+    ttsBaseUrl: null,
+  } as const
 }
 
 function hasActiveDispatchJobs(dispatches: any[] | undefined): boolean {
@@ -31,22 +53,34 @@ export async function getLivekitToken(req: Request, res: Response) {
 
     console.log(`Generating token for identity: ${identity}, room: ${room}`)
 
+    // Look up the active voice backend so the agent worker uses the right model.
+    const voiceCfg = await getActiveVoiceConfig()
+
     // Create the room first to ensure agent can join
     try {
       const roomService = new RoomServiceClient(httpUrl, apiKey, apiSecret)
-      const roomMeta: Record<string, string | undefined> = {
+      const roomMeta: Record<string, string | undefined | null> = {
         sessionId,
         userName,
         focusArea,
         focusContext,
         sessionName,
+        // Voice backend selection (read by apps/agent/main.py via voice_backends.build_session)
+        voiceBackend: voiceCfg.backend,
+        voiceName: voiceCfg.voiceName ?? undefined,
+        pipelineStt: voiceCfg.pipelineStt ?? undefined,
+        pipelineLlm: voiceCfg.pipelineLlm ?? undefined,
+        pipelineTts: voiceCfg.pipelineTts ?? undefined,
+        sttBaseUrl: voiceCfg.sttBaseUrl ?? undefined,
+        llmBaseUrl: voiceCfg.llmBaseUrl ?? undefined,
+        ttsBaseUrl: voiceCfg.ttsBaseUrl ?? undefined,
       }
       await roomService.createRoom({
         name: room,
         emptyTimeout: 60 * 10, // 10 minutes
         metadata: JSON.stringify(roomMeta),
       })
-      console.log(`✅ Room ${room} created`)
+      console.log(`✅ Room ${room} created (voice backend: ${voiceCfg.backend})`)
     } catch (roomError: any) {
       // Room might already exist, that's OK
       if (!roomError.message?.includes('already exists')) {

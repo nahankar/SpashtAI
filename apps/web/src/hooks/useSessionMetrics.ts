@@ -179,20 +179,46 @@ export function useSessionMetrics(sessionId: string | null): UseSessionMetricsRe
   };
 }
 
-// Hook for real-time metrics updates during active sessions
+// Hook for real-time metrics updates during active sessions.
+// The agent publishes a snapshot to the LiveKit `lk.metrics` data-channel
+// topic every ~12s; this hook stores the latest one for the live overlay.
+export interface LiveMetricsSnapshot {
+  totalTurns: number;
+  userWpm: number;
+  userFillerRate: number;
+  responseTimeAvg: number;
+  conversationLatency: number;
+  // Enriched fields (added when agent supports them; older agents will leave undefined).
+  userTotalWords?: number;
+  userSpeakingSeconds?: number;
+  userFillerCount?: number;
+  userVocabDiversity?: number;
+  pacingQualitative?: 'slow' | 'measured' | 'ideal' | 'fast' | 'rapid' | 'not-enough-data';
+  coachingTip?: string;
+  // Wall-clock timestamp from the agent (epoch seconds) — useful to detect stale snapshots.
+  publishedAt?: number;
+}
+
 export function useRealTimeMetrics() {
-  const [currentMetrics, setCurrentMetrics] = useState<{
-    totalTurns: number;
-    userWpm: number;
-    userFillerRate: number;
-    responseTimeAvg: number;
-    conversationLatency: number;
-  } | null>(null);
+  const [currentMetrics, setCurrentMetrics] = useState<LiveMetricsSnapshot | null>(null);
 
   const updateMetrics = (metricsUpdate: any) => {
-    if (metricsUpdate.current_metrics) {
-      setCurrentMetrics(metricsUpdate.current_metrics);
-    }
+    const cm = metricsUpdate?.current_metrics;
+    if (!cm) return;
+    setCurrentMetrics({
+      totalTurns: Number(cm.total_turns) || 0,
+      userWpm: Number(cm.user_wpm) || 0,
+      userFillerRate: Number(cm.user_filler_rate) || 0,
+      responseTimeAvg: Number(cm.response_time_avg) || 0,
+      conversationLatency: Number(cm.conversation_latency) || 0,
+      userTotalWords: cm.user_total_words,
+      userSpeakingSeconds: cm.user_speaking_seconds,
+      userFillerCount: cm.user_filler_count,
+      userVocabDiversity: cm.user_vocab_diversity,
+      pacingQualitative: cm.pacing_qualitative,
+      coachingTip: cm.coaching_tip,
+      publishedAt: metricsUpdate.timestamp,
+    });
   };
 
   const resetMetrics = () => {

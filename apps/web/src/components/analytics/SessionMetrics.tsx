@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Progress } from '../ui/progress';
-import { Clock, MessageSquare, Zap, TrendingUp, Download, RefreshCw, FileText, Loader2 } from 'lucide-react';
+import { Clock, MessageSquare, Zap, TrendingUp, Download, RefreshCw, FileText, Loader2, Mic } from 'lucide-react';
 import { Button } from '../ui/button';
 import { getAuthHeaders } from '@/lib/api-client';
+import { toast } from 'sonner';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
 
@@ -40,7 +41,58 @@ interface SessionMetricsProps {
 
 export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExportPdf, pdfLoading }: SessionMetricsProps) {
   const [isReprocessing, setIsReprocessing] = useState(false);
+  const [isDownloadingAudio, setIsDownloadingAudio] = useState(false);
   const [reprocessStatus, setReprocessStatus] = useState<string>('');
+
+  const downloadAudioFiles = async (onlyUser: boolean) => {
+    setIsDownloadingAudio(true);
+    try {
+      const listResponse = await fetch(`${API_BASE_URL}/api/downloads/sessions/${sessionId}/audio`, {
+        headers: getAuthHeaders(),
+      });
+      if (!listResponse.ok) {
+        throw new Error(`Failed to list audio files: ${listResponse.statusText}`);
+      }
+
+      const listJson = await listResponse.json();
+      const allFiles = Array.isArray(listJson?.audioFiles) ? listJson.audioFiles : [];
+      const selectedFiles = onlyUser
+        ? allFiles.filter((f: any) => String(f?.filename || '').toLowerCase().includes('user'))
+        : allFiles;
+
+      if (selectedFiles.length === 0) {
+        toast.error(onlyUser ? 'No user audio file found for this session' : 'No audio files found for this session');
+        return;
+      }
+
+      for (const file of selectedFiles) {
+        const fileUrl = String(file?.url || '');
+        const fileName = String(file?.filename || 'session-audio.wav');
+        if (!fileUrl) continue;
+
+        const absoluteUrl = fileUrl.startsWith('http') ? fileUrl : `${API_BASE_URL}${fileUrl}`;
+        const fileResponse = await fetch(absoluteUrl, { headers: getAuthHeaders() });
+        if (!fileResponse.ok) continue;
+
+        const blob = await fileResponse.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      }
+
+      toast.success(onlyUser ? 'User audio downloaded' : 'Session audio downloaded');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to download audio';
+      toast.error(message);
+    } finally {
+      setIsDownloadingAudio(false);
+    }
+  };
 
   const handleReprocess = async () => {
     setIsReprocessing(true);
@@ -193,6 +245,15 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExp
               >
               <Download className="h-4 w-4 mr-2" />
               Download JSON
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => downloadAudioFiles(true)}
+              disabled={isDownloadingAudio}
+            >
+              {isDownloadingAudio ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Mic className="h-4 w-4 mr-2" />}
+              Download My Audio
             </Button>
             </div>
             {reprocessStatus && (

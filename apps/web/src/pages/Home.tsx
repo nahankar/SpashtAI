@@ -3,8 +3,14 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Upload, Mic, History } from 'lucide-react';
 import { ProgressPulseCard } from '@/components/analytics/ProgressPulseCard';
+import { useFeatureFlags } from '@/contexts/FeatureFlagsContext';
 
 export function Home() {
+  const { isEnabled } = useFeatureFlags()
+  const showReplay = isEnabled('replay')
+  const showElevate = isEnabled('elevate')
+  const moduleCount = [showReplay, showElevate].filter(Boolean).length
+
   return (
     <div className="grid gap-6">
       <section className="grid gap-4">
@@ -15,71 +21,81 @@ export function Home() {
           </p>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          {/* Replay Card */}
-          <Card className="hover:shadow-lg transition-shadow">
-            <CardHeader>
-              <div className="flex items-center gap-3">
-                <Upload className="h-8 w-8 text-blue-500 shrink-0" />
-                <CardTitle>Replay</CardTitle>
-              </div>
-              <CardDescription>
-                Upload past recordings or transcripts and get AI-powered analysis and feedback.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Link to="/replay">
-                <Button className="w-full" size="lg" variant="outline">Upload &amp; Analyze</Button>
-              </Link>
-              <ul className="mt-3 grid gap-1 text-xs text-muted-foreground">
-                <li>Works with any meeting platform</li>
-                <li>Detailed AI feedback &amp; scores</li>
-                <li>Track improvement over time</li>
-              </ul>
-              <div className="mt-3 flex justify-end">
-                <Link
-                  to="/history?tab=replay"
-                  className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <History className="h-3.5 w-3.5" />
-                  Past Sessions
-                </Link>
-              </div>
+        {moduleCount === 0 ? (
+          <Card>
+            <CardContent className="py-10 text-center text-sm text-muted-foreground">
+              No coaching modules are currently available. Contact your administrator.
             </CardContent>
           </Card>
+        ) : (
+          <div className={`grid gap-4 ${moduleCount > 1 ? 'sm:grid-cols-2' : 'max-w-lg'}`}>
+            {showReplay && (
+              <Card className="hover:shadow-lg transition-shadow">
+                <CardHeader>
+                  <div className="flex items-center gap-3">
+                    <Upload className="h-8 w-8 text-blue-500 shrink-0" />
+                    <CardTitle>Replay</CardTitle>
+                  </div>
+                  <CardDescription>
+                    Upload past recordings or transcripts and get AI-powered analysis and feedback.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Link to="/replay">
+                    <Button className="w-full" size="lg" variant="outline">Upload &amp; Analyze</Button>
+                  </Link>
+                  <ul className="mt-3 grid gap-1 text-xs text-muted-foreground">
+                    <li>Works with any meeting platform</li>
+                    <li>Detailed AI feedback &amp; scores</li>
+                    <li>Track improvement over time</li>
+                  </ul>
+                  <div className="mt-3 flex justify-end">
+                    <Link
+                      to="/history?tab=replay"
+                      className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <History className="h-3.5 w-3.5" />
+                      Past Sessions
+                    </Link>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
-          {/* Elevate Card */}
-          <Card className="hover:shadow-lg transition-shadow">
-            <CardHeader>
-              <div className="flex items-center gap-3">
-                <Mic className="h-8 w-8 text-indigo-500 shrink-0" />
-                <CardTitle>Elevate</CardTitle>
-              </div>
-              <CardDescription>
-                Practice live with an AI coach and elevate your communication skills in real time.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Link to="/elevate">
-                <Button className="w-full" size="lg" variant="outline">Start Live Session</Button>
-              </Link>
-              <ul className="mt-3 grid gap-1 text-xs text-muted-foreground">
-                <li>Real-time voice AI conversation</li>
-                <li>Live metrics &amp; analytics</li>
-                <li>Resume anytime</li>
-              </ul>
-              <div className="mt-3 flex justify-end">
-                <Link
-                  to="/history?tab=elevate"
-                  className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <History className="h-3.5 w-3.5" />
-                  Past Sessions
-                </Link>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+            {showElevate && (
+              <Card className="hover:shadow-lg transition-shadow">
+                <CardHeader>
+                  <div className="flex items-center gap-3">
+                    <Mic className="h-8 w-8 text-indigo-500 shrink-0" />
+                    <CardTitle>Elevate</CardTitle>
+                  </div>
+                  <CardDescription>
+                    Practice live with an AI coach and elevate your communication skills in real time.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Link to="/elevate">
+                    <Button className="w-full" size="lg" variant="outline">Start Live Session</Button>
+                  </Link>
+                  <ul className="mt-3 grid gap-1 text-xs text-muted-foreground">
+                    <li>Real-time voice AI conversation</li>
+                    <li>Live metrics &amp; analytics</li>
+                    <li>Resume anytime</li>
+                  </ul>
+                  <div className="mt-3 flex justify-end">
+                    <Link
+                      to="/history?tab=elevate"
+                      className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <History className="h-3.5 w-3.5" />
+                      Past Sessions
+                    </Link>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        )}
       </section>
 
       <ProgressPulseCard />

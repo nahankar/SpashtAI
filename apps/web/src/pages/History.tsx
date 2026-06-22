@@ -25,6 +25,7 @@ import {
 } from 'lucide-react'
 import { getAuthHeaders } from '@/lib/api-client'
 import { SessionFilters, type SortField, type SortDir } from '@/components/SessionFilters'
+import { useFeatureFlags } from '@/contexts/FeatureFlagsContext'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 
@@ -92,7 +93,14 @@ const REPLAY_STATUS_BADGE: Record<string, { variant: 'default' | 'secondary' | '
 
 export function History() {
   const [searchParams] = useSearchParams()
-  const defaultTab = searchParams.get('tab') === 'elevate' ? 'elevate' : 'replay'
+  const { isEnabled } = useFeatureFlags()
+  const replayOn = isEnabled('replay')
+  const elevateOn = isEnabled('elevate')
+  const defaultTab = !replayOn && elevateOn
+    ? 'elevate'
+    : searchParams.get('tab') === 'elevate' && elevateOn
+      ? 'elevate'
+      : 'replay'
   const confirm = useConfirm()
 
   const [replaySessions, setReplaySessions] = useState<ReplaySummary[]>([])
@@ -215,9 +223,11 @@ export function History() {
   ]
 
   useEffect(() => {
-    fetchReplay()
-    fetchElevate()
-  }, [])
+    if (replayOn) fetchReplay()
+    else setReplayLoading(false)
+    if (elevateOn) fetchElevate()
+    else setElevateLoading(false)
+  }, [replayOn, elevateOn])
 
   async function fetchReplay() {
     try {
@@ -335,27 +345,46 @@ export function History() {
         </Link>
         <h1 className="text-2xl font-bold">Past Sessions</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Review your Replay analyses and Elevate practice sessions.
+          {replayOn && elevateOn
+            ? 'Review your Replay analyses and Elevate practice sessions.'
+            : replayOn
+              ? 'Review your Replay analyses.'
+              : elevateOn
+                ? 'Review your Elevate practice sessions.'
+                : 'No session modules are currently enabled.'}
         </p>
       </div>
 
+      {!replayOn && !elevateOn ? (
+        <Card>
+          <CardContent className="py-10 text-center text-sm text-muted-foreground">
+            Session history is unavailable while all modules are disabled.
+          </CardContent>
+        </Card>
+      ) : (
       <Tabs defaultValue={defaultTab}>
+        {(replayOn && elevateOn) && (
         <TabsList className="mb-4 w-full justify-start">
+          {replayOn && (
           <TabsTrigger value="replay" className="gap-1.5">
             Replay
             {replaySessions.length > 0 && (
               <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">{replaySessions.length}</Badge>
             )}
           </TabsTrigger>
+          )}
+          {elevateOn && (
           <TabsTrigger value="elevate" className="gap-1.5">
             Elevate
             {elevateSessions.length > 0 && (
               <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">{elevateSessions.length}</Badge>
             )}
           </TabsTrigger>
+          )}
         </TabsList>
+        )}
 
-        {/* Replay Sessions */}
+        {replayOn && (
         <TabsContent value="replay">
           {selectedReplay.size > 0 && (
             <div className="mb-4 flex items-center gap-2">
@@ -512,8 +541,9 @@ export function History() {
             </div>
           )}
         </TabsContent>
+        )}
 
-        {/* Elevate Sessions */}
+        {elevateOn && (
         <TabsContent value="elevate">
           {selectedElevate.size > 0 && (
             <div className="mb-4 flex items-center gap-2">
@@ -677,7 +707,9 @@ export function History() {
             </div>
           )}
         </TabsContent>
+        )}
       </Tabs>
+      )}
     </div>
   )
 }

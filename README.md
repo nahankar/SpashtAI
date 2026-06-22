@@ -39,7 +39,8 @@ Every session is scored across six core skills:
            │
            ▼
 ┌──────────────────────┐
-│  PostgreSQL (Aiven)  │
+│  PostgreSQL (Docker) │
+│  localhost:5432      │
 └──────────────────────┘
 ```
 
@@ -49,7 +50,7 @@ Every session is scored across six core skills:
 - **Backend:** Node.js, Express, Prisma ORM, TypeScript
 - **AI Agent:** Python, LiveKit Agents SDK, AWS Bedrock (Claude/Nova)
 - **Real-time:** LiveKit (WebRTC)
-- **Cloud:** AWS (Bedrock, Transcribe, S3), Aiven PostgreSQL
+- **Cloud (optional):** AWS Bedrock, Transcribe, S3 for prod paths; **Postgres on EC2** for production DB
 
 ## Project Structure
 

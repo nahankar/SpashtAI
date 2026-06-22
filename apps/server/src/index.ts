@@ -62,9 +62,13 @@ import adminAnalyticsRouter from './routes/admin/analytics'
 import adminSystemRouter from './routes/admin/system'
 import ticketsRouter from './routes/tickets'
 import adminTicketsRouter from './routes/admin/tickets'
+import adminVoiceConfigRouter, { ensurePresets as ensureVoicePresets } from './routes/admin/voice-config'
+import adminFeatureFlagsRouter from './routes/admin/feature-flags'
+import { getPublicFeatures } from './routes/features'
 import { ensureAdminExists } from './lib/init-admin'
-import { requireAuth } from './middleware/auth'
+import { requireAuth, requireAuthOrAgent } from './middleware/auth'
 import { requireAdmin } from './middleware/admin'
+import { requireFeature, ensureFeatureFlags } from './lib/featureFlags'
 import { apiLimiter } from './middleware/rate-limit'
 
 const app = express()
@@ -80,6 +84,9 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok' })
 })
 
+// Public: platform feature flags (no secrets — drives nav visibility)
+app.get('/api/features', getPublicFeatures)
+
 // Auth routes (authLimiter applied inside the router for login/register)
 app.use('/api/auth', authRouter)
 
@@ -88,24 +95,26 @@ app.use('/api/admin/users', requireAuth, requireAdmin, adminUsersRouter)
 app.use('/api/admin/analytics', requireAuth, requireAdmin, adminAnalyticsRouter)
 app.use('/api/admin/system', requireAuth, requireAdmin, adminSystemRouter)
 app.use('/api/admin/tickets', requireAuth, requireAdmin, adminTicketsRouter)
+app.use('/api/admin/voice-config', requireAuth, requireAdmin, adminVoiceConfigRouter)
+app.use('/api/admin/feature-flags', requireAuth, requireAdmin, adminFeatureFlagsRouter)
 
 // Protected: user tickets
 app.use('/api/tickets', requireAuth, ticketsRouter)
 
-// Public: LiveKit (has its own auth via API keys)
-app.get('/livekit/token', getLivekitToken)
-app.post('/livekit/dispatch', dispatchAgent)
+// Public: LiveKit (has its own auth via API keys) — Elevate only
+app.get('/livekit/token', requireFeature('elevate'), getLivekitToken)
+app.post('/livekit/dispatch', requireFeature('elevate'), dispatchAgent)
 
 // Public: personas (read-only reference data)
 app.get('/personas', listPersonas)
 app.get('/personas/:id', getPersona)
 
-// Protected: sessions
-app.get('/sessions', requireAuth, listSessions)
-app.get('/sessions/:id', requireAuth, getSession)
-app.post('/sessions', requireAuth, createSession)
-app.post('/sessions/:id/end', requireAuth, endSession)
-app.delete('/sessions/:id', requireAuth, deleteSession)
+// Protected: sessions (Elevate live coaching)
+app.get('/sessions', requireAuth, requireFeature('elevate'), listSessions)
+app.get('/sessions/:id', requireAuth, requireFeature('elevate'), getSession)
+app.post('/sessions', requireAuth, requireFeature('elevate'), createSession)
+app.post('/sessions/:id/end', requireAuthOrAgent, requireFeature('elevate'), endSession)
+app.delete('/sessions/:id', requireAuth, requireFeature('elevate'), deleteSession)
 
 // Protected: settings
 app.get('/settings', requireAuth, getSettings)
@@ -115,8 +124,10 @@ app.put('/settings', requireAuth, updateSettings)
 app.post('/assistant/text', requireAuth, assistantText)
 
 // Protected: metrics and transcripts
-app.post('/sessions/:sessionId/metrics', requireAuth, saveSessionMetrics)
-app.post('/sessions/:sessionId/transcript', requireAuth, saveSessionTranscript)
+// POST endpoints accept either a user JWT or the agent's internal token, since
+// the LiveKit Python worker also writes metrics at session end.
+app.post('/sessions/:sessionId/metrics', requireAuthOrAgent, saveSessionMetrics)
+app.post('/sessions/:sessionId/transcript', requireAuthOrAgent, saveSessionTranscript)
 app.get('/sessions/:sessionId/metrics', requireAuth, getSessionMetrics)
 app.get('/sessions/:sessionId/transcript', requireAuth, getSessionTranscript)
 app.get('/sessions/:sessionId/transcript/download', requireAuth, downloadSessionTranscript)
@@ -134,15 +145,18 @@ app.post('/sessions/:sessionId/state', requireAuth, updateSessionState)
 app.get('/conversations/search', requireAuth, searchConversations)
 
 // Protected: audio storage
-app.post('/sessions/:sessionId/audio', requireAuth, saveAudioMetadata)
-app.post('/sessions/:sessionId/recording', requireAuth, saveRecording)
+// POST endpoints accept agent token because the LiveKit worker uploads
+// recordings server-side.
+app.post('/sessions/:sessionId/audio', requireAuthOrAgent, saveAudioMetadata)
+app.post('/sessions/:sessionId/recording', requireAuthOrAgent, saveRecording)
 app.get('/sessions/:sessionId/audio', requireAuth, getSessionAudio)
 app.get('/sessions/:sessionId/audio/:audioId/url', requireAuth, generateAudioUrl)
 app.delete('/sessions/:sessionId/audio/:audioId', requireAuth, deleteSessionAudio)
 app.get('/audio/analytics', requireAuth, getAudioAnalytics)
 
 // Protected: advanced metrics
-app.post('/sessions/:sessionId/advanced-metrics', requireAuth, saveAdvancedMetrics)
+// POST is agent-callable; GET stays user-only.
+app.post('/sessions/:sessionId/advanced-metrics', requireAuthOrAgent, saveAdvancedMetrics)
 app.get('/sessions/:sessionId/advanced-metrics', requireAuth, getAdvancedMetrics)
 
 // Protected: analytics engine v2
@@ -160,7 +174,7 @@ app.get('/api/coaching-context', requireAuth, getCoachingContext)
 
 // Protected: downloads and replay
 app.use('/api/downloads', requireAuth, downloadsRouter)
-app.use('/api/replay', requireAuth, replayRouter)
+app.use('/api/replay', requireAuth, requireFeature('replay'), replayRouter)
 
 // local audio serving for development
 app.get('/audio/local/:date/:sessionId/:filename', (req, res) => {
@@ -213,7 +227,21 @@ wss.on('connection', (ws) => {
 })
 
 async function startServer() {
+  if (process.env.NODE_ENV === 'production' && !process.env.INTERNAL_AGENT_TOKEN?.trim()) {
+    throw new Error('INTERNAL_AGENT_TOKEN must be set in production')
+  }
+
   await ensureAdminExists()
+  try {
+    await ensureFeatureFlags()
+  } catch (err) {
+    console.warn('⚠️  Feature flag seeding failed:', err)
+  }
+  try {
+    await ensureVoicePresets()
+  } catch (err) {
+    console.warn('⚠️  Voice config preset seeding failed:', err)
+  }
 
   server.listen(port, () => {
     console.log(`Server listening on http://localhost:${port}`)

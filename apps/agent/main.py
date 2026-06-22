@@ -26,9 +26,11 @@ from livekit.agents import (
     WorkerOptions,
     cli,
 )
-from livekit.agents import AgentSession, Agent
+from livekit.agents import AgentSession, Agent, function_tool, RunContext
 from livekit.plugins import aws
 from exercise_templates import get_exercise_instructions
+from voice_backends import VoiceBackendConfig, build_session, metadata_label
+from live_pacing import LivePacingTracker
 
 # Import analytics components (includes basic + advanced metrics)
 try:
@@ -236,6 +238,80 @@ def build_resume_context(history_messages: list[dict]) -> str:
         + "\n\nContinue naturally from this context. Do not restart from introductions unless the user asks."
     )
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CoachingAgent — Agent subclass that exposes function tools to the LLM.
+#
+# Today: `get_live_pacing` returns a *measured* WPM derived from VAD events,
+# so the model can quote a real number instead of guessing. As we add more
+# grounded coaching signals (filler-word counts, pause structure, etc.) we
+# will register them here as additional `@function_tool` methods.
+# ─────────────────────────────────────────────────────────────────────────────
+class CoachingAgent(Agent):
+    def __init__(
+        self,
+        instructions: str,
+        pacing_tracker: "LivePacingTracker",
+        advanced_metrics=None,
+        room_getter=None,
+    ) -> None:
+        super().__init__(instructions=instructions)
+        self._pacing_tracker = pacing_tracker
+        # Optional handles used to push a fresh snapshot to the frontend at
+        # the exact moment the LLM cites a number — keeps the spoken number
+        # and the on-screen card in sync.
+        self._advanced_metrics = advanced_metrics
+        self._room_getter = room_getter
+
+    @function_tool
+    async def get_live_pacing(self, context: RunContext) -> dict:
+        """Get the user's CURRENT (fresh, just-measured) speaking pace.
+
+        FRESHNESS RULE: This value is only valid for ~5 seconds. If you
+        previously called this tool and the user is still talking, you MUST
+        call it AGAIN before quoting a number — do not reuse values from
+        earlier in the conversation. Cumulative WPM shifts as the user
+        speaks more, so a 30-second-old number is likely wrong.
+
+        WHEN TO CALL: every time you are about to mention WPM, speed, pace,
+        rhythm, or how fast/slow the user is speaking. Especially when the
+        user asks "what is my current speed?" — that ALWAYS warrants a
+        fresh call, even if you called this tool a moment ago.
+
+        WHAT TO QUOTE: round to the nearest 5 (e.g. 158 → "around 160 WPM")
+        to feel natural, and pair the number with the qualitative label.
+
+        Returns:
+            wpm: Measured words per minute across the session so far.
+            total_words: Total user words counted.
+            total_speaking_seconds: Total user speaking time in seconds.
+            samples: Number of speaking turns measured.
+            qualitative: One of slow|measured|ideal|fast|rapid|not-enough-data.
+            ideal_range_wpm: The reference range for natural speech.
+        """
+        snap = self._pacing_tracker.get_live_metrics()
+        result = snap.to_dict()
+        logger_init = logging.getLogger("spashtai-agent")
+        logger_init.info(
+            "🛠️  get_live_pacing tool called → wpm=%s words=%s secs=%s qual=%s",
+            result["wpm"], result["total_words"], result["total_speaking_seconds"], result["qualitative"],
+        )
+
+        # Push the same snapshot to the live-metrics card immediately so the
+        # number the user is about to hear matches the number on screen.
+        # Fire-and-forget — never block the tool call on this.
+        try:
+            if self._advanced_metrics is not None and self._room_getter is not None:
+                room = self._room_getter()
+                if room is not None:
+                    asyncio.create_task(self._advanced_metrics.publish_metrics_update(room))
+                    logger_init.debug("📡 tool-triggered live-metrics push scheduled")
+        except Exception as e:
+            logger_init.debug(f"tool-triggered push skipped: {e}")
+
+        return result
+
+
 class ConversationLogger:
     """Minimal conversation logging to server API with IST timestamps"""
     
@@ -431,6 +507,7 @@ class EgressRecorder:
                 async with session.post(
                     url,
                     json=payload,
+                    headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
                     timeout=aiohttp.ClientTimeout(total=5.0)
                 ) as response:
                     if response.status in [200, 201]:
@@ -592,6 +669,7 @@ class TrackEgressRecorder:
                 async with session.post(
                     url,
                     json=payload,
+                    headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
                     timeout=aiohttp.ClientTimeout(total=5.0)
                 ) as response:
                     if response.status in [200, 201]:
@@ -742,6 +820,7 @@ class RoomCompositeEgressRecorder:
                 async with session.post(
                     url,
                     json=payload,
+                    headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
                     timeout=aiohttp.ClientTimeout(total=5.0)
                 ) as response:
                     if response.status in [200, 201]:
@@ -869,6 +948,7 @@ class AudioMerger:
                 async with session.post(
                     f"{SERVER_URL}/sessions/{self.session_id}/recording",
                     json=payload,
+                    headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
                     timeout=aiohttp.ClientTimeout(total=5.0)
                 ) as response:
                     if response.status in [200, 201]:
@@ -993,26 +1073,34 @@ async def entrypoint(ctx: JobContext):
     
     logger.info("⏳ Triple recording will start after session initialization (user + agent + room composite)")
     
+    # ── Voice backend selection (admin-configurable) ──
+    # Set by the server in apps/server/src/routes/livekit.ts. Defaults to
+    # Nova Sonic if the field is missing (e.g. older client / pre-feature room).
+    voice_cfg = VoiceBackendConfig.from_room_meta(room_meta)
+    logger.info(
+        "🎚️  Voice backend selected: %s (voice=%s, llm=%s)",
+        voice_cfg.backend, voice_cfg.voice_name, voice_cfg.pipeline_llm,
+    )
+
     try:
         # Set agent metadata for frontend
         try:
             await ctx.room.local_participant.set_name("SpashtAI Assistant")
             await ctx.room.local_participant.set_metadata(
-                '{"role": "agent", "type": "voice_assistant", "model": "AWS Nova Sonic"}'
+                json.dumps({
+                    "role": "agent",
+                    "type": "voice_assistant",
+                    "model": metadata_label(voice_cfg),
+                    "backend": voice_cfg.backend,
+                })
             )
             logger.info("✅ Agent metadata set")
         except Exception as e:
             logger.warning("⚠️ Failed to set metadata: %s", e)
         
-        # Create AWS Nova Sonic RealtimeModel (proven pattern)
-        realtime_model = aws.realtime.RealtimeModel(
-            region=region,
-            voice="tiffany",
-            temperature=0.7,
-            top_p=0.9,
-            max_tokens=1024,
-        )
-        logger.info("✅ AWS Nova Sonic model created")
+        # Region kept for backward-compat downstream usage; the backend factory
+        # also reads it directly from env when building Nova Sonic.
+        _ = region  # silence unused warning if pipeline backend is active
         
         # Track actual AWS usage metrics for billing
         # Note: Token metrics will be estimated from conversation text since
@@ -1038,7 +1126,21 @@ async def entrypoint(ctx: JobContext):
         base_instructions = (
             "You are a voice AI coach for SpashtAI, a platform that helps people become better communicators. "
             "Your interface with users will be voice. Use short and concise responses, "
-            "and avoid unpronounceable punctuation. Be warm, encouraging, and professional."
+            "and avoid unpronounceable punctuation. Be warm, encouraging, and professional.\n\n"
+            "GROUNDING RULE — speaking-pace metrics:\n"
+            "• Whenever you reference the user's speaking pace, words-per-minute, or speed, "
+            "you MUST first call the `get_live_pacing` tool to obtain the measured value. "
+            "Quote that number to the user (you may round to the nearest 5 — e.g. 158 → 'around 160 WPM').\n"
+            "• FRESHNESS — the value goes stale within ~5 seconds. ALWAYS call the tool again "
+            "before quoting WPM, even if you called it a moment ago. NEVER reuse a number "
+            "from earlier in the conversation — the cumulative WPM shifts as the user speaks more, "
+            "so a 30-second-old value will not match what the user sees on their live metrics card. "
+            "If the user asks 'what is my current speed?', you MUST re-call the tool right then.\n"
+            "• Never invent, estimate, or guess a WPM number. If `get_live_pacing` returns "
+            "qualitative='not-enough-data', acknowledge it ('I need to hear a bit more first') "
+            "instead of fabricating a value.\n"
+            "• You may always describe pace qualitatively ('that felt rushed', 'nice and steady') "
+            "without the tool — only quoting a specific number requires the tool."
         )
 
         # Personalization: use the user's name naturally
@@ -1112,15 +1214,48 @@ async def entrypoint(ctx: JobContext):
             else base_instructions
         )
 
-        agent = Agent(instructions=combined_instructions)
-        logger.info("✅ Agent created")
-        
-        # Create AgentSession with transcript support enabled
-        session = AgentSession(
-            llm=realtime_model,
-            use_tts_aligned_transcript=True  # Enable transcript events
+        # ── Live pacing tracker (real WPM grounded in audio events) ──
+        # Populated via session.on(...) handlers below. The CoachingAgent
+        # exposes a `get_live_pacing` tool that the LLM can call to retrieve
+        # measured numbers — this is what makes "you're speaking at 187 WPM"
+        # grounded instead of hallucinated.
+        pacing_tracker = LivePacingTracker()
+
+        agent = CoachingAgent(
+            instructions=combined_instructions,
+            pacing_tracker=pacing_tracker,
+            advanced_metrics=advanced_metrics,
+            # Lazy room getter — ctx.room is already valid at this point but
+            # we wrap it so the closure stays cheap and the room reference
+            # always reflects the live session.
+            room_getter=lambda: ctx.room,
         )
+        logger.info("✅ CoachingAgent created (with get_live_pacing tool + live-sync push)")
+        
+        # Create AgentSession via the voice-backend factory.
+        # • nova-sonic        → AWS Bedrock RealtimeModel (legacy default)
+        # • pipeline-premium  → faster-whisper + Ollama + Kokoro
+        # • unknown / pipeline servers down → falls back to nova-sonic.
+        session = await build_session(voice_cfg)
         logger.info("✅ AgentSession created with transcript support")
+
+        # Hook live-pacing measurement into VAD + transcript signals.
+        @session.on("user_state_changed")
+        def _on_user_state(ev):  # noqa: ANN001
+            try:
+                pacing_tracker.on_user_state_changed(getattr(ev, "new_state", "") or "")
+            except Exception as e:
+                logger.debug(f"pacing user_state hook failed: {e}")
+
+        @session.on("user_input_transcribed")
+        def _on_user_transcribed(ev):  # noqa: ANN001
+            try:
+                pacing_tracker.on_user_transcript(
+                    getattr(ev, "transcript", "") or "",
+                    bool(getattr(ev, "is_final", False)),
+                )
+            except Exception as e:
+                logger.debug(f"pacing transcript hook failed: {e}")
         
         # Register event handlers for transcripts
         @session.on("conversation_item_added")
@@ -1182,9 +1317,19 @@ async def entrypoint(ctx: JobContext):
                 if advanced_metrics:
                     try:
                         # This automatically updates both basic metrics and advanced analytics
-                        advanced_metrics.add_conversation_turn(role, content)
+                        advanced_metrics.ingest_conversation_fragment(role, content)
                     except Exception as analytics_error:
                         logger.debug(f"⚠️ Analytics tracking error: {analytics_error}")
+
+                # Also feed user transcripts into LivePacingTracker. The
+                # `user_input_transcribed` event is unreliable in pipeline
+                # mode (Whisper + Ollama + Kokoro), so we use this event as
+                # the canonical source. The tracker dedups against doubles.
+                if role == 'user':
+                    try:
+                        pacing_tracker.on_user_transcript(content, is_final=True)
+                    except Exception as pace_err:
+                        logger.debug(f"pacing fallback hook failed: {pace_err}")
                 
             except Exception as e:
                 logger.warning("⚠️ Error in conversation_item_added: %s", e)
@@ -1197,7 +1342,8 @@ async def entrypoint(ctx: JobContext):
             json.dumps({
                 "type": "session_state",
                 "text": "ready",
-                "agent_model": "AWS Nova Sonic",
+                "agent_model": metadata_label(voice_cfg),
+                "agent_backend": voice_cfg.backend,
                 "timestamp": datetime.now().isoformat()
             }).encode(),
             topic="lk.control"
@@ -1212,6 +1358,69 @@ async def entrypoint(ctx: JobContext):
             logger.info(f"🔚 Session close event received, error: {event.error if hasattr(event, 'error') else None}")
             session_closed.set()
         
+        # ── Live metrics publisher ────────────────────────────────────
+        # The frontend's "Show Metrics" toggle reveals a card that listens to
+        # the `lk.metrics` data-channel topic. Push a fresh snapshot every
+        # ~12s so the user can self-correct mid-session (slow down, catch
+        # filler-word spikes, etc.) without waiting for the post-session
+        # report. Grounded in the LivePacingTracker we built for #1/#2.
+        if advanced_metrics:
+            try:
+                advanced_metrics.attach_pacing_tracker(pacing_tracker)
+                logger.info("🔗 Pacing tracker attached to advanced_metrics for live publish")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not attach pacing tracker: {e}")
+
+            async def _publish_user_turn_metrics(stitched_text: str, turn_metrics_snapshot) -> None:
+                try:
+                    payload = {
+                        "type": "turn_metrics",
+                        "text": stitched_text,
+                        "turnMetrics": turn_metrics_snapshot.to_dict(),
+                        "timestamp": int(datetime.now().timestamp() * 1000),
+                    }
+                    await ctx.room.local_participant.publish_data(
+                        json.dumps(payload).encode(),
+                        topic="lk.conversation",
+                    )
+                except Exception as pub_err:
+                    logger.warning("⚠️ Failed to publish turn metrics: %s", pub_err)
+
+            def _schedule_user_turn_metrics(text: str, metrics_snapshot) -> None:
+                asyncio.create_task(_publish_user_turn_metrics(text, metrics_snapshot))
+
+            try:
+                bc = advanced_metrics.basic_collector
+                bc.set_utterance_peeker(pacing_tracker.peek_last_utterance)
+                bc.set_user_turn_metrics_callback(_schedule_user_turn_metrics)
+                bc.set_turn_committed_callback(advanced_metrics.record_committed_turn)
+                logger.info("🔗 Turn stitcher wired (utterance peeker + per-turn metrics publish)")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not wire turn metrics callbacks: {e}")
+
+        live_metrics_task: asyncio.Task | None = None
+        if advanced_metrics:
+            async def _live_metrics_publisher():
+                # Initial delay so the first emission has at least one user turn.
+                await asyncio.sleep(8)
+                interval = 12  # seconds — "minute delay" tolerance per UX brief
+                tick = 0
+                while not session_closed.is_set():
+                    tick += 1
+                    try:
+                        await advanced_metrics.publish_metrics_update(ctx.room)
+                        logger.info(f"📡 live-metrics tick #{tick} published to lk.metrics topic")
+                    except Exception as pub_err:
+                        logger.warning(f"⚠️ live-metrics tick #{tick} failed: {pub_err}")
+                    try:
+                        await asyncio.wait_for(session_closed.wait(), timeout=interval)
+                    except asyncio.TimeoutError:
+                        pass
+                logger.info("🛑 Live metrics publisher stopped (session closed)")
+
+            live_metrics_task = asyncio.create_task(_live_metrics_publisher())
+            logger.info("📡 Live metrics publisher scheduled (every 12s)")
+
         # Start session (proven pattern - this handles everything)
         logger.info("🎯 Starting AgentSession...")
         session_task = asyncio.create_task(session.start(room=ctx.room, agent=agent))
@@ -1273,7 +1482,16 @@ async def entrypoint(ctx: JobContext):
         # Wait for the session to ACTUALLY close (not just start)
         await session_closed.wait()
         logger.info("🎉 Session completed - waiting for task cleanup...")
-        
+
+        # Cancel the live-metrics publisher so it doesn't try to publish into
+        # a closed room and surface a noisy "Failed to publish data" error.
+        if live_metrics_task and not live_metrics_task.done():
+            live_metrics_task.cancel()
+            try:
+                await live_metrics_task
+            except (asyncio.CancelledError, Exception):
+                pass
+
         # Give the task a moment to cleanup
         try:
             await asyncio.wait_for(session_task, timeout=2.0)
@@ -1380,6 +1598,27 @@ async def entrypoint(ctx: JobContext):
                         local_user_audio_path = user_file_path
                     logger.info(f"📁 Using user audio file for delivery analysis: {local_user_audio_path}")
                 
+                # Plumb the audio-grounded user speaking duration into the
+                # basic metrics collector so its WPM uses real time instead of
+                # the legacy tautological 150-WPM estimate. This is *the*
+                # post-session fix that keeps in-session and dashboard numbers
+                # consistent.
+                try:
+                    user_words, user_seconds, samples = pacing_tracker.get_session_totals()
+                    if user_seconds > 0:
+                        advanced_metrics.basic_collector.set_measured_speaking_seconds(
+                            user_seconds=user_seconds
+                        )
+                        logger.info(
+                            "📐 Plumbed measured user pacing into basic_collector: "
+                            f"{user_words} words / {user_seconds:.2f}s "
+                            f"({(user_words / user_seconds) * 60:.1f} WPM, {samples} samples)"
+                        )
+                    else:
+                        logger.info("📐 LivePacingTracker produced no measured seconds — falling back to wall-clock estimate")
+                except Exception as _e:
+                    logger.warning(f"⚠️  Could not plumb pacing data into metrics: {_e}")
+
                 await advanced_metrics.finalize_session(user_audio_file_path=local_user_audio_path)
                 logger.info("✅ Advanced analytics processing complete!")
                 
@@ -1412,7 +1651,12 @@ async def entrypoint(ctx: JobContext):
                                 "endedAt": advanced_metrics.session_metrics.end_time.isoformat(),
                                 "durationSec": int((advanced_metrics.session_metrics.end_time - advanced_metrics.session_metrics.start_time).total_seconds()) if advanced_metrics.session_metrics.start_time else 0
                             }
-                            async with session.post(end_url, json=end_payload, timeout=aiohttp.ClientTimeout(total=5.0)) as response:
+                            async with session.post(
+                                end_url,
+                                json=end_payload,
+                                headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
+                                timeout=aiohttp.ClientTimeout(total=5.0),
+                            ) as response:
                                 if response.status == 200:
                                     logger.info(f"✅ Session marked as ended in database")
                                 else:

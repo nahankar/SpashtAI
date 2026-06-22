@@ -5,7 +5,9 @@ import { WebSocketServer, WebSocket } from 'ws'
 let wss: WebSocketServer | null = null
 
 const clientSessions = new WeakMap<WebSocket, Set<string>>()
-const INTERNAL_AGENT_TOKEN = process.env.INTERNAL_AGENT_TOKEN || 'dev-internal-agent-token'
+const INTERNAL_AGENT_TOKEN =
+  process.env.INTERNAL_AGENT_TOKEN?.trim() ||
+  (process.env.NODE_ENV !== 'production' ? 'dev-internal-agent-token' : '')
 
 export function setWebSocketServer(webSocketServer: WebSocketServer) {
   wss = webSocketServer
@@ -204,7 +206,9 @@ export async function getConversation(req: Request, res: Response) {
 export async function getConversationForAgent(req: Request, res: Response) {
   try {
     const token = req.header('x-internal-agent-token')
-    const expected = process.env.INTERNAL_AGENT_TOKEN || 'dev-internal-agent-token'
+    const expected =
+      process.env.INTERNAL_AGENT_TOKEN?.trim() ||
+      (process.env.NODE_ENV !== 'production' ? 'dev-internal-agent-token' : '')
     if (!token || token !== expected) {
       return res.status(401).json({ error: 'Unauthorized internal agent request' })
     }

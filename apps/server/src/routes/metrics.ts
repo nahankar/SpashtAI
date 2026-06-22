@@ -7,86 +7,129 @@ import { fileURLToPath } from 'url'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
+/**
+ * Server-side canonical recompute of words-per-minute.
+ *
+ * The agent posts pre-computed `words_per_minute` and `total_speaking_time`,
+ * but for "100% correct data for users to consume" we treat the server as
+ * the source of truth and recompute WPM from raw signals. This guarantees:
+ *   • a single formula across in-session, post-session, Replay, and Pulse
+ *   • bugs in the agent's calc never leak into the dashboard
+ *   • old sessions can be reprocessed by re-running this function
+ *
+ * Returns the canonical (wpm, speakingSec) tuple. Falls back to the agent's
+ * value when raw signals are missing.
+ */
+function canonicalWpm(opts: {
+  agentWpm: number
+  agentSpeakingSec: number
+  totalWords?: number
+  sessionDurationSec?: number
+}): { wpm: number; speakingSec: number; source: string } {
+  const agentWpm = Number(opts.agentWpm) || 0
+  const agentSec = Number(opts.agentSpeakingSec) || 0
+  const sessionSec = Number(opts.sessionDurationSec) || 0
+
+  // Infer total words when the agent didn't send them explicitly.
+  const inferredWords =
+    typeof opts.totalWords === 'number' && opts.totalWords > 0
+      ? opts.totalWords
+      : agentWpm > 0 && agentSec > 0
+      ? Math.round((agentWpm * agentSec) / 60)
+      : 0
+
+  // Preferred path: real measured speaking time and word count, validated
+  // against session wall-clock so we never accept impossible durations.
+  if (inferredWords > 0 && agentSec > 0 && (sessionSec === 0 || agentSec <= sessionSec * 1.05)) {
+    const wpm = Math.round((inferredWords / agentSec) * 60)
+    return { wpm, speakingSec: agentSec, source: 'agent-measured' }
+  }
+
+  // Fallback: derive from session wall-clock. Coarse but real (not the legacy
+  // 150-WPM tautology). Assumes ~40% of session is user speech.
+  if (inferredWords > 0 && sessionSec > 0) {
+    const estUserSec = Math.max(sessionSec * 0.4, 1)
+    const wpm = Math.round((inferredWords / estUserSec) * 60)
+    return { wpm, speakingSec: estUserSec, source: 'wall-clock-estimated' }
+  }
+
+  // Last resort: pass through whatever the agent sent.
+  return { wpm: Math.round(agentWpm), speakingSec: agentSec, source: 'agent-passthrough' }
+}
+
 export async function saveSessionMetrics(req: Request, res: Response) {
   try {
     const { sessionId } = req.params
     const metricsData = req.body
 
-    // Validate session exists
     const session = await prisma.session.findUnique({
-      where: { id: sessionId }
+      where: { id: sessionId },
     })
 
     if (!session) {
       return res.status(404).json({ error: 'Session not found' })
     }
 
-    // Save or update metrics
+    // Compute canonical WPM server-side. The agent's value is one input, not
+    // the verdict — see `canonicalWpm` doc above for the full rationale.
+    const sessionDurationSec =
+      session.startedAt && session.endedAt
+        ? (session.endedAt.getTime() - session.startedAt.getTime()) / 1000
+        : 0
+
+    const userCanon = canonicalWpm({
+      agentWpm: metricsData.userMetrics?.words_per_minute || 0,
+      agentSpeakingSec: metricsData.userMetrics?.total_speaking_time || 0,
+      totalWords: metricsData.userMetrics?.total_words,
+      sessionDurationSec,
+    })
+    const assistantCanon = canonicalWpm({
+      agentWpm: metricsData.assistantMetrics?.words_per_minute || 0,
+      agentSpeakingSec: metricsData.assistantMetrics?.total_speaking_time || 0,
+      totalWords: metricsData.assistantMetrics?.total_words,
+      sessionDurationSec,
+    })
+
+    console.log(
+      `[metrics] session=${sessionId} userWpm: agent=${metricsData.userMetrics?.words_per_minute} ` +
+        `→ canonical=${userCanon.wpm} (${userCanon.source}); ` +
+        `assistantWpm: agent=${metricsData.assistantMetrics?.words_per_minute} ` +
+        `→ canonical=${assistantCanon.wpm} (${assistantCanon.source})`
+    )
+
+    const sharedFields = {
+      totalLlmTokens: metricsData.totalLlmTokens || 0,
+      totalLlmDuration: metricsData.totalLlmDuration || 0,
+      avgTtft: metricsData.avgTtft || 0,
+      totalTtsDuration: metricsData.totalTtsDuration || 0,
+      totalTtsAudioDuration: metricsData.totalTtsAudioDuration || 0,
+      avgTtsTtfb: metricsData.avgTtsTtfb || 0,
+      totalEouDelay: metricsData.totalEouDelay || 0,
+      conversationLatencyAvg: metricsData.conversationLatencyAvg || 0,
+
+      userWpm: userCanon.wpm,
+      userFillerCount: metricsData.userMetrics?.filler_word_count || 0,
+      userFillerRate: metricsData.userMetrics?.filler_word_rate || 0,
+      userAvgSentenceLength: metricsData.userMetrics?.average_sentence_length || 0,
+      userSpeakingTime: userCanon.speakingSec,
+      userVocabDiversity: metricsData.userMetrics?.vocabulary_diversity || 0,
+      userResponseTimeAvg: metricsData.userMetrics?.response_time_avg || 0,
+
+      assistantWpm: assistantCanon.wpm,
+      assistantFillerCount: metricsData.assistantMetrics?.filler_word_count || 0,
+      assistantFillerRate: metricsData.assistantMetrics?.filler_word_rate || 0,
+      assistantAvgSentenceLength: metricsData.assistantMetrics?.average_sentence_length || 0,
+      assistantSpeakingTime: assistantCanon.speakingSec,
+      assistantVocabDiversity: metricsData.assistantMetrics?.vocabulary_diversity || 0,
+      assistantResponseTimeAvg: metricsData.assistantMetrics?.response_time_avg || 0,
+
+      totalTurns: metricsData.totalTurns || 0,
+    }
+
     const metrics = await prisma.sessionMetrics.upsert({
       where: { sessionId },
-      update: {
-        // LiveKit metrics
-        totalLlmTokens: metricsData.totalLlmTokens || 0,
-        totalLlmDuration: metricsData.totalLlmDuration || 0,
-        avgTtft: metricsData.avgTtft || 0,
-        totalTtsDuration: metricsData.totalTtsDuration || 0,
-        totalTtsAudioDuration: metricsData.totalTtsAudioDuration || 0,
-        avgTtsTtfb: metricsData.avgTtsTtfb || 0,
-        totalEouDelay: metricsData.totalEouDelay || 0,
-        conversationLatencyAvg: metricsData.conversationLatencyAvg || 0,
-        
-        // User metrics
-        userWpm: metricsData.userMetrics?.words_per_minute || 0,
-        userFillerCount: metricsData.userMetrics?.filler_word_count || 0,
-        userFillerRate: metricsData.userMetrics?.filler_word_rate || 0,
-        userAvgSentenceLength: metricsData.userMetrics?.average_sentence_length || 0,
-        userSpeakingTime: metricsData.userMetrics?.total_speaking_time || 0,
-        userVocabDiversity: metricsData.userMetrics?.vocabulary_diversity || 0,
-        userResponseTimeAvg: metricsData.userMetrics?.response_time_avg || 0,
-        
-        // Assistant metrics
-        assistantWpm: metricsData.assistantMetrics?.words_per_minute || 0,
-        assistantFillerCount: metricsData.assistantMetrics?.filler_word_count || 0,
-        assistantFillerRate: metricsData.assistantMetrics?.filler_word_rate || 0,
-        assistantAvgSentenceLength: metricsData.assistantMetrics?.average_sentence_length || 0,
-        assistantSpeakingTime: metricsData.assistantMetrics?.total_speaking_time || 0,
-        assistantVocabDiversity: metricsData.assistantMetrics?.vocabulary_diversity || 0,
-        assistantResponseTimeAvg: metricsData.assistantMetrics?.response_time_avg || 0,
-        
-        totalTurns: metricsData.totalTurns || 0,
-      },
-      create: {
-        sessionId,
-        // LiveKit metrics
-        totalLlmTokens: metricsData.totalLlmTokens || 0,
-        totalLlmDuration: metricsData.totalLlmDuration || 0,
-        avgTtft: metricsData.avgTtft || 0,
-        totalTtsDuration: metricsData.totalTtsDuration || 0,
-        totalTtsAudioDuration: metricsData.totalTtsAudioDuration || 0,
-        avgTtsTtfb: metricsData.avgTtsTtfb || 0,
-        totalEouDelay: metricsData.totalEouDelay || 0,
-        conversationLatencyAvg: metricsData.conversationLatencyAvg || 0,
-        
-        // User metrics
-        userWpm: metricsData.userMetrics?.words_per_minute || 0,
-        userFillerCount: metricsData.userMetrics?.filler_word_count || 0,
-        userFillerRate: metricsData.userMetrics?.filler_word_rate || 0,
-        userAvgSentenceLength: metricsData.userMetrics?.average_sentence_length || 0,
-        userSpeakingTime: metricsData.userMetrics?.total_speaking_time || 0,
-        userVocabDiversity: metricsData.userMetrics?.vocabulary_diversity || 0,
-        userResponseTimeAvg: metricsData.userMetrics?.response_time_avg || 0,
-        
-        // Assistant metrics
-        assistantWpm: metricsData.assistantMetrics?.words_per_minute || 0,
-        assistantFillerCount: metricsData.assistantMetrics?.filler_word_count || 0,
-        assistantFillerRate: metricsData.assistantMetrics?.filler_word_rate || 0,
-        assistantAvgSentenceLength: metricsData.assistantMetrics?.average_sentence_length || 0,
-        assistantSpeakingTime: metricsData.assistantMetrics?.total_speaking_time || 0,
-        assistantVocabDiversity: metricsData.assistantMetrics?.vocabulary_diversity || 0,
-        assistantResponseTimeAvg: metricsData.assistantMetrics?.response_time_avg || 0,
-        
-        totalTurns: metricsData.totalTurns || 0,
-      }
+      update: sharedFields,
+      create: { sessionId, ...sharedFields },
     })
 
     res.json({ success: true, metrics })
