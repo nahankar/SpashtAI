@@ -6,10 +6,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT}"
 
 echo "==> Python agent venv"
-if [[ ! -x apps/agent/.venv312/bin/python ]]; then
-  python3.12 -m venv apps/agent/.venv312
-  apps/agent/.venv312/bin/pip install -r apps/agent/requirements.txt
+RESOLVE_PY="${ROOT}/infra/ec2/resolve-python.sh"
+chmod +x "${RESOLVE_PY}"
+AGENT_PY="$("${RESOLVE_PY}")"
+VENV_DIR="${ROOT}/apps/agent/.venv"
+if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
+  "${AGENT_PY}" -m venv "${VENV_DIR}"
+  "${VENV_DIR}/bin/pip" install -r apps/agent/requirements.txt
 fi
+echo "    Using ${VENV_DIR} ($("${VENV_DIR}/bin/python" --version))"
 
 mkdir -p logs
 

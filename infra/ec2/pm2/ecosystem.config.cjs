@@ -25,7 +25,7 @@ module.exports = {
       cwd: path.join(root, 'apps/agent'),
       script: 'main.py',
       args: 'start',
-      interpreter: path.join(root, 'apps/agent/.venv312/bin/python'),
+      interpreter: path.join(root, 'apps/agent/.venv/bin/python'),
       instances: 1,
       exec_mode: 'fork',
       env: {

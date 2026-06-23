@@ -15,8 +15,18 @@ sudo apt upgrade -y
 echo "==> Base packages"
 sudo apt install -y \
   curl git build-essential nginx rsync \
-  python3.12 python3.12-venv python3-pip \
+  python3 python3-venv python3-pip \
   ca-certificates gnupg
+
+# Prefer 3.12 when available (Ubuntu 22.04/24.04); newer Ubuntu may only ship 3.13+
+if apt-cache show python3.12 >/dev/null 2>&1; then
+  sudo apt install -y python3.12 python3.12-venv || true
+fi
+
+RESOLVE_PY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/resolve-python.sh"
+chmod +x "${RESOLVE_PY}"
+AGENT_PY="$("${RESOLVE_PY}")"
+echo "==> Python for agent: ${AGENT_PY} ($(${AGENT_PY} --version))"
 
 echo "==> Node.js 22"
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
