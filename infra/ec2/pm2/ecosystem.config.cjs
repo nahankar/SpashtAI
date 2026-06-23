@@ -8,7 +8,9 @@ module.exports = {
     {
       name: 'spashtai-api',
       cwd: path.join(root, 'apps/server'),
-      script: 'dist/index.js',
+      // tsc output omits .js extensions; tsx runs TypeScript directly in production
+      script: path.join(root, 'node_modules/.bin/tsx'),
+      args: 'src/index.ts',
       instances: 1,
       exec_mode: 'fork',
       env: {

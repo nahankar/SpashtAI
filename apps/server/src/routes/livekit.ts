@@ -5,8 +5,12 @@ import { prisma } from '../lib/prisma'
 function getLivekitConfig() {
   const apiKey = process.env.LIVEKIT_API_KEY
   const apiSecret = process.env.LIVEKIT_API_SECRET
+  // Public URL returned to browsers (wss://livekit.spasht.ai)
   const lkUrl = process.env.LIVEKIT_URL
-  const httpUrl = lkUrl?.replace('ws://', 'http://').replace('wss://', 'https://') || ''
+  // Server-side SDK calls — use internal docker URL on EC2 when set
+  const lkInternalUrl = process.env.LIVEKIT_INTERNAL_URL || lkUrl
+  const httpUrl =
+    lkInternalUrl?.replace('ws://', 'http://').replace('wss://', 'https://') || ''
   return { apiKey, apiSecret, lkUrl, httpUrl }
 }
 
