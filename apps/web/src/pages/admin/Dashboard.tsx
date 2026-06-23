@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { apiClient } from '@/lib/api-client'
 import { MetricCard } from '@/components/admin/MetricCard'
+import { BrandName } from '@/components/brand/BrandName'
 
 interface Overview {
   users: { total: number; newToday: number; newThisWeek: number; activeThisWeek: number }
@@ -39,7 +40,7 @@ export function Dashboard() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
-        <p className="text-muted-foreground">Overview of your SpashtAI platform</p>
+        <p className="text-muted-foreground">Overview of your <BrandName size="sm" className="inline" /> platform</p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

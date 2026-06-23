@@ -11,16 +11,36 @@ export interface AuthUser {
   emailVerified: boolean
   lastLoginAt: string | null
   createdAt: string
+  rewardPoints?: number
+  profileComplete?: boolean
+  needsProfileCompletion?: boolean
+  hideTranscriptText?: boolean
+  hideTranscriptJsonExport?: boolean
+  hideAudioDownload?: boolean
+}
+
+export interface RegisterData {
+  email: string
+  password: string
+  firstName?: string
+  lastName?: string
+  phone: string
+  dateOfBirth: string
+  gender: string
+  pincode: string
+  acceptedTerms: boolean
 }
 
 export interface AuthContextType {
   user: AuthUser | null
   loading: boolean
   login: (email: string, password: string) => Promise<AuthUser>
-  register: (email: string, password: string, firstName?: string, lastName?: string) => Promise<AuthUser>
+  loginWithGoogle: (credential: string) => Promise<AuthUser>
+  register: (data: RegisterData) => Promise<AuthUser>
   logout: () => void
   isAdmin: boolean
   updateUser: (data: Partial<AuthUser>) => void
+  fetchCurrentUser: () => Promise<void>
 }
 
 export const AuthContext = createContext<AuthContextType | null>(null)
@@ -63,20 +83,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return data.user
   }, [])
 
-  const register = useCallback(async (
-    email: string,
-    password: string,
-    firstName?: string,
-    lastName?: string
-  ): Promise<AuthUser> => {
-    const data = await apiClient<{ token: string; user: AuthUser }>('/api/auth/register', {
+  const loginWithGoogle = useCallback(async (credential: string): Promise<AuthUser> => {
+    const data = await apiClient<{ token: string; user: AuthUser }>('/api/auth/google', {
       method: 'POST',
-      body: JSON.stringify({ email, password, firstName, lastName }),
+      body: JSON.stringify({ credential }),
       skipAuth: true,
     })
     localStorage.setItem(TOKEN_KEY, data.token)
     setUser(data.user)
     return data.user
+  }, [])
+
+  const register = useCallback(async (data: RegisterData): Promise<AuthUser> => {
+    const res = await apiClient<{ token: string; user: AuthUser }>('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(data),
+      skipAuth: true,
+    })
+    localStorage.setItem(TOKEN_KEY, res.token)
+    setUser(res.user)
+    return res.user
   }, [])
 
   const logout = useCallback(() => {
@@ -92,7 +118,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN'
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, isAdmin, updateUser }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        loading,
+        login,
+        loginWithGoogle,
+        register,
+        logout,
+        isAdmin,
+        updateUser,
+        fetchCurrentUser,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   )

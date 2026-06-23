@@ -3,9 +3,10 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
 import { useConfirm } from '@/hooks/useConfirm'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Loader2 } from 'lucide-react'
 
 interface UserDetailData {
   id: string
@@ -13,6 +14,13 @@ interface UserDetailData {
   firstName: string | null
   lastName: string | null
   avatar: string | null
+  phone: string | null
+  dateOfBirth: string | null
+  gender: string | null
+  pincode: string | null
+  city: string | null
+  state: string | null
+  country: string | null
   role: string
   emailVerified: boolean
   lastLoginAt: string | null
@@ -20,6 +28,9 @@ interface UserDetailData {
   loginCount: number
   createdAt: string
   updatedAt: string
+  hideTranscriptText: boolean
+  hideTranscriptJsonExport: boolean
+  hideAudioDownload: boolean
   _count: { sessions: number; replaySessions: number; featureUsage: number }
 }
 
@@ -38,6 +49,7 @@ export function UserDetail() {
   const [user, setUser] = useState<UserDetailData | null>(null)
   const [activities, setActivities] = useState<Activity[]>([])
   const [loading, setLoading] = useState(true)
+  const [savingFlags, setSavingFlags] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -67,6 +79,29 @@ export function UserDetail() {
     }
   }
 
+  async function updateExportFlag(
+    key: 'hideTranscriptText' | 'hideTranscriptJsonExport' | 'hideAudioDownload',
+    value: boolean,
+  ) {
+    if (!id || !user) return
+    setSavingFlags(true)
+    try {
+      const data = await apiClient<{
+        user: Pick<UserDetailData, 'hideTranscriptText' | 'hideTranscriptJsonExport' | 'hideAudioDownload'>
+      }>(`/api/admin/users/${id}/export-flags`, {
+        method: 'PATCH',
+        body: JSON.stringify({ [key]: value }),
+      })
+      setUser((prev) => prev ? { ...prev, ...data.user } : null)
+      toast.success('Export settings updated')
+    } catch (err) {
+      console.error('Failed to update export flags:', err)
+      toast.error('Failed to update export settings')
+    } finally {
+      setSavingFlags(false)
+    }
+  }
+
   async function handleDelete() {
     if (!id) return
     const ok = await confirm({ title: 'Delete User', description: 'Are you sure you want to delete this user? This cannot be undone.', confirmLabel: 'Delete', variant: 'destructive' })
@@ -93,9 +128,16 @@ export function UserDetail() {
     ? `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim()
     : user.email
 
+  const genderLabel: Record<string, string> = {
+    MALE: 'Male',
+    FEMALE: 'Female',
+    OTHER: 'Other',
+    PREFER_NOT_TO_SAY: 'Prefer not to say',
+  }
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <Link to="/admin/users" className="text-sm text-muted-foreground hover:text-foreground">
             &larr; Back to Users
@@ -143,6 +185,47 @@ export function UserDetail() {
 
         <Card>
           <CardHeader>
+            <CardTitle className="text-base">Contact & location</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <div className="flex justify-between gap-4">
+              <span className="text-muted-foreground shrink-0">Phone</span>
+              <span className="text-right">{user.phone || '—'}</span>
+            </div>
+            <div className="flex justify-between gap-4">
+              <span className="text-muted-foreground shrink-0">Date of birth</span>
+              <span className="text-right">
+                {user.dateOfBirth ? new Date(user.dateOfBirth).toLocaleDateString() : '—'}
+              </span>
+            </div>
+            <div className="flex justify-between gap-4">
+              <span className="text-muted-foreground shrink-0">Gender</span>
+              <span className="text-right">{user.gender ? genderLabel[user.gender] || user.gender : '—'}</span>
+            </div>
+            <div className="flex justify-between gap-4">
+              <span className="text-muted-foreground shrink-0">Pincode</span>
+              <span className="text-right">{user.pincode || '—'}</span>
+            </div>
+            <div className="border-t pt-2 mt-2 space-y-2">
+              <p className="text-xs text-muted-foreground uppercase tracking-wide">Resolved (admin only)</p>
+              <div className="flex justify-between gap-4">
+                <span className="text-muted-foreground shrink-0">City</span>
+                <span className="text-right">{user.city || '—'}</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-muted-foreground shrink-0">State</span>
+                <span className="text-right">{user.state || '—'}</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-muted-foreground shrink-0">Country</span>
+                <span className="text-right">{user.country || '—'}</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
             <CardTitle className="text-base">Usage</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
@@ -158,6 +241,68 @@ export function UserDetail() {
               <span className="text-muted-foreground">Feature Usage Events</span>
               <span className="font-medium">{user._count.featureUsage}</span>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Export & content</CardTitle>
+            <CardDescription>
+              Restrict what this user can view or download. Metrics and coaching scores remain visible.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border"
+                checked={user.hideTranscriptText}
+                disabled={savingFlags}
+                onChange={(e) => updateExportFlag('hideTranscriptText', e.target.checked)}
+              />
+              <span>
+                <span className="font-medium">Hide transcript text</span>
+                <span className="block text-muted-foreground text-xs">
+                  Hides in-app conversation/transcript views and TXT downloads
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border"
+                checked={user.hideTranscriptJsonExport}
+                disabled={savingFlags}
+                onChange={(e) => updateExportFlag('hideTranscriptJsonExport', e.target.checked)}
+              />
+              <span>
+                <span className="font-medium">Hide transcript JSON export</span>
+                <span className="block text-muted-foreground text-xs">
+                  Blocks JSON transcript downloads (Elevate and Replay)
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border"
+                checked={user.hideAudioDownload}
+                disabled={savingFlags}
+                onChange={(e) => updateExportFlag('hideAudioDownload', e.target.checked)}
+              />
+              <span>
+                <span className="font-medium">Hide audio download</span>
+                <span className="block text-muted-foreground text-xs">
+                  Blocks server audio downloads and in-session record/download controls
+                </span>
+              </span>
+            </label>
+            {savingFlags && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Saving…
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -194,7 +339,7 @@ export function UserDetail() {
           ) : (
             <div className="space-y-2">
               {activities.slice(0, 20).map((a) => (
-                <div key={a.id} className="flex items-center justify-between text-sm border-b last:border-0 pb-2">
+                <div key={a.id} className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between text-sm border-b last:border-0 pb-2">
                   <div>
                     <span className="font-medium">{a.action}</span>
                     {a.resource && <span className="text-muted-foreground ml-2">{a.resource}</span>}

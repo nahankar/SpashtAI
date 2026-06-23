@@ -4,6 +4,7 @@ import { Progress } from '../ui/progress';
 import { Clock, MessageSquare, Zap, TrendingUp, Download, RefreshCw, FileText, Loader2, Mic } from 'lucide-react';
 import { Button } from '../ui/button';
 import { getAuthHeaders } from '@/lib/api-client';
+import { useUserExportFlags } from '@/hooks/useUserExportFlags';
 import { toast } from 'sonner';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
@@ -43,6 +44,7 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExp
   const [isReprocessing, setIsReprocessing] = useState(false);
   const [isDownloadingAudio, setIsDownloadingAudio] = useState(false);
   const [reprocessStatus, setReprocessStatus] = useState<string>('');
+  const exportFlags = useUserExportFlags();
 
   const downloadAudioFiles = async (onlyUser: boolean) => {
     setIsDownloadingAudio(true);
@@ -234,6 +236,8 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExp
                 variant="outline"
                 size="sm"
                 onClick={() => onDownloadTranscript?.('txt')}
+                disabled={exportFlags.hideTranscriptText}
+                title={exportFlags.hideTranscriptText ? 'Transcript download disabled for your account' : undefined}
               >
                 <Download className="h-4 w-4 mr-2" />
                 Download TXT
@@ -242,6 +246,8 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExp
                 variant="outline"
                 size="sm"
                 onClick={() => onDownloadTranscript?.('json')}
+                disabled={exportFlags.hideTranscriptJsonExport}
+                title={exportFlags.hideTranscriptJsonExport ? 'JSON export disabled for your account' : undefined}
               >
               <Download className="h-4 w-4 mr-2" />
               Download JSON
@@ -250,7 +256,8 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExp
               variant="outline"
               size="sm"
               onClick={() => downloadAudioFiles(true)}
-              disabled={isDownloadingAudio}
+              disabled={isDownloadingAudio || exportFlags.hideAudioDownload}
+              title={exportFlags.hideAudioDownload ? 'Audio download disabled for your account' : undefined}
             >
               {isDownloadingAudio ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Mic className="h-4 w-4 mr-2" />}
               Download My Audio
@@ -301,8 +308,26 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExp
                 <span className="text-sm font-medium">Vocabulary Diversity</span>
                 <RatingBadge rating={vocabRating} />
               </div>
-              <div className="text-2xl font-bold">{metrics.userVocabDiversity.toFixed(1)}%</div>
-              <Progress value={metrics.userVocabDiversity} className="mt-2" />
+              <div className="text-2xl font-bold">{(metrics.userVocabDiversity * 100).toFixed(1)}%</div>
+              <Progress value={metrics.userVocabDiversity * 100} className="mt-2" />
+            </div>
+
+            <div>
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-sm font-medium">Total Speaking Time</span>
+              </div>
+              <div className="text-2xl font-bold">{(metrics.userSpeakingTime / 60).toFixed(1)} min</div>
+              <div className="text-sm text-muted-foreground">
+                {Math.round(metrics.userSpeakingTime)} seconds active
+              </div>
+            </div>
+
+            <div>
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-sm font-medium">Avg Sentence Length</span>
+              </div>
+              <div className="text-2xl font-bold">{metrics.userAvgSentenceLength.toFixed(1)}</div>
+              <div className="text-sm text-muted-foreground">words per sentence</div>
             </div>
           </CardContent>
         </Card>
@@ -392,40 +417,6 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExp
           </CardContent>
         </Card>
       </div>
-
-      {/* Detailed Breakdown */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Detailed Breakdown</CardTitle>
-          <CardDescription>
-            Comprehensive analysis of your session performance
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            <h4 className="font-semibold mb-4">Your Performance</h4>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="flex justify-between p-3 bg-muted/50 rounded-lg">
-                <span className="text-sm">Average Sentence Length:</span>
-                <span className="text-sm font-medium">{metrics.userAvgSentenceLength.toFixed(1)} words</span>
-              </div>
-              <div className="flex justify-between p-3 bg-muted/50 rounded-lg">
-                <span className="text-sm">Total Speaking Time:</span>
-                <span className="text-sm font-medium">{(metrics.userSpeakingTime / 60).toFixed(1)} minutes</span>
-              </div>
-              <div className="flex justify-between p-3 bg-muted/50 rounded-lg">
-                <span className="text-sm">Words Per Minute:</span>
-                <span className="text-sm font-medium">{metrics.userWpm.toFixed(0)} WPM</span>
-              </div>
-            </div>
-            <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg">
-              <p className="text-sm text-blue-900 dark:text-blue-100">
-                💡 <strong>LLM Processing Time:</strong> {metrics.totalLlmDuration.toFixed(1)}s total for analyzing your responses
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }

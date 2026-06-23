@@ -17,11 +17,7 @@ from turn_metrics import TurnStitcher, compute_turn_metrics, TurnMetricsSnapshot
 
 logger = logging.getLogger("metrics-collector")
 
-# Common filler words for English
-FILLER_WORDS = {
-    'um', 'uh', 'er', 'ah', 'like', 'you know', 'so', 'well', 'actually', 
-    'basically', 'literally', 'right', 'okay', 'yeah', 'hmm', 'mmm'
-}
+from speech_patterns import analyze_speech_text
 
 @dataclass
 class LinguisticMetrics:
@@ -117,6 +113,7 @@ class MetricsCollector:
         self._on_user_turn_metrics = None
         self._on_turn_committed = None
         self._stitcher = TurnStitcher(metrics_for_user=self._compute_user_turn_metrics)
+        self._user_turn_metrics_seq = 0
         
         logger.info(f"🔢 MetricsCollector initialized for session {session_id}")
 
@@ -125,8 +122,29 @@ class MetricsCollector:
         self._utterance_peeker = peeker
 
     def set_user_turn_metrics_callback(self, callback) -> None:
-        """Called with (stitched_text, TurnMetricsSnapshot) when a user turn completes."""
+        """Called with (stitched_text, TurnMetricsSnapshot, turn_index) when a user utterance completes."""
         self._on_user_turn_metrics = callback
+
+    def publish_pending_user_utterance_metrics(self) -> bool:
+        """Publish per-turn metrics for the in-progress user utterance (end-of-speech)."""
+        text = self._stitcher.peek_pending_user()
+        if not text or len(text.strip()) < 3:
+            return False
+        normalized = text.strip()
+        # Same logical turn until coach replies — always index seq+1, allow updates.
+        turn_index = self._user_turn_metrics_seq + 1
+        metrics = self._compute_user_turn_metrics(normalized, None)
+        if self._on_user_turn_metrics:
+            try:
+                self._on_user_turn_metrics(normalized, metrics, turn_index)
+            except Exception as e:
+                logger.warning("user turn metrics callback failed: %s", e)
+        logger.info(
+            "📊 Published user utterance metrics (turn #%d, %d words)",
+            turn_index,
+            metrics.word_count,
+        )
+        return True
 
     def set_turn_committed_callback(self, callback) -> None:
         """Called with (speaker, stitched_text) when any logical turn completes."""
@@ -173,8 +191,10 @@ class MetricsCollector:
             except Exception as e:
                 logger.warning("turn committed callback failed: %s", e)
         if speaker == "user" and user_metrics and self._on_user_turn_metrics:
+            self._user_turn_metrics_seq += 1
+            turn_index = self._user_turn_metrics_seq
             try:
-                self._on_user_turn_metrics(text, user_metrics)
+                self._on_user_turn_metrics(text, user_metrics, turn_index)
             except Exception as e:
                 logger.warning("user turn metrics callback failed: %s", e)
 
@@ -195,7 +215,7 @@ class MetricsCollector:
 
         words = self._extract_words(text)
         turn.word_count = len(words)
-        turn.filler_words = [word for word in words if word.lower() in FILLER_WORDS]
+        turn.filler_words = []  # legacy list; counts use analyze_speech_text on turn.text
 
         if speaker == "user":
             self.current_user_turn_start = timestamp
@@ -275,7 +295,7 @@ class MetricsCollector:
             return LinguisticMetrics()
         
         total_words = sum(turn.word_count for turn in turns)
-        total_filler_words = sum(len(turn.filler_words) for turn in turns)
+        total_filler_words = sum(analyze_speech_text(turn.text).filler_count for turn in turns)
 
         # Decide which speaker we're computing for (user vs assistant) — used
         # to pick the right measured duration from the tracker.
@@ -470,6 +490,39 @@ class MetricsCollector:
             qual = "rapid"
         return wpm, words, secs, qual
 
+    def get_live_speech_stats(self) -> dict:
+        """Grounded filler/hedging stats for the LLM coaching tool."""
+        user_turns = [t for t in self.session_metrics.turns if t.speaker == "user"]
+        assistant_turns = [t for t in self.session_metrics.turns if t.speaker == "assistant"]
+        total_words = sum(t.word_count for t in user_turns)
+        filler_count = sum(analyze_speech_text(t.text).filler_count for t in user_turns)
+        hedging_count = sum(analyze_speech_text(t.text).hedging_count for t in user_turns)
+        acknowledgment_count = sum(
+            analyze_speech_text(t.text).acknowledgment_count for t in user_turns
+        )
+        last_turn_text = user_turns[-1].text if user_turns else ""
+        last = analyze_speech_text(last_turn_text) if last_turn_text else None
+        return {
+            "session_filler_count": filler_count,
+            "session_filler_rate_percent": round(
+                (filler_count / total_words * 100) if total_words else 0.0, 1
+            ),
+            "session_hedging_count": hedging_count,
+            "session_acknowledgment_count": acknowledgment_count,
+            "session_user_words": total_words,
+            "session_user_turns": len(user_turns),
+            "session_exchanges": min(len(user_turns), len(assistant_turns)),
+            "last_turn_filler_count": last.filler_count if last else 0,
+            "last_turn_hedging_count": last.hedging_count if last else 0,
+            "last_turn_acknowledgment_count": last.acknowledgment_count if last else 0,
+            "last_turn_word_count": last.word_count if last else 0,
+            "note": (
+                "Fillers = um/uh/discourse-like/basically/etc. "
+                "Acknowledgments (okay/yeah) tracked separately. "
+                "Never invent counts — use these numbers."
+            ),
+        }
+
     @staticmethod
     def _build_coaching_tip(wpm: float, qualitative: str, filler_rate: float) -> str:
         """Generate a short, actionable tip for the live panel.
@@ -501,10 +554,17 @@ class MetricsCollector:
         try:
             wpm, total_words, speaking_secs, pacing_qual = self._live_user_pacing()
 
-            # Filler stats over the whole user transcript so far.
+            # Filler stats over committed user turns plus any in-progress utterance
+            # (the stitcher only commits at role boundaries — without pending text
+            # the live bar shows 0 fillers during a long monologue).
             user_turns = [t for t in self.session_metrics.turns if t.speaker == 'user']
-            cum_words = sum(t.word_count for t in user_turns) or 1
-            cum_fillers = sum(len(t.filler_words) for t in user_turns)
+            pending_user = self._stitcher.peek_pending_user()
+            filler_texts = [t.text for t in user_turns]
+            if pending_user:
+                filler_texts.append(pending_user)
+            cum_words = sum(len(self._extract_words(tx)) for tx in filler_texts) or 1
+            cum_fillers = sum(analyze_speech_text(tx).filler_count for tx in filler_texts)
+            user_turn_count = len(user_turns)
             filler_rate = (cum_fillers / cum_words) * 100 if cum_words > 0 else 0.0
 
             # Vocabulary diversity (rolling) — unique / total over user turns.
@@ -522,7 +582,11 @@ class MetricsCollector:
                 "timestamp": time.time(),
                 "current_metrics": {
                     # Original (kept for backward-compat with the existing hook).
-                    "total_turns": len(self.session_metrics.turns),
+                    "total_turns": user_turn_count,
+                    "total_exchanges": min(
+                        user_turn_count,
+                        len([t for t in self.session_metrics.turns if t.speaker == 'assistant']),
+                    ),
                     "user_wpm": wpm,
                     "user_filler_rate": filler_rate,
                     "response_time_avg": response_time_avg,

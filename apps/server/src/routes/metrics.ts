@@ -1,11 +1,47 @@
 import { Request, Response } from 'express'
 import { prisma } from '../lib/prisma'
+import {
+  exportDenied,
+  getElevateSessionOwnerId,
+  resolveRequestExportFlags,
+} from '../lib/userExportFlags'
 import { spawn } from 'child_process'
 import { join, dirname } from 'path'
+import { existsSync } from 'fs'
 import { fileURLToPath } from 'url'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
+
+/** Drop duplicate STT/log rows (same role + content, often dual timezone logging). */
+function dedupeTranscriptMessages(
+  messages: Array<{ id?: string; role: string; content?: string; timestamp?: string }>,
+) {
+  const out: typeof messages = []
+  for (const message of messages) {
+    const content = (message.content || '').trim()
+    if (!content) continue
+    const prev = out[out.length - 1]
+    if (
+      prev &&
+      prev.role === message.role &&
+      (prev.content || '').trim() === content
+    ) {
+      continue
+    }
+    const dup = out.find(
+      (m) =>
+        m.role === message.role &&
+        (m.content || '').trim() === content &&
+        m.timestamp &&
+        message.timestamp &&
+        Math.abs(new Date(m.timestamp).getTime() - new Date(message.timestamp).getTime()) < 5000,
+    )
+    if (dup) continue
+    out.push(message)
+  }
+  return out
+}
 
 /**
  * Server-side canonical recompute of words-per-minute.
@@ -263,6 +299,12 @@ export async function getSessionTranscript(req: Request, res: Response) {
   try {
     const { sessionId } = req.params
 
+    const ownerId = await getElevateSessionOwnerId(sessionId)
+    const { flags, accessDenied } = await resolveRequestExportFlags(req, ownerId)
+    if (accessDenied) {
+      return exportDenied(res, 'Access denied')
+    }
+
     const transcript = await prisma.sessionTranscript.findUnique({
       where: { sessionId },
       include: {
@@ -287,6 +329,14 @@ export async function getSessionTranscript(req: Request, res: Response) {
       return res.status(404).json({ error: 'Transcript not found' })
     }
 
+    if (flags.hideTranscriptText) {
+      return res.json({
+        ...transcript,
+        conversationData: { messages: [] },
+        transcriptHidden: true,
+      })
+    }
+
     res.json(transcript)
   } catch (error) {
     console.error('Error fetching session transcript:', error)
@@ -298,6 +348,19 @@ export async function downloadSessionTranscript(req: Request, res: Response) {
   try {
     const { sessionId } = req.params
     const { format = 'json' } = req.query
+
+    const ownerId = await getElevateSessionOwnerId(sessionId)
+    const { flags, accessDenied } = await resolveRequestExportFlags(req, ownerId)
+    if (accessDenied) {
+      return exportDenied(res, 'Access denied')
+    }
+
+    if (format === 'json' && flags.hideTranscriptJsonExport) {
+      return exportDenied(res, 'Transcript JSON export is disabled for your account')
+    }
+    if (format === 'txt' && flags.hideTranscriptText) {
+      return exportDenied(res, 'Transcript download is disabled for your account')
+    }
 
     const transcript = await prisma.sessionTranscript.findUnique({
       where: { sessionId },
@@ -347,12 +410,13 @@ export async function downloadSessionTranscript(req: Request, res: Response) {
         }))
       : []
 
-    const normalizedMessages =
+    const normalizedMessages = dedupeTranscriptMessages(
       messagesFromCurrent.length > 0
         ? messagesFromCurrent
         : messagesFromLegacyConversation.length > 0
           ? messagesFromLegacyConversation
-          : messagesFromLegacyTurns
+          : messagesFromLegacyTurns,
+    )
 
     if (format === 'txt') {
       // Generate plain text transcript
@@ -453,6 +517,26 @@ export async function getUserSessionsMetrics(req: Request, res: Response) {
 export async function calculateTextMetrics(req: Request, res: Response) {
   try {
     const { sessionId } = req.params
+
+    // Never clobber audio-grounded agent metrics with coarse text estimates.
+    // The frontend auto-calls this when transcript fragments outnumber stitched
+    // turns, which previously replaced ~160 WPM (VAD-measured) with ~35 WPM
+    // (words ÷ full session wall-clock).
+    const existingMetrics = await prisma.sessionMetrics.findUnique({
+      where: { sessionId },
+    })
+    if (
+      existingMetrics &&
+      existingMetrics.userWpm > 0 &&
+      existingMetrics.userSpeakingTime > 0 &&
+      existingMetrics.totalTurns > 0
+    ) {
+      return res.json({
+        message: 'Keeping existing agent metrics (text recompute skipped)',
+        metrics: existingMetrics,
+        skipped: true,
+      })
+    }
     
     // Get conversation data
     const transcript = await prisma.sessionTranscript.findUnique({
@@ -576,13 +660,29 @@ export async function calculateTextMetrics(req: Request, res: Response) {
       ? assistantResponseTimes.reduce((a, b) => a + b, 0) / assistantResponseTimes.length 
       : 0
 
-    // Estimate speaking time (rough: 150 WPM average)
-    const userSpeakingTime = (userWordCount / 150) * 60
-    const assistantSpeakingTime = (assistantWordCount / 150) * 60
+    // Text-only fallback: estimate active speaking windows — never divide word
+    // count by full session wall-clock (includes silence + coach speech).
+    const userSpeakingTime =
+      totalDurationSec > 0
+        ? Math.max(totalDurationSec * 0.38, (userWordCount / 200) * 60, 1)
+        : userWordCount > 0
+          ? (userWordCount / 150) * 60
+          : 0
+    const assistantSpeakingTime =
+      totalDurationSec > 0
+        ? Math.max(totalDurationSec * 0.35, (assistantWordCount / 160) * 60, 1)
+        : assistantWordCount > 0
+          ? (assistantWordCount / 150) * 60
+          : 0
 
-    // WPM estimates
-    const userWpm = totalDurationSec > 0 ? Math.round((userWordCount / totalDurationSec) * 60) : 0
-    const assistantWpm = totalDurationSec > 0 ? Math.round((assistantWordCount / totalDurationSec) * 60) : 0
+    const userWpm =
+      userSpeakingTime > 0
+        ? Math.min(Math.round((userWordCount / userSpeakingTime) * 60), 200)
+        : 0
+    const assistantWpm =
+      assistantSpeakingTime > 0
+        ? Math.min(Math.round((assistantWordCount / assistantSpeakingTime) * 60), 200)
+        : 0
 
     // Estimate tokens from text (1 token ≈ 4 characters for English)
     const totalChars = userText.length + assistantText.length
@@ -678,32 +778,40 @@ export async function reprocessSessionMetrics(req: Request, res: Response) {
       .map((type) => session.recordings.find((r: any) => r.recordingType === type && r.filePath))
       .find(Boolean)
 
-    // Build conversation transcript from conversation data
+    // Build deduplicated user transcript for audio alignment
     let transcript = ''
     if (session.transcript && session.transcript.conversationData) {
       const conversationData = session.transcript.conversationData as any
-      
-      // Check for messages array (current structure)
+      let rawMessages: Array<{ role: string; content?: string; text?: string; timestamp?: string }> = []
+
       if (Array.isArray(conversationData.messages)) {
-        transcript = conversationData.messages
-          .filter((msg: any) => msg.role === 'user')
-          .map((msg: any) => msg.content || msg.text)
-          .join(' ')
+        rawMessages = conversationData.messages
+      } else if (Array.isArray(conversationData.turns)) {
+        rawMessages = conversationData.turns.map((turn: any) => ({
+          role: turn.role,
+          content: turn.text || turn.content,
+          timestamp: turn.timestamp,
+        }))
+      } else if (Array.isArray(conversationData.conversation)) {
+        rawMessages = conversationData.conversation.map((turn: any) => ({
+          role: turn.speaker === 'user' ? 'user' : 'assistant',
+          content: turn.text || turn.content,
+          timestamp: turn.timestamp,
+        }))
       }
-      // Fallback: check for turns array (older structure)
-      else if (Array.isArray(conversationData.turns)) {
-        transcript = conversationData.turns
-          .filter((turn: any) => turn.role === 'user')
-          .map((turn: any) => turn.text || turn.content)
-          .join(' ')
-      }
-      // Legacy fallback: check for conversation array
-      else if (Array.isArray(conversationData.conversation)) {
-        transcript = conversationData.conversation
-          .filter((turn: any) => turn.speaker === 'user' || turn.role === 'user')
-          .map((turn: any) => turn.text || turn.content)
-          .join(' ')
-      }
+
+      const deduped = dedupeTranscriptMessages(
+        rawMessages.map((m) => ({
+          role: m.role === 'user' ? 'user' : 'assistant',
+          content: m.content || m.text || '',
+          timestamp: m.timestamp,
+        })),
+      )
+
+      transcript = deduped
+        .filter((msg) => msg.role === 'user')
+        .map((msg) => msg.content || '')
+        .join(' ')
     }
 
     if (!transcript.trim()) {
@@ -742,7 +850,12 @@ export async function reprocessSessionMetrics(req: Request, res: Response) {
       : selectedRecording.filePath
     
     const pythonScript = join(__dirname, '../../../agent/reprocess_session.py')
-    const pythonEnv = join(__dirname, '../../../agent/.venv312/bin/python')
+    const pythonCandidates = [
+      join(__dirname, '../../../agent/.venv312/bin/python'),
+      join(__dirname, '../../../.venv/bin/python'),
+      'python3',
+    ]
+    const pythonEnv = pythonCandidates.find((p) => p === 'python3' || existsSync(p)) ?? 'python3'
     
     // Spawn Python process
     const python = spawn(pythonEnv, [pythonScript, sessionId, localAudioPath, transcript])

@@ -6,6 +6,7 @@ import asyncio
 import logging
 import io
 import json
+import os
 import tempfile
 import wave
 import subprocess
@@ -14,8 +15,21 @@ from typing import List, Dict, Optional, Tuple
 from pathlib import Path
 import numpy as np
 from audio_storage import get_storage_instance, AudioMetadata
+from speech_patterns import analyze_speech_text
 
 logger = logging.getLogger("audio-processor")
+
+def wav_duration_seconds(wav_path: str) -> float:
+    """Duration of a PCM WAV file in seconds."""
+    try:
+        with wave.open(wav_path, "rb") as wf:
+            rate = wf.getframerate()
+            if rate <= 0:
+                return 0.0
+            return wf.getnframes() / float(rate)
+    except Exception as e:
+        logger.warning("Could not read WAV duration from %s: %s", wav_path, e)
+        return 0.0
 
 def convert_to_wav(input_path: str, output_path: Optional[str] = None) -> str:
     """
@@ -200,33 +214,61 @@ class AudioBuffer:
 class GentleAligner:
     """Interface to Gentle forced alignment service"""
     
-    def __init__(self, gentle_url: str = "http://localhost:8765"):
-        self.gentle_url = gentle_url
+    def __init__(self, gentle_url: Optional[str] = None):
+        self.gentle_url = (gentle_url or os.getenv("GENTLE_URL", "http://localhost:8765")).rstrip("/")
         self.session = None
-    
-    async def align(self, audio_path: str, transcript: str) -> List[WordAlignment]:
-        """Perform forced alignment using Gentle service"""
+
+    async def is_available(self) -> bool:
         try:
             import aiohttp
-            
-            # Prepare multipart form data
+            async with aiohttp.ClientSession() as session:
+                async with session.get(self.gentle_url, timeout=aiohttp.ClientTimeout(total=3)) as response:
+                    return response.status < 500
+        except Exception:
+            return False
+    
+    async def align(self, audio_path: str, transcript: str) -> List[WordAlignment]:
+        """Perform forced alignment using Gentle service (sync mode — returns JSON, not HTML poll page)."""
+        try:
+            import aiohttp
+
+            duration = wav_duration_seconds(audio_path)
+            # Gentle can take ~1–2× realtime on CPU; floor at 120s for short clips
+            timeout_sec = max(120, int(duration * 3) + 30)
+            timeout = aiohttp.ClientTimeout(total=timeout_sec)
+
             with open(audio_path, 'rb') as audio_file:
                 form_data = aiohttp.FormData()
-                form_data.add_field('audio', audio_file, filename='audio.wav')
+                form_data.add_field('audio', audio_file, filename=Path(audio_path).name)
                 form_data.add_field('transcript', transcript)
-                
-                async with aiohttp.ClientSession() as session:
+
+                async with aiohttp.ClientSession(timeout=timeout) as session:
                     async with session.post(
-                        f"{self.gentle_url}/transcriptions", 
-                        data=form_data
+                        f"{self.gentle_url}/transcriptions?async=false",
+                        data=form_data,
                     ) as response:
-                        if response.status == 200:
-                            result = await response.json()
-                            return self._parse_gentle_response(result)
-                        else:
-                            logger.error(f"Gentle alignment failed: {response.status}")
+                        if response.status != 200:
+                            body = await response.text()
+                            logger.error(
+                                "Gentle alignment failed: %s — %s",
+                                response.status,
+                                body[:200],
+                            )
                             return []
-                            
+
+                        content_type = response.headers.get('Content-Type', '')
+                        if 'json' not in content_type:
+                            body = await response.text()
+                            logger.error(
+                                "Gentle returned non-JSON (%s). Use ?async=false. Body: %s",
+                                content_type,
+                                body[:200],
+                            )
+                            return []
+
+                        result = await response.json()
+                        return self._parse_gentle_response(result)
+
         except Exception as e:
             logger.error(f"Error in Gentle alignment: {e}")
             return []
@@ -368,12 +410,6 @@ class AudioProcessor:
         self.gentle_aligner = GentleAligner()
         self.praat_analyzer = PraatAnalyzer()
         
-        # Filler words for detection in alignment
-        self.filler_words = {
-            'um', 'uh', 'er', 'ah', 'like', 'you know', 'so', 'well', 
-            'actually', 'basically', 'literally', 'right', 'okay', 'yeah'
-        }
-        
         logger.info(f"🎵 AudioProcessor initialized for session {session_id}")
     
     def start_session(self):
@@ -389,34 +425,61 @@ class AudioProcessor:
         logger.info(f"🔬 Starting delivery analysis for session {self.session_id}")
         
         wav_file_to_cleanup = None
+        audio_path: Optional[str] = None
+        audio_duration = 0.0
         
         try:
             # Use provided audio file or fall back to audio buffer
             if audio_file_path:
                 logger.info(f"📁 Using existing audio file: {audio_file_path}")
                 
-                # Check if file needs conversion to WAV
+                if not Path(audio_file_path).exists():
+                    logger.error(f"❌ Audio file not found: {audio_file_path}")
+                    return self._fallback_analysis(transcript, audio_duration=0.0)
+                
+                # Convert MP3/M4A/WebM/MP4 → 16 kHz mono WAV for Gentle + Praat
                 if not audio_file_path.lower().endswith('.wav'):
                     logger.info(f"🔄 Converting {Path(audio_file_path).suffix} to WAV for Gentle/Praat...")
                     audio_path = convert_to_wav(audio_file_path)
-                    wav_file_to_cleanup = audio_path  # Mark for cleanup
+                    wav_file_to_cleanup = audio_path
                 else:
                     audio_path = audio_file_path
+                
+                audio_duration = wav_duration_seconds(audio_path)
+                logger.info(f"⏱️ Audio duration from file: {audio_duration:.2f}s")
             else:
-                # Stop recording and save audio to temporary file
                 complete_audio = self.audio_buffer.stop_recording()
                 
                 with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
                     audio_path = self.audio_buffer.save_to_wav(temp_file.name)
-                    wav_file_to_cleanup = audio_path  # Mark for cleanup
+                    wav_file_to_cleanup = audio_path
+                
+                audio_duration = self.audio_buffer.total_duration or wav_duration_seconds(audio_path)
             
-            # Step 1: Forced alignment with Gentle
-            logger.info("🎯 Performing forced alignment...")
-            alignments = await self.gentle_aligner.align(audio_path, transcript)
+            if audio_duration <= 0 and audio_path:
+                audio_duration = wav_duration_seconds(audio_path)
+            
+            normalized_transcript = (transcript or "").strip()
+            if not normalized_transcript:
+                logger.warning("⚠️ Empty transcript for delivery analysis")
+                return None
+            
+            # Step 1: Forced alignment with Gentle (optional — needs docker on :8765)
+            alignments: List[WordAlignment] = []
+            gentle_ok = await self.gentle_aligner.is_available()
+            if gentle_ok:
+                logger.info("🎯 Performing forced alignment with Gentle...")
+                alignments = await self.gentle_aligner.align(audio_path, normalized_transcript)
+            else:
+                logger.warning(
+                    "⚠️ Gentle not reachable at %s — WPM/pauses will use audio duration + transcript. "
+                    "Start with: cd infra/gentle && docker compose up -d",
+                    self.gentle_aligner.gentle_url,
+                )
             
             if not alignments:
-                logger.warning("No alignment results, using basic analysis")
-                return self._fallback_analysis(transcript)
+                logger.warning("No alignment results — using duration + transcript fallback")
+                return self._fallback_analysis(normalized_transcript, audio_duration, audio_path)
             
             # Step 2: Extract pauses from alignment
             pauses = self.gentle_aligner.extract_pauses(alignments)
@@ -425,61 +488,62 @@ class AudioProcessor:
             logger.info("🎼 Performing prosodic analysis...")
             prosody = self.praat_analyzer.extract_prosodic_features(audio_path, alignments)
             
-            # Step 4: Detect filler words from alignment
-            filler_alignments = [a for a in alignments if a.word.lower() in self.filler_words]
-            
-            # Step 5: Calculate delivery metrics
+            # Step 4: Filler counts — same strict rules as live coaching (speech_patterns)
             delivery_metrics = self._calculate_delivery_metrics(
-                alignments, pauses, filler_alignments, prosody
+                alignments, pauses, prosody, normalized_transcript, audio_duration
             )
             
-            # Cleanup converted WAV file if we created one
             if wav_file_to_cleanup:
                 Path(wav_file_to_cleanup).unlink(missing_ok=True)
-                logger.info(f"🗑️ Cleaned up temporary WAV file")
+                logger.info("🗑️ Cleaned up temporary WAV file")
             
             logger.info("✅ Delivery analysis completed")
             return delivery_metrics
             
         except Exception as e:
             logger.error(f"❌ Error in delivery analysis: {e}")
-            # Cleanup on error too
             if wav_file_to_cleanup:
                 Path(wav_file_to_cleanup).unlink(missing_ok=True)
-            return self._fallback_analysis(transcript)
+            return self._fallback_analysis(transcript, audio_duration, audio_path)
     
     def _calculate_delivery_metrics(
         self,
         alignments: List[WordAlignment],
         pauses: List[PauseSegment],
-        filler_alignments: List[WordAlignment],
-        prosody: Optional[ProsodyMetrics]
+        prosody: Optional[ProsodyMetrics],
+        transcript: str,
+        audio_duration: float,
     ) -> DeliveryMetrics:
         """Calculate comprehensive delivery metrics"""
         
         total_words = len(alignments)
-        total_duration = self.audio_buffer.total_duration
+        duration = audio_duration if audio_duration > 0 else sum(a.end - a.start for a in alignments)
         
-        # Basic speech metrics
+        # Speech rate from alignment timestamps over real audio duration
         speech_rate, articulation_rate = self.gentle_aligner.calculate_speech_rates(
-            alignments, total_duration
+            alignments, duration
         )
+        
+        # Prefer Praat-derived rates when available (more accurate)
+        if prosody and prosody.speech_rate_precise > 0:
+            speech_rate = prosody.speech_rate_precise
+            articulation_rate = prosody.articulation_rate
         
         # Pause analysis
         pause_durations = [p.duration for p in pauses]
-        mean_pause = np.mean(pause_durations) if pause_durations else 0.0
-        max_pause = max(pause_durations) if pause_durations else 0.0
+        mean_pause = float(np.mean(pause_durations)) if pause_durations else 0.0
+        max_pause = float(max(pause_durations)) if pause_durations else 0.0
         
-        # Filler word analysis
-        filler_count = len(filler_alignments)
-        filler_rate = (filler_count / total_words * 100) if total_words > 0 else 0.0
+        # Strict filler rules — aligned with live metrics (okay/so ≠ filler)
+        speech = analyze_speech_text(transcript)
+        filler_count = speech.filler_count
+        filler_rate = speech.filler_rate
         
         # Prosodic features (with fallbacks)
         pitch_variation = prosody.pitch_variation if prosody else 0.0
         energy_stability = prosody.intensity_stability if prosody else 5.0
         voice_quality = self._calculate_voice_quality_score(prosody) if prosody else 5.0
         
-        # Confidence indicators
         confidence_indicators = {
             'pitch_range_semitones': self._hz_to_semitones(pitch_variation) if prosody else 0.0,
             'volume_consistency': energy_stability,
@@ -501,28 +565,38 @@ class AudioProcessor:
             confidence_indicators=confidence_indicators
         )
     
-    def _fallback_analysis(self, transcript: str) -> DeliveryMetrics:
-        """Fallback analysis when advanced processing fails"""
-        words = transcript.split()
-        total_words = len(words)
-        duration = self.audio_buffer.total_duration
-        
-        # Basic estimates
-        speech_rate = (total_words / duration * 60) if duration > 0 else 0
-        filler_count = sum(1 for word in words if word.lower() in self.filler_words)
-        filler_rate = (filler_count / total_words * 100) if total_words > 0 else 0
-        
+    def _fallback_analysis(
+        self,
+        transcript: str,
+        audio_duration: float = 0.0,
+        audio_path: Optional[str] = None,
+    ) -> DeliveryMetrics:
+        """Fallback when Gentle alignment is unavailable — still uses audio duration + strict fillers."""
+        speech = analyze_speech_text(transcript)
+        total_words = speech.word_count or len(transcript.split())
+        duration = audio_duration
+
+        if duration <= 0 and audio_path:
+            duration = wav_duration_seconds(audio_path)
+
+        prosody = None
+        if audio_path and Path(audio_path).exists():
+            prosody = self.praat_analyzer.extract_prosodic_features(audio_path)
+
+        speech_rate = (total_words / duration * 60) if duration > 0 else 0.0
+        articulation_rate = prosody.articulation_rate if prosody and prosody.articulation_rate > 0 else speech_rate * 1.1
+
         return DeliveryMetrics(
             speech_rate=speech_rate,
-            articulation_rate=speech_rate * 1.2,  # Estimate
+            articulation_rate=articulation_rate,
             pause_count=0,
             mean_pause_duration=0.0,
             max_pause_duration=0.0,
-            filler_word_count=filler_count,
-            filler_word_rate=filler_rate,
-            pitch_variation=0.0,
-            energy_stability=5.0,
-            voice_quality_score=5.0,
+            filler_word_count=speech.filler_count,
+            filler_word_rate=speech.filler_rate,
+            pitch_variation=prosody.pitch_variation if prosody else 0.0,
+            energy_stability=prosody.intensity_stability if prosody else 5.0,
+            voice_quality_score=self._calculate_voice_quality_score(prosody) if prosody else 5.0,
             confidence_indicators={}
         )
     
@@ -569,5 +643,7 @@ __all__ = [
     'DeliveryMetrics', 
     'ProsodyMetrics',
     'WordAlignment',
-    'PauseSegment'
+    'PauseSegment',
+    'convert_to_wav',
+    'wav_duration_seconds',
 ]

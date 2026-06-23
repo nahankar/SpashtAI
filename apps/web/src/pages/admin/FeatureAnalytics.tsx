@@ -43,6 +43,9 @@ export function FeatureAnalytics() {
 
   const elevateCount = usage.filter((u) => u.feature === 'elevate').reduce((sum, u) => sum + u._count.id, 0)
   const replayCount = usage.filter((u) => u.feature === 'replay').reduce((sum, u) => sum + u._count.id, 0)
+  const appPageViews = usage
+    .filter((u) => u.feature === 'app' && u.action === 'page_view')
+    .reduce((sum, u) => sum + u._count.id, 0)
   const showElevate = enabledFeatures.includes('elevate')
   const showReplay = enabledFeatures.includes('replay')
 
@@ -67,7 +70,8 @@ export function FeatureAnalytics() {
             {showReplay && (
               <MetricCard label="Replay Usage" value={replayCount} sublabel="Events tracked" />
             )}
-            <MetricCard label="Total Events" value={elevateCount + replayCount} sublabel="Enabled modules" />
+            <MetricCard label="Total Events" value={elevateCount + replayCount + appPageViews} sublabel="All tracked events" />
+            <MetricCard label="Page Views" value={appPageViews} sublabel="Authenticated navigation (30d)" />
           </div>
 
           {chartData.length > 0 && <UsageChart title="Feature Usage" data={chartData} />}

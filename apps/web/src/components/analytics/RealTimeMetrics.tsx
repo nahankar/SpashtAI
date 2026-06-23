@@ -7,6 +7,9 @@ import type { LiveMetricsSnapshot } from '@/hooks/useSessionMetrics';
 interface RealTimeMetricsProps {
   metrics: LiveMetricsSnapshot | null;
   isVisible?: boolean;
+  variant?: 'floating' | 'inline';
+  /** When shown beside the conversation, use the message-derived count so it matches the header. */
+  userTurnCount?: number;
 }
 
 // Map pacing buckets to a (Tailwind) tone + display label. Kept here so the
@@ -35,8 +38,123 @@ function fillerTone(rate: number): string {
   return 'text-red-600';
 }
 
-export function RealTimeMetrics({ metrics, isVisible = true }: RealTimeMetricsProps) {
+function coachingTipTone(metrics: LiveMetricsSnapshot): {
+  text: string;
+  bg: string;
+  border: string;
+  icon: string;
+} {
+  const pacing = metrics.pacingQualitative ?? 'not-enough-data';
+  const filler = metrics.userFillerRate ?? 0;
+
+  if (filler >= 8) {
+    return {
+      text: 'text-red-800',
+      bg: 'bg-red-50',
+      border: 'border-red-200',
+      icon: 'text-red-500',
+    };
+  }
+  if (pacing === 'rapid') {
+    return {
+      text: 'text-red-800',
+      bg: 'bg-red-50',
+      border: 'border-red-200',
+      icon: 'text-red-500',
+    };
+  }
+  if (pacing === 'fast') {
+    return {
+      text: 'text-orange-800',
+      bg: 'bg-orange-50',
+      border: 'border-orange-200',
+      icon: 'text-orange-500',
+    };
+  }
+  if (pacing === 'slow') {
+    return {
+      text: 'text-amber-800',
+      bg: 'bg-amber-50',
+      border: 'border-amber-200',
+      icon: 'text-amber-600',
+    };
+  }
+  if (pacing === 'measured') {
+    return {
+      text: 'text-blue-800',
+      bg: 'bg-blue-50',
+      border: 'border-blue-200',
+      icon: 'text-blue-500',
+    };
+  }
+  if (pacing === 'ideal') {
+    return {
+      text: 'text-emerald-800',
+      bg: 'bg-emerald-50',
+      border: 'border-emerald-200',
+      icon: 'text-emerald-600',
+    };
+  }
+  return {
+    text: 'text-muted-foreground',
+    bg: 'bg-muted/40',
+    border: 'border-muted',
+    icon: 'text-muted-foreground',
+  };
+}
+
+export function RealTimeMetrics({
+  metrics,
+  isVisible = true,
+  variant = 'floating',
+  userTurnCount,
+}: RealTimeMetricsProps) {
   if (!isVisible) return null;
+
+  const tone = metrics
+    ? PACING_TONE[metrics.pacingQualitative ?? 'not-enough-data'] ?? PACING_TONE['not-enough-data']
+    : PACING_TONE['not-enough-data'];
+  const wpmShown = metrics && metrics.userWpm > 0 ? Math.round(metrics.userWpm) : null;
+  const vocabPct =
+    metrics?.userVocabDiversity != null ? Math.round(metrics.userVocabDiversity * 100) : null;
+  const turnsShown =
+    userTurnCount != null ? userTurnCount : metrics?.totalTurns ?? 0;
+  const tipTone = metrics ? coachingTipTone(metrics) : null;
+
+  if (variant === 'inline') {
+    if (!metrics) {
+      return (
+        <div className="text-xs text-muted-foreground shrink-0 max-w-md text-right">
+          Metrics: listening…
+        </div>
+      )
+    }
+    return (
+      <div className="flex flex-col items-end gap-0.5 shrink min-w-0 flex-1 sm:max-w-[65%]">
+        <div className="flex flex-wrap items-center justify-end gap-x-2.5 gap-y-0.5 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
+            <span className={`font-medium ${tone.text}`}>{wpmShown ?? '—'} WPM</span>
+            <span className="text-[10px] opacity-70">({tone.label})</span>
+          </span>
+          <span>{turnsShown} your {turnsShown === 1 ? 'turn' : 'turns'}</span>
+          <span>{metrics.userTotalWords ?? 0} words</span>
+          <span>{formatSeconds(metrics.userSpeakingSeconds)} speaking</span>
+          <span>{metrics.responseTimeAvg.toFixed(1)}s response</span>
+          <span className={fillerTone(metrics.userFillerRate)}>
+            {metrics.userFillerRate.toFixed(1)}% fillers
+            {metrics.userFillerCount != null ? ` (${metrics.userFillerCount})` : ''}
+          </span>
+          {vocabPct != null && <span>{vocabPct}% vocab</span>}
+        </div>
+        {metrics.coachingTip && tipTone && (
+          <p className={`text-[10px] text-right leading-snug max-w-sm rounded px-1.5 py-0.5 ${tipTone.text} ${tipTone.bg}`}>
+            {metrics.coachingTip}
+          </p>
+        )}
+      </div>
+    )
+  }
 
   // Render a placeholder card while we're waiting for the first snapshot,
   // so the user knows the toggle worked even if no metrics have arrived yet.
@@ -56,10 +174,7 @@ export function RealTimeMetrics({ metrics, isVisible = true }: RealTimeMetricsPr
     );
   }
 
-  const tone = PACING_TONE[metrics.pacingQualitative ?? 'not-enough-data'] ?? PACING_TONE['not-enough-data'];
-  const wpmShown = metrics.userWpm > 0 ? Math.round(metrics.userWpm) : null;
-  const vocabPct = metrics.userVocabDiversity != null ? Math.round(metrics.userVocabDiversity * 100) : null;
-
+  // Floating card variant
   return (
     <Card className="fixed top-20 right-4 w-80 z-50 bg-background/95 backdrop-blur-sm border shadow-lg">
       <CardHeader className="pb-3">
@@ -96,8 +211,8 @@ export function RealTimeMetrics({ metrics, isVisible = true }: RealTimeMetricsPr
         <div className="grid grid-cols-2 gap-3 text-sm">
           <Stat
             icon={<MessageSquare className="h-3 w-3" />}
-            label="Turns"
-            value={String(metrics.totalTurns)}
+            label="Your turns"
+            value={String(turnsShown)}
           />
           <Stat
             icon={<Hash className="h-3 w-3" />}
@@ -142,11 +257,11 @@ export function RealTimeMetrics({ metrics, isVisible = true }: RealTimeMetricsPr
         </div>
 
         {/* Coaching tip — agent-generated, always one short actionable line */}
-        {metrics.coachingTip && (
-          <div className="rounded-md border border-dashed border-primary/30 bg-primary/5 p-2.5">
+        {metrics.coachingTip && tipTone && (
+          <div className={`rounded-md border p-2.5 ${tipTone.bg} ${tipTone.border}`}>
             <div className="flex items-start gap-2 text-xs">
-              <Lightbulb className="h-3.5 w-3.5 mt-0.5 text-primary flex-shrink-0" />
-              <span className="leading-snug">{metrics.coachingTip}</span>
+              <Lightbulb className={`h-3.5 w-3.5 mt-0.5 flex-shrink-0 ${tipTone.icon}`} />
+              <span className={`leading-snug ${tipTone.text}`}>{metrics.coachingTip}</span>
             </div>
           </div>
         )}

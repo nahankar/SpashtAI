@@ -22,6 +22,51 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '..
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
 import { getAuthHeaders } from '@/lib/api-client';
 
+/** API may return camelCase (Prisma) or snake_case; scoring engine uses a different insights shape. */
+function normalizeAdvancedMetrics(raw: Record<string, unknown>): AdvancedMetrics {
+  const pi = (raw.performance_insights ?? raw.performanceInsights) as Record<string, unknown> | null | undefined
+  const scores = pi?.scores as Record<string, number> | undefined
+  const feedback = pi?.feedback as Array<{ actionable_tip?: string; message?: string }> | undefined
+
+  let performance_insights: AdvancedMetrics['performance_insights']
+  if (pi) {
+    performance_insights = {
+      overall_score:
+        (pi.overall_score as number | undefined) ??
+        (scores?.overall != null ? scores.overall * 10 : undefined),
+      category_scores:
+        (pi.category_scores as AdvancedMetrics['performance_insights'] extends infer P
+          ? P extends { category_scores?: infer C }
+            ? C
+            : never
+          : never) ??
+        (scores
+          ? {
+              content_quality: scores.clarity * 10,
+              delivery_effectiveness: scores.fluency * 10,
+              communication_clarity: scores.confidence * 10,
+            }
+          : undefined),
+      strengths: (pi.strengths as string[]) ?? [],
+      areas_for_improvement: (pi.areas_for_improvement as string[]) ?? [],
+      recommendations:
+        (pi.recommendations as string[]) ??
+        (feedback?.map((f) => f.actionable_tip || f.message).filter(Boolean) as string[]) ??
+        [],
+    }
+  }
+
+  return {
+    content_processed: Boolean(raw.content_processed ?? raw.contentProcessed),
+    audio_processed: Boolean(raw.audio_processed ?? raw.audioProcessed),
+    insights_generated: Boolean(raw.insights_generated ?? raw.insightsGenerated),
+    content_metrics: (raw.content_metrics ?? raw.contentMetrics) as AdvancedMetrics['content_metrics'],
+    delivery_metrics: (raw.delivery_metrics ?? raw.deliveryMetrics) as AdvancedMetrics['delivery_metrics'],
+    performance_insights,
+    processing_errors: (raw.processing_errors ?? raw.processingErrors) as string[] | undefined,
+  }
+}
+
 interface AdvancedInsightsProps {
   sessionId: string;
   isSessionEnded?: boolean;
@@ -112,7 +157,7 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
       }
       
       const data = await response.json();
-      setMetrics(data);
+      setMetrics(normalizeAdvancedMetrics(data));
     } catch (err) {
       console.error('Error fetching advanced metrics:', err);
       setError(err instanceof Error ? err.message : 'Failed to load advanced insights');
@@ -279,7 +324,7 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
 
         {/* Insights Tab */}
         <TabsContent value="insights" className="space-y-4">
-          {metrics.performance_insights && (
+          {metrics.performance_insights ? (
             <>
               <Card>
                 <CardHeader>
@@ -347,12 +392,18 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
                 </CardContent>
               </Card>
             </>
+          ) : (
+            <Card>
+              <CardContent className="py-8 text-center text-sm text-muted-foreground">
+                No insight data for this session yet. Try &quot;Reprocess Audio&quot; on the analytics header.
+              </CardContent>
+            </Card>
           )}
         </TabsContent>
 
         {/* Content Analysis Tab */}
         <TabsContent value="content" className="space-y-4">
-          {metrics.content_metrics && (
+          {metrics.content_metrics ? (
             <>
               <Card>
                 <CardHeader>
@@ -462,12 +513,18 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
                 </Card>
               )}
             </>
+          ) : (
+            <Card>
+              <CardContent className="py-8 text-center text-sm text-muted-foreground">
+                Content analysis not available yet. Reprocess the session audio to generate vocabulary and grammar insights.
+              </CardContent>
+            </Card>
           )}
         </TabsContent>
 
         {/* Delivery Analysis Tab */}
         <TabsContent value="delivery" className="space-y-4">
-          {metrics.delivery_metrics && (
+          {metrics.delivery_metrics ? (
             <>
               <Card>
                 <CardHeader>
@@ -534,6 +591,12 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
                 </CardContent>
               </Card>
             </>
+          ) : (
+            <Card>
+              <CardContent className="py-8 text-center text-sm text-muted-foreground">
+                Delivery analysis (speech rate, pauses, prosody) not available yet. Use &quot;Reprocess Audio&quot; after downloading your recording.
+              </CardContent>
+            </Card>
           )}
         </TabsContent>
       </Tabs>

@@ -1,15 +1,43 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { z } from 'zod';
 import path from 'path';
 import fs from 'fs/promises';
+import {
+  exportDenied,
+  getElevateSessionOwnerId,
+  resolveRequestExportFlags,
+} from '../lib/userExportFlags';
 
 const router = Router();
+
+async function guardSessionExport(
+  req: Request,
+  res: Response,
+  sessionId: string,
+  flag: 'hideTranscriptText' | 'hideTranscriptJsonExport' | 'hideAudioDownload',
+  message: string,
+) {
+  const ownerId = await getElevateSessionOwnerId(sessionId);
+  const { flags, accessDenied } = await resolveRequestExportFlags(req, ownerId);
+  if (accessDenied) {
+    exportDenied(res, 'Access denied');
+    return false;
+  }
+  if (flags[flag]) {
+    exportDenied(res, message);
+    return false;
+  }
+  return true;
+}
 
 // Download conversation transcript
 router.get('/sessions/:sessionId/transcript', async (req, res) => {
   try {
     const sessionId = req.params.sessionId;
+    if (!(await guardSessionExport(req, res, sessionId, 'hideTranscriptText', 'Transcript download is disabled for your account'))) {
+      return;
+    }
     
     // Get session transcript from database
     const sessionTranscript = await prisma.sessionTranscript.findUnique({
@@ -64,6 +92,9 @@ Total Messages: ${messages.length}
 router.get('/sessions/:sessionId/transcript.json', async (req, res) => {
   try {
     const sessionId = req.params.sessionId;
+    if (!(await guardSessionExport(req, res, sessionId, 'hideTranscriptJsonExport', 'Transcript JSON export is disabled for your account'))) {
+      return;
+    }
     
     // Get session transcript from database
     const sessionTranscript = await prisma.sessionTranscript.findUnique({
@@ -103,6 +134,9 @@ router.get('/sessions/:sessionId/transcript.json', async (req, res) => {
 router.get('/sessions/:sessionId/audio', async (req, res) => {
   try {
     const sessionId = req.params.sessionId;
+    if (!(await guardSessionExport(req, res, sessionId, 'hideAudioDownload', 'Audio download is disabled for your account'))) {
+      return;
+    }
     const environment = process.env.ENVIRONMENT || 'development';
     
     if (environment === 'development') {
@@ -142,6 +176,9 @@ router.get('/sessions/:sessionId/audio', async (req, res) => {
 router.get('/sessions/:sessionId/audio/:filename', async (req, res) => {
   try {
     const { sessionId, filename } = req.params;
+    if (!(await guardSessionExport(req, res, sessionId, 'hideAudioDownload', 'Audio download is disabled for your account'))) {
+      return;
+    }
     const environment = process.env.ENVIRONMENT || 'development';
     
     // Validate filename to prevent path traversal

@@ -57,7 +57,7 @@ export function UploadZone({ onSubmit, loading }: UploadZoneProps) {
         <CardDescription>
           Upload an audio/video recording, a transcript file, paste text directly, or combine them for best results.
           For VTT files, we try to detect the real-world meeting date from the file name or header before asking you
-          manually (needed for My Progress Pulse trends).
+          manually (needed for Progress Pulse trends).
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-5">

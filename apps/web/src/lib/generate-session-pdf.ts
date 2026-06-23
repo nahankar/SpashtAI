@@ -117,7 +117,7 @@ export async function generateSessionPdf(report: SessionReport): Promise<void> {
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(26)
   doc.setTextColor(...COLORS.white)
-  doc.text('SpashtAI', MARGIN, 22)
+  doc.text('SpashtAI Beta', MARGIN, 22)
 
   doc.setFontSize(12)
   doc.setFont('helvetica', 'normal')
@@ -632,7 +632,7 @@ export async function generateSessionPdf(report: SessionReport): Promise<void> {
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(7)
     doc.setTextColor(...COLORS.muted)
-    doc.text(`SpashtAI — ${report.title}`, MARGIN, PAGE_H - 8)
+    doc.text(`SpashtAI Beta — ${report.title}`, MARGIN, PAGE_H - 8)
     doc.text(`Page ${i} of ${pageCount}`, PAGE_W - MARGIN - 20, PAGE_H - 8)
   }
 

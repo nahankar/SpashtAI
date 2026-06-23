@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 export function ForgotPassword() {
   const [email, setEmail] = useState('')
   const [sent, setSent] = useState(false)
+  const [devResetUrl, setDevResetUrl] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -18,21 +19,27 @@ export function ForgotPassword() {
     setSubmitting(true)
 
     try {
-      await apiClient('/api/auth/forgot-password', {
-        method: 'POST',
-        body: JSON.stringify({ email }),
-        skipAuth: true,
-      })
+      const data = await apiClient<{ message: string; devResetUrl?: string }>(
+        '/api/auth/forgot-password',
+        {
+          method: 'POST',
+          body: JSON.stringify({ email }),
+          skipAuth: true,
+        },
+      )
       setSent(true)
-    } catch (err: any) {
-      setError(err.message || 'Failed to send reset link')
+      if (data.devResetUrl) {
+        setDevResetUrl(data.devResetUrl)
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to send reset link')
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4">
+    <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center bg-background px-4 py-8">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl">Reset your password</CardTitle>
@@ -49,6 +56,21 @@ export function ForgotPassword() {
                 If an account exists for <strong>{email}</strong>, you'll receive a password reset
                 link shortly.
               </p>
+              {import.meta.env.DEV && !devResetUrl && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-3 text-left">
+                  <strong>Development:</strong> SMTP is not configured. Check the API server console
+                  for the reset URL, or set SMTP_* env vars /{' '}
+                  <code className="text-[10px]">EXPOSE_DEV_RESET_URL=true</code> to show the link here.
+                </p>
+              )}
+              {devResetUrl && (
+                <div className="text-left text-xs bg-muted rounded-md p-3 space-y-2">
+                  <p className="font-medium text-foreground">Development reset link:</p>
+                  <a href={devResetUrl} className="text-primary break-all hover:underline">
+                    {devResetUrl}
+                  </a>
+                </div>
+              )}
               <Link to="/auth/login">
                 <Button variant="outline" className="w-full">
                   Back to Sign In

@@ -1,0 +1,18 @@
+# Production LiveKit config — copy to livekit.yaml and replace keys.
+# Generate: docker run --rm livekit/livekit-server:latest livekit-server generate-keys
+port: 7880
+rtc:
+  tcp_port: 7881
+  udp_port: 7882
+  port_range_start: 50000
+  port_range_end: 60000
+  use_external_ip: true
+keys:
+  APIKeyReplaceMe: APISecretReplaceMe
+turn:
+  enabled: false
+log_level: info
+
+# Uncomment if using egress with redis from docker-compose
+# redis:
+#   address: redis:6379

@@ -62,18 +62,17 @@ router.get('/features', async (req: Request, res: Response) => {
     const days = Math.min(90, parseInt(req.query.days as string) || 30)
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
 
-    const featureWhere =
-      enabled.length > 0 ? { feature: { in: enabled } } : { feature: { in: [] as string[] } }
+    const trackedFeatures = [...enabled, 'app']
 
     const usage = await prisma.featureUsage.groupBy({
       by: ['feature', 'action'],
       _count: { id: true },
-      where: { timestamp: { gte: since }, ...featureWhere },
+      where: { timestamp: { gte: since }, feature: { in: trackedFeatures } },
       orderBy: { _count: { id: 'desc' } },
     })
 
     const recentUsage = await prisma.featureUsage.findMany({
-      where: { timestamp: { gte: since }, ...featureWhere },
+      where: { timestamp: { gte: since }, feature: { in: trackedFeatures } },
       orderBy: { timestamp: 'desc' },
       take: 100,
       select: {

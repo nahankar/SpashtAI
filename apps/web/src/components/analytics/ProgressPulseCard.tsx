@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { TrendingUp, TrendingDown, Minus, Mic, Target, Activity } from 'lucide-react'
+import { TrendingUp, TrendingDown, Minus, Mic, Activity } from 'lucide-react'
 import { getAuthHeaders } from '@/lib/api-client'
 import { getFocusAreaLabel } from '@/lib/focus-areas'
+import { highlightSkillTerms } from '@/lib/pulse-skills'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 
@@ -63,9 +64,6 @@ function buildPulseSummary(items: PulseSummaryItem[]): string {
   if (needsFocus.length > 0) {
     const focus = getFocusAreaLabel(needsFocus[0].skill).toLowerCase()
     parts.push(`focus on ${focus} next`)
-  } else if (improving.length === 0) {
-    const lowest = [...items].sort((a, b) => a.currentScore - b.currentScore)[0]
-    if (lowest) parts.push(`Keep working on ${getFocusAreaLabel(lowest.skill).toLowerCase()}`)
   }
 
   if (parts.length === 0) {
@@ -91,13 +89,6 @@ function buildPredictiveInsight(items: PulseSummaryItem[]): string | null {
 
   const skillName = getFocusAreaLabel(weakest.skill).toLowerCase()
   return `If your ${skillName} improves from ${weakest.currentScore.toFixed(1)} to ${targetScore.toFixed(1)}, your average communication score could reach ${projectedOverall.toFixed(1)}.`
-}
-
-function getFocusSkill(items: PulseSummaryItem[]): string | null {
-  const needsFocus = items
-    .filter((i) => i.currentScore < 7)
-    .sort((a, b) => a.currentScore - b.currentScore)
-  return needsFocus.length > 0 ? needsFocus[0].skill : null
 }
 
 function DeltaBadge({ delta }: { delta: number | null }) {
@@ -197,7 +188,7 @@ export function ProgressPulseCard() {
         <CardHeader>
           <div className="flex items-center gap-3">
             <Activity className="h-8 w-8 text-emerald-500 shrink-0" />
-            <CardTitle>My Progress Pulse</CardTitle>
+            <CardTitle>Progress Pulse</CardTitle>
           </div>
         </CardHeader>
         <CardContent className="py-4 text-center">
@@ -219,7 +210,7 @@ export function ProgressPulseCard() {
         <CardHeader>
           <div className="flex items-center gap-3">
             <Activity className="h-8 w-8 text-emerald-500 shrink-0" />
-            <CardTitle>My Progress Pulse</CardTitle>
+            <CardTitle>Progress Pulse</CardTitle>
           </div>
           <CardDescription>
             Complete a Replay analysis or Elevate session and choose to track it.
@@ -233,7 +224,6 @@ export function ProgressPulseCard() {
   }
 
   const pulseSummary = buildPulseSummary(summary)
-  const focusSkill = getFocusSkill(summary)
   const predictiveInsight = buildPredictiveInsight(summary)
 
   return (
@@ -241,7 +231,7 @@ export function ProgressPulseCard() {
       <CardHeader className="pb-3">
         <div className="flex items-center gap-3">
           <Activity className="h-8 w-8 text-emerald-500 shrink-0" />
-          <CardTitle>My Progress Pulse</CardTitle>
+          <CardTitle>Progress Pulse</CardTitle>
         </div>
         <CardDescription>
           {summary.length} skill{summary.length !== 1 ? 's' : ''} tracked across your sessions. Trends compare your
@@ -251,19 +241,11 @@ export function ProgressPulseCard() {
       <CardContent className="grid gap-4">
         {/* Pulse Summary */}
         <div className="rounded-lg bg-muted/50 px-4 py-3">
-          <p className="text-sm text-foreground">{pulseSummary}</p>
-          {focusSkill && (
-            <div className="mt-2 flex items-center gap-1.5">
-              <Target className="h-3.5 w-3.5 text-primary" />
-              <span className="text-xs font-medium text-primary">
-                Focus area: {getFocusAreaLabel(focusSkill)}
-              </span>
-            </div>
-          )}
+          <p className="text-sm text-foreground">{highlightSkillTerms(pulseSummary)}</p>
           {predictiveInsight && (
             <div className="mt-2 flex items-start gap-1.5 rounded-md border border-blue-200 bg-blue-50/60 px-3 py-2">
               <TrendingUp className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-500" />
-              <p className="text-xs text-blue-800">{predictiveInsight}</p>
+              <p className="text-xs text-blue-800">{highlightSkillTerms(predictiveInsight)}</p>
             </div>
           )}
         </div>
@@ -275,7 +257,8 @@ export function ProgressPulseCard() {
             return (
               <div
                 key={item.skill}
-                className="flex flex-col gap-2 rounded-lg border p-3"
+                id={`pulse-skill-${item.skill}`}
+                className="flex flex-col gap-2 rounded-lg border p-3 scroll-mt-4"
               >
                 <div className="flex items-start gap-3">
                   <div className="flex flex-col items-center">

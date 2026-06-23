@@ -116,6 +116,10 @@ class AdvancedMetricsCollector:
         """Ingest a transcript fragment through the turn stitcher."""
         self.basic_collector.ingest_conversation_fragment(speaker, text, timestamp)
 
+    def publish_pending_user_utterance_metrics(self) -> bool:
+        """Publish metrics when the user finishes speaking (before coach replies)."""
+        return self.basic_collector.publish_pending_user_utterance_metrics()
+
     def record_committed_turn(self, speaker: str, text: str) -> None:
         """Track stitched turns for content/delivery analysis (not raw fragments)."""
         if speaker == "user":
@@ -175,13 +179,16 @@ class AdvancedMetricsCollector:
         try:
             logger.info("🎵 Analyzing audio delivery")
             
-            # Combine all conversation text for alignment
-            full_transcript = ""
-            for speaker, text, _ in self.conversation_turns:
-                full_transcript += f"{text} "
+            # User-only transcript — egress audio is user mic only
+            user_text = self.user_transcript.strip()
+            if not user_text:
+                for speaker, text, _ in self.conversation_turns:
+                    if speaker == "user":
+                        user_text += f"{text} "
+                user_text = user_text.strip()
             
-            if full_transcript.strip():
-                delivery_metrics = await self.audio_processor.analyze_delivery(full_transcript.strip(), user_audio_file_path)
+            if user_text:
+                delivery_metrics = await self.audio_processor.analyze_delivery(user_text, user_audio_file_path)
                 if delivery_metrics:
                     self.session_metrics.delivery_metrics = delivery_metrics
                     self.session_metrics.audio_processed = True

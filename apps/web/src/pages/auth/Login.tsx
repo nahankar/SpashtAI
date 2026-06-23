@@ -1,18 +1,29 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
+import { BrandName, BRAND_ALT } from '@/components/brand/BrandName'
 
 export function Login() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const { login } = useAuth()
+  const { login, loginWithGoogle } = useAuth()
   const navigate = useNavigate()
+
+  async function handleGoogleCredential(credential: string) {
+    const user = await loginWithGoogle(credential)
+    if (user.needsProfileCompletion) {
+      navigate('/auth/complete-profile')
+      return
+    }
+    navigate(user.role === 'ADMIN' || user.role === 'SUPER_ADMIN' ? '/admin' : '/')
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -21,27 +32,44 @@ export function Login() {
 
     try {
       const user = await login(email, password)
-      if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') {
-        navigate('/admin')
-      } else {
-        navigate('/')
+      if (user.needsProfileCompletion) {
+        navigate('/auth/complete-profile')
+        return
       }
-    } catch (err: any) {
-      setError(err.message || 'Invalid credentials')
+      navigate(user.role === 'ADMIN' || user.role === 'SUPER_ADMIN' ? '/admin' : '/')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Invalid credentials')
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4">
+    <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center bg-background px-4 py-8">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center space-y-3">
-          <img src="/spashtai_logo.svg" alt="SpashtAI" className="h-16 w-auto mx-auto" />
-          <CardTitle className="text-2xl">Sign in to SpashtAI</CardTitle>
-          <CardDescription>Enter your credentials to continue</CardDescription>
+          <img src="/spashtai_logo.svg" alt={BRAND_ALT} className="h-16 w-auto mx-auto" />
+          <CardDescription className="text-base"><BrandName size="md" className="justify-center" /></CardDescription>
+          <CardDescription className="text-base text-foreground font-medium">
+            Enter your credentials to Sign in
+          </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          <GoogleSignInButton
+            label="signin_with"
+            onCredential={handleGoogleCredential}
+            onError={setError}
+          />
+
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-card px-2 text-muted-foreground">or</span>
+            </div>
+          </div>
+
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
               <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
@@ -84,10 +112,10 @@ export function Login() {
             </Button>
           </form>
 
-          <div className="mt-6 text-center text-sm text-muted-foreground">
-            Don't have an account?{' '}
+          <div className="text-center text-sm text-muted-foreground">
+            Don&apos;t have an account?{' '}
             <Link to="/auth/register" className="text-foreground font-medium hover:underline">
-              Create one
+              Signup
             </Link>
           </div>
         </CardContent>

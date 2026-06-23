@@ -247,6 +247,28 @@ def build_resume_context(history_messages: list[dict]) -> str:
 # grounded coaching signals (filler-word counts, pause structure, etc.) we
 # will register them here as additional `@function_tool` methods.
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+async def fetch_agent_prompt(key: str) -> str | None:
+    """Load admin-editable prompt overlay from the server."""
+    url = f"{SERVER_URL}/internal/agent-prompts/{key}"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                url,
+                headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
+                timeout=aiohttp.ClientTimeout(total=5.0),
+            ) as response:
+                if response.status != 200:
+                    return None
+                data = await response.json()
+                content = (data.get("content") or "").strip()
+                return content or None
+    except Exception as e:
+        logger.debug("Agent prompt fetch failed for %s: %s", key, e)
+        return None
+
+
 class CoachingAgent(Agent):
     def __init__(
         self,
@@ -254,6 +276,9 @@ class CoachingAgent(Agent):
         pacing_tracker: "LivePacingTracker",
         advanced_metrics=None,
         room_getter=None,
+        user_name: str | None = None,
+        focus_area: str | None = None,
+        session_name: str | None = None,
     ) -> None:
         super().__init__(instructions=instructions)
         self._pacing_tracker = pacing_tracker
@@ -262,6 +287,28 @@ class CoachingAgent(Agent):
         # and the on-screen card in sync.
         self._advanced_metrics = advanced_metrics
         self._room_getter = room_getter
+        self._user_name = user_name
+        self._focus_area = focus_area
+        self._session_name = session_name
+
+    async def on_enter(self) -> None:
+        """Coach always greets first — don't wait for the user to speak."""
+        greeting_parts = [
+            "You are starting a new SpashtAI coaching session.",
+            "YOU must speak first — greet the user warmly in one or two short sentences.",
+            "Briefly set expectations for what you'll practice today, then invite them to respond when ready.",
+            "Keep it conversational and concise — no bullet lists or markdown.",
+        ]
+        if self._user_name:
+            greeting_parts.append(f"Use their name: {self._user_name}.")
+        if self._focus_area:
+            focus_label = self._focus_area.replace("_", " ")
+            greeting_parts.append(f"Mention today's focus area: {focus_label}.")
+        if self._session_name:
+            greeting_parts.append(f"This session is titled '{self._session_name}'.")
+
+        await self.session.generate_reply(instructions=" ".join(greeting_parts))
+        logging.getLogger("spashtai-agent").info("👋 Coach opening greeting triggered via on_enter")
 
     @function_tool
     async def get_live_pacing(self, context: RunContext) -> dict:
@@ -310,6 +357,30 @@ class CoachingAgent(Agent):
             logger_init.debug(f"tool-triggered push skipped: {e}")
 
         return result
+
+    @function_tool
+    async def get_speech_metrics(self, context: RunContext) -> dict:
+        """Get measured filler, hedging, and acknowledgment counts from the transcript.
+
+        CALL THIS before stating how many filler words the user used, giving a
+        filler rate, or comparing filler usage across rounds. NEVER guess or
+        invent a filler count — the user sees the real numbers on their metrics card.
+
+        Returns session totals plus counts for the user's most recent turn.
+        """
+        if self._advanced_metrics is None:
+            return {
+                "session_filler_count": 0,
+                "note": "Metrics not available yet — ask the user to keep speaking.",
+            }
+        stats = self._advanced_metrics.basic_collector.get_live_speech_stats()
+        logging.getLogger("spashtai-agent").info(
+            "🛠️  get_speech_metrics → fillers=%s hedging=%s last_turn_fillers=%s",
+            stats.get("session_filler_count"),
+            stats.get("session_hedging_count"),
+            stats.get("last_turn_filler_count"),
+        )
+        return stats
 
 
 class ConversationLogger:
@@ -1123,25 +1194,31 @@ async def entrypoint(ctx: JobContext):
 
         logger.info(f"👤 User name: {user_name or '(unknown)'}, focus: {focus_area or 'general'}, context: {focus_context or '(none)'}")
 
-        base_instructions = (
-            "You are a voice AI coach for SpashtAI, a platform that helps people become better communicators. "
-            "Your interface with users will be voice. Use short and concise responses, "
-            "and avoid unpronounceable punctuation. Be warm, encouraging, and professional.\n\n"
+        TOOL_GROUNDING = (
             "GROUNDING RULE — speaking-pace metrics:\n"
             "• Whenever you reference the user's speaking pace, words-per-minute, or speed, "
             "you MUST first call the `get_live_pacing` tool to obtain the measured value. "
             "Quote that number to the user (you may round to the nearest 5 — e.g. 158 → 'around 160 WPM').\n"
             "• FRESHNESS — the value goes stale within ~5 seconds. ALWAYS call the tool again "
             "before quoting WPM, even if you called it a moment ago. NEVER reuse a number "
-            "from earlier in the conversation — the cumulative WPM shifts as the user speaks more, "
-            "so a 30-second-old value will not match what the user sees on their live metrics card. "
-            "If the user asks 'what is my current speed?', you MUST re-call the tool right then.\n"
-            "• Never invent, estimate, or guess a WPM number. If `get_live_pacing` returns "
-            "qualitative='not-enough-data', acknowledge it ('I need to hear a bit more first') "
-            "instead of fabricating a value.\n"
-            "• You may always describe pace qualitatively ('that felt rushed', 'nice and steady') "
-            "without the tool — only quoting a specific number requires the tool."
+            "from earlier in the conversation.\n"
+            "• Never invent, estimate, or guess a WPM number.\n\n"
+            "GROUNDING RULE — filler & hedging counts:\n"
+            "• Before stating how many filler words the user used (session or last round), "
+            "you MUST call `get_speech_metrics` and quote those counts.\n"
+            "• NEVER invent filler numbers (e.g. do not say '21 fillers' unless the tool returns ~21).\n"
+            "• Acknowledgments like 'okay' or 'yeah' are tracked separately — not strict fillers.\n"
+            "• 'Like' in 'I like cricket' is NOT a filler; discourse 'like' is counted."
         )
+
+        default_persona = (
+            "You are a voice AI coach for SpashtAI, a platform that helps people become better communicators. "
+            "Your interface with users will be voice. Use short and concise responses, "
+            "and avoid unpronounceable punctuation. Be warm, encouraging, and professional. "
+            "Always take the initiative at session start: greet the user first before they speak."
+        )
+        custom_persona = await fetch_agent_prompt("elevate_coach_persona")
+        base_instructions = f"{custom_persona or default_persona}\n\n{TOOL_GROUNDING}"
 
         # Personalization: use the user's name naturally
         if user_name:
@@ -1180,7 +1257,11 @@ async def entrypoint(ctx: JobContext):
         # Session scope: adapt based on how the user arrived
         exercise_instructions = ""
         if focus_area:
-            exercise_instructions = get_exercise_instructions(focus_area, focus_context, coaching_context)
+            custom_exercise = await fetch_agent_prompt(f"elevate_exercise_{focus_area}")
+            if custom_exercise:
+                exercise_instructions = custom_exercise
+            else:
+                exercise_instructions = get_exercise_instructions(focus_area, focus_context, coaching_context)
             _debug_log(f"Exercise instructions length: {len(exercise_instructions)}, has coaching data: {'USER DATA' in exercise_instructions}")
 
         if exercise_instructions:
@@ -1229,6 +1310,9 @@ async def entrypoint(ctx: JobContext):
             # we wrap it so the closure stays cheap and the room reference
             # always reflects the live session.
             room_getter=lambda: ctx.room,
+            user_name=user_name,
+            focus_area=focus_area,
+            session_name=session_name,
         )
         logger.info("✅ CoachingAgent created (with get_live_pacing tool + live-sync push)")
         
@@ -1239,11 +1323,33 @@ async def entrypoint(ctx: JobContext):
         session = await build_session(voice_cfg)
         logger.info("✅ AgentSession created with transcript support")
 
+        _user_metrics_debounce_task: asyncio.Task | None = None
+        USER_METRICS_DEBOUNCE_SEC = 2.0
+
+        def _schedule_pending_user_metrics() -> None:
+            nonlocal _user_metrics_debounce_task
+            if not advanced_metrics:
+                return
+
+            async def _publish_after_quiet() -> None:
+                await asyncio.sleep(USER_METRICS_DEBOUNCE_SEC)
+                try:
+                    advanced_metrics.publish_pending_user_utterance_metrics()
+                except Exception as e:
+                    logger.debug("pending user metrics publish failed: %s", e)
+
+            if _user_metrics_debounce_task and not _user_metrics_debounce_task.done():
+                _user_metrics_debounce_task.cancel()
+            _user_metrics_debounce_task = asyncio.create_task(_publish_after_quiet())
+
         # Hook live-pacing measurement into VAD + transcript signals.
         @session.on("user_state_changed")
         def _on_user_state(ev):  # noqa: ANN001
             try:
-                pacing_tracker.on_user_state_changed(getattr(ev, "new_state", "") or "")
+                new_state = getattr(ev, "new_state", "") or ""
+                pacing_tracker.on_user_state_changed(new_state)
+                if new_state != "speaking":
+                    _schedule_pending_user_metrics()
             except Exception as e:
                 logger.debug(f"pacing user_state hook failed: {e}")
 
@@ -1330,6 +1436,7 @@ async def entrypoint(ctx: JobContext):
                         pacing_tracker.on_user_transcript(content, is_final=True)
                     except Exception as pace_err:
                         logger.debug(f"pacing fallback hook failed: {pace_err}")
+                    _schedule_pending_user_metrics()
                 
             except Exception as e:
                 logger.warning("⚠️ Error in conversation_item_added: %s", e)
@@ -1371,12 +1478,15 @@ async def entrypoint(ctx: JobContext):
             except Exception as e:
                 logger.warning(f"⚠️ Could not attach pacing tracker: {e}")
 
-            async def _publish_user_turn_metrics(stitched_text: str, turn_metrics_snapshot) -> None:
+            async def _publish_user_turn_metrics(
+                stitched_text: str, turn_metrics_snapshot, turn_index: int = 0
+            ) -> None:
                 try:
                     payload = {
                         "type": "turn_metrics",
                         "text": stitched_text,
                         "turnMetrics": turn_metrics_snapshot.to_dict(),
+                        "turnIndex": turn_index,
                         "timestamp": int(datetime.now().timestamp() * 1000),
                     }
                     await ctx.room.local_participant.publish_data(
@@ -1386,8 +1496,12 @@ async def entrypoint(ctx: JobContext):
                 except Exception as pub_err:
                     logger.warning("⚠️ Failed to publish turn metrics: %s", pub_err)
 
-            def _schedule_user_turn_metrics(text: str, metrics_snapshot) -> None:
-                asyncio.create_task(_publish_user_turn_metrics(text, metrics_snapshot))
+            def _schedule_user_turn_metrics(
+                text: str, metrics_snapshot, turn_index: int = 0
+            ) -> None:
+                asyncio.create_task(
+                    _publish_user_turn_metrics(text, metrics_snapshot, turn_index)
+                )
 
             try:
                 bc = advanced_metrics.basic_collector

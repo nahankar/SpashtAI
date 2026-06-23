@@ -262,7 +262,7 @@ export function History() {
   async function deleteReplaySession(id: string) {
     const session = replaySessions.find((s) => s.id === id)
     const pulseWarning = session?.progressPulseStatus === 'tracked'
-      ? ' This session is tracked in My Progress Pulse — its scores will also be removed.'
+      ? ' This session is tracked in Progress Pulse — its scores will also be removed.'
       : ''
     const ok = await confirm({ title: 'Delete Session', description: `Delete this replay session? This cannot be undone.${pulseWarning}`, confirmLabel: 'Delete', variant: 'destructive' })
     if (!ok) return
@@ -280,7 +280,7 @@ export function History() {
     if (selectedReplay.size === 0) return
     const trackedCount = replaySessions.filter((s) => selectedReplay.has(s.id) && s.progressPulseStatus === 'tracked').length
     const pulseWarning = trackedCount > 0
-      ? ` ${trackedCount} of these are tracked in My Progress Pulse — their scores will also be removed.`
+      ? ` ${trackedCount} of these are tracked in Progress Pulse — their scores will also be removed.`
       : ''
     const ok = await confirm({ title: 'Delete Sessions', description: `Delete ${selectedReplay.size} session(s)? This cannot be undone.${pulseWarning}`, confirmLabel: 'Delete All', variant: 'destructive' })
     if (!ok) return
@@ -301,7 +301,7 @@ export function History() {
   async function deleteElevateSession(id: string) {
     const session = elevateSessions.find((s) => s.id === id)
     const pulseWarning = session?.progressPulseStatus === 'tracked'
-      ? ' This session is tracked in My Progress Pulse — its scores will also be removed.'
+      ? ' This session is tracked in Progress Pulse — its scores will also be removed.'
       : ''
     const ok = await confirm({ title: 'Delete Session', description: `Delete this session? This cannot be undone.${pulseWarning}`, confirmLabel: 'Delete', variant: 'destructive' })
     if (!ok) return
@@ -319,7 +319,7 @@ export function History() {
     if (selectedElevate.size === 0) return
     const trackedCount = elevateSessions.filter((s) => selectedElevate.has(s.id) && s.progressPulseStatus === 'tracked').length
     const pulseWarning = trackedCount > 0
-      ? ` ${trackedCount} of these are tracked in My Progress Pulse — their scores will also be removed.`
+      ? ` ${trackedCount} of these are tracked in Progress Pulse — their scores will also be removed.`
       : ''
     const ok = await confirm({ title: 'Delete Sessions', description: `Delete ${selectedElevate.size} session(s)? This cannot be undone.${pulseWarning}`, confirmLabel: 'Delete All', variant: 'destructive' })
     if (!ok) return
@@ -343,7 +343,7 @@ export function History() {
         <Link to="/" className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-3.5 w-3.5" /> Home
         </Link>
-        <h1 className="text-2xl font-bold">Past Sessions</h1>
+        <h1 className="text-2xl font-bold">Sessions</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           {replayOn && elevateOn
             ? 'Review your Replay analyses and Elevate practice sessions.'
@@ -507,12 +507,12 @@ export function History() {
                           )}
                           <span>{s.userRole}</span>
                           {s.progressPulseStatus === 'tracked' && (
-                            <span className="flex items-center gap-0.5 text-green-600" title="Tracked in My Progress Pulse">
+                            <span className="flex items-center gap-0.5 text-green-600" title="Tracked in Progress Pulse">
                               <CheckCircle2 className="h-3 w-3" />
                             </span>
                           )}
                           {s.progressPulseStatus === 'skipped' && (
-                            <span className="flex items-center gap-0.5 text-muted-foreground/50" title="Not considered for My Progress Pulse">
+                            <span className="flex items-center gap-0.5 text-muted-foreground/50" title="Not considered for Progress Pulse">
                               <MinusCircle className="h-3 w-3" />
                             </span>
                           )}
@@ -674,12 +674,12 @@ export function History() {
                             </span>
                           )}
                           {session.progressPulseStatus === 'tracked' && (
-                            <span className="flex items-center gap-0.5 text-green-600" title="Tracked in My Progress Pulse">
+                            <span className="flex items-center gap-0.5 text-green-600" title="Tracked in Progress Pulse">
                               <CheckCircle2 className="h-3 w-3" />
                             </span>
                           )}
                           {session.progressPulseStatus === 'skipped' && (
-                            <span className="flex items-center gap-0.5 text-muted-foreground/50" title="Not considered for My Progress Pulse">
+                            <span className="flex items-center gap-0.5 text-muted-foreground/50" title="Not considered for Progress Pulse">
                               <MinusCircle className="h-3 w-3" />
                             </span>
                           )}

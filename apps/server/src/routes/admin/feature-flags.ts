@@ -9,7 +9,6 @@ import {
 
 const router = Router()
 
-// GET /api/admin/feature-flags
 router.get('/', async (_req: Request, res: Response) => {
   try {
     await ensureFeatureFlags()
@@ -23,7 +22,6 @@ router.get('/', async (_req: Request, res: Response) => {
   }
 })
 
-// PUT /api/admin/feature-flags/:feature
 router.put('/:feature', async (req: Request, res: Response) => {
   try {
     const feature = req.params.feature as PlatformFeature
@@ -31,32 +29,37 @@ router.put('/:feature', async (req: Request, res: Response) => {
       return res.status(400).json({ error: `Unknown feature: ${feature}` })
     }
 
-    const { enabled } = req.body as { enabled?: boolean }
-    if (typeof enabled !== 'boolean') {
-      return res.status(400).json({ error: 'enabled (boolean) is required' })
+    const { hidden, disabled, overlayComment, overlayPosition } = req.body as {
+      hidden?: boolean
+      disabled?: boolean
+      overlayComment?: string | null
+      overlayPosition?: string
     }
 
-    const adminId = (req as any).user?.userId ?? null
+    const data: Record<string, unknown> = {}
+    if (typeof hidden === 'boolean') data.hidden = hidden
+    if (typeof disabled === 'boolean') data.disabled = disabled
+    if (overlayComment !== undefined) data.overlayComment = overlayComment
+    if (overlayPosition === 'top' || overlayPosition === 'center') {
+      data.overlayPosition = overlayPosition
+    }
+
+    // Keep legacy enabled in sync
+    const current = await prisma.platformFeatureFlag.findUnique({ where: { feature } })
+    const nextHidden = typeof hidden === 'boolean' ? hidden : current?.hidden ?? false
+    const nextDisabled =
+      typeof disabled === 'boolean' ? disabled : current?.disabled ?? false
+    data.enabled = !nextHidden && !nextDisabled
+
+    const adminId = (req as Request & { user?: { userId: string } }).user?.userId ?? null
+    data.updatedBy = adminId
 
     const updated = await prisma.platformFeatureFlag.update({
       where: { feature },
-      data: { enabled, updatedBy: adminId },
+      data,
     })
 
     invalidateFeatureFlagCache()
-
-    try {
-      await prisma.adminAction.create({
-        data: {
-          adminId: adminId ?? 'unknown',
-          action: 'feature_flag.set',
-          metadata: { feature, enabled },
-        },
-      })
-    } catch (auditErr) {
-      console.warn('Audit log skipped:', auditErr)
-    }
-
     res.json({ flag: updated })
   } catch (err) {
     console.error('Feature flag update error:', err)

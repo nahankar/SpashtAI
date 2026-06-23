@@ -3,9 +3,10 @@ import { useAuth } from '@/hooks/useAuth'
 
 interface ProtectedRouteProps {
   requireAdmin?: boolean
+  requireProfile?: boolean
 }
 
-export function ProtectedRoute({ requireAdmin = false }: ProtectedRouteProps) {
+export function ProtectedRoute({ requireAdmin = false, requireProfile = true }: ProtectedRouteProps) {
   const { user, loading, isAdmin } = useAuth()
   const location = useLocation()
 
@@ -19,6 +20,10 @@ export function ProtectedRoute({ requireAdmin = false }: ProtectedRouteProps) {
 
   if (!user) {
     return <Navigate to="/auth/login" state={{ from: location }} replace />
+  }
+
+  if (requireProfile && user.needsProfileCompletion) {
+    return <Navigate to="/auth/complete-profile" replace />
   }
 
   if (requireAdmin && !isAdmin) {

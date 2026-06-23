@@ -62,14 +62,62 @@ const SKILL_CONFIG: {
   icon: typeof Brain
   description: string
 }[] = [
-  { key: 'clarity', label: 'Clarity', icon: Lightbulb, description: 'How easy to understand' },
-  { key: 'confidence', label: 'Confidence', icon: Zap, description: 'Assertiveness vs hesitation' },
-  { key: 'conciseness', label: 'Conciseness', icon: Target, description: 'Efficiency of expression' },
-  { key: 'structure', label: 'Structure', icon: Brain, description: 'Logical organization' },
-  { key: 'engagement', label: 'Engagement', icon: MessageSquare, description: 'Interaction quality' },
-  { key: 'pacing', label: 'Pacing', icon: Activity, description: 'Speaking speed control' },
-  { key: 'delivery', label: 'Delivery', icon: Mic, description: 'Voice modulation' },
-  { key: 'emotionalControl', label: 'Emotional Control', icon: TrendingUp, description: 'Stability under pressure' },
+  {
+    key: 'clarity',
+    label: 'Clarity',
+    icon: Lightbulb,
+    description:
+      'How easy your message is to follow — clear wording, logical phrasing, and vocabulary that matches your audience.',
+  },
+  {
+    key: 'confidence',
+    label: 'Confidence',
+    icon: Zap,
+    description:
+      'How assertive and assured you sound — fewer hedges (“I think”, “maybe”), steady tone, and direct statements.',
+  },
+  {
+    key: 'conciseness',
+    label: 'Conciseness',
+    icon: Target,
+    description:
+      'How efficiently you express ideas — low filler rate, focused sentences, and no unnecessary repetition.',
+  },
+  {
+    key: 'structure',
+    label: 'Structure',
+    icon: Brain,
+    description:
+      'How well your points are organized — clear opening, logical flow between ideas, and a sense of progression.',
+  },
+  {
+    key: 'engagement',
+    label: 'Engagement',
+    icon: MessageSquare,
+    description:
+      'How much you draw others in — questions, check-ins, examples, and signals that you are speaking with the room, not at it.',
+  },
+  {
+    key: 'pacing',
+    label: 'Pacing',
+    icon: Activity,
+    description:
+      'How well you control speaking speed and rhythm — WPM in a listenable range, pauses at the right moments, not rushing.',
+  },
+  {
+    key: 'delivery',
+    label: 'Delivery',
+    icon: Mic,
+    description:
+      'How you sound, not just what you say — pitch variation, energy, pauses, and vocal quality from audio analysis.',
+  },
+  {
+    key: 'emotionalControl',
+    label: 'Emotional Control',
+    icon: TrendingUp,
+    description:
+      'How steady you stay under pressure — even tone when challenged, no sharp spikes in nerves or frustration.',
+  },
 ]
 
 function getScoreColor(score: number): string {
@@ -306,9 +354,12 @@ export function SkillScoresCard({ sessionId, isSessionEnded = false, initialSkil
                 return (
                   <AccordionItem key={skill.key} value={skill.key}>
                     <AccordionTrigger className="text-sm">
-                      <span className="flex items-center gap-2">
-                        {skill.label}
-                        <Badge variant="outline" className="ml-1">{val.toFixed(1)}</Badge>
+                      <span className="flex flex-col items-start gap-0.5 text-left">
+                        <span className="flex items-center gap-2">
+                          {skill.label}
+                          <Badge variant="outline" className="ml-1">{val.toFixed(1)}</Badge>
+                        </span>
+                        <span className="text-xs font-normal text-muted-foreground pr-4">{skill.description}</span>
                       </span>
                     </AccordionTrigger>
                     <AccordionContent>

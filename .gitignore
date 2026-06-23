@@ -24,3 +24,14 @@ audio_storage/
 
 # Agent archive (old dev iterations)
 apps/agent/archive/
+
+# Build output (rebuilt on deploy)
+apps/server/dist/
+apps/server/tsconfig.tsbuildinfo
+
+# Secrets & certs (never commit)
+*.pem
+client_secret_*.json
+
+# Local test assets
+Session Testing/

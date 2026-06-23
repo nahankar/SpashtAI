@@ -35,9 +35,12 @@ router.get('/', async (req: Request, res: Response) => {
           emailVerified: true,
           lastLoginAt: true,
           lastActiveAt: true,
-          loginCount: true,
-          createdAt: true,
-          _count: { select: { sessions: true, replaySessions: true } },
+        loginCount: true,
+        createdAt: true,
+        hideTranscriptText: true,
+        hideTranscriptJsonExport: true,
+        hideAudioDownload: true,
+        _count: { select: { sessions: true, replaySessions: true } },
         },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
@@ -67,6 +70,13 @@ router.get('/:id', async (req: Request, res: Response) => {
         firstName: true,
         lastName: true,
         avatar: true,
+        phone: true,
+        dateOfBirth: true,
+        gender: true,
+        pincode: true,
+        city: true,
+        state: true,
+        country: true,
         role: true,
         emailVerified: true,
         lastLoginAt: true,
@@ -74,6 +84,9 @@ router.get('/:id', async (req: Request, res: Response) => {
         loginCount: true,
         createdAt: true,
         updatedAt: true,
+        hideTranscriptText: true,
+        hideTranscriptJsonExport: true,
+        hideAudioDownload: true,
         _count: { select: { sessions: true, replaySessions: true, featureUsage: true } },
       },
     })
@@ -234,6 +247,49 @@ router.post('/:id/change-role', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Change role error:', err)
     res.status(500).json({ error: 'Failed to change role' })
+  }
+})
+
+// PATCH /api/admin/users/:id/export-flags
+router.patch('/:id/export-flags', async (req: Request, res: Response) => {
+  try {
+    const { hideTranscriptText, hideTranscriptJsonExport, hideAudioDownload } = req.body
+
+    const data: Record<string, boolean> = {}
+    if (typeof hideTranscriptText === 'boolean') data.hideTranscriptText = hideTranscriptText
+    if (typeof hideTranscriptJsonExport === 'boolean') data.hideTranscriptJsonExport = hideTranscriptJsonExport
+    if (typeof hideAudioDownload === 'boolean') data.hideAudioDownload = hideAudioDownload
+
+    if (Object.keys(data).length === 0) {
+      res.status(400).json({ error: 'At least one export flag is required' })
+      return
+    }
+
+    const user = await prisma.user.update({
+      where: { id: req.params.id },
+      data,
+      select: {
+        id: true,
+        email: true,
+        hideTranscriptText: true,
+        hideTranscriptJsonExport: true,
+        hideAudioDownload: true,
+      },
+    })
+
+    await prisma.adminAction.create({
+      data: {
+        adminId: req.user!.userId,
+        action: 'user_export_flags_updated',
+        targetUserId: user.id,
+        metadata: data,
+      },
+    })
+
+    res.json({ user })
+  } catch (err) {
+    console.error('Update export flags error:', err)
+    res.status(500).json({ error: 'Failed to update export flags' })
   }
 })
 

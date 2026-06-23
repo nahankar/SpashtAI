@@ -13,12 +13,20 @@ enum UserRole {
   SUPER_ADMIN
 }
 
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
 model User {
   id             String          @id @default(cuid())
   email          String          @unique
 
   // Authentication
-  passwordHash          String
+  passwordHash          String?
+  googleId              String?   @unique
   emailVerified         Boolean   @default(false)
   verificationToken     String?   @unique
   resetPasswordToken    String?   @unique
@@ -28,6 +36,13 @@ model User {
   firstName     String?
   lastName      String?
   avatar        String?
+  phone         String?
+  dateOfBirth   DateTime?
+  gender        Gender?
+  pincode       String?
+  city          String?   // resolved from pincode — admin only
+  state         String?   // admin only
+  country       String?   // admin only
 
   // Authorization
   role          UserRole @default(USER)
@@ -36,6 +51,12 @@ model User {
   lastLoginAt   DateTime?
   lastActiveAt  DateTime?
   loginCount    Int      @default(0)
+  rewardPoints  Float    @default(0)
+
+  // Per-user content/export restrictions (admin-controlled)
+  hideTranscriptText       Boolean @default(false)
+  hideTranscriptJsonExport Boolean @default(false)
+  hideAudioDownload        Boolean @default(false)
 
   // Relations
   sessions       Session[]
@@ -43,9 +64,7 @@ model User {
   activityLogs   UserActivity[]
   featureUsage   FeatureUsage[]
   progressPulse  ProgressPulse[]
-  tickets          Ticket[]        @relation("UserTickets")
-  assignedTickets  Ticket[]        @relation("AssignedTickets")
-  ticketComments   TicketComment[]
+  feedback         UserFeedback[]
 
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -136,6 +155,7 @@ model Session {
   startedAt   DateTime @default(now())
   endedAt     DateTime?
   durationSec Int?
+  sessionPointsAwarded Boolean @default(false)
 
   viewCount    Int       @default(0)
   lastViewedAt DateTime?
@@ -357,92 +377,27 @@ model ProgressPulse {
   @@index([userId, recordedAt])
 }
 
-// ── Ticketing Feature ──
-
-enum TicketCategory {
-  BUG
-  FEATURE_REQUEST
-  ACCOUNT_ISSUE
-  BILLING
-  OTHER
-}
-
-enum TicketPriority {
-  LOW
-  MEDIUM
-  HIGH
-  CRITICAL
-}
-
-enum TicketStatus {
-  OPEN
-  IN_PROGRESS
-  AWAITING_USER
-  RESOLVED
-  CLOSED
-}
-
-model Ticket {
-  id           String   @id @default(cuid())
-  ticketNumber String   @unique
-
-  userId       String
-  user         User     @relation("UserTickets", fields: [userId], references: [id])
-
-  assignedToId String?
-  assignedTo   User?    @relation("AssignedTickets", fields: [assignedToId], references: [id])
-
-  subject      String
-  description  String   @db.Text
-  category     TicketCategory
-  priority     TicketPriority @default(MEDIUM)
-  status       TicketStatus   @default(OPEN)
-
-  attachments  TicketAttachment[]
-  comments     TicketComment[]
-
-  resolvedAt   DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  @@index([userId, createdAt])
-  @@index([assignedToId, status])
-  @@index([status, priority])
-}
-
-model TicketAttachment {
-  id           String   @id @default(cuid())
-  ticketId     String
-  ticket       Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-
-  originalName String
-  storedPath   String
-  fileSize     Int
-  mimeType     String
-
-  createdAt    DateTime @default(now())
-}
-
-model TicketComment {
-  id        String   @id @default(cuid())
-  ticketId  String
-  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-
-  content   String   @db.Text
-  isAdmin   Boolean  @default(false)
-
-  createdAt DateTime @default(now())
-}
-
 // ── Platform feature flags (global until multi-tenant) ──
 model PlatformFeatureFlag {
-  feature     String   @unique // "elevate" | "replay"
+  feature          String   @unique // "elevate" | "replay"
+  label            String
+  description      String?  @db.Text
+  enabled          Boolean  @default(true) // legacy; migrated to hidden/disabled
+  hidden           Boolean  @default(false)
+  disabled         Boolean  @default(false)
+  overlayComment   String?  @db.Text
+  overlayPosition  String   @default("center") // top | center
+  updatedBy        String?
+  updatedAt        DateTime @updatedAt
+  createdAt        DateTime @default(now())
+}
+
+// Admin-editable LLM prompts for the live Elevate coach (agent loads at session start).
+model AgentPrompt {
+  key         String   @unique // e.g. elevate_coach_persona, elevate_exercise_filler_words
   label       String
   description String?  @db.Text
-  enabled     Boolean  @default(true)
+  content     String   @db.Text
   updatedBy   String?
   updatedAt   DateTime @updatedAt
   createdAt   DateTime @default(now())
@@ -475,3 +430,110 @@ model VoiceConfig {
   createdAt DateTime @default(now())
 }
 
+enum UserFeedbackType {
+  FEEDBACK
+  ISSUE
+  FEATURE_REQUEST
+}
+
+enum UserFeedbackStatus {
+  OPEN
+  ACKNOWLEDGED
+  CONSIDERED
+  IMPLEMENTED
+  PARKED
+}
+
+enum FeedbackPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model UserFeedback {
+  id             String              @id @default(cuid())
+  feedbackNumber String              @unique
+  userId         String
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type           UserFeedbackType    @default(FEEDBACK)
+  subject        String?
+  body           String              @db.Text
+  status         UserFeedbackStatus  @default(OPEN)
+  priority       FeedbackPriority?
+  pointsAwarded  Boolean             @default(false)
+  acknowledgedAt DateTime?
+  attachments    UserFeedbackAttachment[]
+  notes          UserFeedbackNote[]
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([status])
+  @@index([status, priority])
+}
+
+model UserFeedbackAttachment {
+  id          String       @id @default(cuid())
+  feedbackId  String
+  feedback    UserFeedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  fileName    String
+  mimeType    String
+  storedPath  String
+  createdAt   DateTime     @default(now())
+}
+
+model UserFeedbackNote {
+  id         String       @id @default(cuid())
+  feedbackId String
+  feedback   UserFeedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  authorId   String
+  isAdmin    Boolean      @default(false)
+  body       String       @db.Text
+  createdAt  DateTime     @default(now())
+}
+
+model PlatformTicker {
+  id        String   @id @default(cuid())
+  message   String   @db.Text
+  sortOrder Int      @default(0)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model PricingSettings {
+  id             String  @id @default("default")
+  enabled        Boolean @default(false)
+  comingSoonText String? @db.Text
+  updatedAt      DateTime @updatedAt
+}
+
+model PricingPlan {
+  id           String   @id @default(cuid())
+  name         String
+  priceMonthly Float
+  description  String?  @db.Text
+  isPromoted   Boolean  @default(false)
+  sortOrder    Int      @default(0)
+  features     PricingPlanFeature[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model PricingPlanFeature {
+  id        String      @id @default(cuid())
+  planId    String
+  plan      PricingPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  text      String
+  sortOrder Int         @default(0)
+}
+
+model LegalDocument {
+  id        String   @id @default(cuid())
+  slug      String   @unique // terms | privacy
+  title     String
+  content   String   @db.Text
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+}

@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { getAuthHeaders } from '@/lib/api-client'
+import { useUserExportFlags } from '@/hooks/useUserExportFlags'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -1004,10 +1005,11 @@ function ReanalyzeOverlay({ status, error }: { status: ReanalyzeStatus; error: s
 
 export function ReplayResults() {
   const { id } = useParams<{ id: string }>()
+  const exportFlags = useUserExportFlags()
   const [searchParams] = useSearchParams()
   const cameFromHistory = searchParams.get('from') === 'history'
   const backTo = cameFromHistory ? '/history?tab=replay' : '/replay'
-  const backLabel = cameFromHistory ? 'Back to My Sessions' : 'Back to Replay'
+  const backLabel = cameFromHistory ? 'Back to Sessions' : 'Back to Replay'
   const [data, setData] = useState<ReplayResultData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -1106,7 +1108,7 @@ export function ReplayResults() {
       }
       if (!recordedAt) {
         toast.error(
-          'Add the date this meeting happened. My Progress Pulse uses it to order improving / declining trends — not the day you uploaded.'
+          'Add the date this meeting happened. Progress Pulse uses it to order improving / declining trends — not the day you uploaded.'
         )
         return
       }
@@ -1143,7 +1145,7 @@ export function ReplayResults() {
         body: JSON.stringify({ entries, sessionId: id, source: 'replay', recordedAt }),
       })
       setPulseStatus('tracked')
-      toast.success('Session tracked in My Progress Pulse')
+      toast.success('Session tracked in Progress Pulse')
     } catch (e: any) {
       toast.error(e?.message || 'Failed to track session')
     } finally {
@@ -1398,9 +1400,11 @@ export function ReplayResults() {
             {pdfLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
             Export PDF
           </Button>
-          <Button variant="outline" size="sm" onClick={handleDownload}>
-            <Download className="mr-2 h-4 w-4" /> Export JSON
-          </Button>
+          {!exportFlags.hideTranscriptJsonExport && (
+            <Button variant="outline" size="sm" onClick={handleDownload}>
+              <Download className="mr-2 h-4 w-4" /> Export JSON
+            </Button>
+          )}
         </div>
       </div>
 
@@ -1436,7 +1440,9 @@ export function ReplayResults() {
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="metrics">Metrics</TabsTrigger>
           <TabsTrigger value="insights">AI Insights</TabsTrigger>
-          <TabsTrigger value="transcript">Transcript</TabsTrigger>
+          {!exportFlags.hideTranscriptText && (
+            <TabsTrigger value="transcript">Transcript</TabsTrigger>
+          )}
           <TabsTrigger value="impact">Meeting Impact</TabsTrigger>
         </TabsList>
 
@@ -1864,6 +1870,7 @@ export function ReplayResults() {
         </TabsContent>
 
         {/* Transcript */}
+        {!exportFlags.hideTranscriptText && (
         <TabsContent value="transcript">
           <Card>
             <CardHeader>
@@ -1933,6 +1940,7 @@ export function ReplayResults() {
             </CardContent>
           </Card>
         </TabsContent>
+        )}
 
         {/* Meeting Impact */}
         <TabsContent value="impact">

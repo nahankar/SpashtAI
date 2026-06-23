@@ -60,14 +60,25 @@ import authRouter from './routes/auth'
 import adminUsersRouter from './routes/admin/users'
 import adminAnalyticsRouter from './routes/admin/analytics'
 import adminSystemRouter from './routes/admin/system'
-import ticketsRouter from './routes/tickets'
-import adminTicketsRouter from './routes/admin/tickets'
 import adminVoiceConfigRouter, { ensurePresets as ensureVoicePresets } from './routes/admin/voice-config'
 import adminFeatureFlagsRouter from './routes/admin/feature-flags'
+import adminAgentPromptsRouter, { ensurePrompts } from './routes/admin/agent-prompts'
+import internalAgentPromptsRouter from './routes/internal/agent-prompts'
+import feedbackRouter from './routes/feedback'
+import adminFeedbackRouter from './routes/admin/feedback'
+import adminTickersRouter from './routes/admin/tickers'
+import adminPricingRouter from './routes/admin/pricing'
+import adminLegalRouter from './routes/admin/legal'
+import legalRouter from './routes/legal'
+import { getPublicTickers } from './routes/tickers'
+import { getPublicPricing } from './routes/pricing'
 import { getPublicFeatures } from './routes/features'
 import { ensureAdminExists } from './lib/init-admin'
+import { ensureLegalDocuments } from './lib/ensure-legal'
 import { requireAuth, requireAuthOrAgent } from './middleware/auth'
 import { requireAdmin } from './middleware/admin'
+import { trackFeatureUsage } from './middleware/tracking'
+import eventsRouter from './routes/events'
 import { requireFeature, ensureFeatureFlags } from './lib/featureFlags'
 import { apiLimiter } from './middleware/rate-limit'
 
@@ -86,6 +97,9 @@ app.get('/health', (_req, res) => {
 
 // Public: platform feature flags (no secrets — drives nav visibility)
 app.get('/api/features', getPublicFeatures)
+app.get('/api/tickers', getPublicTickers)
+app.get('/api/pricing', getPublicPricing)
+app.use('/api/legal', legalRouter)
 
 // Auth routes (authLimiter applied inside the router for login/register)
 app.use('/api/auth', authRouter)
@@ -94,12 +108,19 @@ app.use('/api/auth', authRouter)
 app.use('/api/admin/users', requireAuth, requireAdmin, adminUsersRouter)
 app.use('/api/admin/analytics', requireAuth, requireAdmin, adminAnalyticsRouter)
 app.use('/api/admin/system', requireAuth, requireAdmin, adminSystemRouter)
-app.use('/api/admin/tickets', requireAuth, requireAdmin, adminTicketsRouter)
 app.use('/api/admin/voice-config', requireAuth, requireAdmin, adminVoiceConfigRouter)
 app.use('/api/admin/feature-flags', requireAuth, requireAdmin, adminFeatureFlagsRouter)
+app.use('/api/admin/agent-prompts', requireAuth, requireAdmin, adminAgentPromptsRouter)
+app.use('/api/admin/tickers', requireAuth, requireAdmin, adminTickersRouter)
+app.use('/api/admin/pricing', requireAuth, requireAdmin, adminPricingRouter)
+app.use('/api/admin/legal', requireAuth, requireAdmin, adminLegalRouter)
+app.use('/api/admin/feedback', requireAuth, requireAdmin, adminFeedbackRouter)
 
-// Protected: user tickets
-app.use('/api/tickets', requireAuth, ticketsRouter)
+// Protected: product event tracking (page views, etc.)
+app.use('/api/events', requireAuth, eventsRouter)
+
+// Protected: user feedback
+app.use('/api/feedback', requireAuth, feedbackRouter)
 
 // Public: LiveKit (has its own auth via API keys) — Elevate only
 app.get('/livekit/token', requireFeature('elevate'), getLivekitToken)
@@ -112,8 +133,8 @@ app.get('/personas/:id', getPersona)
 // Protected: sessions (Elevate live coaching)
 app.get('/sessions', requireAuth, requireFeature('elevate'), listSessions)
 app.get('/sessions/:id', requireAuth, requireFeature('elevate'), getSession)
-app.post('/sessions', requireAuth, requireFeature('elevate'), createSession)
-app.post('/sessions/:id/end', requireAuthOrAgent, requireFeature('elevate'), endSession)
+app.post('/sessions', requireAuth, requireFeature('elevate'), trackFeatureUsage('elevate', 'session_start'), createSession)
+app.post('/sessions/:id/end', requireAuthOrAgent, requireFeature('elevate'), trackFeatureUsage('elevate', 'session_end'), endSession)
 app.delete('/sessions/:id', requireAuth, requireFeature('elevate'), deleteSession)
 
 // Protected: settings
@@ -141,6 +162,7 @@ app.get('/sessions/:sessionId/conversation', requireAuth, getConversation)
 app.post('/internal/sessions/:sessionId/messages', addConversationMessageForAgent)
 app.get('/internal/sessions/:sessionId/conversation', getConversationForAgent)
 app.get('/internal/coaching-context', getCoachingContextForAgent)
+app.use('/internal/agent-prompts', internalAgentPromptsRouter)
 app.post('/sessions/:sessionId/state', requireAuth, updateSessionState)
 app.get('/conversations/search', requireAuth, searchConversations)
 
@@ -238,9 +260,19 @@ async function startServer() {
     console.warn('⚠️  Feature flag seeding failed:', err)
   }
   try {
+    await ensurePrompts()
+  } catch (err) {
+    console.warn('⚠️  Agent prompt seeding failed:', err)
+  }
+  try {
     await ensureVoicePresets()
   } catch (err) {
     console.warn('⚠️  Voice config preset seeding failed:', err)
+  }
+  try {
+    await ensureLegalDocuments()
+  } catch (err) {
+    console.warn('⚠️  Legal document seeding failed:', err)
   }
 
   server.listen(port, () => {

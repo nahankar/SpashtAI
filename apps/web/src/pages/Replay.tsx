@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useConfirm } from '@/hooks/useConfirm'
+import { useUserExportFlags } from '@/hooks/useUserExportFlags'
 import { ContextForm } from '@/components/replay/ContextForm'
 import { UploadZone } from '@/components/replay/UploadZone'
 import { ProcessingStatus } from '@/components/replay/ProcessingStatus'
@@ -195,6 +196,7 @@ function EditSessionDialog({
 export function Replay() {
   const navigate = useNavigate()
   const confirm = useConfirm()
+  const exportFlags = useUserExportFlags()
   const [step, setStep] = useState<Step>('history')
   const [sessions, setSessions] = useState<ReplaySessionSummary[]>([])
   const [sessionsLoading, setSessionsLoading] = useState(true)
@@ -255,7 +257,7 @@ export function Replay() {
   const handleDelete = async (id: string) => {
     const session = sessions.find((s) => s.id === id)
     const pulseWarning = session?.progressPulseStatus === 'tracked'
-      ? ' This session is tracked in My Progress Pulse — its scores will also be removed.'
+      ? ' This session is tracked in Progress Pulse — its scores will also be removed.'
       : ''
     const ok = await confirm({ title: 'Delete Session', description: `Delete this replay session? This cannot be undone.${pulseWarning}`, confirmLabel: 'Delete', variant: 'destructive' })
     if (!ok) return
@@ -276,7 +278,7 @@ export function Replay() {
     if (selectedReplay.size === 0) return
     const trackedCount = sessions.filter((s) => selectedReplay.has(s.id) && s.progressPulseStatus === 'tracked').length
     const pulseWarning = trackedCount > 0
-      ? ` ${trackedCount} of these are tracked in My Progress Pulse — their scores will also be removed.`
+      ? ` ${trackedCount} of these are tracked in Progress Pulse — their scores will also be removed.`
       : ''
     const ok = await confirm({ title: 'Delete Sessions', description: `Delete ${selectedReplay.size} session(s)? This cannot be undone.${pulseWarning}`, confirmLabel: 'Delete All', variant: 'destructive' })
     if (!ok) return
@@ -796,12 +798,12 @@ export function Replay() {
                       )}
                       <span>{s.userRole}</span>
                       {s.progressPulseStatus === 'tracked' && (
-                        <span className="flex items-center gap-0.5 text-green-600" title="Tracked in My Progress Pulse">
+                        <span className="flex items-center gap-0.5 text-green-600" title="Tracked in Progress Pulse">
                           <CheckCircle2 className="h-3 w-3" />
                         </span>
                       )}
                       {s.progressPulseStatus === 'skipped' && (
-                        <span className="flex items-center gap-0.5 text-muted-foreground/50" title="Not considered for My Progress Pulse">
+                        <span className="flex items-center gap-0.5 text-muted-foreground/50" title="Not considered for Progress Pulse">
                           <MinusCircle className="h-3 w-3" />
                         </span>
                       )}
@@ -837,7 +839,8 @@ export function Replay() {
                         <DropdownMenuItem onClick={() => { setEditSession(s); setEditOpen(true) }}>
                           <Pencil className="mr-2 h-4 w-4" /> Edit Details
                         </DropdownMenuItem>
-                        {s.uploadedFiles.some((f) => f.fileType === 'transcript' || f.fileType === 'text') && (
+                        {!exportFlags.hideTranscriptText &&
+                          s.uploadedFiles.some((f) => f.fileType === 'transcript' || f.fileType === 'text') && (
                           <DropdownMenuItem onClick={() => handleDownloadTranscript(s)}>
                             <Download className="mr-2 h-4 w-4" /> Download Transcript
                           </DropdownMenuItem>

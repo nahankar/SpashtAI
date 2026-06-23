@@ -5,6 +5,13 @@ import { existsSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { prisma } from '../lib/prisma'
+import {
+  exportDenied,
+  getReplaySessionOwnerId,
+  resolveRequestExportFlags,
+  stripReplayTranscriptFields,
+} from '../lib/userExportFlags'
+import { trackFeatureUsage } from '../middleware/tracking'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -202,7 +209,7 @@ const router = Router()
 
 // ── POST /api/replay/sessions ──
 
-router.post('/sessions', async (req: Request, res: Response) => {
+router.post('/sessions', trackFeatureUsage('replay', 'session_create'), async (req: Request, res: Response) => {
   try {
     const { sessionName, meetingType, userRole, focusAreas, meetingGoal, meetingDate, participantName } = req.body
 
@@ -359,7 +366,7 @@ router.post(
 
 // ── POST /api/replay/sessions/:id/process ──
 
-router.post('/sessions/:id/process', async (req: Request, res: Response) => {
+router.post('/sessions/:id/process', trackFeatureUsage('replay', 'analyze'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params
     const session = await prisma.replaySession.findUnique({
@@ -765,6 +772,12 @@ router.get('/sessions/:id/status', async (req: Request, res: Response) => {
 router.get('/sessions/:id/results', async (req: Request, res: Response) => {
   try {
     const { id } = req.params
+    const ownerId = await getReplaySessionOwnerId(id)
+    const { flags, accessDenied } = await resolveRequestExportFlags(req, ownerId)
+    if (accessDenied) {
+      return exportDenied(res, 'Access denied')
+    }
+
     const session = await prisma.replaySession.findUnique({
       where: { id },
       include: {
@@ -788,6 +801,12 @@ router.get('/sessions/:id/results', async (req: Request, res: Response) => {
       })
     }
 
+    const resultPayload = session.result
+      ? flags.hideTranscriptText
+        ? stripReplayTranscriptFields(session.result as Record<string, unknown>)
+        : session.result
+      : null
+
     res.json({
       session: {
         id: session.id,
@@ -803,7 +822,10 @@ router.get('/sessions/:id/results', async (req: Request, res: Response) => {
         createdAt: session.createdAt,
       },
       uploads: session.uploadedFiles,
-      result: session.result,
+      result: resultPayload,
+      transcriptHidden: flags.hideTranscriptText,
+      transcriptJsonExportDisabled: flags.hideTranscriptJsonExport,
+      audioDownloadDisabled: flags.hideAudioDownload,
       skillScores: session.result?.skillScores ?? null,
       coachingInsights: session.result?.coachingInsights ?? null,
     })
@@ -846,10 +868,27 @@ router.get('/sessions', async (req: Request, res: Response) => {
 router.get('/sessions/:id/download/:fileId', async (req: Request, res: Response) => {
   try {
     const { id, fileId } = req.params
+    const ownerId = await getReplaySessionOwnerId(id)
+    const { flags, accessDenied } = await resolveRequestExportFlags(req, ownerId)
+    if (accessDenied) {
+      return exportDenied(res, 'Access denied')
+    }
+
     const file = await prisma.replayUpload.findFirst({
       where: { id: fileId, replaySessionId: id },
     })
     if (!file) return res.status(404).json({ error: 'File not found' })
+
+    const fileType = String(file.fileType || '').toLowerCase()
+    if (flags.hideAudioDownload && (fileType === 'audio' || fileType === 'video')) {
+      return exportDenied(res, 'Audio download is disabled for your account')
+    }
+    if (flags.hideTranscriptText && (fileType === 'transcript' || fileType === 'text')) {
+      return exportDenied(res, 'Transcript download is disabled for your account')
+    }
+    if (flags.hideTranscriptJsonExport && fileType === 'transcript') {
+      return exportDenied(res, 'Transcript export is disabled for your account')
+    }
 
     if (!existsSync(file.storedPath)) {
       return res.status(404).json({ error: 'File no longer exists on disk' })

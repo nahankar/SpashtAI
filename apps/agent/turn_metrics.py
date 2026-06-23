@@ -12,19 +12,7 @@ from typing import Callable, Optional, Tuple
 
 STITCH_GAP_SEC = 90.0
 
-FILLER_WORDS = {
-    "um", "uh", "er", "ah", "like", "you know", "so", "well", "actually",
-    "basically", "literally", "right", "okay", "yeah", "hmm", "mmm",
-}
-
-HEDGING_RE = re.compile(
-    r"\b(i think|maybe|probably|perhaps|kind of|sort of|i guess|"
-    r"i suppose|it seems|i feel like|not sure|might|could be|possibly|"
-    r"a little|somewhat|i believe)\b",
-    re.IGNORECASE,
-)
-
-_WORD_RE = re.compile(r"[A-Za-z']+(?:[-'][A-Za-z']+)?")
+from speech_patterns import analyze_speech_text, unique_vocab_ratio
 
 CommittedTurn = Tuple[str, str, Optional["TurnMetricsSnapshot"]]
 
@@ -35,6 +23,8 @@ class TurnMetricsSnapshot:
     filler_count: int
     filler_rate: float
     hedging_count: int
+    acknowledgment_count: int = 0
+    vocab_diversity: float = 0.0
     wpm: Optional[float] = None
     speaking_seconds: Optional[float] = None
     qualitative_pace: Optional[str] = None
@@ -45,7 +35,7 @@ class TurnMetricsSnapshot:
 
 
 def _extract_words(text: str) -> list[str]:
-    return _WORD_RE.findall(text)
+    return re.findall(r"[A-Za-z']+(?:[-'][A-Za-z']+)?", text)
 
 
 def _qualitative_pace(wpm: float) -> str:
@@ -71,10 +61,12 @@ def compute_turn_metrics(
 ) -> TurnMetricsSnapshot:
     words = _extract_words(text)
     word_count = len(words)
-    fillers = [w for w in words if w.lower() in FILLER_WORDS]
-    filler_count = len(fillers)
-    filler_rate = (filler_count / word_count * 100) if word_count else 0.0
-    hedging_count = len(HEDGING_RE.findall(text))
+    speech = analyze_speech_text(text)
+    filler_count = speech.filler_count
+    filler_rate = speech.filler_rate
+    hedging_count = speech.hedging_count
+    acknowledgment_count = speech.acknowledgment_count
+    vocab_diversity = unique_vocab_ratio(text)
 
     wpm: Optional[float] = None
     speaking_seconds: Optional[float] = None
@@ -97,6 +89,8 @@ def compute_turn_metrics(
         filler_count=filler_count,
         filler_rate=round(filler_rate, 1),
         hedging_count=hedging_count,
+        acknowledgment_count=acknowledgment_count,
+        vocab_diversity=vocab_diversity,
         wpm=wpm,
         speaking_seconds=speaking_seconds,
         qualitative_pace=qualitative,
@@ -172,6 +166,12 @@ class TurnStitcher:
         self._pending_text = ""
         self._pending_timestamp = 0.0
         return [turn] if turn else []
+
+    def peek_pending_user(self) -> Optional[str]:
+        """Current in-progress user text (not yet committed at role boundary)."""
+        if self._pending_speaker == "user" and self._pending_text.strip():
+            return self._pending_text.strip()
+        return None
 
     def _merge_fragment(self, text: str) -> None:
         if text.startswith(self._pending_text) or (

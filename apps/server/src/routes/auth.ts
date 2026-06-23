@@ -5,15 +5,45 @@ import { hashPassword, comparePassword } from '../lib/password'
 import { signToken } from '../lib/jwt'
 import { requireAuth } from '../middleware/auth'
 import { authLimiter } from '../middleware/rate-limit'
+import { sendEmail, buildPasswordResetEmail } from '../lib/email'
+import { verifyGoogleIdToken } from '../lib/google-auth'
+import { validateProfileFields, resolveProfileLocation, toAuthUser } from '../lib/profile'
+
 const router = Router()
 
 // POST /api/auth/register
 router.post('/register', authLimiter, async (req: Request, res: Response) => {
   try {
-    const { email, password, firstName, lastName } = req.body
+    const {
+      email,
+      password,
+      firstName,
+      lastName,
+      phone,
+      dateOfBirth,
+      gender,
+      pincode,
+      acceptedTerms,
+    } = req.body
 
     if (!email || !password) {
       res.status(400).json({ error: 'Email and password are required' })
+      return
+    }
+
+    if (!phone || !dateOfBirth || !gender || !pincode) {
+      res.status(400).json({ error: 'Phone, date of birth, gender, and pincode are required' })
+      return
+    }
+
+    if (!acceptedTerms) {
+      res.status(400).json({ error: 'You must accept the Terms and Conditions and Privacy Policy' })
+      return
+    }
+
+    const profile = validateProfileFields({ phone, dateOfBirth, gender, pincode })
+    if (profile.error || !profile.data) {
+      res.status(400).json({ error: profile.error })
       return
     }
 
@@ -28,13 +58,22 @@ router.post('/register', authLimiter, async (req: Request, res: Response) => {
       return
     }
 
+    const location = await resolveProfileLocation(profile.data.pincode)
+
     const passwordHash = await hashPassword(password)
     const user = await prisma.user.create({
       data: {
         email: email.toLowerCase(),
         passwordHash,
-        firstName: firstName || null,
-        lastName: lastName || null,
+        firstName: firstName?.trim() || null,
+        lastName: lastName?.trim() || null,
+        phone: profile.data.phone,
+        dateOfBirth: profile.data.dateOfBirth,
+        gender: profile.data.gender,
+        pincode: profile.data.pincode,
+        city: location.city,
+        state: location.state,
+        country: location.country,
       },
     })
 
@@ -51,13 +90,7 @@ router.post('/register', authLimiter, async (req: Request, res: Response) => {
 
     res.status(201).json({
       token,
-      user: {
-        id: user.id,
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        role: user.role,
-      },
+      user: toAuthUser(user),
     })
   } catch (err) {
     console.error('Register error:', err)
@@ -79,6 +112,11 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
     if (!user) {
       await comparePassword(password, '$2b$12$000000000000000000000uGsInbBqMUvMJIpIGnHsOHGSJxUXeJi')
       res.status(401).json({ error: 'Invalid credentials' })
+      return
+    }
+
+    if (!user.passwordHash) {
+      res.status(401).json({ error: 'Please sign in with Google for this account' })
       return
     }
 
@@ -109,18 +147,122 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
 
     res.json({
       token,
-      user: {
-        id: user.id,
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        role: user.role,
-        avatar: user.avatar,
-      },
+      user: toAuthUser(user),
     })
   } catch (err) {
     console.error('Login error:', err)
     res.status(500).json({ error: 'Login failed' })
+  }
+})
+
+// POST /api/auth/google — verify Google ID token; create or sign in user
+router.post('/google', authLimiter, async (req: Request, res: Response) => {
+  try {
+    const { credential } = req.body as { credential?: string }
+    if (!credential) {
+      res.status(400).json({ error: 'Google credential is required' })
+      return
+    }
+
+    const googleUser = await verifyGoogleIdToken(credential)
+
+    let user = await prisma.user.findFirst({
+      where: {
+        OR: [{ googleId: googleUser.googleId }, { email: googleUser.email }],
+      },
+    })
+
+    if (user && user.googleId && user.googleId !== googleUser.googleId) {
+      res.status(409).json({ error: 'Email already linked to another Google account' })
+      return
+    }
+
+    if (user) {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          googleId: user.googleId ?? googleUser.googleId,
+          emailVerified: user.emailVerified || googleUser.emailVerified,
+          firstName: user.firstName ?? googleUser.firstName,
+          lastName: user.lastName ?? googleUser.lastName,
+          avatar: user.avatar ?? googleUser.avatar,
+          lastLoginAt: new Date(),
+          loginCount: { increment: 1 },
+        },
+      })
+    } else {
+      user = await prisma.user.create({
+        data: {
+          email: googleUser.email,
+          googleId: googleUser.googleId,
+          emailVerified: googleUser.emailVerified,
+          firstName: googleUser.firstName,
+          lastName: googleUser.lastName,
+          avatar: googleUser.avatar,
+          lastLoginAt: new Date(),
+          loginCount: 1,
+        },
+      })
+
+      await prisma.userActivity.create({
+        data: {
+          userId: user.id,
+          action: 'register_google',
+          ipAddress: req.ip || null,
+          userAgent: req.headers['user-agent'] || null,
+        },
+      })
+    }
+
+    const token = signToken({ userId: user.id, email: user.email, role: user.role })
+
+    await prisma.userActivity.create({
+      data: {
+        userId: user.id,
+        action: 'login_google',
+        ipAddress: req.ip || null,
+        userAgent: req.headers['user-agent'] || null,
+      },
+    })
+
+    res.json({ token, user: toAuthUser(user) })
+  } catch (err) {
+    console.error('Google auth error:', err)
+    const message = err instanceof Error ? err.message : 'Google sign-in failed'
+    res.status(401).json({ error: message })
+  }
+})
+
+// POST /api/auth/complete-profile — required after Google sign-up
+router.post('/complete-profile', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { phone, dateOfBirth, gender, pincode } = req.body
+
+    const profile = validateProfileFields({ phone, dateOfBirth, gender, pincode })
+    if (profile.error || !profile.data) {
+      res.status(400).json({ error: profile.error })
+      return
+    }
+
+    const location = await resolveProfileLocation(profile.data.pincode)
+
+    const user = await prisma.user.update({
+      where: { id: req.user!.userId },
+      data: {
+        phone: profile.data.phone,
+        dateOfBirth: profile.data.dateOfBirth,
+        gender: profile.data.gender,
+        pincode: profile.data.pincode,
+        city: location.city,
+        state: location.state,
+        country: location.country,
+      },
+    })
+
+    res.json({ user: toAuthUser(user) })
+  } catch (err) {
+    console.error('Complete profile error:', err)
+    res.status(500).json({ error: 'Failed to save profile' })
   }
 })
 
@@ -148,11 +290,28 @@ router.post('/forgot-password', authLimiter, async (req: Request, res: Response)
       data: { resetPasswordToken: resetToken, resetPasswordExpiry: expiry },
     })
 
-    // In dev, log the token to console
-    console.log(`🔑 Password reset token for ${email}: ${resetToken}`)
-    console.log(`   Reset URL: http://localhost:5173/auth/reset-password?token=${resetToken}`)
+    const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '')
+    const resetUrl = `${frontendUrl}/auth/reset-password?token=${resetToken}`
+    const { subject, text } = buildPasswordResetEmail(resetUrl)
+    const emailResult = await sendEmail({ to: user.email, subject, text })
 
-    res.json({ message: 'If that email is registered, a reset link has been sent' })
+    if (!emailResult.sent) {
+      console.log(`🔑 Password reset token for ${email}: ${resetToken}`)
+      console.log(`   Reset URL: ${resetUrl}`)
+    }
+
+    const payload: Record<string, string> = {
+      message: 'If that email is registered, a reset link has been sent',
+    }
+    if (
+      !emailResult.sent &&
+      process.env.NODE_ENV !== 'production' &&
+      process.env.EXPOSE_DEV_RESET_URL === 'true'
+    ) {
+      payload.devResetUrl = resetUrl
+    }
+
+    res.json(payload)
   } catch (err) {
     console.error('Forgot password error:', err)
     res.status(500).json({ error: 'Failed to process request' })
@@ -160,7 +319,7 @@ router.post('/forgot-password', authLimiter, async (req: Request, res: Response)
 })
 
 // POST /api/auth/reset-password
-router.post('/reset-password', async (req: Request, res: Response) => {
+router.post('/reset-password', authLimiter, async (req: Request, res: Response) => {
   try {
     const { token, password } = req.body
     if (!token || !password) {
@@ -217,6 +376,15 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
         emailVerified: true,
         lastLoginAt: true,
         createdAt: true,
+        rewardPoints: true,
+        googleId: true,
+        phone: true,
+        dateOfBirth: true,
+        gender: true,
+        pincode: true,
+        hideTranscriptText: true,
+        hideTranscriptJsonExport: true,
+        hideAudioDownload: true,
       },
     })
 
@@ -230,7 +398,7 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
       data: { lastActiveAt: new Date() },
     })
 
-    res.json({ user })
+    res.json({ user: toAuthUser(user) })
   } catch (err) {
     console.error('Get me error:', err)
     res.status(500).json({ error: 'Failed to fetch user' })
@@ -283,6 +451,11 @@ router.put('/change-password', requireAuth, async (req: Request, res: Response) 
     const user = await prisma.user.findUnique({ where: { id: req.user!.userId } })
     if (!user) {
       res.status(404).json({ error: 'User not found' })
+      return
+    }
+
+    if (!user.passwordHash) {
+      res.status(400).json({ error: 'Set a password via forgot-password flow for Google-only accounts' })
       return
     }
 

@@ -1,5 +1,10 @@
 import type { Request, Response } from 'express'
 import { prisma } from '../lib/prisma'
+import {
+  exportDenied,
+  getElevateSessionOwnerId,
+  resolveRequestExportFlags,
+} from '../lib/userExportFlags'
 
 export async function saveAudioMetadata(req: Request, res: Response) {
   try {
@@ -81,6 +86,15 @@ export async function getSessionAudio(req: Request, res: Response) {
   try {
     const { sessionId } = req.params
 
+    const ownerId = await getElevateSessionOwnerId(sessionId)
+    const { flags, accessDenied } = await resolveRequestExportFlags(req, ownerId)
+    if (accessDenied) {
+      return exportDenied(res, 'Access denied')
+    }
+    if (flags.hideAudioDownload) {
+      return exportDenied(res, 'Audio download is disabled for your account')
+    }
+
     const transcript = await prisma.sessionTranscript.findUnique({
       where: { sessionId },
       include: {
@@ -122,6 +136,15 @@ export async function generateAudioUrl(req: Request, res: Response) {
   try {
     const { sessionId, audioId } = req.params
     const { expiration = 3600 } = req.query
+
+    const ownerId = await getElevateSessionOwnerId(sessionId)
+    const { flags, accessDenied } = await resolveRequestExportFlags(req, ownerId)
+    if (accessDenied) {
+      return exportDenied(res, 'Access denied')
+    }
+    if (flags.hideAudioDownload) {
+      return exportDenied(res, 'Audio download is disabled for your account')
+    }
 
     const transcript = await prisma.sessionTranscript.findUnique({
       where: { sessionId }

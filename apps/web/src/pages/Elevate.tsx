@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from 'react'
+import { createPortal } from 'react-dom'
+import { findSpeechSpans, SPEECH_HIGHLIGHT_CLASS } from '@/lib/speechPatterns'
 import { SessionFilters, type SortField, type SortDir } from '@/components/SessionFilters'
 import { useSearchParams, useNavigate, Link } from 'react-router-dom'
 import {
@@ -22,11 +24,12 @@ import { SkillScoresCard } from '@/components/analytics/SkillScoresCard'
 import { useRealTimeMetrics, useSessionMetrics } from '@/hooks/useSessionMetrics'
 import { useAudioRecording } from '@/hooks/useAudioRecording'
 import { useConversationPersistence } from '@/hooks/useConversationPersistence'
-import { AgentVisualizer } from '@/components/layout/AgentVisualizer'
+import { AgentVisualizer, SessionStatusBar } from '@/components/layout/AgentVisualizer'
 import { toast } from 'sonner'
 import { getAuthHeaders } from '@/lib/api-client'
 import { FOCUS_AREAS, getFocusAreaLabel } from '@/lib/focus-areas'
 import { useAuth } from '@/hooks/useAuth'
+import { useUserExportFlags } from '@/hooks/useUserExportFlags'
 import { useConfirm } from '@/hooks/useConfirm'
 import { Trash2, CheckSquare, Square, Target, ArrowRight, Info } from 'lucide-react'
 import { generateSessionPdf, type SessionReport } from '@/lib/generate-session-pdf'
@@ -65,7 +68,8 @@ async function saveSessionData(sessionId: string, metrics: any, transcript: any)
 export function Elevate() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { user, updateUser } = useAuth()
+  const exportFlags = useUserExportFlags()
   const confirmDialog = useConfirm()
   const viewSessionId = searchParams.get('session')
   const cameFromHistory = searchParams.get('from') === 'history'
@@ -89,6 +93,7 @@ export function Elevate() {
   const [isCompletedSessionView, setIsCompletedSessionView] = useState(false)
   const [sessionId, setSessionId] = useState<string | null>(viewSessionId) // Initialize with URL param if present
   const [showMetrics, setShowMetrics] = useState(false)
+  const [turnMetricsByIndex, setTurnMetricsByIndex] = useState<Record<number, TurnMetrics>>({})
   const [turnMetricsByText, setTurnMetricsByText] = useState<Record<string, TurnMetrics>>({})
   const [showHistory, setShowHistory] = useState(!viewSessionId && !inboundNewSession)
 
@@ -279,7 +284,7 @@ export function Elevate() {
             section: 'Your Performance',
             items: [
               { label: 'Words Per Minute', value: String(m.userWpm), unit: 'WPM' },
-              { label: 'Filler Rate', value: `${(m.userFillerRate * 100).toFixed(1)}`, unit: '%' },
+              { label: 'Filler Rate', value: `${m.userFillerRate.toFixed(1)}`, unit: '%' },
               { label: 'Avg Sentence Length', value: String(m.userAvgSentenceLength), unit: 'words' },
               { label: 'Vocab Diversity', value: `${(m.userVocabDiversity * 100).toFixed(0)}`, unit: '%' },
               { label: 'Speaking Time', value: `${m.userSpeakingTime.toFixed(0)}`, unit: 's' },
@@ -312,6 +317,7 @@ export function Elevate() {
     error: conversationError,
     loadConversation,
     addMessage,
+    upsertStreamingMessage,
     clearMessages,
     subscribeToUpdates
   } = useConversationPersistence()
@@ -392,8 +398,7 @@ export function Elevate() {
     setUrl(null)
     setRoomName('')
     setAssistantState('unknown')
-    resetMetrics()
-  }, [resetMetrics])
+  }, [])
 
   const resumeLiveSession = useCallback(async (resumeSessionId: string) => {
     const newRoomName = `room_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
@@ -611,11 +616,17 @@ export function Elevate() {
 
     if (currentSessionId) {
       try {
-        await fetch(`${API_BASE_URL}/sessions/${currentSessionId}/end`, {
+        const endRes = await fetch(`${API_BASE_URL}/sessions/${currentSessionId}/end`, {
           method: 'POST',
           headers: getAuthHeaders(),
           body: JSON.stringify({ endedAt: new Date().toISOString() })
         })
+        if (endRes.ok) {
+          const endData = await endRes.json().catch(() => ({}))
+          if (typeof endData.totalPoints === 'number') {
+            updateUser({ rewardPoints: endData.totalPoints })
+          }
+        }
 
         // Run legacy text metrics (keeps backward compatibility)
         await fetch(`${API_BASE_URL}/sessions/${currentSessionId}/calculate-text-metrics`, {
@@ -628,7 +639,7 @@ export function Elevate() {
 
       // Ask user whether to track this session in Progress Pulse
       const trackIt = await confirmDialog({
-        title: 'Track in My Progress Pulse?',
+        title: 'Track in Progress Pulse?',
         description: 'Would you like to include this session\'s skill scores in your progress tracking?',
         confirmLabel: 'Yes, track this',
         cancelLabel: 'Skip — won\'t be added later',
@@ -646,11 +657,11 @@ export function Elevate() {
           if (trackIt && result.pulseEntriesCreated > 0) {
             toast.success(`Session tracked — ${result.pulseEntriesCreated} skills updated in Progress Pulse`)
           } else if (trackIt) {
-            toast.success('Session tracked in My Progress Pulse')
+            toast.success('Session tracked in Progress Pulse')
           }
         } else {
           console.warn('Analytics pipeline returned', analyzeRes.status)
-          if (trackIt) toast.success('Session tracked in My Progress Pulse')
+          if (trackIt) toast.success('Session tracked in Progress Pulse')
         }
       } catch {
         console.warn('Analytics pipeline unavailable, session still saved')
@@ -678,7 +689,7 @@ export function Elevate() {
 
     setShowHistory(true)
     navigate(cameFromHistory ? '/history?tab=elevate' : '/elevate')
-  }, [sessionId, clearMessages, resetMetrics, navigate, cameFromHistory, confirmDialog])
+  }, [sessionId, clearMessages, resetMetrics, navigate, cameFromHistory, confirmDialog, updateUser])
 
   const handleDiscard = useCallback(async () => {
     const yes = await confirmDialog({
@@ -740,14 +751,14 @@ export function Elevate() {
 
     return (
       <div className="grid gap-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-bold">Elevate</h1>
             <p className="mt-1 text-sm text-muted-foreground">
               Practice with a live AI coach and elevate your communication skills.
             </p>
           </div>
-          <Button onClick={() => setShowHistory(false)}>
+          <Button className="w-full sm:w-auto shrink-0" onClick={() => setShowHistory(false)}>
             + New Elevate Session
           </Button>
         </div>
@@ -846,47 +857,49 @@ export function Elevate() {
               const isSelected = selectedElevate.has(s.id)
               return (
                 <Card key={s.id} className={`transition-all hover:shadow-md ${isSelected ? 'ring-2 ring-primary' : ''}`}>
-                  <CardContent className="flex items-center gap-4 py-4">
-                    <button
-                      onClick={() =>
-                        setSelectedElevate((prev) => {
-                          const n = new Set(prev)
-                          n.has(s.id) ? n.delete(s.id) : n.add(s.id)
-                          return n
-                        })
-                      }
-                      className="shrink-0"
-                    >
-                      {isSelected ? (
-                        <CheckSquare className="h-5 w-5 text-primary" />
-                      ) : (
-                        <Square className="h-5 w-5 text-muted-foreground" />
-                      )}
-                    </button>
-
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-medium truncate">
-                          {s.sessionName || `${s.module.charAt(0).toUpperCase() + s.module.slice(1)} Session`}
-                        </span>
-                        <Badge variant={done ? 'default' : 'secondary'}>
-                          {done ? 'Completed' : 'In Progress'}
-                        </Badge>
-                        {s.focusArea && (
-                          <Badge variant="outline" className="text-xs">
-                            {getFocusAreaLabel(s.focusArea)}
-                          </Badge>
+                  <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center py-4">
+                    <div className="flex items-start gap-3 sm:gap-4 min-w-0 flex-1">
+                      <button
+                        onClick={() =>
+                          setSelectedElevate((prev) => {
+                            const n = new Set(prev)
+                            n.has(s.id) ? n.delete(s.id) : n.add(s.id)
+                            return n
+                          })
+                        }
+                        className="shrink-0"
+                      >
+                        {isSelected ? (
+                          <CheckSquare className="h-5 w-5 text-primary" />
+                        ) : (
+                          <Square className="h-5 w-5 text-muted-foreground" />
                         )}
-                      </div>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
-                        <span>{formatRelDate(s.startedAt)}</span>
-                        {done && s.durationSec != null && <span>{fmtDur(s.durationSec)}</span>}
-                        {s.words != null && <span>{s.words} words</span>}
-                        {s.fillerRate != null && <span>{s.fillerRate.toFixed(1)}% fillers</span>}
+                      </button>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium truncate">
+                            {s.sessionName || `${s.module.charAt(0).toUpperCase() + s.module.slice(1)} Session`}
+                          </span>
+                          <Badge variant={done ? 'default' : 'secondary'}>
+                            {done ? 'Completed' : 'In Progress'}
+                          </Badge>
+                          {s.focusArea && (
+                            <Badge variant="outline" className="text-xs">
+                              {getFocusAreaLabel(s.focusArea)}
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
+                          <span>{formatRelDate(s.startedAt)}</span>
+                          {done && s.durationSec != null && <span>{fmtDur(s.durationSec)}</span>}
+                          {s.words != null && <span>{s.words} words</span>}
+                          {s.fillerRate != null && <span>{s.fillerRate.toFixed(1)}% fillers</span>}
+                        </div>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
                       <Link to={`/elevate?session=${s.id}`}>
                         <Button size="sm" variant="outline">
                           {done ? 'View Results' : 'Resume'}
@@ -916,7 +929,7 @@ export function Elevate() {
       {/* Back navigation */}
       {!joined && viewSessionId && cameFromHistory && (
         <Link to="/history?tab=elevate" className="text-sm text-muted-foreground hover:text-foreground w-fit">
-          &larr; Back to My Sessions
+          &larr; Back to Sessions
         </Link>
       )}
       {!joined && !viewSessionId && !showHistory && !sessionId && (
@@ -987,7 +1000,12 @@ export function Elevate() {
           ) : !joined && viewSessionId && isCompletedSessionView ? (
             <div className="space-y-4">
               {/* Viewing completed session - show chat and metrics */}
-              <ChatPanel messages={messages} turnMetricsByText={turnMetricsByText} />
+              <ChatPanel
+                messages={messages}
+                turnMetricsByIndex={turnMetricsByIndex}
+                turnMetricsByText={turnMetricsByText}
+                transcriptHidden={exportFlags.hideTranscriptText}
+              />
               
               {/* Historical metrics display */}
               {sessionId && historicalMetrics && (
@@ -1021,13 +1039,13 @@ export function Elevate() {
           ) : (
             <div className="space-y-4">
               {idleWarning && (
-                <div className="rounded-md border border-yellow-400 bg-yellow-50 px-4 py-3 text-sm text-yellow-800 flex items-center justify-between">
+                <div className="rounded-md border border-yellow-400 bg-yellow-50 px-4 py-3 text-sm text-yellow-800 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <span>Session will auto-pause in 1 minute due to inactivity. Move your mouse or press a key to stay connected.</span>
                   <Button size="sm" variant="outline" onClick={resetIdleTimer}>Stay Connected</Button>
                 </div>
               )}
               {!token && !url && sessionId && !isSessionPaused && (
-                <div className="rounded-md border border-blue-400 bg-blue-50 px-4 py-3 text-sm text-blue-800 flex items-center justify-between">
+                <div className="rounded-md border border-blue-400 bg-blue-50 px-4 py-3 text-sm text-blue-800 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <span>
                     {isSessionPaused
                       ? 'Session paused. User and assistant are both paused.'
@@ -1043,24 +1061,13 @@ export function Elevate() {
               )}
               {!joined && isSessionPaused && (
                 <>
-                  <div className="bg-muted/20 rounded-lg mb-4">
-                    <div className="flex flex-col items-center justify-center p-6">
-                      <div className="w-full max-w-md h-32 flex items-center justify-center">
-                        <div className="flex items-center gap-6">
-                          <span className="h-8 w-4 rounded-full bg-muted-foreground/20" />
-                          <span className="h-8 w-4 rounded-full bg-muted-foreground/20" />
-                          <span className="h-8 w-4 rounded-full bg-muted-foreground/20" />
-                          <span className="h-10 w-4 rounded-full bg-muted-foreground/50" />
-                          <span className="h-8 w-4 rounded-full bg-muted-foreground/20" />
-                          <span className="h-8 w-4 rounded-full bg-muted-foreground/20" />
-                          <span className="h-8 w-4 rounded-full bg-muted-foreground/20" />
-                        </div>
-                      </div>
-                      <div className="mt-4 text-center font-medium">
-                        <div className="text-lg text-amber-600">Paused</div>
-                        <div className="text-xs text-muted-foreground mt-1">Click Resume to continue</div>
-                      </div>
-                    </div>
+                  <div className="flex justify-center w-full mb-2">
+                    <SessionStatusBar
+                      isPaused
+                      label="Paused"
+                      hint="Click Resume to continue"
+                      className="bg-muted/20 rounded-lg w-full"
+                    />
                   </div>
 
                   <div className="flex items-center gap-2 text-sm">
@@ -1093,11 +1100,6 @@ export function Elevate() {
                       Discard Session
                     </Button>
                   </div>
-
-                  <RealTimeMetrics
-                    metrics={currentMetrics}
-                    isVisible={showMetrics && !isSessionPaused}
-                  />
                 </>
               )}
               {url && token && (
@@ -1110,7 +1112,9 @@ export function Elevate() {
                   onDisconnected={handleDisconnected}
                 >
                   <RoomAudioRenderer />
-                  <AgentVisualizer className="bg-muted/20 rounded-lg mb-4" isPaused={isSessionPaused} />
+                  <div className="flex justify-center w-full mb-2">
+                    <AgentVisualizer className="bg-muted/20 rounded-lg w-full" isPaused={isSessionPaused} compact />
+                  </div>
                   <ConnectionStatus assistantState={assistantState} />
                   <LiveKitConversation 
                     sessionId={sessionId}
@@ -1120,39 +1124,49 @@ export function Elevate() {
                         console.log('⏸️ Dropping message while session is paused')
                         return
                       }
-                      console.log('🎯 Adding message via LiveKit:', message)
-                      
-                      // Filter out empty or meaningless messages
                       const content = message.content?.trim() || ''
                       if (!content || content === '[]' || content.length < 2) {
-                        console.log('⏭️ Skipping empty/invalid message:', content)
                         return
                       }
-                      
-                      // Check for duplicates in existing messages
-                      const isDuplicate = messages.some((msg: any) => 
-                        msg.role === message.role && 
-                        msg.content === content &&
-                        msg.id === message.id
+
+                      if (message.partial) {
+                        const streamId = message.id || `stream_${message.role}`
+                        upsertStreamingMessage(
+                          message.role as 'user' | 'assistant',
+                          content,
+                          streamId,
+                        )
+                        return
+                      }
+
+                      const isDuplicate = messages.some(
+                        (msg) =>
+                          msg.role === message.role &&
+                          msg.content === content &&
+                          (msg.id === message.id || !message.partial),
                       )
-                      if (isDuplicate) {
-                        console.log('⏭️ Skipping duplicate message:', content.substring(0, 50))
-                        return
-                      }
-                      
-                      // Use the persistence hook's addMessage function instead of setMessages
-                      console.log('📝 Adding valid message to conversation:', { role: message.role, content: content.substring(0, 50) })
-                      addMessage(message.role, content)
+                      if (isDuplicate) return
+
+                      addMessage(
+                        message.role as 'user' | 'assistant',
+                        content,
+                        message.id,
+                      )
                     }}
                     onStateChange={setAssistantState}
                     onRestart={() => {
                       clearMessages()
                       resetMetrics()
+                      setTurnMetricsByIndex({})
                       setTurnMetricsByText({})
                     }}
-                    onTurnMetrics={(text, metrics) => {
-                      const key = normalizeTurnText(text)
-                      setTurnMetricsByText((prev) => ({ ...prev, [key]: metrics }))
+                    onTurnMetrics={(text, metrics, turnIndex) => {
+                      if (turnIndex != null && turnIndex > 0) {
+                        setTurnMetricsByIndex((prev) => ({ ...prev, [turnIndex]: metrics }))
+                      } else if (text) {
+                        const key = normalizeTurnText(text)
+                        setTurnMetricsByText((prev) => ({ ...prev, [key]: metrics }))
+                      }
                     }}
                     onMetricsUpdate={updateMetrics}
                   />
@@ -1164,20 +1178,25 @@ export function Elevate() {
                     >
                       {showMetrics ? 'Hide Metrics' : 'Show Metrics'}
                     </Button>
-                    <InRoomControls sessionId={sessionId} onPauseSession={pauseLiveSession} />
+                    <InRoomControls
+                      sessionId={sessionId}
+                      onPauseSession={pauseLiveSession}
+                      hideAudioDownload={exportFlags.hideAudioDownload}
+                    />
                     <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={handleDiscard}>
                       Discard Session
                     </Button>
                   </div>
-                  
-                  {/* Real-time metrics overlay */}
-                  <RealTimeMetrics 
-                    metrics={currentMetrics} 
-                    isVisible={showMetrics && joined}
-                  />
                 </LiveKitRoom>
               )}
-              <ChatPanel messages={messages} turnMetricsByText={turnMetricsByText} />
+              <ChatPanel
+                messages={messages}
+                turnMetricsByIndex={turnMetricsByIndex}
+                turnMetricsByText={turnMetricsByText}
+                liveMetrics={currentMetrics}
+                showLiveMetrics={showMetrics}
+                transcriptHidden={exportFlags.hideTranscriptText}
+              />
               
               {/* Historical metrics display */}
               {!joined && sessionId && historicalMetrics && !isSessionPaused && (
@@ -1279,16 +1298,33 @@ function LiveKitConversation({
 }: {
   sessionId: string | null
   isSessionPaused: boolean
-  onNewMessage: (message: ChatMessage) => void
+  onNewMessage: (message: ChatMessage & { partial?: boolean }) => void
   onStateChange: (state: 'restarting' | 'ready' | 'recovering' | 'unknown') => void
   onRestart: () => void
   onMetricsUpdate: (metrics: any) => void
-  onTurnMetrics?: (text: string, metrics: TurnMetrics) => void
+  onTurnMetrics?: (text: string, metrics: TurnMetrics, turnIndex?: number) => void
 }) {
   const connectionState = useConnectionState()
   const room = useRoomContext()
+  const { agentTranscriptions } = useVoiceAssistant()
   const seenFragmentsRef = useRef<Map<string, string>>(new Map())
   const lastControlStateRef = useRef<string>('unknown')
+
+  // Stream coach speech via LiveKit agent transcriptions
+  useEffect(() => {
+    if (isSessionPaused || agentTranscriptions.length === 0) return
+    const latest = agentTranscriptions[agentTranscriptions.length - 1]
+    const text = latest.text?.trim()
+    if (!text) return
+    const streamId = latest.id || 'agent-live'
+    onNewMessage({
+      role: 'assistant',
+      content: text,
+      id: streamId,
+      partial: !latest.final,
+      timestamp: new Date().toISOString(),
+    })
+  }, [agentTranscriptions, isSessionPaused, onNewMessage])
 
   const processPayload = useCallback(
     (payload: string, source: 'dataChannel' | 'roomEvent') => {
@@ -1307,6 +1343,9 @@ function LiveKitConversation({
           return
         }
 
+        // Coach speech is streamed via useVoiceAssistant agentTranscriptions
+        if (parsed.type === 'assistant') return
+
         const key = parsed.id || `${parsed.type}`
         const existing = seenFragmentsRef.current.get(key) || ''
 
@@ -1323,13 +1362,25 @@ function LiveKitConversation({
         if (parsed.final) {
           seenFragmentsRef.current.delete(key)
           const role = parsed.type === 'assistant' ? 'assistant' : 'user'
-          console.log('🧾 Emitting final message', { key, role, text: next })
-          onNewMessage({ role, content: next, id: parsed.id, timestamp: new Date().toISOString() })
+          onNewMessage({
+            role,
+            content: next,
+            id: parsed.id || key,
+            partial: false,
+            timestamp: new Date().toISOString(),
+          })
           return
         }
 
         seenFragmentsRef.current.set(key, next)
-        console.log('🧩 Stored partial fragment', { key, length: next.length })
+        const role = parsed.type === 'assistant' ? 'assistant' : 'user'
+        onNewMessage({
+          role,
+          content: next,
+          id: parsed.id || key,
+          partial: true,
+          timestamp: new Date().toISOString(),
+        })
       } catch (error) {
         console.log('❌ LiveKit message parse error:', error, { payload, source })
       }
@@ -1410,26 +1461,29 @@ function LiveKitConversation({
             const conversationData = JSON.parse(text)
             console.log('💬 Conversation data received:', conversationData)
 
-            if (conversationData.type === 'turn_metrics' && conversationData.text && conversationData.turnMetrics) {
-              onTurnMetrics?.(conversationData.text, conversationData.turnMetrics as TurnMetrics)
+            if (conversationData.type === 'turn_metrics' && conversationData.turnMetrics) {
+              onTurnMetrics?.(
+                conversationData.text || '',
+                conversationData.turnMetrics as TurnMetrics,
+                typeof conversationData.turnIndex === 'number' ? conversationData.turnIndex : undefined,
+              )
               break
             }
             
-            // Handle direct conversation messages from agent (type: "user" or "assistant")
-            if (conversationData.type === 'user' || conversationData.type === 'assistant') {
-              const role = conversationData.type
+            // User turns only — coach speech comes from agentTranscriptions
+            if (conversationData.type === 'user') {
               const content = conversationData.text || conversationData.content || ''
               const timestamp = conversationData.timestamp 
                 ? new Date(conversationData.timestamp).toISOString() 
                 : new Date().toISOString()
               
               if (content) {
-                console.log(`� Adding ${role} message:`, content.substring(0, 50))
                 onNewMessage({ 
-                  role, 
+                  role: 'user', 
                   content, 
                   id: conversationData.id,
-                  timestamp 
+                  timestamp,
+                  partial: false,
                 })
               }
             }
@@ -1488,9 +1542,11 @@ function LiveKitConversation({
 function InRoomControls({
   sessionId,
   onPauseSession,
+  hideAudioDownload = false,
 }: {
   sessionId: string | null
   onPauseSession: () => void
+  hideAudioDownload?: boolean
 }) {
   const room = useRoomContext()
   const { isRecording, startRecording, stopRecording } = useAudioRecording()
@@ -1546,9 +1602,11 @@ function InRoomControls({
       <Button variant="secondary" onClick={toggle}>
         Pause
       </Button>
-      <Button variant={isRecording ? 'destructive' : 'outline'} onClick={handleToggleRecording}>
-        {isRecording ? 'Stop & Download Audio' : 'Record My Audio'}
-      </Button>
+      {!hideAudioDownload && (
+        <Button variant={isRecording ? 'destructive' : 'outline'} onClick={handleToggleRecording}>
+          {isRecording ? 'Stop & Download Audio' : 'Record My Audio'}
+        </Button>
+      )}
     </>
   )
 }
@@ -1558,6 +1616,8 @@ interface TurnMetrics {
   filler_count: number
   filler_rate: number
   hedging_count: number
+  acknowledgment_count?: number
+  vocab_diversity?: number
   wpm?: number | null
   speaking_seconds?: number | null
   qualitative_pace?: string | null
@@ -1589,19 +1649,119 @@ function paceLabel(pace?: string | null): string {
   return pace.charAt(0).toUpperCase() + pace.slice(1)
 }
 
-function TurnMetricsPopover({ metrics }: { metrics: TurnMetrics }) {
+function HighlightedSpeechText({ text }: { text: string }) {
+  const spans = useMemo(() => findSpeechSpans(text), [text])
+  if (spans.length === 0) return <>{text}</>
+
+  const nodes: React.ReactNode[] = []
+  let cursor = 0
+  for (const span of spans) {
+    if (span.start > cursor) nodes.push(text.slice(cursor, span.start))
+    const slice = text.slice(span.start, span.end)
+    nodes.push(
+      <mark key={`${span.start}-${span.kind}`} className={SPEECH_HIGHLIGHT_CLASS[span.kind]}>
+        {slice}
+      </mark>,
+    )
+    cursor = span.end
+  }
+  if (cursor < text.length) nodes.push(text.slice(cursor))
+  return <>{nodes}</>
+}
+
+function UserTurnBubble({ content, metrics }: { content: string; metrics: TurnMetrics }) {
+  const [highlight, setHighlight] = useState(false)
+
   return (
-    <div className="relative inline-flex group/metrics ml-1 align-middle">
-      <button
-        type="button"
-        className="inline-flex h-4 w-4 items-center justify-center rounded-full text-blue-100/90 hover:text-white focus:outline-none focus-visible:ring-1 focus-visible:ring-white/60"
-        aria-label="View turn metrics"
-      >
-        <Info className="h-3 w-3" />
-      </button>
+    <div className="flex items-start gap-2">
+      <p className="flex-1 min-w-0 text-[13px] leading-relaxed whitespace-pre-wrap break-words">
+        {highlight ? <HighlightedSpeechText text={content} /> : content}
+      </p>
+      <div className="flex-shrink-0 self-end">
+        <TurnMetricsPopover metrics={metrics} onOpenChange={setHighlight} />
+      </div>
+    </div>
+  )
+}
+
+function TurnMetricsPopover({
+  metrics,
+  onOpenChange,
+}: {
+  metrics: TurnMetrics
+  onOpenChange?: (open: boolean) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const [pos, setPos] = useState({ top: 0, left: 0 })
+  const PANEL_W = 240
+  const PANEL_H = 300
+
+  const setOpenState = useCallback(
+    (next: boolean) => {
+      setOpen(next)
+      onOpenChange?.(next)
+    },
+    [onOpenChange],
+  )
+
+  const updatePosition = useCallback(() => {
+    if (!btnRef.current) return
+    const rect = btnRef.current.getBoundingClientRect()
+    const margin = 8
+    let top = rect.bottom + margin
+    let left = Math.max(margin, rect.right - PANEL_W)
+    if (top + PANEL_H > window.innerHeight - margin) {
+      top = Math.max(margin, rect.top - PANEL_H - margin)
+    }
+    if (left + PANEL_W > window.innerWidth - margin) {
+      left = window.innerWidth - PANEL_W - margin
+    }
+    setPos({ top, left })
+  }, [])
+
+  const toggle = useCallback(() => {
+    setOpen((wasOpen) => {
+      const next = !wasOpen
+      if (next) {
+        requestAnimationFrame(updatePosition)
+      }
+      onOpenChange?.(next)
+      return next
+    })
+  }, [onOpenChange, updatePosition])
+
+  useLayoutEffect(() => {
+    if (!open) return
+    updatePosition()
+    window.addEventListener('scroll', updatePosition, true)
+    window.addEventListener('resize', updatePosition)
+    return () => {
+      window.removeEventListener('scroll', updatePosition, true)
+      window.removeEventListener('resize', updatePosition)
+    }
+  }, [open, updatePosition])
+
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpenState(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, setOpenState])
+
+  const vocabPct =
+    metrics.vocab_diversity != null ? Math.round(metrics.vocab_diversity * 100) : null
+
+  const panel = open ? (
+    <>
+      <div className="fixed inset-0 z-40" aria-hidden onClick={() => setOpenState(false)} />
       <div
         role="tooltip"
-        className="pointer-events-none absolute bottom-full right-0 z-20 mb-2 hidden w-56 rounded-lg border border-border bg-popover p-3 text-left text-popover-foreground shadow-lg group-hover/metrics:block group-focus-within/metrics:block"
+        className="fixed z-50 w-60 max-h-[min(320px,calc(100vh-16px))] overflow-y-auto rounded-lg border border-border bg-popover p-3 text-left text-popover-foreground shadow-lg"
+        style={{ top: pos.top, left: pos.left }}
+        onClick={(e) => e.stopPropagation()}
       >
         <div className="text-[11px] font-semibold mb-2">This turn</div>
         <dl className="space-y-1 text-[10px]">
@@ -1617,18 +1777,63 @@ function TurnMetricsPopover({ metrics }: { metrics: TurnMetrics }) {
             <dt className="text-muted-foreground">Hedging</dt>
             <dd>{metrics.hedging_count}</dd>
           </div>
+          {(metrics.acknowledgment_count ?? 0) > 0 && (
+            <div className="flex justify-between gap-2">
+              <dt className="text-muted-foreground">Acknowledgments</dt>
+              <dd>{metrics.acknowledgment_count}</dd>
+            </div>
+          )}
+          {vocabPct != null && (
+            <div className="flex justify-between gap-2">
+              <dt className="text-muted-foreground">Vocabulary</dt>
+              <dd>{vocabPct}%</dd>
+            </div>
+          )}
           <div className="flex justify-between gap-2">
             <dt className="text-muted-foreground">Pace</dt>
             <dd>{paceLabel(metrics.qualitative_pace)}</dd>
           </div>
         </dl>
+        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[9px] text-muted-foreground border-t pt-2">
+          <span className="inline-flex items-center gap-1">
+            <span className={`${SPEECH_HIGHLIGHT_CLASS.filler} text-[8px] px-1 py-0`}>filler</span>
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className={`${SPEECH_HIGHLIGHT_CLASS.hedging} text-[8px] px-1 py-0`}>hedging</span>
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className={`${SPEECH_HIGHLIGHT_CLASS.acknowledgment} text-[8px] px-1 py-0`}>okay/yeah</span>
+          </span>
+        </div>
+        <p className="mt-2 text-[9px] leading-snug text-muted-foreground/80">
+          Fillers = um/uh/discourse-like. Okay/yeah = acknowledgments (softer signal). Vocabulary = distinct words ÷ total.
+        </p>
         {metrics.coaching_tip && (
           <p className="mt-2 text-[10px] leading-snug text-muted-foreground border-t pt-2">
             {metrics.coaching_tip}
           </p>
         )}
       </div>
-    </div>
+    </>
+  ) : null
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          toggle()
+        }}
+        className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-blue-100/90 hover:text-white focus:outline-none focus-visible:ring-1 focus-visible:ring-white/60"
+        aria-label="View turn metrics"
+        aria-expanded={open}
+      >
+        <Info className="h-3.5 w-3.5" />
+      </button>
+      {panel && createPortal(panel, document.body)}
+    </>
   )
 }
 
@@ -1679,13 +1884,22 @@ function groupConsecutive(messages: ChatMessage[]): ChatGroup[] {
 
 function ChatPanel({
   messages,
+  turnMetricsByIndex = {},
   turnMetricsByText = {},
+  liveMetrics = null,
+  showLiveMetrics = false,
+  transcriptHidden = false,
 }: {
   messages: ChatMessage[]
+  turnMetricsByIndex?: Record<number, TurnMetrics>
   turnMetricsByText?: Record<string, TurnMetrics>
+  liveMetrics?: import('@/hooks/useSessionMetrics').LiveMetricsSnapshot | null
+  showLiveMetrics?: boolean
+  transcriptHidden?: boolean
 }) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const groups = useMemo(() => groupConsecutive(messages), [messages])
+  const userTurnCount = useMemo(() => groups.filter((g) => g.role === 'user').length, [groups])
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -1709,19 +1923,40 @@ function ChatPanel({
   return (
     <div className="mt-2 rounded-lg border bg-card shadow-sm">
       {/* Header */}
-      <div className="border-b bg-muted/50 px-4 py-3">
-        <div className="text-sm font-semibold">Conversation</div>
-        <div className="text-xs text-muted-foreground mt-0.5">
-          {groups.length} {groups.length === 1 ? 'turn' : 'turns'}
-          {messages.length !== groups.length && (
-            <span className="ml-1 opacity-60">({messages.length} fragments)</span>
+      <div className="border-b bg-muted/50 px-4 py-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+          <div className="shrink-0">
+            <div className="text-sm font-semibold">Conversation</div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              {userTurnCount} {userTurnCount === 1 ? 'your turn' : 'your turns'}
+              {groups.length !== userTurnCount && (
+                <span className="ml-1 opacity-70">· {groups.length} messages</span>
+              )}
+            </div>
+          </div>
+          {showLiveMetrics && (
+            <RealTimeMetrics
+              metrics={liveMetrics}
+              isVisible
+              variant="inline"
+              userTurnCount={userTurnCount}
+            />
           )}
         </div>
       </div>
       
       {/* Messages Container */}
-      <div className="p-4 space-y-3 max-h-96 overflow-y-auto overflow-x-hidden bg-gradient-to-b from-background to-muted/10">
-        {messages.length === 0 ? (
+      <div className="p-4 space-y-3 max-h-[32rem] min-h-[12rem] overflow-y-auto overflow-x-hidden bg-gradient-to-b from-background to-muted/10">
+        {transcriptHidden ? (
+          <div className="flex items-center justify-center h-32">
+            <div className="text-center px-4">
+              <div className="text-sm text-muted-foreground">Transcript hidden</div>
+              <div className="text-xs text-muted-foreground/60 mt-1">
+                Conversation text is not available for your account. Metrics and coaching feedback remain visible.
+              </div>
+            </div>
+          </div>
+        ) : messages.length === 0 ? (
           <div className="flex items-center justify-center h-32">
             <div className="text-center">
               <div className="text-sm text-muted-foreground">No messages yet</div>
@@ -1730,16 +1965,20 @@ function ChatPanel({
           </div>
         ) : (
           <>
-            {groups.map((g, i) => {
+            {(() => {
+              let userTurnIdx = 0
+              return groups.map((g, i) => {
               const turnMetrics =
-                g.role === 'user' ? lookupTurnMetrics(g.content, turnMetricsByText) : undefined
+                g.role === 'user'
+                  ? (turnMetricsByIndex[++userTurnIdx] ??
+                      lookupTurnMetrics(g.content, turnMetricsByText))
+                  : undefined
               return (
               <div 
                 key={g.id || i} 
                 className={`flex ${g.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}
               >
                 <div className={`flex flex-col max-w-[80%] ${g.role === 'user' ? 'items-end' : 'items-start'}`}>
-                  {/* Message Bubble (stitched from g.count fragments) */}
                   <div 
                     className={`rounded-2xl px-4 py-2.5 shadow-sm ${
                       g.role === 'user' 
@@ -1747,25 +1986,27 @@ function ChatPanel({
                         : 'bg-gray-100 text-gray-900 rounded-tl-sm border border-gray-200'
                     }`}
                   >
-                    <div className="text-[13px] leading-relaxed whitespace-pre-wrap break-words inline">
-                      {g.content}
-                      {turnMetrics && <TurnMetricsPopover metrics={turnMetrics} />}
-                    </div>
+                    {g.role === 'user' ? (
+                      turnMetrics ? (
+                        <UserTurnBubble content={g.content} metrics={turnMetrics} />
+                      ) : (
+                        <p className="text-[13px] leading-relaxed whitespace-pre-wrap break-words">
+                          {g.content}
+                        </p>
+                      )
+                    ) : (
+                      <p className="text-[13px] leading-relaxed whitespace-pre-wrap break-words">
+                        {g.content}
+                      </p>
+                    )}
                   </div>
                   
-                  {/* Timestamp + fragment hint */}
-                  <div 
-                    className="text-[10px] mt-1 px-1 text-muted-foreground"
-                    title={g.count > 1 ? `Stitched from ${g.count} fragments` : undefined}
-                  >
+                  <div className="text-[10px] mt-1 px-1 text-muted-foreground">
                     {formatTime(g.timestamp)}
-                    {g.count > 1 && (
-                      <span className="ml-1 opacity-60">· {g.count} fragments</span>
-                    )}
                   </div>
                 </div>
               </div>
-            )})}
+            )})})()}
             {/* Invisible div for auto-scroll anchor */}
             <div ref={messagesEndRef} />
           </>

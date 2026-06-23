@@ -10,7 +10,7 @@ export async function getPublicFeatures(_req: Request, res: Response) {
           acc[feature] = map[feature]
           return acc
         },
-        {} as Record<string, boolean>,
+        {} as Record<string, typeof map.elevate>,
       ),
     })
   } catch (err) {

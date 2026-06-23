@@ -70,16 +70,22 @@ export function useSessionMetrics(sessionId: string | null): UseSessionMetricsRe
     }
   };
 
+  const hasAgentGroundedMetrics = (data: any): boolean =>
+    Number(data?.userWpm || 0) > 0 &&
+    Number(data?.userSpeakingTime || 0) > 0 &&
+    Number(data?.totalTurns || 0) > 0;
+
   const shouldRecomputeFromTranscript = (data: any, messageCount: number): boolean => {
-    // Conservative expected turns from persisted transcript messages.
+    // Agent saves VAD-measured WPM at session end — do not overwrite with
+    // text-only estimates (they use wall-clock and fragment-inflated turn counts).
+    if (hasAgentGroundedMetrics(data)) return false;
+
     const expectedTurns = Math.floor(messageCount / 2);
     const currentTurns = Number(data?.totalTurns || 0);
     const endedAt = data?.session?.endedAt;
 
-    // Always allow fallback on empty metrics.
     if (isAllZeros(data)) return true;
 
-    // For ended sessions, recompute if transcript has grown but metrics lag behind.
     if (endedAt && expectedTurns > currentTurns) return true;
 
     return false;

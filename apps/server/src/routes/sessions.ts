@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express'
 import { prisma } from '../lib/prisma'
+import { awardSessionActivePoints } from '../lib/points'
 
 export async function listSessions(_req: Request, res: Response) {
   try {
@@ -76,21 +77,41 @@ export async function endSession(req: Request, res: Response) {
   try {
     const { id } = req.params
     const { endedAt, durationSec } = req.body
-    
+
+    const existing = await prisma.session.findUnique({ where: { id } })
+    if (!existing) {
+      return res.status(404).json({ error: 'Session not found' })
+    }
+
+    // Avoid double-awarding points if end is called more than once
+    const alreadyEnded = existing.endedAt != null
+
     const session = await prisma.session.update({
       where: { id },
       data: {
-        endedAt: endedAt ? new Date(endedAt) : new Date(),
-        durationSec,
+        endedAt: endedAt ? new Date(endedAt) : existing.endedAt ?? new Date(),
+        durationSec: durationSec ?? existing.durationSec,
       },
       include: {
         user: {
-          select: { id: true, email: true }
-        }
-      }
+          select: { id: true, email: true, rewardPoints: true },
+        },
+      },
     })
-    
-    res.json({ success: true, session })
+
+    let pointsAwarded = 0
+    let totalPoints = session.user.rewardPoints
+    if (!alreadyEnded) {
+      try {
+        const pts = await awardSessionActivePoints(session.userId, id)
+        pointsAwarded = pts.awarded
+        totalPoints = pts.total
+      } catch (ptsErr) {
+        console.warn('Session points award skipped:', ptsErr)
+      }
+    }
+
+    res.json({ success: true, session, pointsAwarded, totalPoints })
   } catch (error) {
     console.error('Error ending session:', error)
     res.status(500).json({ error: 'Failed to end session' })

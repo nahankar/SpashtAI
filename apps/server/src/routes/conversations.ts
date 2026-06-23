@@ -1,5 +1,11 @@
 import type { Request, Response } from 'express'
 import { prisma } from '../lib/prisma'
+import { awardSessionActivePoints } from '../lib/points'
+import {
+  exportDenied,
+  getElevateSessionOwnerId,
+  resolveRequestExportFlags,
+} from '../lib/userExportFlags'
 import { WebSocketServer, WebSocket } from 'ws'
 
 let wss: WebSocketServer | null = null
@@ -123,8 +129,15 @@ export async function addConversationMessage(req: Request, res: Response) {
       action: 'message_added',
       message: messageData
     })
+
+    // If session already ended, a late-persisted message may be the last piece needed for points.
+    if (session.endedAt && !session.sessionPointsAwarded) {
+      awardSessionActivePoints(session.userId, sessionId).catch((err) => {
+        console.warn('Deferred session points award failed:', err)
+      })
+    }
     
-    res.status(201).json({ 
+    res.status(201).json({
       success: true, 
       message: messageData,
       transcriptId: transcript.id
@@ -153,6 +166,12 @@ export async function addConversationMessageForAgent(req: Request, res: Response
 export async function getConversation(req: Request, res: Response) {
   try {
     const { sessionId } = req.params
+
+    const ownerId = await getElevateSessionOwnerId(sessionId)
+    const { flags, accessDenied } = await resolveRequestExportFlags(req, ownerId)
+    if (accessDenied) {
+      return exportDenied(res, 'Access denied')
+    }
     
     const transcript = await prisma.sessionTranscript.findUnique({
       where: { sessionId },
@@ -181,11 +200,14 @@ export async function getConversation(req: Request, res: Response) {
     }
     
     const conversationData = transcript.conversationData as any
-    const messages = Array.isArray(conversationData.messages) ? conversationData.messages : []
+    const messages = flags.hideTranscriptText
+      ? []
+      : Array.isArray(conversationData.messages) ? conversationData.messages : []
     
     res.json({
       sessionId,
       messages,
+      transcriptHidden: flags.hideTranscriptText,
       metadata: {
         created: conversationData.created,
         lastUpdated: conversationData.lastUpdated,

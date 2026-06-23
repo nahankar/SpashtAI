@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { getAuthHeaders } from '@/lib/api-client';
 
 interface ConversationMessage {
@@ -17,7 +17,8 @@ interface ConversationState {
 
 interface ConversationAPI {
   loadConversation: (sessionId: string) => Promise<void>;
-  addMessage: (role: 'user' | 'assistant', content: string) => Promise<void>;
+  addMessage: (role: 'user' | 'assistant', content: string, streamId?: string) => Promise<void>;
+  upsertStreamingMessage: (role: 'user' | 'assistant', content: string, streamId: string) => void;
   clearMessages: () => void;
   subscribeToUpdates: (sessionId: string) => () => void;
 }
@@ -34,6 +35,11 @@ export function useConversationPersistence(): ConversationState & ConversationAP
   });
 
   const [ws, setWs] = useState<WebSocket | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    sessionIdRef.current = state.sessionId;
+  }, [state.sessionId]);
 
   // Load conversation from server
   const loadConversation = useCallback(async (sessionId: string) => {
@@ -71,35 +77,60 @@ export function useConversationPersistence(): ConversationState & ConversationAP
     }
   }, []);
 
-  // Add message to conversation
-  const addMessage = useCallback(async (role: 'user' | 'assistant', content: string) => {
-    if (!state.sessionId) {
+  // Update in-progress streaming transcript (UI only — not persisted until final)
+  const upsertStreamingMessage = useCallback(
+    (role: 'user' | 'assistant', content: string, streamId: string) => {
+      setState((prev) => {
+        const idx = prev.messages.findIndex((m) => m.id === streamId)
+        if (idx >= 0) {
+          const next = [...prev.messages]
+          next[idx] = { ...next[idx], content }
+          return { ...prev, messages: next }
+        }
+        return {
+          ...prev,
+          messages: [
+            ...prev.messages,
+            { id: streamId, role, content, timestamp: new Date().toISOString() },
+          ],
+        }
+      })
+    },
+    [],
+  )
+
+  // Add message to conversation (final utterance — persisted to server)
+  const addMessage = useCallback(async (role: 'user' | 'assistant', content: string, streamId?: string) => {
+    const activeSessionId = sessionIdRef.current;
+    if (!activeSessionId) {
       console.warn('Cannot add message: no session ID');
       return;
     }
 
-    // Optimistically update UI
-    const tempMessage: ConversationMessage = {
-      id: `temp_${Date.now()}`,
-      role,
-      content,
-      timestamp: new Date().toISOString()
-    };
+    const timestamp = new Date().toISOString();
+    let tempId = streamId || `temp_${Date.now()}`;
 
-    setState(prev => ({
-      ...prev,
-      messages: [...prev.messages, tempMessage]
-    }));
+    setState((prev) => {
+      if (streamId) {
+        const idx = prev.messages.findIndex((m) => m.id === streamId);
+        if (idx >= 0) {
+          tempId = streamId;
+          const next = [...prev.messages];
+          next[idx] = { ...next[idx], content, timestamp };
+          return { ...prev, messages: next };
+        }
+      }
+      return {
+        ...prev,
+        messages: [...prev.messages, { id: tempId, role, content, timestamp }],
+      };
+    });
 
     try {
-      const response = await fetch(`${API_BASE_URL}/sessions/${state.sessionId}/messages`, {
+      const response = await fetch(`${API_BASE_URL}/sessions/${activeSessionId}/messages`, {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({
-          role,
-          content,
-          timestamp: tempMessage.timestamp
-        })
+        body: JSON.stringify({ role, content, timestamp }),
       });
 
       if (!response.ok) {
@@ -107,28 +138,22 @@ export function useConversationPersistence(): ConversationState & ConversationAP
       }
 
       const savedMessage = await response.json();
-      
-      // Replace temp message with saved one
-      setState(prev => ({
-        ...prev,
-        messages: prev.messages.map(msg => 
-          msg.id === tempMessage.id 
-            ? { ...savedMessage.message, id: savedMessage.message.id }
-            : msg
-        )
-      }));
 
+      setState((prev) => ({
+        ...prev,
+        messages: prev.messages.map((msg) =>
+          msg.id === tempId ? { ...savedMessage.message, id: savedMessage.message.id } : msg,
+        ),
+      }));
     } catch (error) {
       console.error('Error saving message:', error);
-      
-      // Remove failed message and show error
-      setState(prev => ({
+      setState((prev) => ({
         ...prev,
-        messages: prev.messages.filter(msg => msg.id !== tempMessage.id),
-        error: error instanceof Error ? error.message : 'Failed to save message'
+        messages: prev.messages.filter((msg) => msg.id !== tempId),
+        error: error instanceof Error ? error.message : 'Failed to save message',
       }));
     }
-  }, [state.sessionId]);
+  }, []);
 
   // Clear messages
   const clearMessages = useCallback(() => {
@@ -160,8 +185,11 @@ export function useConversationPersistence(): ConversationState & ConversationAP
           if (data.type === 'conversation_update' && data.sessionId === sessionId) {
             if (data.action === 'message_added') {
               setState(prev => {
-                // Check if message already exists to avoid duplicates
-                const exists = prev.messages.some(msg => msg.id === data.message.id);
+                const exists = prev.messages.some(
+                  (msg) =>
+                    msg.id === data.message.id ||
+                    (msg.role === data.message.role && msg.content === data.message.content),
+                );
                 if (exists) return prev;
                 
                 return {
@@ -212,6 +240,7 @@ export function useConversationPersistence(): ConversationState & ConversationAP
     ...state,
     loadConversation,
     addMessage,
+    upsertStreamingMessage,
     clearMessages,
     subscribeToUpdates
   };
