@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express'
+import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/prisma'
 
 const router = Router()
@@ -36,7 +37,10 @@ router.post('/track', async (req: Request, res: Response) => {
         action: safeAction,
         sessionId: sessionId || null,
         duration: typeof duration === 'number' ? Math.round(duration) : null,
-        metadata: metadata || undefined,
+        metadata:
+          metadata != null
+            ? (metadata as Prisma.InputJsonValue)
+            : undefined,
       },
     })
 
