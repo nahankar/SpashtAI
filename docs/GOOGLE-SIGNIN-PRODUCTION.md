@@ -113,7 +113,7 @@ Required: `googleId`, optional `passwordHash`, profile fields.
 | Button disabled "not configured" | Rebuild web with `VITE_GOOGLE_CLIENT_ID` |
 | `Invalid token` on server | Client ID mismatch between web and server |
 | CORS errors | Set `FRONTEND_URL` to match browser URL |
-| `COOP policy would block postMessage` | Set `Cross-Origin-Opener-Policy: same-origin-allow-popups` on `spasht.ai` (Nginx config). If Cloudflare adds `same-origin` COOP, remove or override it in Transform Rules |
+| `COOP policy would block postMessage` | Set `Cross-Origin-Opener-Policy: same-origin-allow-popups` on `spasht.ai` (see `infra/ec2/nginx/spasht.ai.conf`). Copy to **`/etc/nginx/sites-available/spasht.ai.conf`** (note `.conf` suffix), reload nginx, purge Cloudflare cache. Verify origin: `curl -sk --resolve spasht.ai:443:127.0.0.1 -I https://spasht.ai/auth/login \| grep -i cross-origin-opener`. Warning may still appear in console even when sign-in works |
 
 ## Optional follow-ups
 
