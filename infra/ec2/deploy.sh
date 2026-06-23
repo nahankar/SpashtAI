@@ -25,6 +25,8 @@ echo "==> Prisma"
 cd apps/server
 npm run prisma:generate
 npx prisma migrate deploy
+# Migrations may lag schema on fresh EC2 — push adds missing columns/tables
+npx prisma db push
 cd "${ROOT}"
 
 echo "==> Build server + web"
