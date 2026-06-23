@@ -25,6 +25,8 @@ declare global {
 }
 
 let scriptPromise: Promise<void> | null = null
+let gsiInitialized = false
+let activeSetBusy: ((busy: boolean) => void) | null = null
 
 function loadGoogleScript(): Promise<void> {
   if (window.google?.accounts?.id) return Promise.resolve()
@@ -58,8 +60,14 @@ export function GoogleSignInButton({
   onError: (message: string) => void
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const onCredentialRef = useRef(onCredential)
+  const onErrorRef = useRef(onError)
   const [ready, setReady] = useState(false)
   const [busy, setBusy] = useState(false)
+
+  onCredentialRef.current = onCredential
+  onErrorRef.current = onError
+  activeSetBusy = setBusy
 
   useEffect(() => {
     if (!GOOGLE_CLIENT_ID) return
@@ -70,23 +78,26 @@ export function GoogleSignInButton({
       .then(() => {
         if (cancelled || !containerRef.current || !window.google?.accounts?.id) return
 
-        window.google.accounts.id.initialize({
-          client_id: GOOGLE_CLIENT_ID,
-          callback: async (response) => {
-            if (!response.credential) {
-              onError('Google sign-in was cancelled')
-              return
-            }
-            setBusy(true)
-            try {
-              await onCredential(response.credential)
-            } catch (err) {
-              onError(err instanceof Error ? err.message : 'Google sign-in failed')
-            } finally {
-              setBusy(false)
-            }
-          },
-        })
+        if (!gsiInitialized) {
+          window.google.accounts.id.initialize({
+            client_id: GOOGLE_CLIENT_ID,
+            callback: async (response) => {
+              if (!response.credential) {
+                onErrorRef.current('Google sign-in was cancelled')
+                return
+              }
+              activeSetBusy?.(true)
+              try {
+                await onCredentialRef.current(response.credential)
+              } catch (err) {
+                onErrorRef.current(err instanceof Error ? err.message : 'Google sign-in failed')
+              } finally {
+                activeSetBusy?.(false)
+              }
+            },
+          })
+          gsiInitialized = true
+        }
 
         containerRef.current.innerHTML = ''
         window.google.accounts.id.renderButton(containerRef.current, {
@@ -99,12 +110,13 @@ export function GoogleSignInButton({
         })
         setReady(true)
       })
-      .catch(() => onError('Could not load Google Sign-In'))
+      .catch(() => onErrorRef.current('Could not load Google Sign-In'))
 
     return () => {
       cancelled = true
+      if (activeSetBusy === setBusy) activeSetBusy = null
     }
-  }, [label, onCredential, onError])
+  }, [label])
 
   if (!GOOGLE_CLIENT_ID) {
     return (
