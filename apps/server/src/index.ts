@@ -83,6 +83,9 @@ import { requireFeature, ensureFeatureFlags } from './lib/featureFlags'
 import { apiLimiter } from './middleware/rate-limit'
 
 const app = express()
+// Cloudflare → Nginx → Express; required for rate limiting and client IP
+app.set('trust proxy', 1)
+
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   credentials: true,
