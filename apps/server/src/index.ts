@@ -69,10 +69,12 @@ import adminFeedbackRouter from './routes/admin/feedback'
 import adminTickersRouter from './routes/admin/tickers'
 import adminPricingRouter from './routes/admin/pricing'
 import adminLegalRouter from './routes/admin/legal'
+import adminPlatformRouter from './routes/admin/platform'
 import legalRouter from './routes/legal'
 import { getPublicTickers } from './routes/tickers'
 import { getPublicPricing } from './routes/pricing'
 import { getPublicFeatures } from './routes/features'
+import { getPublicPlatform } from './routes/platform'
 import { ensureAdminExists } from './lib/init-admin'
 import { ensureLegalDocuments } from './lib/ensure-legal'
 import { requireAuth, requireAuthOrAgent } from './middleware/auth'
@@ -80,6 +82,7 @@ import { requireAdmin } from './middleware/admin'
 import { trackFeatureUsage } from './middleware/tracking'
 import eventsRouter from './routes/events'
 import { requireFeature, ensureFeatureFlags } from './lib/featureFlags'
+import { ensurePlatformSettings } from './lib/platformSettings'
 import { apiLimiter } from './middleware/rate-limit'
 
 const app = express()
@@ -100,6 +103,7 @@ app.get('/health', (_req, res) => {
 
 // Public: platform feature flags (no secrets — drives nav visibility)
 app.get('/api/features', getPublicFeatures)
+app.get('/api/platform', getPublicPlatform)
 app.get('/api/tickers', getPublicTickers)
 app.get('/api/pricing', getPublicPricing)
 app.use('/api/legal', legalRouter)
@@ -117,6 +121,7 @@ app.use('/api/admin/agent-prompts', requireAuth, requireAdmin, adminAgentPrompts
 app.use('/api/admin/tickers', requireAuth, requireAdmin, adminTickersRouter)
 app.use('/api/admin/pricing', requireAuth, requireAdmin, adminPricingRouter)
 app.use('/api/admin/legal', requireAuth, requireAdmin, adminLegalRouter)
+app.use('/api/admin/platform', requireAuth, requireAdmin, adminPlatformRouter)
 app.use('/api/admin/feedback', requireAuth, requireAdmin, adminFeedbackRouter)
 
 // Protected: product event tracking (page views, etc.)
@@ -276,6 +281,11 @@ async function startServer() {
     await ensureLegalDocuments()
   } catch (err) {
     console.warn('⚠️  Legal document seeding failed:', err)
+  }
+  try {
+    await ensurePlatformSettings()
+  } catch (err) {
+    console.warn('⚠️  Platform settings seeding failed:', err)
   }
 
   server.listen(port, () => {

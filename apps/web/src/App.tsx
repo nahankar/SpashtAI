@@ -152,6 +152,7 @@ function Navbar() {
   const { user, isAdmin, logout } = useAuth()
   const { isVisible, isAccessible, getFlag } = useFeatureFlags()
   const [pricingEnabled, setPricingEnabled] = useState(false)
+  const [signupsPaused, setSignupsPaused] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const location = useLocation()
 
@@ -165,6 +166,10 @@ function Navbar() {
       .then((r) => r.json())
       .then((d) => setPricingEnabled(Boolean(d.enabled)))
       .catch(() => setPricingEnabled(false))
+    fetch(`${API}/api/platform`)
+      .then((r) => r.json())
+      .then((d) => setSignupsPaused(Boolean(d.signupsPaused)))
+      .catch(() => setSignupsPaused(false))
   }, [])
 
   function NavFeatureLink({
@@ -234,7 +239,9 @@ function Navbar() {
           ) : (
             <>
               <Link className="hover:underline" to="/auth/login">Sign In</Link>
-              <Link className="hover:underline" to="/auth/register">Signup</Link>
+              {!signupsPaused && (
+                <Link className="hover:underline" to="/auth/register">Signup</Link>
+              )}
             </>
           )}
         </nav>
@@ -279,7 +286,9 @@ function Navbar() {
           ) : (
             <>
               <Link className={navLinkClass} to="/auth/login" onClick={() => setMobileOpen(false)}>Sign In</Link>
-              <Link className={navLinkClass} to="/auth/register" onClick={() => setMobileOpen(false)}>Signup</Link>
+              {!signupsPaused && (
+                <Link className={navLinkClass} to="/auth/register" onClick={() => setMobileOpen(false)}>Signup</Link>
+              )}
             </>
           )}
         </div>

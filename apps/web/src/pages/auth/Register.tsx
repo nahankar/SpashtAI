@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useState, useEffect, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -21,8 +21,26 @@ export function Register() {
   const [pincode, setPincode] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [signupsPaused, setSignupsPaused] = useState(false)
+  const [pausedMessage, setPausedMessage] = useState('')
+  const [checkingPlatform, setCheckingPlatform] = useState(true)
   const { register, loginWithGoogle } = useAuth()
   const navigate = useNavigate()
+
+  useEffect(() => {
+    const API = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
+    fetch(`${API}/api/platform`)
+      .then((r) => r.json())
+      .then((d) => {
+        setSignupsPaused(Boolean(d.signupsPaused))
+        setPausedMessage(
+          d.signupsPausedMessage ||
+            'New signups are temporarily paused. Please check back soon.',
+        )
+      })
+      .catch(() => setSignupsPaused(false))
+      .finally(() => setCheckingPlatform(false))
+  }, [])
 
   async function handleGoogleCredential(credential: string) {
     const user = await loginWithGoogle(credential)
@@ -79,6 +97,22 @@ export function Register() {
           <CardDescription>Start improving your communication with <BrandName size="sm" className="inline" showBeta={false} /></CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {checkingPlatform ? (
+            <p className="text-center text-sm text-muted-foreground">Loading…</p>
+          ) : signupsPaused ? (
+            <div className="space-y-4 text-center">
+              <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-foreground">
+                {pausedMessage}
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Already have an account?{' '}
+                <Link to="/auth/login" className="text-foreground font-medium hover:underline">
+                  Sign in
+                </Link>
+              </p>
+            </div>
+          ) : (
+            <>
           <GoogleSignInButton
             label="signup_with"
             onCredential={handleGoogleCredential}
@@ -210,6 +244,8 @@ export function Register() {
               Sign in
             </Link>
           </div>
+            </>
+          )}
         </CardContent>
       </Card>
     </div>

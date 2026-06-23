@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useState, useEffect, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { Card, CardContent, CardHeader, CardDescription } from '@/components/ui/card'
@@ -13,8 +13,17 @@ export function Login() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [signupsPaused, setSignupsPaused] = useState(false)
   const { login, loginWithGoogle } = useAuth()
   const navigate = useNavigate()
+
+  useEffect(() => {
+    const API = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
+    fetch(`${API}/api/platform`)
+      .then((r) => r.json())
+      .then((d) => setSignupsPaused(Boolean(d.signupsPaused)))
+      .catch(() => setSignupsPaused(false))
+  }, [])
 
   async function handleGoogleCredential(credential: string) {
     const user = await loginWithGoogle(credential)
@@ -113,10 +122,14 @@ export function Login() {
           </form>
 
           <div className="text-center text-sm text-muted-foreground">
-            Don&apos;t have an account?{' '}
-            <Link to="/auth/register" className="text-foreground font-medium hover:underline">
-              Signup
-            </Link>
+            {!signupsPaused && (
+              <>
+                Don&apos;t have an account?{' '}
+                <Link to="/auth/register" className="text-foreground font-medium hover:underline">
+                  Signup
+                </Link>
+              </>
+            )}
           </div>
         </CardContent>
       </Card>

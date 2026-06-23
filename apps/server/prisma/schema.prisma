@@ -502,6 +502,14 @@ model PlatformTicker {
   updatedAt DateTime @updatedAt
 }
 
+model PlatformSettings {
+  id                   String   @id @default("default")
+  signupsPaused        Boolean  @default(false)
+  signupsPausedMessage String?  @db.Text
+  updatedBy            String?
+  updatedAt            DateTime @updatedAt
+}
+
 model PricingSettings {
   id             String  @id @default("default")
   enabled        Boolean @default(false)

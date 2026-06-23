@@ -8,12 +8,24 @@ import { authLimiter } from '../middleware/rate-limit'
 import { sendEmail, buildPasswordResetEmail } from '../lib/email'
 import { verifyGoogleIdToken } from '../lib/google-auth'
 import { validateProfileFields, resolveProfileLocation, toAuthUser } from '../lib/profile'
+import { areSignupsPaused, getSignupsPausedMessage } from '../lib/platformSettings'
 
 const router = Router()
+
+async function rejectIfSignupsPaused(res: Response): Promise<boolean> {
+  if (!(await areSignupsPaused())) return false
+  res.status(403).json({
+    error: 'signups_paused',
+    message: await getSignupsPausedMessage(),
+  })
+  return true
+}
 
 // POST /api/auth/register
 router.post('/register', authLimiter, async (req: Request, res: Response) => {
   try {
+    if (await rejectIfSignupsPaused(res)) return
+
     const {
       email,
       password,
@@ -191,6 +203,14 @@ router.post('/google', authLimiter, async (req: Request, res: Response) => {
         },
       })
     } else {
+      if (await areSignupsPaused()) {
+        res.status(403).json({
+          error: 'signups_paused',
+          message: await getSignupsPausedMessage(),
+        })
+        return
+      }
+
       user = await prisma.user.create({
         data: {
           email: googleUser.email,
