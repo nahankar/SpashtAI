@@ -98,7 +98,17 @@ sudo chmod 600 /etc/ssl/cloudflare/spasht.ai.key
 
 ### Why LiveKit is grey-cloud
 
-Cloudflare’s HTTP proxy does not carry WebRTC UDP. `livekit.spasht.ai` must resolve directly to EC2. Nginx on `:443` still terminates TLS using the same Cloudflare origin certificate.
+Cloudflare’s HTTP proxy does not carry WebRTC UDP. `livekit.spasht.ai` must resolve **directly** to EC2 (grey cloud / DNS only).
+
+**Important:** Grey-cloud means the **browser** connects to EC2 for WSS — not Cloudflare. You cannot use the Cloudflare **origin** certificate on `livekit.spasht.ai`; browsers will reject it with `ERR_CERT_AUTHORITY_INVALID`. Use a **Let’s Encrypt** cert on the instance instead:
+
+```bash
+cd /opt/spashtai
+chmod +x infra/ec2/setup-livekit-tls.sh
+CERTBOT_EMAIL=info@spasht.ai ./infra/ec2/setup-livekit-tls.sh
+```
+
+Keep Cloudflare origin certs for **proxied** hosts only (`spasht.ai`, `api.spasht.ai`).
 
 ---
 
@@ -291,7 +301,7 @@ git pull
 | Symptom | Check |
 |---------|-------|
 | 502 on API | `pm2 logs spashtai-api`, `DATABASE_URL`, migrations |
-| Elevate won’t connect | LiveKit grey-cloud DNS, UDP ports, `LIVEKIT_URL=wss://...` |
+| Elevate won’t connect / stuck Paused | `ERR_CERT_AUTHORITY_INVALID` on `livekit.spasht.ai` → run `./infra/ec2/setup-livekit-tls.sh` (LE cert). Also: grey-cloud DNS, UDP ports 7882 + 50000–60000 |
 | Agent not joining room | `pm2 logs spashtai-agent`, AWS creds, LiveKit keys match |
 | WebRTC fails behind CF | Confirm `livekit` is **not** orange-cloud proxied |
 | Delivery WPM empty | `GENTLE_URL`, `docker ps` gentle, CPU load on t3.large |

@@ -44,10 +44,15 @@ sudo rsync -a --delete apps/web/dist/ /var/www/spashtai/
 
 echo "==> Nginx vhosts"
 sudo cp infra/ec2/nginx/cloudflare-real-ip.conf /etc/nginx/snippets/cloudflare-real-ip.conf
-sudo cp infra/ec2/nginx/spasht.ai.conf infra/ec2/nginx/api.spasht.ai.conf infra/ec2/nginx/livekit.spasht.ai.conf /etc/nginx/sites-available/
+sudo cp infra/ec2/nginx/spasht.ai.conf infra/ec2/nginx/api.spasht.ai.conf /etc/nginx/sites-available/
 sudo ln -sf /etc/nginx/sites-available/spasht.ai.conf /etc/nginx/sites-enabled/spasht.ai.conf
 sudo ln -sf /etc/nginx/sites-available/api.spasht.ai.conf /etc/nginx/sites-enabled/api.spasht.ai.conf
-sudo ln -sf /etc/nginx/sites-available/livekit.spasht.ai.conf /etc/nginx/sites-enabled/livekit.spasht.ai.conf
+if [[ -f /etc/letsencrypt/live/livekit.spasht.ai/fullchain.pem ]]; then
+  sudo cp infra/ec2/nginx/livekit.spasht.ai.conf /etc/nginx/sites-available/livekit.spasht.ai.conf
+  sudo ln -sf /etc/nginx/sites-available/livekit.spasht.ai.conf /etc/nginx/sites-enabled/livekit.spasht.ai.conf
+else
+  echo "Warning: livekit TLS cert missing — run ./infra/ec2/setup-livekit-tls.sh (Elevate WSS will fail until then)" >&2
+fi
 sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t
 sudo systemctl reload nginx
