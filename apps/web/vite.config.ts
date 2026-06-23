@@ -14,5 +14,8 @@ export default defineConfig({
     host: '0.0.0.0', // listen on IPv4 + IPv6 so Chrome and Cursor both work
     port: 5173,
     strictPort: true,
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
+    },
   },
 })

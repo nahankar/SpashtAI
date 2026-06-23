@@ -113,6 +113,7 @@ Required: `googleId`, optional `passwordHash`, profile fields.
 | Button disabled "not configured" | Rebuild web with `VITE_GOOGLE_CLIENT_ID` |
 | `Invalid token` on server | Client ID mismatch between web and server |
 | CORS errors | Set `FRONTEND_URL` to match browser URL |
+| `COOP policy would block postMessage` | Set `Cross-Origin-Opener-Policy: same-origin-allow-popups` on `spasht.ai` (Nginx config). If Cloudflare adds `same-origin` COOP, remove or override it in Transform Rules |
 
 ## Optional follow-ups
 
