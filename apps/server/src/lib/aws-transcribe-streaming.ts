@@ -12,15 +12,13 @@ import {
 import { readFileSync, existsSync, unlinkSync } from 'fs'
 import { execSync } from 'child_process'
 import type { TranscriptionResult, TranscribedSegment } from './aws-transcribe'
+import { awsCredentialsConfig } from './awsCredentials'
 
 const region = process.env.AWS_REGION || process.env.BEDROCK_REGION || 'us-east-1'
 
 const streamingClient = new TranscribeStreamingClient({
   region,
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-  },
+  ...awsCredentialsConfig(),
 })
 
 function cleanupTemp(tempFile?: string) {

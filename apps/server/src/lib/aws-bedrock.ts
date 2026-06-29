@@ -2,15 +2,13 @@ import {
   BedrockRuntimeClient,
   InvokeModelCommand,
 } from '@aws-sdk/client-bedrock-runtime'
+import { awsCredentialsConfig } from './awsCredentials'
 
 const BEDROCK_MODEL_ID = process.env.BEDROCK_REPLAY_MODEL_ID || 'amazon.nova-pro-v1:0'
 
 const client = new BedrockRuntimeClient({
   region: process.env.BEDROCK_REGION || process.env.AWS_REGION || 'us-east-1',
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-  },
+  ...awsCredentialsConfig(),
 })
 
 interface ReplayContext {

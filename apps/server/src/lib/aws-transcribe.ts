@@ -6,6 +6,7 @@ import {
 } from '@aws-sdk/client-transcribe'
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
 import { readFile } from 'fs/promises'
+import { awsCredentialsConfig } from './awsCredentials'
 
 const region = process.env.AWS_REGION || 'us-east-1'
 const isDev = process.env.NODE_ENV !== 'production'
@@ -16,18 +17,12 @@ const S3_BUCKET = isDev ? S3_BUCKET_DEV : S3_BUCKET_PROD
 
 const transcribeClient = new TranscribeClient({
   region,
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-  },
+  ...awsCredentialsConfig(),
 })
 
 const s3Client = new S3Client({
   region,
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-  },
+  ...awsCredentialsConfig(),
 })
 
 export interface TranscribedSegment {
