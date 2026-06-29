@@ -240,7 +240,7 @@ export function ProgressPulseCard() {
       </CardHeader>
       <CardContent className="grid gap-4">
         {/* Pulse Summary */}
-        <div className="rounded-lg bg-muted/50 px-4 py-3">
+        <div className="px-1 py-1">
           <p className="text-sm text-foreground">{highlightSkillTerms(pulseSummary)}</p>
           {predictiveInsight && (
             <div className="mt-2 flex items-start gap-1.5 rounded-md border border-blue-200 bg-blue-50/60 px-3 py-2">

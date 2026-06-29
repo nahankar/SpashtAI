@@ -11,11 +11,20 @@ import {
 
 const router = Router();
 
+// Each download action is gated by BOTH a "hide" view flag (content restricted)
+// and an "enable" capability flag (admin must turn the action on). The action
+// is allowed only when it is not hidden AND it is enabled.
+const EXPORT_FLAG_MAP = {
+  hideTranscriptText: 'enableTxtExport',
+  hideTranscriptJsonExport: 'enableJsonExport',
+  hideAudioDownload: 'enableAudioExport',
+} as const;
+
 async function guardSessionExport(
   req: Request,
   res: Response,
   sessionId: string,
-  flag: 'hideTranscriptText' | 'hideTranscriptJsonExport' | 'hideAudioDownload',
+  flag: keyof typeof EXPORT_FLAG_MAP,
   message: string,
 ) {
   const ownerId = await getElevateSessionOwnerId(sessionId);
@@ -25,6 +34,10 @@ async function guardSessionExport(
     return false;
   }
   if (flags[flag]) {
+    exportDenied(res, message);
+    return false;
+  }
+  if (!flags[EXPORT_FLAG_MAP[flag]]) {
     exportDenied(res, message);
     return false;
   }
@@ -137,35 +150,25 @@ router.get('/sessions/:sessionId/audio', async (req, res) => {
     if (!(await guardSessionExport(req, res, sessionId, 'hideAudioDownload', 'Audio download is disabled for your account'))) {
       return;
     }
-    const environment = process.env.ENVIRONMENT || 'development';
-    
-    if (environment === 'development') {
-      // List local audio files
-      const audioDir = path.join(process.cwd(), '../../temp_audio');
-      
-      try {
-        const files = await fs.readdir(audioDir);
-        const sessionFiles = files.filter(file => 
-          file.includes(sessionId) && (file.endsWith('.wav') || file.endsWith('.mp3'))
-        );
-        
-        const audioFiles = sessionFiles.map(file => ({
-          filename: file,
-          url: `/api/downloads/sessions/${sessionId}/audio/${file}`,
-          size: null // Could add file size if needed
-        }));
-        
-        res.json({ audioFiles });
-      } catch (error) {
-        res.json({ audioFiles: [] });
-      }
-    } else {
-      // S3 implementation would go here
-      res.json({ 
-        audioFiles: [],
-        message: 'S3 audio listing not implemented yet'
-      });
-    }
+    // Source of truth is the SessionRecording table (browser/egress uploads),
+    // NOT a hard-coded temp dir. The old code scanned ../../temp_audio for
+    // *.wav/*.mp3 only, so client-captured *.webm recordings (the dev default)
+    // were never listed → "No user audio file found".
+    const recordings = await prisma.sessionRecording.findMany({
+      where: { sessionId, status: 'completed' },
+      orderBy: { createdAt: 'desc' },
+    });
+    const audioFiles = recordings
+      .filter((r) => r.filePath)
+      .map((r) => ({
+        filename: path.basename(r.filePath as string),
+        url: `/api/downloads/sessions/${sessionId}/audio/${encodeURIComponent(
+          path.basename(r.filePath as string),
+        )}`,
+        size: r.fileSize ?? null,
+        recordingType: r.recordingType,
+      }));
+    res.json({ audioFiles });
   } catch (error) {
     console.error('Error listing audio files:', error);
     res.status(500).json({ error: 'Failed to list audio files' });
@@ -179,34 +182,39 @@ router.get('/sessions/:sessionId/audio/:filename', async (req, res) => {
     if (!(await guardSessionExport(req, res, sessionId, 'hideAudioDownload', 'Audio download is disabled for your account'))) {
       return;
     }
-    const environment = process.env.ENVIRONMENT || 'development';
-    
     // Validate filename to prevent path traversal
-    const safeName = path.basename(filename);
-    if (!safeName.includes(sessionId)) {
-      return res.status(403).json({ error: 'Invalid file access' });
+    const safeName = path.basename(decodeURIComponent(filename));
+
+    // Resolve via the SessionRecording table so the absolute upload path (any
+    // extension: webm/m4a/wav/...) is served, instead of guessing a temp dir.
+    const recordings = await prisma.sessionRecording.findMany({
+      where: { sessionId, status: 'completed' },
+    });
+    const rec = recordings.find(
+      (r) => r.filePath && path.basename(r.filePath) === safeName,
+    );
+    if (!rec?.filePath) {
+      return res.status(404).json({ error: 'Audio file not found' });
     }
-    
-    if (environment === 'development') {
-      const audioDir = path.join(process.cwd(), '../../temp_audio');
-      const filePath = path.join(audioDir, safeName);
-      
-      try {
-        const stats = await fs.stat(filePath);
-        const fileStream = await fs.readFile(filePath);
-        
-        // Set appropriate headers
-        res.setHeader('Content-Type', 'audio/wav');
-        res.setHeader('Content-Length', stats.size);
-        res.setHeader('Content-Disposition', `attachment; filename="${safeName}"`);
-        
-        res.send(fileStream);
-      } catch (error) {
-        res.status(404).json({ error: 'Audio file not found' });
-      }
-    } else {
-      // S3 implementation would go here
-      res.status(501).json({ error: 'S3 audio download not implemented yet' });
+
+    const mimeByExt: Record<string, string> = {
+      wav: 'audio/wav',
+      mp3: 'audio/mpeg',
+      m4a: 'audio/mp4',
+      mp4: 'video/mp4',
+      webm: 'audio/webm',
+      ogg: 'audio/ogg',
+    };
+    const ext = safeName.split('.').pop()?.toLowerCase();
+    try {
+      const stats = await fs.stat(rec.filePath);
+      const fileBuffer = await fs.readFile(rec.filePath);
+      res.setHeader('Content-Type', (ext && mimeByExt[ext]) || 'application/octet-stream');
+      res.setHeader('Content-Length', stats.size);
+      res.setHeader('Content-Disposition', `attachment; filename="${safeName}"`);
+      res.send(fileBuffer);
+    } catch (error) {
+      res.status(404).json({ error: 'Audio file not found' });
     }
   } catch (error) {
     console.error('Error downloading audio file:', error);

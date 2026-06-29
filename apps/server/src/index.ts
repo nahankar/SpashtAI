@@ -36,6 +36,12 @@ import {
   deleteSessionAudio,
   getAudioAnalytics
 } from './routes/audio'
+import { getSessionTurns, saveSessionTurnsForAgent } from './routes/turns'
+import {
+  recordingUpload,
+  uploadSessionRecording,
+  streamSessionRecording,
+} from './routes/recordings'
 import {
   saveAdvancedMetrics,
   getAdvancedMetrics
@@ -44,7 +50,8 @@ import {
   analyzeSession,
   getSkillScores,
   getCoachingInsights,
-  getCommunicationSignals
+  getCommunicationSignals,
+  getTurnSuggestions
 } from './routes/analytics'
 import {
   getProgressPulse,
@@ -61,6 +68,7 @@ import adminUsersRouter from './routes/admin/users'
 import adminAnalyticsRouter from './routes/admin/analytics'
 import adminSystemRouter from './routes/admin/system'
 import adminVoiceConfigRouter, { ensurePresets as ensureVoicePresets } from './routes/admin/voice-config'
+import adminAnalysisConfigRouter from './routes/admin/analysis-config'
 import adminFeatureFlagsRouter from './routes/admin/feature-flags'
 import adminAgentPromptsRouter, { ensurePrompts } from './routes/admin/agent-prompts'
 import internalAgentPromptsRouter from './routes/internal/agent-prompts'
@@ -116,6 +124,7 @@ app.use('/api/admin/users', requireAuth, requireAdmin, adminUsersRouter)
 app.use('/api/admin/analytics', requireAuth, requireAdmin, adminAnalyticsRouter)
 app.use('/api/admin/system', requireAuth, requireAdmin, adminSystemRouter)
 app.use('/api/admin/voice-config', requireAuth, requireAdmin, adminVoiceConfigRouter)
+app.use('/api/admin/analysis-config', requireAuth, requireAdmin, adminAnalysisConfigRouter)
 app.use('/api/admin/feature-flags', requireAuth, requireAdmin, adminFeatureFlagsRouter)
 app.use('/api/admin/agent-prompts', requireAuth, requireAdmin, adminAgentPromptsRouter)
 app.use('/api/admin/tickers', requireAuth, requireAdmin, adminTickersRouter)
@@ -184,16 +193,32 @@ app.get('/sessions/:sessionId/audio/:audioId/url', requireAuth, generateAudioUrl
 app.delete('/sessions/:sessionId/audio/:audioId', requireAuth, deleteSessionAudio)
 app.get('/audio/analytics', requireAuth, getAudioAnalytics)
 
+// Protected: client-captured recording upload + streamable playback (replay)
+app.post(
+  '/sessions/:sessionId/recording/upload',
+  requireAuth,
+  recordingUpload.single('audio'),
+  uploadSessionRecording,
+)
+app.get('/sessions/:sessionId/recording/stream', requireAuth, streamSessionRecording)
+
+// Protected: per-turn replay records (GET user, POST agent-internal)
+app.get('/sessions/:sessionId/turns', requireAuth, getSessionTurns)
+app.post('/internal/sessions/:sessionId/turns', saveSessionTurnsForAgent)
+
 // Protected: advanced metrics
 // POST is agent-callable; GET stays user-only.
 app.post('/sessions/:sessionId/advanced-metrics', requireAuthOrAgent, saveAdvancedMetrics)
 app.get('/sessions/:sessionId/advanced-metrics', requireAuth, getAdvancedMetrics)
 
 // Protected: analytics engine v2
-app.post('/sessions/:sessionId/analyze', requireAuth, analyzeSession)
+// Accepts the agent's internal token so analytics run at session end even if
+// the user closes the tab before the frontend can trigger /analyze.
+app.post('/sessions/:sessionId/analyze', requireAuthOrAgent, analyzeSession)
 app.get('/sessions/:sessionId/skill-scores', requireAuth, getSkillScores)
 app.get('/sessions/:sessionId/coaching-insights', requireAuth, getCoachingInsights)
 app.get('/sessions/:sessionId/communication-signals', requireAuth, getCommunicationSignals)
+app.get('/sessions/:sessionId/turn-suggestions', requireAuth, getTurnSuggestions)
 
 // Protected: My Progress Pulse
 app.get('/api/progress-pulse', requireAuth, getProgressPulse)
@@ -233,6 +258,13 @@ const port = process.env.PORT ? Number(process.env.PORT) : 4000
 // Create HTTP server and WebSocket server for real-time updates
 const server = createServer(app)
 const wss = new WebSocketServer({ server })
+
+// Without an 'error' listener the WebSocketServer (attached to the HTTP server)
+// rethrows a fatal listen error (e.g. EADDRINUSE), crashing the process. Handle
+// it so a transient port conflict during a dev hot-reload is recoverable.
+wss.on('error', (err) => {
+  console.warn('⚠️  WebSocket server error:', (err as Error)?.message || err)
+})
 
 // Set up WebSocket server for conversation routes
 setWebSocketServer(wss)
@@ -288,10 +320,45 @@ async function startServer() {
     console.warn('⚠️  Platform settings seeding failed:', err)
   }
 
+  // During `tsx watch` hot-reloads the previous process can still hold the port
+  // for a brief moment when the new one starts. Instead of crashing on
+  // EADDRINUSE, retry a few times so the reload settles on its own.
+  let listenRetries = 0
+  const MAX_LISTEN_RETRIES = 10
+  const LISTEN_RETRY_DELAY_MS = 400
+
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE' && listenRetries < MAX_LISTEN_RETRIES) {
+      listenRetries += 1
+      console.warn(
+        `⚠️  Port ${port} busy (likely a reload in progress) — retry ${listenRetries}/${MAX_LISTEN_RETRIES} in ${LISTEN_RETRY_DELAY_MS}ms`,
+      )
+      setTimeout(() => {
+        server.close()
+        server.listen(port)
+      }, LISTEN_RETRY_DELAY_MS)
+      return
+    }
+    console.error('Server error:', err)
+    process.exit(1)
+  })
+
   server.listen(port, () => {
+    listenRetries = 0
     console.log(`Server listening on http://localhost:${port}`)
     console.log(`WebSocket server ready for real-time conversation updates`)
   })
+
+  // Release the port promptly on shutdown/reload so the next process can bind
+  // immediately (prevents the EADDRINUSE reload race in the first place).
+  const shutdown = (signal: string) => {
+    console.log(`${signal} received — shutting down server gracefully`)
+    server.close(() => process.exit(0))
+    // Don't hang forever if connections are slow to drain.
+    setTimeout(() => process.exit(0), 3000).unref()
+  }
+  process.once('SIGTERM', () => shutdown('SIGTERM'))
+  process.once('SIGINT', () => shutdown('SIGINT'))
 }
 
 startServer().catch((err) => {

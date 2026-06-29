@@ -39,6 +39,7 @@ import {
 import type { ReplayResultData } from '@/hooks/useReplaySession'
 import { inferFocusArea, EXERCISE_PREVIEWS, getFocusAreaLabel } from '@/lib/focus-areas'
 import { generateSessionPdf, type SessionReport } from '@/lib/generate-session-pdf'
+import { buildReportExtras } from '@/lib/report-extras'
 import { FileText } from 'lucide-react'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
@@ -1268,6 +1269,17 @@ export function ReplayResults() {
     setPdfLoading(true)
     try {
       const { session: s, result: r } = data
+
+      // Standardized report extras (summary + Progress Pulse + Next Steps),
+      // shared verbatim with the Elevate PDF so both reports stay consistent.
+      const extras = await buildReportExtras({
+        apiBase: API_BASE_URL,
+        headers: getAuthHeaders(),
+        scores: data.skillScores?.scores ?? {},
+        overallScore: r.overallScore,
+        coaching: data.coachingInsights ?? null,
+      })
+
       const pdfReport: SessionReport = {
         title: s.sessionName || s.meetingType,
         subtitle: `${s.meetingType} — ${s.userRole}`,
@@ -1277,7 +1289,9 @@ export function ReplayResults() {
           ...(s.meetingDate ? [{ label: 'Meeting Date', value: new Date(s.meetingDate).toLocaleDateString() }] : []),
           { label: 'Role', value: s.userRole },
           { label: 'Status', value: s.status },
+          { label: 'Generated', value: new Date().toLocaleString() },
         ],
+        summary: extras.summary,
         overallScore: r.overallScore,
         skillScores: data.skillScores ?? null,
         coachingInsights: data.coachingInsights ?? null,
@@ -1289,6 +1303,7 @@ export function ReplayResults() {
         metrics: [
           {
             section: 'Delivery Quality',
+            description: 'Your pace, fillers and fluency across this meeting',
             items: [
               { label: 'Words Per Minute', value: String(r.wordsPerMinute), unit: 'WPM' },
               { label: 'Filler Words', value: String(r.fillerWordCount) },
@@ -1300,6 +1315,7 @@ export function ReplayResults() {
           },
           {
             section: 'Collaboration & Interaction',
+            description: 'How you shared the floor and engaged others',
             items: [
               { label: 'Speaking Share', value: `${r.speakingPercentage.toFixed(0)}`, unit: '%' },
               { label: 'Questions Asked', value: String(r.questionsAsked) },
@@ -1315,10 +1331,8 @@ export function ReplayResults() {
         strengths: r.strengths,
         improvements: r.improvements,
         recommendations: r.recommendations,
-        transcript: r.transcriptText,
-        structuredTranscript: Array.isArray(r.structuredTranscript)
-          ? (r.structuredTranscript as { speaker: string; text: string }[])
-          : undefined,
+        progressPulse: extras.progressPulse.length ? extras.progressPulse : null,
+        nextSteps: extras.nextSteps.length ? extras.nextSteps : null,
         meetingImpact: computeMeetingImpact(r, data.coachingInsights),
       }
       await generateSessionPdf(pdfReport)
@@ -1352,12 +1366,10 @@ export function ReplayResults() {
             <ArrowLeft className="h-3.5 w-3.5" /> {backLabel}
           </Link>
           <h1 className="text-2xl font-bold">{session.sessionName || 'Replay Results'}</h1>
-          {session.participantName && (
-            <p className="mt-0.5 text-sm font-medium text-primary">
-              Analysis for: {session.participantName}
-            </p>
-          )}
-          <div className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+            {session.participantName && (
+              <span className="font-medium text-primary">Analysis for {session.participantName}</span>
+            )}
             <Badge variant="secondary">{session.meetingType}</Badge>
             <span>{session.userRole}</span>
             {session.meetingDate && (
@@ -1393,14 +1405,16 @@ export function ReplayResults() {
               <TrendingUp className="mr-2 h-4 w-4" /> {pulseStatus === 'skipped' ? 'Track in Pulse' : 'Track in Pulse'}
             </Button>
           )}
-          <Button variant="outline" size="sm" onClick={() => setDialogOpen(true)}>
-            <RefreshCw className="mr-2 h-4 w-4" /> Re-analyze
-          </Button>
+          {exportFlags.enableReprocess && (
+            <Button variant="outline" size="sm" onClick={() => setDialogOpen(true)}>
+              <RefreshCw className="mr-2 h-4 w-4" /> Re-analyze
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={handleExportPdf} disabled={pdfLoading}>
             {pdfLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
             Export PDF
           </Button>
-          {!exportFlags.hideTranscriptJsonExport && (
+          {exportFlags.enableJsonExport && (
             <Button variant="outline" size="sm" onClick={handleDownload}>
               <Download className="mr-2 h-4 w-4" /> Export JSON
             </Button>

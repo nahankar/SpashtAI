@@ -123,6 +123,11 @@ class LivePacingTracker:
         # the last accepted text so double-fires are silently dropped.
         self._last_accepted_hash: int | None = None
         self._last_utterance: UtteranceSnapshot | None = None
+        # Set once the STT stream delivers real word/segment timestamps
+        # (AWS Transcribe). When active, the VAD-paired `on_user_transcript`
+        # accumulation is suppressed so the two sources never double-count and
+        # so we never fall back to the 150-WPM estimate.
+        self._word_timing_active: bool = False
 
     # ── Event hooks ──────────────────────────────────────────────────────
 
@@ -150,6 +155,10 @@ class LivePacingTracker:
         the same text.
         """
         if not is_final:
+            return
+        if self._word_timing_active:
+            # Real STT timestamps are driving pacing — ignore the VAD-paired
+            # path to avoid double-counting and the 150-WPM estimate fallback.
             return
         text = (transcript or "").strip()
         if not text:
@@ -193,6 +202,43 @@ class LivePacingTracker:
                 (self._total_words / self._total_seconds) * 60 if self._total_seconds > 0 else 0.0,
             )
 
+    def ingest_measured_final(self, text: str, words: int, seconds: float | None) -> None:
+        """Authoritative pacing from real STT word/segment timestamps.
+
+        `seconds` is the measured speech span (segment end - start) from AWS
+        Transcribe. Unlike `on_user_transcript`, this never estimates: if no
+        valid duration is present the segment is skipped rather than guessed.
+        Once any measured segment lands, the VAD-paired path is suppressed.
+        """
+        text = (text or "").strip()
+        if not text or words <= 0:
+            return
+        if seconds is None or seconds <= 0:
+            return
+        text_hash = hash(text)
+        with self._lock:
+            self._word_timing_active = True
+            if self._last_accepted_hash == text_hash:
+                logger.debug("live-pacing: dedup-dropped duplicate measured final")
+                return
+            self._last_accepted_hash = text_hash
+
+            self._total_words += words
+            self._total_seconds += seconds
+            self._samples += 1
+            utterance_wpm = (words / seconds) * 60 if seconds > 0 else 0.0
+            self._last_utterance = UtteranceSnapshot(
+                words=words,
+                seconds=seconds,
+                wpm=utterance_wpm,
+                qualitative=_qualitative_pace(utterance_wpm),
+            )
+            logger.info(
+                "⏱️  live-pacing(measured): +%d words in %.2fs (cum %d words / %.2fs / %.1f WPM)",
+                words, seconds, self._total_words, self._total_seconds,
+                (self._total_words / self._total_seconds) * 60 if self._total_seconds > 0 else 0.0,
+            )
+
     # ── Read APIs ────────────────────────────────────────────────────────
 
     def get_live_metrics(self) -> LivePacingSnapshot:
@@ -232,3 +278,5 @@ class LivePacingTracker:
             self._total_seconds = 0.0
             self._samples = 0
             self._last_utterance = None
+            self._last_accepted_hash = None
+            self._word_timing_active = False

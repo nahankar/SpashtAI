@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { BrowserRouter, Link, Route, Routes, useLocation } from 'react-router-dom'
+import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { Menu, X } from 'lucide-react'
 import { AuthProvider } from '@/contexts/AuthContext'
 import { useAuth } from '@/hooks/useAuth'
@@ -8,9 +8,12 @@ import { Home } from '@/pages/Home'
 import { Elevate } from '@/pages/Elevate'
 import { Replay } from '@/pages/Replay'
 import { ReplayResults } from '@/pages/ReplayResults'
+import { SessionReplay } from '@/pages/SessionReplay'
 import { History } from '@/pages/History'
 import { ProgressPulse } from '@/pages/ProgressPulse'
+import { Landing } from '@/pages/Landing'
 import { Login } from '@/pages/auth/Login'
+import { AdminLogin } from '@/pages/auth/AdminLogin'
 import { Register } from '@/pages/auth/Register'
 import { ForgotPassword } from '@/pages/auth/ForgotPassword'
 import { ResetPassword } from '@/pages/auth/ResetPassword'
@@ -66,11 +69,16 @@ function AppBreadcrumbs() {
   const isReplayResults = path.startsWith('/replay/') && path !== '/replay'
   const isFeedbackDetail =
     path.startsWith('/feedback/') && path !== '/feedback' && path !== '/feedback/new'
+  const isElevatePlayback = path.startsWith('/elevate/playback/')
+  const isElevateResults =
+    path === '/elevate' && new URLSearchParams(location.search).has('session')
 
   const currentLabel =
+    (isElevateResults ? 'Results' : null) ||
     routeLabelMap[path] ||
     (isReplayResults ? 'Results' : null) ||
     (isFeedbackDetail ? 'Feedback Details' : null) ||
+    (isElevatePlayback ? 'Playback' : null) ||
     path
       .split('/')
       .filter(Boolean)
@@ -90,6 +98,18 @@ function AppBreadcrumbs() {
         <>
           <span>/</span>
           <Link to="/feedback" className="hover:text-foreground transition-colors">Feedback</Link>
+        </>
+      )}
+      {isElevatePlayback && (
+        <>
+          <span>/</span>
+          <Link to="/history?tab=elevate" className="hover:text-foreground transition-colors">Sessions</Link>
+        </>
+      )}
+      {isElevateResults && (
+        <>
+          <span>/</span>
+          <Link to="/elevate" className="hover:text-foreground transition-colors">Elevate</Link>
         </>
       )}
       {path !== '/' && (
@@ -297,6 +317,23 @@ function Navbar() {
   )
 }
 
+/**
+ * Root route: a public marketing landing page for signed-out visitors, and the
+ * authenticated dashboard for signed-in users.
+ */
+function HomeRoute() {
+  const { user, loading } = useAuth()
+  if (loading) return null
+  if (!user) return <Landing />
+  if (user.needsProfileCompletion) return <Navigate to="/auth/complete-profile" replace />
+  return (
+    <main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8">
+      <AppBreadcrumbs />
+      <Home />
+    </main>
+  )
+}
+
 function AppRoutes() {
   const { user, loading } = useAuth()
   usePageTracking()
@@ -307,8 +344,12 @@ function AppRoutes() {
       <div className="flex min-h-[calc(100vh-4rem)] flex-col">
         <div className="flex-1">
       <Routes>
+        {/* Root: public landing for signed-out, dashboard for signed-in */}
+        <Route path="/" element={<HomeRoute />} />
+
         {/* Public auth routes */}
         <Route path="/auth/login" element={<Login />} />
+        <Route path="/auth/admin" element={<AdminLogin />} />
         <Route path="/auth/register" element={<Register />} />
         <Route path="/auth/forgot-password" element={<ForgotPassword />} />
         <Route path="/auth/reset-password" element={<ResetPassword />} />
@@ -331,12 +372,6 @@ function AppRoutes() {
 
         {/* Protected user routes */}
         <Route element={<ProtectedRoute />}>
-          <Route path="/" element={
-            <main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8">
-              <AppBreadcrumbs />
-              <Home />
-            </main>
-          } />
           <Route path="/replay" element={
             <main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8">
               <AppBreadcrumbs />
@@ -358,6 +393,14 @@ function AppRoutes() {
               <AppBreadcrumbs />
               <FeatureGate feature="elevate">
                 <Elevate />
+              </FeatureGate>
+            </main>
+          } />
+          <Route path="/elevate/playback/:sessionId" element={
+            <main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8">
+              <AppBreadcrumbs />
+              <FeatureGate feature="elevate">
+                <SessionReplay />
               </FeatureGate>
             </main>
           } />

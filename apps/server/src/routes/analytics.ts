@@ -15,6 +15,8 @@ import {
   resolveElevateSessionAudio,
 } from '../analytics/insightGenerator'
 import { saveSkillScoresToPulse } from '../analytics/progressPulse'
+import { generateTurnSuggestions } from '../analytics/turnSuggestions'
+import { getElevateSessionOwnerId, resolveRequestExportFlags } from '../lib/userExportFlags'
 
 const SIGNAL_API_URL = process.env.SIGNAL_API_URL || 'http://localhost:4001'
 const INTERNAL_AGENT_TOKEN =
@@ -89,6 +91,9 @@ export async function analyzeSession(req: Request, res: Response) {
           messages,
           durationSec,
         }),
+        // Never let a slow/contended signal service stall the whole pipeline —
+        // fall back to JS signal extraction instead.
+        signal: AbortSignal.timeout(20000),
       })
 
       if (!signalRes.ok) {
@@ -109,6 +114,36 @@ export async function analyzeSession(req: Request, res: Response) {
 
     // 4. Generate coaching insights (provider: local-audio | bedrock-audio | bedrock-text)
     const audioResolved = await resolveElevateSessionAudio(sessionId)
+
+    // 4b. Acoustic prosody (pitch/energy/voice-quality/pauses) from the user's
+    // recording via the Python signal service (Praat + ffmpeg). Best-effort: the
+    // text signals + scores still stand if the recording or DSP is unavailable.
+    if (audioResolved?.audioPath) {
+      try {
+        const prosodyRes = await fetch(`${SIGNAL_API_URL}/analyze-prosody`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-internal-agent-token': INTERNAL_AGENT_TOKEN,
+          },
+          body: JSON.stringify({ sessionId, audioPath: audioResolved.audioPath }),
+          // Best-effort: skip prosody rather than block scores/insights persistence.
+          signal: AbortSignal.timeout(25000),
+        })
+        if (prosodyRes.ok) {
+          const data = await prosodyRes.json()
+          if (data?.prosody) {
+            ;(signals as any).prosody = data.prosody
+            console.log(`[analytics] ${sessionId} prosody:`, data.prosody)
+          }
+        } else {
+          console.warn(`[analytics] prosody API ${prosodyRes.status}`)
+        }
+      } catch (prosodyErr: any) {
+        console.warn('[analytics] prosody analysis skipped:', prosodyErr.message)
+      }
+    }
+
     let insights
     try {
       insights = await generateCoachingInsights({
@@ -237,6 +272,34 @@ export async function getCommunicationSignals(req: Request, res: Response) {
     res.json(metrics.communicationSignals)
   } catch (error: any) {
     res.status(500).json({ error: error.message })
+  }
+}
+
+/**
+ * Get a few AI-generated phrasing suggestions for the user's most improvable
+ * turns (powers the "AI suggestion" tooltips in Playback). Best-effort: always
+ * returns 200 with a (possibly empty) list so the UI degrades gracefully.
+ */
+export async function getTurnSuggestions(req: Request, res: Response) {
+  const { sessionId } = req.params
+  try {
+    const ownerId = await getElevateSessionOwnerId(sessionId)
+    const { accessDenied } = await resolveRequestExportFlags(req, ownerId)
+    if (accessDenied) {
+      return res.status(403).json({ error: 'Access denied' })
+    }
+
+    const turns = await prisma.sessionTurn.findMany({
+      where: { sessionId },
+      orderBy: { turnIndex: 'asc' },
+      select: { turnIndex: true, role: true, text: true, metrics: true },
+    })
+
+    const suggestions = await generateTurnSuggestions(sessionId, turns as any)
+    res.json({ suggestions })
+  } catch (error: any) {
+    console.warn('[turn-suggestions] handler error:', error?.message || error)
+    res.json({ suggestions: [] })
   }
 }
 

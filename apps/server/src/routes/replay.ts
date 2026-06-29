@@ -8,6 +8,7 @@ import { prisma } from '../lib/prisma'
 import {
   exportDenied,
   getReplaySessionOwnerId,
+  isPrivilegedRole,
   resolveRequestExportFlags,
   stripReplayTranscriptFields,
 } from '../lib/userExportFlags'
@@ -24,6 +25,7 @@ import {
 } from '../lib/transcript-parser'
 import { calculateReplayMetrics, findMatchingSpeaker } from '../lib/replay-metrics'
 import { analyzeTranscript } from '../lib/aws-bedrock'
+import { getReplayModelId } from '../lib/analysisConfig'
 import { calculateSkillScores, calculateWeightedOverallScore, type TextSignals } from '../analytics/skillScores'
 import {
   generateCoachingInsights,
@@ -262,6 +264,38 @@ router.post(
 
       const files = req.files as Record<string, Express.Multer.File[]> | undefined
       const pastedText: string | undefined = req.body.text
+
+      // Media uploads are plan-gated: audio requires Pro, video requires Ultra
+      // (Ultra is a superset of Pro). Admins are always allowed. Transcript/text
+      // remain free for everyone.
+      const audioUpload = files?.audio?.[0]
+      if (audioUpload) {
+        const isVideo = audioUpload.mimetype.startsWith('video/')
+        let allowed = isPrivilegedRole(req.user?.role)
+        if (!allowed && req.user) {
+          const u = await prisma.user.findUnique({
+            where: { id: req.user.userId },
+            select: { enablePro: true, enableUltra: true },
+          })
+          allowed = isVideo ? !!u?.enableUltra : (!!u?.enablePro || !!u?.enableUltra)
+        }
+        if (!allowed) {
+          // Clean up the temp file(s) multer already wrote to disk.
+          await unlink(audioUpload.path).catch(() => {})
+          if (files?.transcript?.[0]) await unlink(files.transcript[0].path).catch(() => {})
+          return res.status(403).json(
+            isVideo
+              ? {
+                  error: 'Video uploads require the Ultra plan. Upload audio or a transcript instead.',
+                  code: 'ULTRA_REQUIRED',
+                }
+              : {
+                  error: 'Audio uploads require the Pro plan. Upload a transcript or paste text instead.',
+                  code: 'PRO_REQUIRED',
+                },
+          )
+        }
+      }
 
       const uploads: any[] = []
 
@@ -575,16 +609,22 @@ async function processReplaySession(sessionId: string): Promise<void> {
   // ── Step 3: AI analysis via Bedrock ──
 
   const startMs = Date.now()
+  // Admin-selectable Replay LLM (falls back to BEDROCK_REPLAY_MODEL_ID env default).
+  const replayModelId = await getReplayModelId()
   const speakerLabeledText = buildSpeakerLabeledText(segments)
-  const aiResult = await analyzeTranscript(speakerLabeledText, {
-    meetingType: session.meetingType,
-    userRole: session.userRole,
-    focusAreas: session.focusAreas,
-    meetingGoal: session.meetingGoal || undefined,
-    participantName: resolvedParticipantSpeaker,
-    speakerCount,
-    durationEstimate: durationSec,
-  })
+  const aiResult = await analyzeTranscript(
+    speakerLabeledText,
+    {
+      meetingType: session.meetingType,
+      userRole: session.userRole,
+      focusAreas: session.focusAreas,
+      meetingGoal: session.meetingGoal || undefined,
+      participantName: resolvedParticipantSpeaker,
+      speakerCount,
+      durationEstimate: durationSec,
+    },
+    replayModelId
+  )
   const processingTimeMs = Date.now() - startMs
 
   // ── Step 4: Run shared analytics engine (signal extraction → skill scores → coaching) ──
@@ -614,6 +654,7 @@ async function processReplaySession(sessionId: string): Promise<void> {
       durationSec: effectiveDurationSec,
       audioPath: replayAudio?.audioPath,
       audioMime: replayAudio?.audioMime,
+      modelId: replayModelId,
     })
   } catch (err: any) {
     console.error(`[replay] Coaching insight generation failed for ${sessionId}:`, err.message)
@@ -668,7 +709,7 @@ async function processReplaySession(sessionId: string): Promise<void> {
       communicationSignals: signalsJson,
       coachingInsights: coachingJson,
 
-      modelUsed: process.env.BEDROCK_REPLAY_MODEL_ID || 'amazon.nova-pro-v1:0',
+      modelUsed: replayModelId,
       promptTokens: aiResult.promptTokens,
       completionTokens: aiResult.completionTokens,
       processingTimeMs,

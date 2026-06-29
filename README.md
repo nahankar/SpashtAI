@@ -63,6 +63,10 @@ docs/           Architecture and setup documentation
 infra/          LiveKit server config
 ```
 
+## Documentation
+
+- [North Star](docs/NORTHSTAR.md) — product architecture, utterance model, and phased roadmap
+
 ## Quick Start
 
 See [docs/LOCAL-DEVELOPMENT-SETUP.md](docs/LOCAL-DEVELOPMENT-SETUP.md) for detailed setup instructions.

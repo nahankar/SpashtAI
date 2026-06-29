@@ -91,7 +91,7 @@ export async function getSessionAudio(req: Request, res: Response) {
     if (accessDenied) {
       return exportDenied(res, 'Access denied')
     }
-    if (flags.hideAudioDownload) {
+    if (flags.hideAudioDownload || !flags.enableAudioExport) {
       return exportDenied(res, 'Audio download is disabled for your account')
     }
 
@@ -142,7 +142,7 @@ export async function generateAudioUrl(req: Request, res: Response) {
     if (accessDenied) {
       return exportDenied(res, 'Access denied')
     }
-    if (flags.hideAudioDownload) {
+    if (flags.hideAudioDownload || !flags.enableAudioExport) {
       return exportDenied(res, 'Audio download is disabled for your account')
     }
 

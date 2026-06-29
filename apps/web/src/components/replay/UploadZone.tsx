@@ -1,13 +1,25 @@
 import { useState, useRef, type DragEvent } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
-import { Upload, X, FileAudio, FileText, Film } from 'lucide-react'
+import { Upload, X, FileAudio, FileText, Film, Lock } from 'lucide-react'
+import { useIsPro } from '@/hooks/useIsPro'
+import { useIsUltra } from '@/hooks/useIsUltra'
 
 const AUDIO_TYPES = ['.mp3', '.mp4', '.wav', '.m4a', '.ogg', '.mov', '.webm']
 const TEXT_TYPES = ['.txt', '.json', '.srt', '.vtt']
-const ALL_ACCEPT = [...AUDIO_TYPES, ...TEXT_TYPES].join(',')
+// Audio-only accept hint for users without the Ultra plan (video blocked).
+const AUDIO_ONLY_TYPES = ['.mp3', '.wav', '.m4a', '.ogg']
+const VIDEO_EXTS = ['.mp4', '.mov', '.webm', '.mkv', '.avi', '.m4v']
+
+/** A file counts as video by its MIME type, falling back to extension. */
+function isVideoFile(f: File): boolean {
+  if (f.type) return f.type.startsWith('video/')
+  const ext = '.' + (f.name.split('.').pop()?.toLowerCase() ?? '')
+  return VIDEO_EXTS.includes(ext)
+}
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -27,12 +39,38 @@ interface UploadZoneProps {
 }
 
 export function UploadZone({ onSubmit, loading }: UploadZoneProps) {
+  const isPro = useIsPro()
+  const isUltra = useIsUltra()
+  // Tiered plans: Free = transcript/text only, Pro adds audio, Ultra adds video.
+  // Ultra is treated as a superset of Pro. Admins satisfy both.
+  const canAudio = isPro || isUltra
+  const canVideo = isUltra
   const [audioFile, setAudioFile] = useState<File | null>(null)
   const [transcriptFile, setTranscriptFile] = useState<File | null>(null)
   const [pastedText, setPastedText] = useState('')
   const [dragging, setDragging] = useState(false)
+  const [blockedMsg, setBlockedMsg] = useState<string | null>(null)
   const audioRef = useRef<HTMLInputElement>(null)
   const transcriptRef = useRef<HTMLInputElement>(null)
+
+  /** Accept a media file, gating audio behind Pro and video behind Ultra. */
+  const selectAudioFile = (f: File) => {
+    if (isVideoFile(f)) {
+      if (!canVideo) {
+        setBlockedMsg(
+          'Video uploads are an Ultra plan feature. Upload an audio file or a transcript instead, or contact your admin to enable Ultra.',
+        )
+        return
+      }
+    } else if (!canAudio) {
+      setBlockedMsg(
+        'Audio uploads are a Pro plan feature. Upload a transcript or paste text instead, or contact your admin to enable Pro.',
+      )
+      return
+    }
+    setBlockedMsg(null)
+    setAudioFile(f)
+  }
 
   const handleDrop = (e: DragEvent) => {
     e.preventDefault()
@@ -40,8 +78,8 @@ export function UploadZone({ onSubmit, loading }: UploadZoneProps) {
     const files = Array.from(e.dataTransfer.files)
     for (const f of files) {
       const ext = '.' + f.name.split('.').pop()?.toLowerCase()
-      if (AUDIO_TYPES.includes(ext)) {
-        setAudioFile(f)
+      if (AUDIO_TYPES.includes(ext) || isVideoFile(f)) {
+        selectAudioFile(f)
       } else if (TEXT_TYPES.includes(ext)) {
         setTranscriptFile(f)
       }
@@ -78,7 +116,29 @@ export function UploadZone({ onSubmit, loading }: UploadZoneProps) {
           <Upload className="mx-auto mb-3 h-10 w-10 text-muted-foreground" />
           <p className="text-sm font-medium">Drag & drop files here</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Audio: MP3, MP4, WAV, M4A, OGG, MOV, WebM (max 500MB)
+            <span className="inline-flex items-center gap-1">
+              Audio: MP3, WAV, M4A, OGG (max 500MB)
+              {!canAudio && (
+                <Badge
+                  variant="secondary"
+                  className="px-1.5 py-0 text-[10px] font-semibold uppercase tracking-wide"
+                >
+                  <Lock className="mr-1 h-2.5 w-2.5" /> Pro
+                </Badge>
+              )}
+            </span>
+            <br />
+            <span className="inline-flex items-center gap-1">
+              Video: MP4, MOV, WebM
+              {!canVideo && (
+                <Badge
+                  variant="secondary"
+                  className="px-1.5 py-0 text-[10px] font-semibold uppercase tracking-wide"
+                >
+                  <Lock className="mr-1 h-2.5 w-2.5" /> Ultra
+                </Badge>
+              )}
+            </span>
             <br />
             Text: TXT, JSON, SRT, VTT (max 10MB)
           </p>
@@ -89,7 +149,7 @@ export function UploadZone({ onSubmit, loading }: UploadZoneProps) {
               type="button"
               onClick={() => audioRef.current?.click()}
             >
-              Choose Audio/Video
+              {canVideo ? 'Choose Audio/Video' : 'Choose Audio'}
             </Button>
             <Button
               variant="outline"
@@ -103,9 +163,9 @@ export function UploadZone({ onSubmit, loading }: UploadZoneProps) {
           <input
             ref={audioRef}
             type="file"
-            accept={AUDIO_TYPES.join(',')}
+            accept={(canVideo ? AUDIO_TYPES : AUDIO_ONLY_TYPES).join(',')}
             className="hidden"
-            onChange={(e) => e.target.files?.[0] && setAudioFile(e.target.files[0])}
+            onChange={(e) => e.target.files?.[0] && selectAudioFile(e.target.files[0])}
           />
           <input
             ref={transcriptRef}
@@ -115,6 +175,13 @@ export function UploadZone({ onSubmit, loading }: UploadZoneProps) {
             onChange={(e) => e.target.files?.[0] && setTranscriptFile(e.target.files[0])}
           />
         </div>
+
+        {blockedMsg && (
+          <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>{blockedMsg}</span>
+          </div>
+        )}
 
         {/* Selected files */}
         {(audioFile || transcriptFile) && (

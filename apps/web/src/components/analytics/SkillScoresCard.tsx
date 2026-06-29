@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card'
-import { Badge } from '../ui/badge'
 import { Progress } from '../ui/progress'
 import {
   Brain,
@@ -14,6 +13,7 @@ import {
   Award,
   Loader2,
   AlertCircle,
+  Play,
 } from 'lucide-react'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '../ui/accordion'
 import { getAuthHeaders } from '@/lib/api-client'
@@ -24,8 +24,13 @@ interface SkillScoresCardProps {
   sessionId: string
   isSessionEnded?: boolean
   initialSkillData?: SkillScoresData | null
-  initialCoaching?: CoachingData | null
+  /** When provided, shows a "Hear it" link on skills backed by per-turn evidence
+   *  (pacing, conciseness, confidence) that jumps the Playback tab to that moment. */
+  onHearMoment?: (skillKey: string) => void
 }
+
+// Only skills we can map to a concrete per-turn moment get a "Hear it" link.
+const HEARABLE_SKILLS = new Set(['pacing', 'conciseness', 'confidence'])
 
 interface SkillScoresData {
   scores: {
@@ -39,21 +44,6 @@ interface SkillScoresData {
     emotionalControl: number | null
   }
   components: Record<string, Record<string, number>>
-}
-
-interface CoachingData {
-  topStrength: string
-  primaryImprovement: string
-  actionableAdvice: string
-  practiceExercise: string
-  decisionClarity?: {
-    decisionsDetected: number
-    actionItemsDetected: number
-    summary: string
-  }
-  topicFlow?: string
-  overallNarrative: string
-  error?: string
 }
 
 const SKILL_CONFIG: {
@@ -127,12 +117,6 @@ function getScoreColor(score: number): string {
   return 'text-red-600'
 }
 
-function getScoreBadgeVariant(score: number): 'default' | 'secondary' | 'destructive' {
-  if (score >= 8) return 'default'
-  if (score >= 6) return 'secondary'
-  return 'destructive'
-}
-
 function getProgressColor(score: number): string {
   if (score >= 8) return '[&>div]:bg-green-500'
   if (score >= 6) return '[&>div]:bg-blue-500'
@@ -140,16 +124,19 @@ function getProgressColor(score: number): string {
   return '[&>div]:bg-red-500'
 }
 
-export function SkillScoresCard({ sessionId, isSessionEnded = false, initialSkillData, initialCoaching }: SkillScoresCardProps) {
+export function SkillScoresCard({
+  sessionId,
+  isSessionEnded = false,
+  initialSkillData,
+  onHearMoment,
+}: SkillScoresCardProps) {
   const [skillData, setSkillData] = useState<SkillScoresData | null>(initialSkillData ?? null)
-  const [coaching, setCoaching] = useState<CoachingData | null>(initialCoaching ?? null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (initialSkillData) setSkillData(initialSkillData)
-    if (initialCoaching) setCoaching(initialCoaching)
-  }, [initialSkillData, initialCoaching])
+  }, [initialSkillData])
 
   useEffect(() => {
     if (isSessionEnded && sessionId && !initialSkillData) {
@@ -161,20 +148,14 @@ export function SkillScoresCard({ sessionId, isSessionEnded = false, initialSkil
     setLoading(true)
     setError(null)
     try {
-      const [scoresRes, coachingRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/sessions/${sessionId}/skill-scores`, { headers: getAuthHeaders() }),
-        fetch(`${API_BASE_URL}/sessions/${sessionId}/coaching-insights`, { headers: getAuthHeaders() }),
-      ])
+      const scoresRes = await fetch(`${API_BASE_URL}/sessions/${sessionId}/skill-scores`, {
+        headers: getAuthHeaders(),
+      })
 
       if (scoresRes.ok) {
         const data = await scoresRes.json()
         setSkillData(data)
-      }
-      if (coachingRes.ok) {
-        const data = await coachingRes.json()
-        setCoaching(data)
-      }
-      if (!scoresRes.ok && !coachingRes.ok) {
+      } else {
         setError('Skill analysis not available yet')
       }
     } catch (err) {
@@ -240,148 +221,93 @@ export function SkillScoresCard({ sessionId, isSessionEnded = false, initialSkil
     availableSkills.reduce((sum, s) => sum + (scores[s.key as keyof typeof scores] as number), 0) /
     availableSkills.length
 
+  const hasComponents = components && Object.keys(components).length > 0
+
   return (
     <div className="space-y-6">
-      {/* Overall Score */}
+      {/* Communication Score — overall + per-skill rows. Each skill row is a
+          dropdown that expands to show what contributes to its score, so we no
+          longer need a separate "Skill Breakdown" card. */}
       <Card className="border-2 border-primary/20">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Award className="h-6 w-6 text-yellow-600" />
             Communication Score
           </CardTitle>
+          <CardDescription>Click any skill to see what contributes to the score</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex items-start gap-8">
-            <div className="text-center">
+          <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:gap-8">
+            <div className="shrink-0 text-center">
               <div className={`text-5xl font-bold ${getScoreColor(avgScore)}`}>
                 {avgScore.toFixed(1)}
               </div>
-              <div className="text-sm text-muted-foreground mt-1">out of 10</div>
+              <div className="mt-1 text-sm text-muted-foreground">out of 10</div>
             </div>
-            <div className="flex-1 grid gap-3">
-              {availableSkills.map((skill) => {
-                const val = scores[skill.key as keyof typeof scores] as number
-                const Icon = skill.icon
-                return (
-                  <div key={skill.key}>
-                    <div className="flex items-center justify-between text-sm mb-1">
-                      <span className="flex items-center gap-1.5">
-                        <Icon className="h-3.5 w-3.5 text-muted-foreground" />
-                        {skill.label}
-                      </span>
-                      <Badge variant={getScoreBadgeVariant(val)}>{val.toFixed(1)}</Badge>
-                    </div>
-                    <Progress value={val * 10} className={`h-1.5 ${getProgressColor(val)}`} />
-                  </div>
-                )
-              })}
+            <div className="min-w-0 flex-1">
+              <Accordion type="single" collapsible className="space-y-0">
+                {availableSkills.map((skill) => {
+                  const val = scores[skill.key as keyof typeof scores] as number
+                  const comp = components?.[skill.key]
+                  const Icon = skill.icon
+                  return (
+                    <AccordionItem key={skill.key} value={skill.key} className="border-b-0">
+                      <div className="flex items-center gap-1">
+                        <AccordionTrigger className="flex-1 py-2 hover:no-underline" disabled={!comp}>
+                          <div className="flex flex-1 flex-col gap-1 pr-2 text-left">
+                            <div className="flex items-center gap-3">
+                              <span className="flex w-32 items-center gap-1.5 text-sm font-medium">
+                                <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+                                {skill.label}
+                              </span>
+                              <span className={`w-9 text-right text-sm font-bold ${getScoreColor(val)}`}>
+                                {val.toFixed(1)}
+                              </span>
+                              <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                                <Progress value={val * 10} className={`h-2 ${getProgressColor(val)}`} />
+                              </div>
+                            </div>
+                          </div>
+                        </AccordionTrigger>
+                        {onHearMoment && HEARABLE_SKILLS.has(skill.key) && (
+                          <button
+                            type="button"
+                            onClick={() => onHearMoment(skill.key)}
+                            title="Jump to a moment in Playback that shaped this score"
+                            className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 px-2 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/10"
+                          >
+                            <Play className="h-3 w-3" /> Hear it
+                          </button>
+                        )}
+                      </div>
+                      {comp && (
+                        <AccordionContent className="pb-2 pl-2 pt-0">
+                          <p className="mb-2 text-xs text-muted-foreground">{skill.description}</p>
+                          <div className="grid gap-1.5 rounded-md bg-muted/40 p-2.5">
+                            {Object.entries(comp).map(([name, value]) => (
+                              <div key={name} className="flex items-center justify-between text-xs">
+                                <span className="capitalize text-muted-foreground">
+                                  {name.replace(/([A-Z])/g, ' $1').trim()}
+                                </span>
+                                <span className={getScoreColor(value)}>{value.toFixed(1)}/10</span>
+                              </div>
+                            ))}
+                          </div>
+                        </AccordionContent>
+                      )}
+                    </AccordionItem>
+                  )
+                })}
+              </Accordion>
+              {!hasComponents && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Per-skill breakdown isn&apos;t available for this session.
+                </p>
+              )}
             </div>
           </div>
         </CardContent>
       </Card>
-
-      {/* Coaching Insights */}
-      {coaching && !coaching.error && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Lightbulb className="h-5 w-5 text-blue-600" />
-              Coaching Insights
-            </CardTitle>
-            {coaching.overallNarrative && (
-              <CardDescription className="text-sm leading-relaxed">
-                {coaching.overallNarrative}
-              </CardDescription>
-            )}
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {coaching.topStrength && (
-              <div className="flex items-start gap-3 rounded-lg border border-green-200 bg-green-50 p-3">
-                <TrendingUp className="h-5 w-5 text-green-600 mt-0.5 shrink-0" />
-                <div>
-                  <p className="text-sm font-medium text-green-800">Top Strength</p>
-                  <p className="text-sm text-green-700 mt-0.5">{coaching.topStrength}</p>
-                </div>
-              </div>
-            )}
-
-            {coaching.primaryImprovement && (
-              <div className="flex items-start gap-3 rounded-lg border border-yellow-200 bg-yellow-50 p-3">
-                <Target className="h-5 w-5 text-yellow-600 mt-0.5 shrink-0" />
-                <div>
-                  <p className="text-sm font-medium text-yellow-800">Focus Area</p>
-                  <p className="text-sm text-yellow-700 mt-0.5">{coaching.primaryImprovement}</p>
-                </div>
-              </div>
-            )}
-
-            {coaching.actionableAdvice && (
-              <div className="flex items-start gap-3 rounded-lg border p-3">
-                <Zap className="h-5 w-5 text-primary mt-0.5 shrink-0" />
-                <div>
-                  <p className="text-sm font-medium">Actionable Advice</p>
-                  <p className="text-sm text-muted-foreground mt-0.5">{coaching.actionableAdvice}</p>
-                </div>
-              </div>
-            )}
-
-            {coaching.practiceExercise && (
-              <div className="flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 p-3">
-                <Activity className="h-5 w-5 text-blue-600 mt-0.5 shrink-0" />
-                <div>
-                  <p className="text-sm font-medium text-blue-800">Practice Exercise</p>
-                  <p className="text-sm text-blue-700 mt-0.5">{coaching.practiceExercise}</p>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Skill Breakdown (Expandable) */}
-      {components && Object.keys(components).length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Skill Breakdown</CardTitle>
-            <CardDescription>What contributes to each score</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Accordion type="single" collapsible>
-              {availableSkills.map((skill) => {
-                const comp = components[skill.key]
-                if (!comp) return null
-                const val = scores[skill.key as keyof typeof scores] as number
-                return (
-                  <AccordionItem key={skill.key} value={skill.key}>
-                    <AccordionTrigger className="text-sm">
-                      <span className="flex flex-col items-start gap-0.5 text-left">
-                        <span className="flex items-center gap-2">
-                          {skill.label}
-                          <Badge variant="outline" className="ml-1">{val.toFixed(1)}</Badge>
-                        </span>
-                        <span className="text-xs font-normal text-muted-foreground pr-4">{skill.description}</span>
-                      </span>
-                    </AccordionTrigger>
-                    <AccordionContent>
-                      <div className="grid gap-2 pt-1">
-                        {Object.entries(comp).map(([name, value]) => (
-                          <div key={name} className="flex items-center justify-between text-sm">
-                            <span className="text-muted-foreground capitalize">
-                              {name.replace(/([A-Z])/g, ' $1').trim()}
-                            </span>
-                            <span className={getScoreColor(value)}>{value.toFixed(1)}/10</span>
-                          </div>
-                        ))}
-                      </div>
-                    </AccordionContent>
-                  </AccordionItem>
-                )
-              })}
-            </Accordion>
-          </CardContent>
-        </Card>
-      )}
-
     </div>
   )
 }

@@ -1,19 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Progress } from '../ui/progress';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { 
   Brain, 
-  Mic, 
   MessageSquare, 
-  TrendingUp, 
-  TrendingDown,
-  CheckCircle2,
   AlertCircle,
-  Award,
-  Target,
-  Lightbulb,
   BarChart3,
   Activity
 } from 'lucide-react';
@@ -22,48 +14,123 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '..
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
 import { getAuthHeaders } from '@/lib/api-client';
 
-/** API may return camelCase (Prisma) or snake_case; scoring engine uses a different insights shape. */
-function normalizeAdvancedMetrics(raw: Record<string, unknown>): AdvancedMetrics {
-  const pi = (raw.performance_insights ?? raw.performanceInsights) as Record<string, unknown> | null | undefined
-  const scores = pi?.scores as Record<string, number> | undefined
-  const feedback = pi?.feedback as Array<{ actionable_tip?: string; message?: string }> | undefined
+/**
+ * V2 analytics shapes (from /communication-signals, /skill-scores,
+ * /coaching-insights). The legacy agent-side content/delivery/insights blobs
+ * were frequently empty (missing spaCy model / no persisted audio in dev), so
+ * we now derive this view from the server-side v2 engine instead.
+ */
+interface V2Signals {
+  speechRate?: { wpm?: number; variability?: number; totalWords?: number }
+  fillers?: { count?: number; rate?: number }
+  hedging?: { count?: number; rate?: number }
+  sentenceComplexity?: { avgLength?: number; subordinateRatio?: number; readability?: number }
+  vocabDiversity?: { ratio?: number; uniqueWords?: number; totalWords?: number; sophistication?: number }
+  prosody?: {
+    pitchVariation?: number
+    energyStability?: number
+    voiceQuality?: number
+    pauseCount?: number
+    meanPauseDuration?: number
+  } | null
+}
+interface V2SkillScores {
+  scores?: Record<string, number | null>
+}
+interface V2Coaching {
+  topStrength?: string
+  primaryImprovement?: string
+  actionableAdvice?: string
+  practiceExercise?: string
+  overallNarrative?: string
+  error?: string
+}
 
-  let performance_insights: AdvancedMetrics['performance_insights']
-  if (pi) {
-    performance_insights = {
-      overall_score:
-        (pi.overall_score as number | undefined) ??
-        (scores?.overall != null ? scores.overall * 10 : undefined),
-      category_scores:
-        (pi.category_scores as AdvancedMetrics['performance_insights'] extends infer P
-          ? P extends { category_scores?: infer C }
-            ? C
-            : never
-          : never) ??
-        (scores
-          ? {
-              content_quality: scores.clarity * 10,
-              delivery_effectiveness: scores.fluency * 10,
-              communication_clarity: scores.confidence * 10,
-            }
-          : undefined),
-      strengths: (pi.strengths as string[]) ?? [],
-      areas_for_improvement: (pi.areas_for_improvement as string[]) ?? [],
-      recommendations:
-        (pi.recommendations as string[]) ??
-        (feedback?.map((f) => f.actionable_tip || f.message).filter(Boolean) as string[]) ??
-        [],
-    }
-  }
+/** Map the deterministic v2 signals + LLM coaching into this card's shape. */
+function buildFromV2(
+  signals: V2Signals | null,
+  skill: V2SkillScores | null,
+  coaching: V2Coaching | null,
+): AdvancedMetrics {
+  const s = signals ?? {}
+  const vocab = s.vocabDiversity ?? {}
+  const sc = s.sentenceComplexity ?? {}
+  const sr = s.speechRate ?? {}
+  const fl = s.fillers ?? {}
+  const scores = skill?.scores ?? {}
+
+  // Derive sentence/complexity counts from the v2 signals instead of hardcoding
+  // zeros: the engine reports avg sentence length + subordinate-clause ratio, so
+  // sentences ≈ words / avgLength and complex ≈ subordinateRatio × sentences.
+  const totalW = vocab.totalWords ?? 0
+  const avgLen = sc.avgLength ?? 0
+  const subRatio = sc.subordinateRatio ?? 0
+  const sentenceCount = avgLen > 0 ? Math.round(totalW / avgLen) : 0
+  const complexSentences = Math.round(subRatio * sentenceCount)
+
+  const content_metrics: AdvancedMetrics['content_metrics'] = signals
+    ? {
+        vocabulary: {
+          total_words: totalW,
+          unique_words: vocab.uniqueWords ?? 0,
+          diversity_ratio: vocab.ratio ?? 0,
+          sophistication_score: vocab.sophistication ?? 0,
+          domain_relevance: 0,
+          academic_words: 0,
+          business_terms: 0,
+        },
+        grammar: {
+          sentence_count: sentenceCount,
+          avg_sentence_length: avgLen,
+          complex_sentences: complexSentences,
+          simple_sentences: Math.max(sentenceCount - complexSentences, 0),
+          readability_score: sc.readability ?? 0,
+          syntactic_complexity: subRatio * 10,
+        },
+        entities: { companies: [], roles: [], skills: [], technologies: [] },
+        confidence_language: 0,
+        relevance_score: 0,
+      }
+    : undefined
+
+  const deliveryScore = (scores.delivery ?? null) as number | null
+  const prosody = s.prosody ?? null
+  const delivery_metrics: AdvancedMetrics['delivery_metrics'] = signals
+    ? {
+        speech_rate: sr.wpm ?? 0,
+        articulation_rate: sr.wpm ?? 0,
+        pause_count: prosody?.pauseCount ?? 0,
+        mean_pause_duration: prosody?.meanPauseDuration ?? 0,
+        filler_word_count: fl.count ?? 0,
+        filler_word_rate: (fl.rate ?? 0) * 100,
+        pitch_variation: prosody?.pitchVariation ?? 0,
+        energy_stability: prosody?.energyStability ?? 0,
+        voice_quality_score: prosody?.voiceQuality ?? deliveryScore ?? 0,
+      }
+    : undefined
+
+  // Insights tab: strengths / improvements / recommendations from the LLM
+  // coaching. The headline skill scores live in SkillScoresCard, so we skip the
+  // big overall-score card here to avoid a duplicate (overall_score undefined).
+  const performance_insights: AdvancedMetrics['performance_insights'] = coaching
+    ? {
+        strengths: coaching.topStrength ? [coaching.topStrength] : [],
+        areas_for_improvement: coaching.primaryImprovement ? [coaching.primaryImprovement] : [],
+        recommendations: [
+          coaching.actionableAdvice,
+          coaching.practiceExercise,
+          coaching.overallNarrative,
+        ].filter((x): x is string => Boolean(x)),
+      }
+    : undefined
 
   return {
-    content_processed: Boolean(raw.content_processed ?? raw.contentProcessed),
-    audio_processed: Boolean(raw.audio_processed ?? raw.audioProcessed),
-    insights_generated: Boolean(raw.insights_generated ?? raw.insightsGenerated),
-    content_metrics: (raw.content_metrics ?? raw.contentMetrics) as AdvancedMetrics['content_metrics'],
-    delivery_metrics: (raw.delivery_metrics ?? raw.deliveryMetrics) as AdvancedMetrics['delivery_metrics'],
+    content_processed: Boolean(signals),
+    audio_processed: deliveryScore != null,
+    insights_generated: Boolean(coaching),
+    content_metrics,
+    delivery_metrics,
     performance_insights,
-    processing_errors: (raw.processing_errors ?? raw.processingErrors) as string[] | undefined,
   }
 }
 
@@ -118,8 +185,8 @@ interface AdvancedMetrics {
   };
   
   performance_insights?: {
-    overall_score: number;
-    category_scores: {
+    overall_score?: number;
+    category_scores?: {
       content_quality: number;
       delivery_effectiveness: number;
       communication_clarity: number;
@@ -130,6 +197,95 @@ interface AdvancedMetrics {
   };
   
   processing_errors?: string[];
+}
+
+// ── Plain-language verdicts ────────────────────────────────────────────
+// Each metric gets a "good / ok / needs work" rating plus a one-line tip so the
+// user knows whether a number is good and how to improve it.
+type Tone = 'good' | 'ok' | 'bad'
+
+const TONE_STYLES: Record<Tone, { badge: string; label: string }> = {
+  good: { badge: 'bg-green-100 text-green-700 border-green-200', label: 'Good' },
+  ok: { badge: 'bg-amber-100 text-amber-700 border-amber-200', label: 'OK' },
+  bad: { badge: 'bg-red-100 text-red-700 border-red-200', label: 'Needs work' },
+}
+
+export interface MetricVerdict {
+  tone: Tone
+  tip: string
+}
+
+function Verdict({ verdict }: { verdict: MetricVerdict | null }) {
+  if (!verdict) return null
+  const s = TONE_STYLES[verdict.tone]
+  return (
+    <div className="mt-1.5">
+      <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${s.badge}`}>
+        {s.label}
+      </span>
+      <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{verdict.tip}</p>
+    </div>
+  )
+}
+
+export const DELIVERY_VERDICTS: Record<string, (v: number) => MetricVerdict> = {
+  speechRate: (wpm) =>
+    wpm >= 120 && wpm <= 180
+      ? { tone: 'good', tip: 'Comfortable, easy-to-follow pace.' }
+      : wpm >= 80 && wpm <= 220
+        ? { tone: 'ok', tip: wpm < 120 ? 'A touch slow — lift the pace on simpler points.' : 'A touch fast — add pauses so ideas land.' }
+        : { tone: 'bad', tip: wpm < 80 ? 'Too slow; aim for ~140 WPM.' : 'Too fast; slow to ~150 WPM and breathe.' },
+  fillerRate: (rate) =>
+    rate < 2
+      ? { tone: 'good', tip: 'Clean, polished delivery.' }
+      : rate <= 5
+        ? { tone: 'ok', tip: 'Some fillers — pause silently instead of saying "um".' }
+        : { tone: 'bad', tip: 'Frequent fillers weaken your message. Replace them with short pauses.' },
+  pitchVariation: (v) =>
+    v >= 5
+      ? { tone: 'good', tip: 'Expressive, engaging intonation.' }
+      : v >= 3
+        ? { tone: 'ok', tip: 'A little flat — vary pitch to stress key words.' }
+        : { tone: 'bad', tip: 'Monotone delivery — lift and drop your pitch on important points.' },
+  energyStability: (v) =>
+    v >= 6
+      ? { tone: 'good', tip: 'Steady, controlled volume.' }
+      : v >= 4
+        ? { tone: 'ok', tip: 'Volume wavers a bit — keep your energy consistent.' }
+        : { tone: 'bad', tip: 'Uneven volume — project consistently so you stay easy to hear.' },
+  voiceQuality: (v) =>
+    v >= 6
+      ? { tone: 'good', tip: 'Clear, resonant voice.' }
+      : v >= 4
+        ? { tone: 'ok', tip: 'Slightly strained or breathy — relax and breathe from the diaphragm.' }
+        : { tone: 'bad', tip: 'Strained voice — warm up, hydrate, and slow down.' },
+}
+
+export const CONTENT_VERDICTS: Record<string, (v: number) => MetricVerdict> = {
+  diversity: (pct) =>
+    pct > 30
+      ? { tone: 'good', tip: 'Varied, engaging word choices.' }
+      : pct >= 20
+        ? { tone: 'ok', tip: 'Some repetition — try varying your phrasing.' }
+        : { tone: 'bad', tip: 'Limited range — prepare varied phrases for key points.' },
+  sophistication: (v) =>
+    v >= 6
+      ? { tone: 'good', tip: 'Rich, precise vocabulary.' }
+      : v >= 4
+        ? { tone: 'ok', tip: 'Moderate — add a few more precise terms where they help.' }
+        : { tone: 'bad', tip: 'Mostly basic words — swap in more specific vocabulary.' },
+  avgSentenceLength: (len) =>
+    len >= 12 && len <= 20
+      ? { tone: 'good', tip: 'Clear, digestible sentence length.' }
+      : len >= 8 && len <= 25
+        ? { tone: 'ok', tip: len < 12 ? 'Sentences run short — combine related ideas.' : 'Sentences run long — tighten toward ~15 words.' }
+        : { tone: 'bad', tip: 'Aim for ~15 words per sentence for clarity.' },
+  syntacticComplexity: (v) =>
+    v >= 3 && v <= 7
+      ? { tone: 'good', tip: 'Good mix of simple and complex sentences.' }
+      : v < 3
+        ? { tone: 'ok', tip: 'Mostly simple sentences — combine ideas for flow.' }
+        : { tone: 'bad', tip: 'Very complex — break long sentences into shorter ones.' },
 }
 
 export function AdvancedInsights({ sessionId, isSessionEnded = false }: AdvancedInsightsProps) {
@@ -146,18 +302,25 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
   const fetchAdvancedMetrics = async () => {
     setLoading(true);
     setError(null);
-    
+
     try {
-      const response = await fetch(`${API_BASE_URL}/sessions/${sessionId}/advanced-metrics`, {
-        headers: getAuthHeaders(),
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch: ${response.status}`);
+      const [signalsRes, scoresRes, coachingRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/sessions/${sessionId}/communication-signals`, { headers: getAuthHeaders() }),
+        fetch(`${API_BASE_URL}/sessions/${sessionId}/skill-scores`, { headers: getAuthHeaders() }),
+        fetch(`${API_BASE_URL}/sessions/${sessionId}/coaching-insights`, { headers: getAuthHeaders() }),
+      ]);
+
+      const signals = signalsRes.ok ? ((await signalsRes.json()) as V2Signals) : null;
+      const skill = scoresRes.ok ? ((await scoresRes.json()) as V2SkillScores) : null;
+      const coaching = coachingRes.ok ? ((await coachingRes.json()) as V2Coaching) : null;
+
+      if (!signals && !skill && !coaching) {
+        setError('Advanced analysis not available yet');
+        setMetrics(null);
+        return;
       }
-      
-      const data = await response.json();
-      setMetrics(normalizeAdvancedMetrics(data));
+
+      setMetrics(buildFromV2(signals, skill, coaching));
     } catch (err) {
       console.error('Error fetching advanced metrics:', err);
       setError(err instanceof Error ? err.message : 'Failed to load advanced insights');
@@ -236,370 +399,219 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
     );
   }
 
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return 'text-green-600';
-    if (score >= 60) return 'text-blue-600';
-    if (score >= 40) return 'text-yellow-600';
-    return 'text-red-600';
-  };
-
-  const getScoreBadge = (score: number) => {
-    if (score >= 80) return 'default';
-    if (score >= 60) return 'secondary';
-    return 'destructive';
-  };
+  const c = metrics.content_metrics
+  const d = metrics.delivery_metrics
+  const hasProsody =
+    !!d && (d.voice_quality_score > 0 || d.pitch_variation > 0 || d.energy_stability > 0)
+  const diversityPct = c ? c.vocabulary.diversity_ratio * 100 : 0
 
   return (
-    <div className="space-y-6">
-      {/* Overall Performance Score */}
-      {metrics.performance_insights && metrics.performance_insights.overall_score !== undefined && (
-        <Card className="border-2 border-primary/20">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Award className="h-6 w-6 text-yellow-600" />
-              Overall Performance Score
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center justify-between mb-4">
-              <div className="text-center flex-1">
-                <div className={`text-6xl font-bold ${getScoreColor(metrics.performance_insights.overall_score)}`}>
-                  {metrics.performance_insights.overall_score.toFixed(0)}
-                </div>
-                <div className="text-muted-foreground mt-1">out of 100</div>
-              </div>
-              <div className="flex-1 space-y-3">
-                {metrics.performance_insights.category_scores && (
-                  <>
-                    <div>
-                      <div className="flex justify-between text-sm mb-1">
-                        <span>Content Quality</span>
-                        <Badge variant={getScoreBadge(metrics.performance_insights.category_scores.content_quality || 0)}>
-                          {(metrics.performance_insights.category_scores.content_quality || 0).toFixed(0)}
-                        </Badge>
-                      </div>
-                      <Progress value={metrics.performance_insights.category_scores.content_quality || 0} />
-                    </div>
-                    <div>
-                      <div className="flex justify-between text-sm mb-1">
-                        <span>Delivery Effectiveness</span>
-                        <Badge variant={getScoreBadge(metrics.performance_insights.category_scores.delivery_effectiveness || 0)}>
-                          {(metrics.performance_insights.category_scores.delivery_effectiveness || 0).toFixed(0)}
-                        </Badge>
-                      </div>
-                      <Progress value={metrics.performance_insights.category_scores.delivery_effectiveness || 0} />
-                    </div>
-                    <div>
-                      <div className="flex justify-between text-sm mb-1">
-                        <span>Communication Clarity</span>
-                        <Badge variant={getScoreBadge(metrics.performance_insights.category_scores.communication_clarity || 0)}>
-                          {(metrics.performance_insights.category_scores.communication_clarity || 0).toFixed(0)}
-                        </Badge>
-                      </div>
-                      <Progress value={metrics.performance_insights.category_scores.communication_clarity || 0} />
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+    <div className="space-y-4">
+      <div>
+        <h3 className="flex items-center gap-2 text-base font-semibold">
+          <Brain className="h-5 w-5" />
+          Communication Analysis
+        </h3>
+        <p className="text-sm text-muted-foreground">
+          What you said (Content) and how you said it (Delivery), with whether each signal is on
+          track and how to improve it.
+        </p>
+      </div>
 
-      <Tabs defaultValue="insights" className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="insights">
-            <Lightbulb className="h-4 w-4 mr-2" />
-            Insights
-          </TabsTrigger>
-          <TabsTrigger value="content">
-            <Brain className="h-4 w-4 mr-2" />
-            Content
-          </TabsTrigger>
-          <TabsTrigger value="delivery">
-            <Mic className="h-4 w-4 mr-2" />
-            Delivery
-          </TabsTrigger>
-        </TabsList>
-
-        {/* Insights Tab */}
-        <TabsContent value="insights" className="space-y-4">
-          {metrics.performance_insights ? (
+      {/* Content & Delivery side by side — no tab switching. items-stretch makes
+          both columns equal height; the last card in each column grows (flex-1)
+          so the Grammar and Voice Quality cards line up at the bottom. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-stretch">
+        {/* ── Content ───────────────────────────────────────────── */}
+        <div className="flex h-full flex-col gap-4">
+          {c ? (
             <>
               <Card>
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <CheckCircle2 className="h-5 w-5 text-green-600" />
-                    Strengths
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ul className="space-y-2">
-                    {(metrics.performance_insights.strengths || []).map((strength, idx) => (
-                      <li key={idx} className="flex items-start gap-2">
-                        <TrendingUp className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
-                        <span className="text-sm">{strength}</span>
-                      </li>
-                    ))}
-                    {(!metrics.performance_insights.strengths || metrics.performance_insights.strengths.length === 0) && (
-                      <li className="text-sm text-muted-foreground">No strengths identified yet</li>
-                    )}
-                  </ul>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Target className="h-5 w-5 text-yellow-600" />
-                    Areas for Improvement
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ul className="space-y-2">
-                    {(metrics.performance_insights.areas_for_improvement || []).map((area, idx) => (
-                      <li key={idx} className="flex items-start gap-2">
-                        <TrendingDown className="h-4 w-4 text-yellow-600 mt-0.5 flex-shrink-0" />
-                        <span className="text-sm">{area}</span>
-                      </li>
-                    ))}
-                    {(!metrics.performance_insights.areas_for_improvement || metrics.performance_insights.areas_for_improvement.length === 0) && (
-                      <li className="text-sm text-muted-foreground">No areas for improvement identified</li>
-                    )}
-                  </ul>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Lightbulb className="h-5 w-5 text-blue-600" />
-                    Recommendations
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ul className="space-y-2">
-                    {(metrics.performance_insights.recommendations || []).map((rec, idx) => (
-                      <li key={idx} className="flex items-start gap-2">
-                        <span className="text-blue-600 font-bold mt-0.5 flex-shrink-0">{idx + 1}.</span>
-                        <span className="text-sm">{rec}</span>
-                      </li>
-                    ))}
-                    {(!metrics.performance_insights.recommendations || metrics.performance_insights.recommendations.length === 0) && (
-                      <li className="text-sm text-muted-foreground">No recommendations available</li>
-                    )}
-                  </ul>
-                </CardContent>
-              </Card>
-            </>
-          ) : (
-            <Card>
-              <CardContent className="py-8 text-center text-sm text-muted-foreground">
-                No insight data for this session yet. Try &quot;Reprocess Audio&quot; on the analytics header.
-              </CardContent>
-            </Card>
-          )}
-        </TabsContent>
-
-        {/* Content Analysis Tab */}
-        <TabsContent value="content" className="space-y-4">
-          {metrics.content_metrics ? (
-            <>
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
+                  <CardTitle className="flex items-center gap-2 text-base">
                     <MessageSquare className="h-5 w-5" />
-                    Vocabulary Analysis
+                    Content — Vocabulary
                   </CardTitle>
+                  <CardDescription>What you said and how varied your wording was</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <div className="text-sm text-muted-foreground">Total Words</div>
-                      <div className="text-2xl font-bold">{metrics.content_metrics.vocabulary.total_words}</div>
+                      <div className="text-2xl font-bold">{c.vocabulary.total_words}</div>
                     </div>
                     <div>
                       <div className="text-sm text-muted-foreground">Unique Words</div>
-                      <div className="text-2xl font-bold">{metrics.content_metrics.vocabulary.unique_words}</div>
+                      <div className="text-2xl font-bold">{c.vocabulary.unique_words}</div>
                     </div>
                     <div>
                       <div className="text-sm text-muted-foreground">Diversity</div>
-                      <div className="text-2xl font-bold">{(metrics.content_metrics.vocabulary.diversity_ratio * 100).toFixed(1)}%</div>
-                      <Progress value={metrics.content_metrics.vocabulary.diversity_ratio * 100} className="mt-1" />
+                      <div className="text-2xl font-bold">{diversityPct.toFixed(1)}%</div>
+                      <Progress value={diversityPct} className="mt-1" />
+                      <Verdict verdict={CONTENT_VERDICTS.diversity(diversityPct)} />
                     </div>
                     <div>
                       <div className="text-sm text-muted-foreground">Sophistication</div>
-                      <div className="text-2xl font-bold">{metrics.content_metrics.vocabulary.sophistication_score.toFixed(1)}/10</div>
-                      <Progress value={metrics.content_metrics.vocabulary.sophistication_score * 10} className="mt-1" />
-                    </div>
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-4 pt-4 border-t">
-                    <div>
-                      <div className="text-sm text-muted-foreground">Academic Words</div>
-                      <div className="text-lg font-semibold">{metrics.content_metrics.vocabulary.academic_words}</div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-muted-foreground">Business Terms</div>
-                      <div className="text-lg font-semibold">{metrics.content_metrics.vocabulary.business_terms}</div>
+                      <div className="text-2xl font-bold">{c.vocabulary.sophistication_score.toFixed(1)}/10</div>
+                      <Progress value={c.vocabulary.sophistication_score * 10} className="mt-1" />
+                      <Verdict verdict={CONTENT_VERDICTS.sophistication(c.vocabulary.sophistication_score)} />
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
-              <Card>
+              <Card className="flex flex-1 flex-col">
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
+                  <CardTitle className="flex items-center gap-2 text-base">
                     <BarChart3 className="h-5 w-5" />
-                    Grammar & Structure
+                    Content — Grammar & Structure
                   </CardTitle>
+                  <CardDescription>How your sentences are built</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent className="flex-1">
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <div className="text-sm text-muted-foreground">Sentences</div>
-                      <div className="text-2xl font-bold">{metrics.content_metrics.grammar.sentence_count}</div>
+                      <div className="text-2xl font-bold">{c.grammar.sentence_count}</div>
                     </div>
                     <div>
                       <div className="text-sm text-muted-foreground">Avg Length</div>
-                      <div className="text-2xl font-bold">{metrics.content_metrics.grammar.avg_sentence_length.toFixed(1)} words</div>
+                      <div className="text-2xl font-bold">{c.grammar.avg_sentence_length.toFixed(1)} words</div>
+                      <Verdict verdict={CONTENT_VERDICTS.avgSentenceLength(c.grammar.avg_sentence_length)} />
                     </div>
                     <div>
                       <div className="text-sm text-muted-foreground">Complex Sentences</div>
-                      <div className="text-2xl font-bold">{metrics.content_metrics.grammar.complex_sentences}</div>
+                      <div className="text-2xl font-bold">{c.grammar.complex_sentences}</div>
                     </div>
                     <div>
                       <div className="text-sm text-muted-foreground">Syntactic Complexity</div>
-                      <div className="text-2xl font-bold">{metrics.content_metrics.grammar.syntactic_complexity.toFixed(1)}/10</div>
-                      <Progress value={metrics.content_metrics.grammar.syntactic_complexity * 10} className="mt-1" />
+                      <div className="text-2xl font-bold">{c.grammar.syntactic_complexity.toFixed(1)}/10</div>
+                      <Progress value={c.grammar.syntactic_complexity * 10} className="mt-1" />
+                      <Verdict verdict={CONTENT_VERDICTS.syntacticComplexity(c.grammar.syntactic_complexity)} />
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
-              {metrics.content_metrics.entities && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Entities Mentioned</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <Accordion type="single" collapsible>
-                      {(metrics.content_metrics.entities.skills || []).length > 0 && (
-                        <AccordionItem value="skills">
-                          <AccordionTrigger>Skills ({(metrics.content_metrics.entities.skills || []).length})</AccordionTrigger>
-                          <AccordionContent>
-                            <div className="flex flex-wrap gap-2">
-                              {(metrics.content_metrics.entities.skills || []).map((skill, idx) => (
-                                <Badge key={idx} variant="outline">{skill}</Badge>
-                              ))}
-                            </div>
-                          </AccordionContent>
-                        </AccordionItem>
-                      )}
-                      {(metrics.content_metrics.entities.technologies || []).length > 0 && (
-                        <AccordionItem value="tech">
-                          <AccordionTrigger>Technologies ({(metrics.content_metrics.entities.technologies || []).length})</AccordionTrigger>
-                          <AccordionContent>
-                            <div className="flex flex-wrap gap-2">
-                              {(metrics.content_metrics.entities.technologies || []).map((tech, idx) => (
-                                <Badge key={idx} variant="outline">{tech}</Badge>
-                              ))}
-                            </div>
-                          </AccordionContent>
-                        </AccordionItem>
-                      )}
-                    </Accordion>
-                  </CardContent>
-                </Card>
-              )}
+              {c.entities &&
+                ((c.entities.skills || []).length > 0 || (c.entities.technologies || []).length > 0) && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-base">Entities Mentioned</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <Accordion type="single" collapsible>
+                        {(c.entities.skills || []).length > 0 && (
+                          <AccordionItem value="skills">
+                            <AccordionTrigger>Skills ({(c.entities.skills || []).length})</AccordionTrigger>
+                            <AccordionContent>
+                              <div className="flex flex-wrap gap-2">
+                                {(c.entities.skills || []).map((skill, idx) => (
+                                  <Badge key={idx} variant="outline">{skill}</Badge>
+                                ))}
+                              </div>
+                            </AccordionContent>
+                          </AccordionItem>
+                        )}
+                        {(c.entities.technologies || []).length > 0 && (
+                          <AccordionItem value="tech">
+                            <AccordionTrigger>Technologies ({(c.entities.technologies || []).length})</AccordionTrigger>
+                            <AccordionContent>
+                              <div className="flex flex-wrap gap-2">
+                                {(c.entities.technologies || []).map((tech, idx) => (
+                                  <Badge key={idx} variant="outline">{tech}</Badge>
+                                ))}
+                              </div>
+                            </AccordionContent>
+                          </AccordionItem>
+                        )}
+                      </Accordion>
+                    </CardContent>
+                  </Card>
+                )}
             </>
           ) : (
             <Card>
               <CardContent className="py-8 text-center text-sm text-muted-foreground">
-                Content analysis not available yet. Reprocess the session audio to generate vocabulary and grammar insights.
+                Content analysis not available yet. Reprocess the session to generate vocabulary and
+                grammar insights.
               </CardContent>
             </Card>
           )}
-        </TabsContent>
+        </div>
 
-        {/* Delivery Analysis Tab */}
-        <TabsContent value="delivery" className="space-y-4">
-          {metrics.delivery_metrics ? (
-            <>
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Mic className="h-5 w-5" />
-                    Speech Metrics (Gentle Analysis)
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <div className="text-sm text-muted-foreground">Speech Rate</div>
-                      <div className="text-2xl font-bold">{metrics.delivery_metrics.speech_rate.toFixed(0)} wpm</div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-muted-foreground">Articulation Rate</div>
-                      <div className="text-2xl font-bold">{metrics.delivery_metrics.articulation_rate.toFixed(0)} wpm</div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-muted-foreground">Pauses</div>
-                      <div className="text-2xl font-bold">{metrics.delivery_metrics.pause_count}</div>
-                      <div className="text-xs text-muted-foreground">Avg: {metrics.delivery_metrics.mean_pause_duration.toFixed(2)}s</div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-muted-foreground">Filler Words</div>
-                      <div className="text-2xl font-bold">{metrics.delivery_metrics.filler_word_count}</div>
-                      <div className="text-xs text-muted-foreground">Rate: {metrics.delivery_metrics.filler_word_rate.toFixed(1)}%</div>
-                    </div>
+        {/* ── Delivery ──────────────────────────────────────────────
+            Pace & fillers live in Speaking Performance (the single source of
+            truth), so Delivery only shows what's unique to the recording: the
+            acoustic prosody (voice quality, pitch, energy) and pauses. */}
+        <div className="flex h-full flex-col gap-4">
+          {hasProsody && d ? (
+            <Card className="flex flex-1 flex-col">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Activity className="h-5 w-5" />
+                  Delivery — Voice Quality
+                </CardTitle>
+                <CardDescription>How you sounded — acoustic analysis of your recording</CardDescription>
+              </CardHeader>
+              <CardContent className="flex-1 space-y-4">
+                <div>
+                  <div className="mb-1 flex justify-between text-sm">
+                    <span>Voice Quality</span>
+                    <Badge>{d.voice_quality_score.toFixed(1)}/10</Badge>
                   </div>
-                </CardContent>
-              </Card>
+                  <Progress value={d.voice_quality_score * 10} />
+                  <Verdict verdict={DELIVERY_VERDICTS.voiceQuality(d.voice_quality_score)} />
+                </div>
+                <div>
+                  <div className="mb-1 flex justify-between text-sm">
+                    <span>Pitch Variation</span>
+                    <Badge>{d.pitch_variation.toFixed(1)}/10</Badge>
+                  </div>
+                  <Progress value={d.pitch_variation * 10} />
+                  <Verdict verdict={DELIVERY_VERDICTS.pitchVariation(d.pitch_variation)} />
+                </div>
+                <div>
+                  <div className="mb-1 flex justify-between text-sm">
+                    <span>Energy Stability</span>
+                    <Badge>{d.energy_stability.toFixed(1)}/10</Badge>
+                  </div>
+                  <Progress value={d.energy_stability * 10} />
+                  <Verdict verdict={DELIVERY_VERDICTS.energyStability(d.energy_stability)} />
+                </div>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Activity className="h-5 w-5" />
-                    Voice Quality (Praat Analysis)
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span>Voice Quality Score</span>
-                      <Badge>{metrics.delivery_metrics.voice_quality_score.toFixed(1)}/10</Badge>
-                    </div>
-                    <Progress value={metrics.delivery_metrics.voice_quality_score * 10} />
+                {d.pause_count > 0 && (
+                  <div className="border-t pt-3">
+                    <div className="text-sm text-muted-foreground">Pauses</div>
+                    <div className="text-2xl font-bold">{d.pause_count}</div>
+                    <div className="text-xs text-muted-foreground">Avg: {d.mean_pause_duration.toFixed(2)}s</div>
                   </div>
-                  
-                  <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span>Pitch Variation</span>
-                      <Badge>{metrics.delivery_metrics.pitch_variation.toFixed(1)}/10</Badge>
-                    </div>
-                    <Progress value={metrics.delivery_metrics.pitch_variation * 10} />
-                  </div>
-                  
-                  <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span>Energy Stability</span>
-                      <Badge>{metrics.delivery_metrics.energy_stability.toFixed(1)}/10</Badge>
-                    </div>
-                    <Progress value={metrics.delivery_metrics.energy_stability * 10} />
-                  </div>
-                </CardContent>
-              </Card>
-            </>
+                )}
+
+                {/* How these acoustic scores are computed — answers "how is pitch rated?" */}
+                <p className="border-t pt-3 text-[11px] leading-snug text-muted-foreground">
+                  <span className="font-medium text-foreground">How these are rated (0–10):</span> a
+                  Praat acoustic analysis of your recording. <span className="font-medium">Pitch
+                  Variation</span> reflects how much your pitch moves (spread of fundamental frequency
+                  in semitones) — flat/monotone scores low, expressive scores high. <span className="font-medium">Energy
+                  Stability</span> is how consistent your volume is, and <span className="font-medium">Voice
+                  Quality</span> is the harmonics-to-noise ratio (clarity vs. breathiness/strain).
+                  Pace &amp; fillers are in <span className="font-medium">Speaking Performance</span> above.
+                </p>
+              </CardContent>
+            </Card>
           ) : (
-            <Card>
-              <CardContent className="py-8 text-center text-sm text-muted-foreground">
-                Delivery analysis (speech rate, pauses, prosody) not available yet. Use &quot;Reprocess Audio&quot; after downloading your recording.
+            <Card className="flex flex-1 flex-col border-dashed">
+              <CardContent className="flex flex-1 flex-col items-center justify-center py-6 text-center text-sm text-muted-foreground">
+                <Activity className="mb-2 h-6 w-6 opacity-50" />
+                Delivery voice quality (pitch variation, energy stability, voice quality, pauses) comes
+                from an acoustic analysis of your recording, which isn&apos;t available for this session
+                yet. Pace &amp; fillers are shown in Speaking Performance above.
               </CardContent>
             </Card>
           )}
-        </TabsContent>
-      </Tabs>
+        </div>
+      </div>
 
       {metrics.processing_errors && metrics.processing_errors.length > 0 && (
         <Card className="border-muted">

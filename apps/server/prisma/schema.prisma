@@ -53,10 +53,29 @@ model User {
   loginCount    Int      @default(0)
   rewardPoints  Float    @default(0)
 
-  // Per-user content/export restrictions (admin-controlled)
+  // Per-user content/export restrictions (admin-controlled).
+  // "hide*" gate VIEWING of transcript/audio content (default: visible).
   hideTranscriptText       Boolean @default(false)
   hideTranscriptJsonExport Boolean @default(false)
   hideAudioDownload        Boolean @default(false)
+
+  // Per-user export/reprocess capabilities (admin-controlled).
+  // "enable*" gate the download/reprocess ACTION BUTTONS and endpoints.
+  // Default OFF — these only appear once an admin enables them (admins always
+  // have them). Independent from the "hide*" view flags above.
+  enableTxtExport   Boolean @default(false)
+  enableJsonExport  Boolean @default(false)
+  enableAudioExport Boolean @default(false)
+  enableReprocess   Boolean @default(false)
+
+  // Pro license (admin-controlled). Gates premium UI features such as
+  // playback "Key Moments" and the "Ask AI Coach" assistant. Default OFF;
+  // admins always have access regardless of this flag.
+  enablePro         Boolean @default(false)
+
+  // Ultra license (admin-controlled). Gates the highest-tier features such as
+  // Replay video-file uploads. Default OFF; admins always have access.
+  enableUltra       Boolean @default(false)
 
   // Relations
   sessions       Session[]
@@ -162,12 +181,46 @@ model Session {
 
   progressPulseStatus String? // 'tracked' | 'skipped' | null (not yet decided)
 
+  // Shared audio timeline anchor (t0): all SessionTurn.audioStart/audioEnd and
+  // word timings are expressed as seconds since this instant, aligned to the
+  // start of the streamable recording so the replay UI can seek directly.
+  recordingStartedAt DateTime?
+
   // Relations
   metrics     SessionMetrics?
   transcript  SessionTranscript?
   recordings  SessionRecording[]
+  turns       SessionTurn[]
 
   @@index([userId, startedAt])
+}
+
+// Per-turn record powering the "conversation as replay" UX (per-message audio
+// offsets, word timings, metrics, scores, coach notes). Session-level rollups
+// stay in SessionMetrics; this is the queryable per-answer primary object.
+model SessionTurn {
+  id        String   @id @default(cuid())
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId String
+
+  turnIndex Int      // 0-based order within the session (reconciled with messages[])
+  role      String   // 'user' | 'assistant'
+  text      String   @db.Text
+
+  // Audio timeline (seconds since Session.recordingStartedAt). Null when timing
+  // could not be measured/aligned (e.g. backend without word timestamps).
+  audioStart Float?
+  audioEnd   Float?
+
+  words   Json?    // [{ w: string, start: number, end: number }] (user turns only, v1)
+  metrics Json?    // TurnMetricsSnapshot: { wpm, fillerCount, fillerRate, hedgingCount, vocabDiversity, speakingSeconds, ... }
+  score   Json?    // LLM judge: { stars, confidence, tags: string[] }
+  coachNote String? @db.Text
+
+  createdAt DateTime @default(now())
+
+  @@unique([sessionId, turnIndex])
+  @@index([sessionId])
 }
 
 model SessionMetrics {
@@ -415,9 +468,13 @@ model VoiceConfig {
 
   // Per-backend tuning (NULL when not applicable)
   pipelineStt String? // e.g. "whisper-large-v3-turbo"
-  pipelineLlm String? // e.g. "qwen2.5:32b"
-  pipelineTts String? // e.g. "kokoro"
-  voiceName   String? // e.g. "tiffany" (Nova Sonic) | "af_bella" (Kokoro)
+  pipelineLlm String? // e.g. "amazon.nova-pro-v1:0"
+  pipelineTts String? // e.g. "kokoro" | "polly"
+  voiceName   String? // e.g. "tiffany" (Nova Sonic) | "af_bella" (Kokoro) | "Ruth" (Polly)
+
+  // Composable providers for pipeline-bedrock (whisper|transcribe, kokoro|polly)
+  sttProvider String? // whisper | transcribe
+  ttsProvider String? // kokoro | polly
 
   // Endpoints for local pipeline servers (only used by pipeline-* backends)
   sttBaseUrl String? // e.g. "http://localhost:8001/v1"
@@ -428,6 +485,18 @@ model VoiceConfig {
   updatedBy String? // admin user id who last changed it
   updatedAt DateTime @updatedAt
   createdAt DateTime @default(now())
+}
+
+// Singleton (id = "default") admin config for the Replay/analysis LLM.
+// Separate from VoiceConfig (which only drives the live Elevate voice agent).
+model AnalysisConfig {
+  id            String   @id @default("default")
+  // Bedrock model id for Replay transcript analysis + coaching insights.
+  // NULL = fall back to the BEDROCK_REPLAY_MODEL_ID env default.
+  replayModelId String?
+  updatedBy     String?
+  updatedAt     DateTime @updatedAt
+  createdAt     DateTime @default(now())
 }
 
 enum UserFeedbackType {

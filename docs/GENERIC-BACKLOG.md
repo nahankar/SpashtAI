@@ -1,5 +1,8 @@
 # Generic Backlog
 
+> **North Star:** Product architecture, utterance model, and phased roadmap live in [NORTHSTAR.md](./NORTHSTAR.md).  
+> Elevate voice reliability and utterance persistence are **P0 / P1** there—backlog items below should reference those phases when touching live coaching or metrics storage.
+
 ## 2026-03-25
 
 ### 1) Remove Replay Context Fields (Deferred)

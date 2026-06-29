@@ -72,7 +72,8 @@ function buildContextCriteria(ctx: ReplayContext): string {
 
 export async function analyzeTranscript(
   transcript: string,
-  context: ReplayContext
+  context: ReplayContext,
+  modelId?: string
 ): Promise<BedrockAnalysisResult> {
   const contextCriteria = buildContextCriteria(context)
 
@@ -175,7 +176,7 @@ IMPORTANT for annotatedTranscript:
   })
 
   const command = new InvokeModelCommand({
-    modelId: BEDROCK_MODEL_ID,
+    modelId: modelId || BEDROCK_MODEL_ID,
     contentType: 'application/json',
     accept: 'application/json',
     body,

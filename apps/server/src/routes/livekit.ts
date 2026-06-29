@@ -26,6 +26,8 @@ async function getActiveVoiceConfig() {
   return {
     backend: 'nova-sonic',
     voiceName: 'tiffany',
+    sttProvider: null,
+    ttsProvider: null,
     pipelineStt: null,
     pipelineLlm: null,
     pipelineTts: null,
@@ -33,6 +35,14 @@ async function getActiveVoiceConfig() {
     llmBaseUrl: null,
     ttsBaseUrl: null,
   } as const
+}
+
+type TurnDetection = 'HIGH' | 'MEDIUM' | 'LOW' | 'EXTRA'
+
+function normalizeTurnDetection(value?: string): TurnDetection {
+  const level = (value || 'MEDIUM').toUpperCase()
+  if (level === 'HIGH' || level === 'LOW' || level === 'EXTRA') return level
+  return 'MEDIUM'
 }
 
 function hasActiveDispatchJobs(dispatches: any[] | undefined): boolean {
@@ -45,7 +55,16 @@ function hasActiveDispatchJobs(dispatches: any[] | undefined): boolean {
 
 export async function getLivekitToken(req: Request, res: Response) {
   try {
-    const { identity, room, sessionId, userName, focusArea, focusContext, sessionName } = req.query as Record<string, string | undefined>
+    const {
+      identity,
+      room,
+      sessionId,
+      userName,
+      focusArea,
+      focusContext,
+      sessionName,
+      turnDetection,
+    } = req.query as Record<string, string | undefined>
     if (!identity || !room) {
       return res.status(400).json({ error: 'identity and room are required' })
     }
@@ -61,24 +80,27 @@ export async function getLivekitToken(req: Request, res: Response) {
     const voiceCfg = await getActiveVoiceConfig()
 
     // Create the room first to ensure agent can join
+    const roomService = new RoomServiceClient(httpUrl, apiKey, apiSecret)
+    const roomMeta: Record<string, string | undefined | null> = {
+      sessionId,
+      userName,
+      focusArea,
+      focusContext,
+      sessionName,
+      // Voice backend selection (read by apps/agent/main.py via voice_backends.build_session)
+      voiceBackend: voiceCfg.backend,
+      voiceName: voiceCfg.voiceName ?? undefined,
+      sttProvider: voiceCfg.sttProvider ?? undefined,
+      ttsProvider: voiceCfg.ttsProvider ?? undefined,
+      pipelineStt: voiceCfg.pipelineStt ?? undefined,
+      pipelineLlm: voiceCfg.pipelineLlm ?? undefined,
+      pipelineTts: voiceCfg.pipelineTts ?? undefined,
+      sttBaseUrl: voiceCfg.sttBaseUrl ?? undefined,
+      llmBaseUrl: voiceCfg.llmBaseUrl ?? undefined,
+      ttsBaseUrl: voiceCfg.ttsBaseUrl ?? undefined,
+      turnDetection: normalizeTurnDetection(turnDetection),
+    }
     try {
-      const roomService = new RoomServiceClient(httpUrl, apiKey, apiSecret)
-      const roomMeta: Record<string, string | undefined | null> = {
-        sessionId,
-        userName,
-        focusArea,
-        focusContext,
-        sessionName,
-        // Voice backend selection (read by apps/agent/main.py via voice_backends.build_session)
-        voiceBackend: voiceCfg.backend,
-        voiceName: voiceCfg.voiceName ?? undefined,
-        pipelineStt: voiceCfg.pipelineStt ?? undefined,
-        pipelineLlm: voiceCfg.pipelineLlm ?? undefined,
-        pipelineTts: voiceCfg.pipelineTts ?? undefined,
-        sttBaseUrl: voiceCfg.sttBaseUrl ?? undefined,
-        llmBaseUrl: voiceCfg.llmBaseUrl ?? undefined,
-        ttsBaseUrl: voiceCfg.ttsBaseUrl ?? undefined,
-      }
       await roomService.createRoom({
         name: room,
         emptyTimeout: 60 * 10, // 10 minutes
@@ -86,9 +108,16 @@ export async function getLivekitToken(req: Request, res: Response) {
       })
       console.log(`✅ Room ${room} created (voice backend: ${voiceCfg.backend})`)
     } catch (roomError: any) {
-      // Room might already exist, that's OK
-      if (!roomError.message?.includes('already exists')) {
-        console.log(`ℹ️ Room creation note: ${roomError.message}`)
+      const msg = roomError?.message || String(roomError)
+      if (msg.includes('already exists')) {
+        try {
+          await roomService.updateRoomMetadata(room, JSON.stringify(roomMeta))
+          console.log(`✅ Room ${room} metadata updated (voice backend: ${voiceCfg.backend})`)
+        } catch (metaErr: any) {
+          console.log(`ℹ️ Room metadata update failed: ${metaErr?.message || metaErr}`)
+        }
+      } else {
+        console.log(`ℹ️ Room creation note: ${msg}`)
       }
     }
 

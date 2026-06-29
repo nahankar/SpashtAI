@@ -47,6 +47,8 @@ export interface CoachingContext {
   /** Absolute path to session audio (user track preferred) */
   audioPath?: string
   audioMime?: string
+  /** Override Bedrock model id (admin-configured Replay LLM); text provider only. */
+  modelId?: string
 }
 
 export function emptyCoachingInsights(error?: string): CoachingInsights {

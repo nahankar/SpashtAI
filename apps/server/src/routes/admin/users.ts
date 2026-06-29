@@ -87,6 +87,12 @@ router.get('/:id', async (req: Request, res: Response) => {
         hideTranscriptText: true,
         hideTranscriptJsonExport: true,
         hideAudioDownload: true,
+        enableTxtExport: true,
+        enableJsonExport: true,
+        enableAudioExport: true,
+        enableReprocess: true,
+        enablePro: true,
+        enableUltra: true,
         _count: { select: { sessions: true, replaySessions: true, featureUsage: true } },
       },
     })
@@ -253,12 +259,28 @@ router.post('/:id/change-role', async (req: Request, res: Response) => {
 // PATCH /api/admin/users/:id/export-flags
 router.patch('/:id/export-flags', async (req: Request, res: Response) => {
   try {
-    const { hideTranscriptText, hideTranscriptJsonExport, hideAudioDownload } = req.body
+    const {
+      hideTranscriptText,
+      hideTranscriptJsonExport,
+      hideAudioDownload,
+      enableTxtExport,
+      enableJsonExport,
+      enableAudioExport,
+      enableReprocess,
+      enablePro,
+      enableUltra,
+    } = req.body
 
     const data: Record<string, boolean> = {}
     if (typeof hideTranscriptText === 'boolean') data.hideTranscriptText = hideTranscriptText
     if (typeof hideTranscriptJsonExport === 'boolean') data.hideTranscriptJsonExport = hideTranscriptJsonExport
     if (typeof hideAudioDownload === 'boolean') data.hideAudioDownload = hideAudioDownload
+    if (typeof enableTxtExport === 'boolean') data.enableTxtExport = enableTxtExport
+    if (typeof enableJsonExport === 'boolean') data.enableJsonExport = enableJsonExport
+    if (typeof enableAudioExport === 'boolean') data.enableAudioExport = enableAudioExport
+    if (typeof enableReprocess === 'boolean') data.enableReprocess = enableReprocess
+    if (typeof enablePro === 'boolean') data.enablePro = enablePro
+    if (typeof enableUltra === 'boolean') data.enableUltra = enableUltra
 
     if (Object.keys(data).length === 0) {
       res.status(400).json({ error: 'At least one export flag is required' })
@@ -274,6 +296,12 @@ router.patch('/:id/export-flags', async (req: Request, res: Response) => {
         hideTranscriptText: true,
         hideTranscriptJsonExport: true,
         hideAudioDownload: true,
+        enableTxtExport: true,
+        enableJsonExport: true,
+        enableAudioExport: true,
+        enableReprocess: true,
+        enablePro: true,
+        enableUltra: true,
       },
     })
 

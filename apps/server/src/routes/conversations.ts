@@ -6,6 +6,7 @@ import {
   getElevateSessionOwnerId,
   resolveRequestExportFlags,
 } from '../lib/userExportFlags'
+import { dedupeConversationMessages } from '../lib/dedupeMessages'
 import { WebSocketServer, WebSocket } from 'ws'
 
 let wss: WebSocketServer | null = null
@@ -202,7 +203,9 @@ export async function getConversation(req: Request, res: Response) {
     const conversationData = transcript.conversationData as any
     const messages = flags.hideTranscriptText
       ? []
-      : Array.isArray(conversationData.messages) ? conversationData.messages : []
+      : dedupeConversationMessages(
+          Array.isArray(conversationData.messages) ? conversationData.messages : [],
+        )
     
     res.json({
       sessionId,

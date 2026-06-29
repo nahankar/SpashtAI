@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ProfileDetailsRow, type ProfileGender } from '@/components/auth/ProfileDetailsRow'
 import { apiClient } from '@/lib/api-client'
-import { BrandName, BRAND_ALT } from '@/components/brand/BrandName'
+import { LogoWithBeta } from '@/components/brand/LogoWithBeta'
 
 export function CompleteProfile() {
   const { user, updateUser, fetchCurrentUser } = useAuth()
@@ -60,7 +60,9 @@ export function CompleteProfile() {
     <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center bg-background px-4 py-8">
       <Card className="w-full max-w-lg">
         <CardHeader className="text-center space-y-2">
-          <img src="/spashtai_logo.svg" alt={BRAND_ALT} className="h-12 w-auto mx-auto" />
+          <div className="flex justify-center">
+            <LogoWithBeta imgClassName="h-12 w-auto" />
+          </div>
           <CardTitle className="text-xl">Almost there</CardTitle>
           <CardDescription>
             {user?.email

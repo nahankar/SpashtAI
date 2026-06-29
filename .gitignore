@@ -28,6 +28,20 @@ apps/agent/archive/
 # Build output (rebuilt on deploy)
 apps/server/dist/
 apps/server/tsconfig.tsbuildinfo
+apps/web/dist/
+apps/web/tsconfig.tsbuildinfo
+
+# Local scratch notes / reference material (not part of the app)
+cursor_code_understanding_and_local_llm.md
+spasht.ai.txt
+spasht.ai.*.txt
+2025-top-tech-trends-ebook.pdf
+GitHub-Design-System/
+
+# Captured user/session audio dumps
+spashtai-user-audio-*.wav
+spashtai-user-audio-*.webm
+*.webm
 
 # Secrets & certs (never commit)
 *.pem

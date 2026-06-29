@@ -405,6 +405,12 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
         hideTranscriptText: true,
         hideTranscriptJsonExport: true,
         hideAudioDownload: true,
+        enableTxtExport: true,
+        enableJsonExport: true,
+        enableAudioExport: true,
+        enableReprocess: true,
+        enablePro: true,
+        enableUltra: true,
       },
     })
 

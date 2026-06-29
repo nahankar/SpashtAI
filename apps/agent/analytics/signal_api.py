@@ -10,10 +10,11 @@ Runs alongside the LiveKit agent process.
 import json
 import logging
 import os
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 
 from .text_signals import extract_text_signals
+from .prosody import analyze_prosody
 
 logger = logging.getLogger("spashtai-signal-api")
 
@@ -86,13 +87,38 @@ class SignalHandler(BaseHTTPRequestHandler):
                 self._json_response(500, {"error": str(e)})
             return
 
+        if self.path == "/analyze-prosody":
+            if not self._check_auth():
+                return
+            body = self._read_body()
+            audio_path = (body or {}).get("audioPath")
+            session_id = (body or {}).get("sessionId", "unknown")
+            if not audio_path:
+                self._json_response(400, {"error": "audioPath required"})
+                return
+            try:
+                logger.info("Analyzing prosody for session %s (%s)", session_id, audio_path)
+                prosody = analyze_prosody(audio_path)
+                if prosody is None:
+                    self._json_response(200, {"sessionId": session_id, "prosody": None})
+                    return
+                self._json_response(200, {"sessionId": session_id, "prosody": prosody})
+            except Exception as e:
+                logger.error("Prosody analysis failed: %s", e, exc_info=True)
+                self._json_response(500, {"error": str(e)})
+            return
+
         self.send_response(404)
         self.end_headers()
 
 
 def start_signal_api(blocking: bool = False):
-    """Start the signal extraction HTTP server."""
-    server = HTTPServer(("0.0.0.0", SIGNAL_API_PORT), SignalHandler)
+    """Start the signal extraction HTTP server.
+
+    Threaded so a slow request (e.g. Praat/ffmpeg prosody) can't block a
+    concurrent /extract-signals call and serialize the analytics pipeline.
+    """
+    server = ThreadingHTTPServer(("0.0.0.0", SIGNAL_API_PORT), SignalHandler)
     logger.info("Signal API listening on port %d", SIGNAL_API_PORT)
 
     if blocking:

@@ -23,7 +23,7 @@ export async function generateBedrockTextInsights(ctx: CoachingContext): Promise
   })
 
   const command = new InvokeModelCommand({
-    modelId: BEDROCK_MODEL_ID,
+    modelId: ctx.modelId || BEDROCK_MODEL_ID,
     contentType: 'application/json',
     accept: 'application/json',
     body,

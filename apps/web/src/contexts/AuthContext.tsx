@@ -17,6 +17,12 @@ export interface AuthUser {
   hideTranscriptText?: boolean
   hideTranscriptJsonExport?: boolean
   hideAudioDownload?: boolean
+  enableTxtExport?: boolean
+  enableJsonExport?: boolean
+  enableAudioExport?: boolean
+  enableReprocess?: boolean
+  enablePro?: boolean
+  enableUltra?: boolean
 }
 
 export interface RegisterData {

@@ -13,6 +13,12 @@ from typing import Dict, List, Optional, Any, Deque
 from datetime import datetime, timezone
 
 from livekit.agents import metrics, MetricsCollectedEvent
+from livekit.agents.metrics import (
+    EOUMetrics,
+    LLMMetrics,
+    STTMetrics,
+    TTSMetrics,
+)
 from turn_metrics import TurnStitcher, compute_turn_metrics, TurnMetricsSnapshot
 
 logger = logging.getLogger("metrics-collector")
@@ -93,6 +99,12 @@ class MetricsCollector:
         self.llm_metrics: List[Any] = []
         self.tts_metrics: List[Any] = []
         self.eou_metrics: List[Any] = []
+        self.stt_metrics: List[Any] = []
+
+        # Per-turn latency assembly, keyed by LiveKit speech_id. Each pipeline
+        # stage (EOU → LLM → TTS) fires its own metrics event; we stitch them
+        # back together so we can log one user-perceived latency line per turn.
+        self._latency_by_speech: Dict[str, Dict[str, float]] = {}
         
         # Conversation tracking
         self.conversation_buffer: Deque[ConversationTurn] = deque(maxlen=1000)
@@ -110,10 +122,14 @@ class MetricsCollector:
         self._assistant_speaking_seconds_measured: Optional[float] = None
 
         self._utterance_peeker = None
+        self._session_totals_peeker = None
         self._on_user_turn_metrics = None
         self._on_turn_committed = None
         self._stitcher = TurnStitcher(metrics_for_user=self._compute_user_turn_metrics)
         self._user_turn_metrics_seq = 0
+        # Baseline of the cumulative pacing totals at the start of the current
+        # user turn. Per-turn WPM = (turn words) / (cumulative_seconds - baseline).
+        self._turn_pacing_start_seconds = 0.0
         
         logger.info(f"🔢 MetricsCollector initialized for session {session_id}")
 
@@ -121,9 +137,25 @@ class MetricsCollector:
         """Callable returning UtteranceSnapshot | None from LivePacingTracker."""
         self._utterance_peeker = peeker
 
+    def set_session_totals_peeker(self, peeker) -> None:
+        """Callable returning (total_words, total_seconds, samples) from LivePacingTracker.
+
+        Used to compute per-turn speaking time as a delta of the cumulative
+        totals, which are accurate even when individual STT segments miss a
+        VAD duration (the single-segment peeker is not)."""
+        self._session_totals_peeker = peeker
+
     def set_user_turn_metrics_callback(self, callback) -> None:
         """Called with (stitched_text, TurnMetricsSnapshot, turn_index) when a user utterance completes."""
         self._on_user_turn_metrics = callback
+
+    def peek_pending_user_text(self) -> str:
+        """Committed text of the in-progress user turn (fragments stitched so far)."""
+        return self._stitcher.peek_pending_user() or ""
+
+    def current_user_turn_index(self) -> int:
+        """Turn index for the in-progress user turn (matches the committed publish)."""
+        return self._user_turn_metrics_seq + 1
 
     def publish_pending_user_utterance_metrics(self) -> bool:
         """Publish per-turn metrics for the in-progress user utterance (end-of-speech)."""
@@ -136,7 +168,7 @@ class MetricsCollector:
         metrics = self._compute_user_turn_metrics(normalized, None)
         if self._on_user_turn_metrics:
             try:
-                self._on_user_turn_metrics(normalized, metrics, turn_index)
+                self._on_user_turn_metrics(normalized, metrics, turn_index, False)
             except Exception as e:
                 logger.warning("user turn metrics callback failed: %s", e)
         logger.info(
@@ -150,7 +182,34 @@ class MetricsCollector:
         """Called with (speaker, stitched_text) when any logical turn completes."""
         self._on_turn_committed = callback
 
+    def _turn_measured_seconds(self) -> Optional[float]:
+        """Speaking seconds for the in-progress user turn (delta of cumulative pacing)."""
+        if not self._session_totals_peeker:
+            return None
+        try:
+            _total_words, total_seconds, _samples = self._session_totals_peeker()
+        except Exception:
+            return None
+        ds = total_seconds - self._turn_pacing_start_seconds
+        return ds if ds > 0 else None
+
     def _compute_user_turn_metrics(self, text: str, _unused) -> TurnMetricsSnapshot:
+        # Prefer measured per-turn timing (delta of the cumulative pacing
+        # totals) so WPM reflects the WHOLE turn rather than just the last STT
+        # segment. The old last-utterance path failed compute_turn_metrics'
+        # word-count match guard on multi-segment turns and fell back to a
+        # constant 150 WPM ("Ideal") for every turn.
+        seconds = self._turn_measured_seconds()
+        if seconds and seconds > 0:
+            wc = len(re.findall(r"[A-Za-z']+(?:[-'][A-Za-z']+)?", text))
+            if wc >= 3:
+                wpm = (wc / seconds) * 60.0
+                return compute_turn_metrics(
+                    text,
+                    utterance_words=wc,
+                    utterance_seconds=seconds,
+                    utterance_wpm=wpm,
+                )
         utt = self._utterance_peeker() if self._utterance_peeker else None
         return compute_turn_metrics(
             text,
@@ -194,9 +253,18 @@ class MetricsCollector:
             self._user_turn_metrics_seq += 1
             turn_index = self._user_turn_metrics_seq
             try:
-                self._on_user_turn_metrics(text, user_metrics, turn_index)
+                self._on_user_turn_metrics(text, user_metrics, turn_index, True)
             except Exception as e:
                 logger.warning("user turn metrics callback failed: %s", e)
+        if speaker == "user":
+            # Advance the per-turn pacing baseline to the current cumulative
+            # total so the NEXT user turn measures only its own speaking time.
+            if self._session_totals_peeker:
+                try:
+                    _tw, ts, _s = self._session_totals_peeker()
+                    self._turn_pacing_start_seconds = ts
+                except Exception:
+                    pass
 
     def add_conversation_turn(self, speaker: str, text: str, timestamp: Optional[float] = None):
         """Legacy entry point — routes through turn stitcher."""
@@ -246,33 +314,74 @@ class MetricsCollector:
             self._assistant_speaking_seconds_measured = float(assistant_seconds)
 
     def on_metrics_collected(self, ev: MetricsCollectedEvent):
-        """Handle LiveKit metrics events"""
+        """Handle LiveKit per-stage metrics events.
+
+        In livekit-agents 1.x, ``ev.metrics`` is a SINGLE metric object (one of
+        STT/EOU/LLM/TTS/VAD), not a container — so each pipeline stage fires its
+        own event. We log every stage at INFO and stitch the stages of one turn
+        (by ``speech_id``) into a single user-perceived latency breakdown:
+
+            latency ≈ EOU delay + LLM TTFT + TTS TTFB
+        """
         try:
-            # Collect usage metrics
-            self.usage_collector.collect(ev.metrics)
-            
-            # Store specific metric types for detailed analysis
-            if hasattr(ev.metrics, 'llm_metrics'):
-                self.llm_metrics.append(ev.metrics.llm_metrics)
-                logger.debug(f"📊 LLM metrics: tokens={ev.metrics.llm_metrics.total_tokens}, "
-                           f"duration={ev.metrics.llm_metrics.duration}s, "
-                           f"ttft={ev.metrics.llm_metrics.ttft}s")
-                
-            if hasattr(ev.metrics, 'tts_metrics'):
-                self.tts_metrics.append(ev.metrics.tts_metrics)
-                logger.debug(f"🔊 TTS metrics: chars={ev.metrics.tts_metrics.characters_count}, "
-                           f"audio_duration={ev.metrics.tts_metrics.audio_duration}s, "
-                           f"ttfb={ev.metrics.tts_metrics.ttfb}s")
-                
-            if hasattr(ev.metrics, 'eou_metrics'):
-                self.eou_metrics.append(ev.metrics.eou_metrics)
-                logger.debug(f"⏱️ EOU metrics: delay={ev.metrics.eou_metrics.end_of_utterance_delay}s")
-                
-            # Log the collected metrics
-            metrics.log_metrics(ev.metrics)
-            
+            m = ev.metrics
+            self.usage_collector.collect(m)
+
+            if isinstance(m, STTMetrics):
+                self.stt_metrics.append(m)
+                logger.info(
+                    f"⏱️ STT: duration={m.duration:.2f}s "
+                    f"audio={m.audio_duration:.2f}s streamed={m.streamed}"
+                )
+
+            elif isinstance(m, EOUMetrics):
+                self.eou_metrics.append(m)
+                logger.info(
+                    f"⏱️ EOU: end_of_utterance_delay={m.end_of_utterance_delay:.2f}s "
+                    f"transcription_delay={m.transcription_delay:.2f}s"
+                )
+                self._record_stage(m.speech_id, "eou", m.end_of_utterance_delay)
+
+            elif isinstance(m, LLMMetrics):
+                self.llm_metrics.append(m)
+                logger.info(
+                    f"⏱️ LLM: ttft={m.ttft:.2f}s duration={m.duration:.2f}s "
+                    f"tokens={m.total_tokens} tok/s={m.tokens_per_second:.1f}"
+                )
+                self._record_stage(m.speech_id, "llm_ttft", m.ttft)
+
+            elif isinstance(m, TTSMetrics):
+                self.tts_metrics.append(m)
+                logger.info(
+                    f"⏱️ TTS: ttfb={m.ttfb:.2f}s duration={m.duration:.2f}s "
+                    f"audio={m.audio_duration:.2f}s chars={m.characters_count}"
+                )
+                self._record_stage(m.speech_id, "tts_ttfb", m.ttfb)
+
+            metrics.log_metrics(m)
+
         except Exception as e:
             logger.error(f"❌ Error processing metrics: {e}")
+
+    def _record_stage(self, speech_id: Optional[str], stage: str, value: float):
+        """Accumulate one stage of a turn; emit the full breakdown once TTS lands."""
+        if not speech_id:
+            return
+        bucket = self._latency_by_speech.setdefault(speech_id, {})
+        bucket[stage] = float(value)
+
+        # TTS TTFB is the last stage before the user hears audio — once we have it
+        # (and the LLM stage), emit the assembled user-perceived latency line.
+        if "tts_ttfb" in bucket and "llm_ttft" in bucket:
+            eou = bucket.get("eou", 0.0)
+            llm = bucket.get("llm_ttft", 0.0)
+            tts = bucket.get("tts_ttfb", 0.0)
+            total = eou + llm + tts
+            logger.info(
+                f"🎯 TURN LATENCY (speech {speech_id}): {total:.2f}s "
+                f"= EOU {eou:.2f}s + LLM-ttft {llm:.2f}s + TTS-ttfb {tts:.2f}s"
+            )
+            self._latency_by_speech.pop(speech_id, None)
     
     def _extract_words(self, text: str) -> List[str]:
         """Extract words from text, handling punctuation and contractions"""

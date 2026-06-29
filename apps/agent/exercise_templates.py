@@ -161,22 +161,12 @@ EXERCISE_TEMPLATES: dict[str, dict] = {
             "120 to 160 words per minute. Too slow and you lose attention. "
             "Too fast and people can't follow. We'll practice finding your "
             "sweet spot and using strategic pauses for emphasis.\n\n"
-            "IMPORTANT — pace numbers must be grounded AND fresh:\n"
-            "• You have a tool called `get_live_pacing` that returns the user's "
-            "MEASURED words-per-minute from real audio.\n"
-            "• Whenever you discuss the user's speed, pace, WPM, or rhythm, "
-            "CALL THIS TOOL FIRST and quote the value it returns. Round to the "
-            "nearest 5 for natural delivery (158 → 'around 160 WPM').\n"
-            "• FRESHNESS: the value goes stale within ~5 seconds. ALWAYS re-call "
-            "the tool right before quoting a number — never reuse a value from "
-            "earlier in the conversation. The cumulative WPM shifts as the user "
-            "speaks more, so an old number will not match the live metrics card.\n"
-            "• NEVER invent or estimate a WPM number. If the tool returns "
-            "qualitative=='not-enough-data', say something like 'let me hear "
-            "a bit more before I can give you a number' and wait for more speech "
-            "instead of fabricating a value.\n"
-            "• Use the tool's qualitative label (slow / measured / ideal / fast / "
-            "rapid) to guide what you coach next."
+            "LIVE METRICS — the user's screen shows real-time WPM and pace labels.\n"
+            "• Coach qualitatively ('you're in a comfortable range', 'that felt a bit rushed').\n"
+            "• Fresh metrics are injected into your context after each turn — use those.\n"
+            "• Only call `get_live_pacing` if the user explicitly asks for their exact WPM.\n"
+            "• Never invent a WPM number. If data is thin, ask them to keep speaking "
+            "while you watch the pace on screen."
         ),
         "rounds": [
             {
@@ -403,8 +393,22 @@ def get_exercise_instructions(
         "",
     ]
 
-    # Rich coaching context from Replay analysis + Progress Pulse
-    if coaching_context:
+    # Rich coaching context from Replay analysis + Progress Pulse.
+    # NOTE: the server returns a 200 with an empty-but-truthy object when the
+    # user has no history (e.g. brand-new account or all sessions deleted):
+    #   {skillSummaries: {}, replayInsights: None, lastPracticeSummary: None,
+    #    elevateSessionCount: 0}
+    # A bare `if coaching_context:` is truthy here, which previously told the
+    # model "you DO have past data, cite the specifics" with NO specifics to
+    # cite — causing it to confabulate quotes from non-existent past sessions.
+    # Only emit the "you have data" framing when real data is actually present.
+    has_real_data = bool(coaching_context) and (
+        bool(coaching_context.get("skillSummaries"))
+        or bool(coaching_context.get("replayInsights"))
+        or bool(coaching_context.get("lastPracticeSummary"))
+        or (coaching_context.get("elevateSessionCount") or 0) > 0
+    )
+    if coaching_context and has_real_data:
         lines.append("IMPORTANT: You DO have access to this user's communication data from their past meetings.")
         lines.append("You MUST reference these specific numbers and examples in your coaching.")
         lines.append("When the user asks if you have their data, say YES and cite the specifics below.")
@@ -422,8 +426,8 @@ def get_exercise_instructions(
                 trend_word = 'improving' if diff > 0 else ('stable' if diff == 0 else 'declining')
                 trend = f" ({trend_word}, was {prev})"
             lines.append(f"PRIMARY FOCUS — {focus_area.upper()} SCORE: {current}/10{trend}")
-            lines.append(f"This is the skill they came to practice. Lead with this in your greeting.")
-            lines.append(f"Example greeting: 'Your {focus_area} score is {current} out of 10 — let's work on getting that up.'")
+            lines.append(f"This is the skill they came to practice. You may mention this score briefly if relevant.")
+            lines.append(f"On pipeline backends the opening TTS greeting already covers the welcome — do not re-greet.")
             lines.append("")
 
         # Focus-specific metrics (surface the most relevant ones first)
@@ -563,6 +567,21 @@ def get_exercise_instructions(
             "Reference the user's actual weakness from their meeting analysis."
         )
         lines.append("")
+    else:
+        # No real history and no replay context. Be explicit so the model does
+        # not confabulate a "previous session" when asked. This is the brand-new
+        # account / all-sessions-deleted case.
+        lines.append("HISTORY: You have NO record of previous sessions or past meeting data for this user.")
+        lines.append("Treat this as a first session. Do NOT claim to remember earlier conversations.")
+        lines.append(
+            "If the user asks what you discussed before, or to quote their earlier words, say honestly "
+            "that you don't have a record of a previous session, then offer to focus on today's practice."
+        )
+        lines.append(
+            "NEVER invent, paraphrase, or attribute quotes, decisions, deadlines, or topics from sessions "
+            "that are not present in your provided data."
+        )
+        lines.append("")
 
     lines.append("SUGGESTED EXERCISE FLOW:")
     lines.append("")
@@ -590,6 +609,22 @@ def get_exercise_instructions(
         "End with a brief conversational assessment: "
         "what improved during the session, one thing to keep practicing, "
         "and genuine encouragement. Keep it natural, like a coach after a good workout."
+    )
+    lines.append("")
+    lines.append("CRITICAL — LONG-ANSWER TURN-TAKING (60–90 second user monologues):")
+    lines.append(
+        "When the user is delivering a full answer (PREP, 60s explanation, etc.), "
+        "DO NOT speak until they have been completely silent for at least 5 seconds."
+    )
+    lines.append(
+        "Never interrupt with backchannels like 'I see', 'Great', 'Let's break this down', "
+        "or partial feedback while they are still talking."
+    )
+    lines.append(
+        "Natural pauses between Point, Reason, Example, and summary are NOT turn endings — keep listening."
+    )
+    lines.append(
+        "Only give coaching feedback after their complete answer is finished."
     )
 
     return "\n".join(lines)

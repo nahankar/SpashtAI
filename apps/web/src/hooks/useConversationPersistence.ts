@@ -17,7 +17,12 @@ interface ConversationState {
 
 interface ConversationAPI {
   loadConversation: (sessionId: string) => Promise<void>;
-  addMessage: (role: 'user' | 'assistant', content: string, streamId?: string) => Promise<void>;
+  addMessage: (
+    role: 'user' | 'assistant',
+    content: string,
+    streamId?: string,
+    persist?: boolean,
+  ) => Promise<void>;
   upsertStreamingMessage: (role: 'user' | 'assistant', content: string, streamId: string) => void;
   clearMessages: () => void;
   subscribeToUpdates: (sessionId: string) => () => void;
@@ -83,6 +88,7 @@ export function useConversationPersistence(): ConversationState & ConversationAP
       setState((prev) => {
         const idx = prev.messages.findIndex((m) => m.id === streamId)
         if (idx >= 0) {
+          if (prev.messages[idx].content === content) return prev
           const next = [...prev.messages]
           next[idx] = { ...next[idx], content }
           return { ...prev, messages: next }
@@ -99,8 +105,16 @@ export function useConversationPersistence(): ConversationState & ConversationAP
     [],
   )
 
-  // Add message to conversation (final utterance — persisted to server)
-  const addMessage = useCallback(async (role: 'user' | 'assistant', content: string, streamId?: string) => {
+  // Add message to conversation. Updates the local UI immediately; only writes
+  // to the server when `persist` is true. In the Elevate flow the agent's
+  // conversation_logger is the single source of truth for persistence, so the
+  // browser passes persist=false to avoid double-writing every turn.
+  const addMessage = useCallback(async (
+    role: 'user' | 'assistant',
+    content: string,
+    streamId?: string,
+    persist: boolean = true,
+  ) => {
     const activeSessionId = sessionIdRef.current;
     if (!activeSessionId) {
       console.warn('Cannot add message: no session ID');
@@ -116,7 +130,11 @@ export function useConversationPersistence(): ConversationState & ConversationAP
         if (idx >= 0) {
           tempId = streamId;
           const next = [...prev.messages];
-          next[idx] = { ...next[idx], content, timestamp };
+          // Keep the bubble's ORIGINAL (earliest) timestamp. The agent emits a
+          // stitched user-turn final whose timestamp matches the coach's reply
+          // time, so bumping it here would make the user's turn sort *after* the
+          // coach response that answers it. Preserve creation order instead.
+          next[idx] = { ...next[idx], content };
           return { ...prev, messages: next };
         }
       }
@@ -125,6 +143,8 @@ export function useConversationPersistence(): ConversationState & ConversationAP
         messages: [...prev.messages, { id: tempId, role, content, timestamp }],
       };
     });
+
+    if (!persist) return;
 
     try {
       const response = await fetch(`${API_BASE_URL}/sessions/${activeSessionId}/messages`, {

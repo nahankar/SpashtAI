@@ -26,10 +26,16 @@ from livekit.agents import (
     WorkerOptions,
     cli,
 )
-from livekit.agents import AgentSession, Agent, function_tool, RunContext
+from livekit.agents import AgentSession, Agent, function_tool, RunContext, llm, stt
+from livekit.agents.llm import StopResponse
+from livekit.agents.voice.agent import ModelSettings
 from livekit.plugins import aws
 from exercise_templates import get_exercise_instructions
-from voice_backends import VoiceBackendConfig, build_session, metadata_label
+from monologue_guard import MONOLOGUE_FOCUS_AREAS, MonologueGuard
+from echo_guard import is_likely_echo, record_assistant_speech
+from text_sanitize import StreamingThinkingStripper, is_thinking_only, strip_thinking_blocks
+from voice_backends import VoiceBackendConfig, apply_turn_detection_update, build_session, metadata_label
+from backend_profiles import BackendProfile, SttMode, profile_for
 from live_pacing import LivePacingTracker
 
 # Import analytics components (includes basic + advanced metrics)
@@ -45,18 +51,28 @@ except ImportError as e:
     logger_init.warning("⚠️ Install with: pip install spacy praat-parselmouth && python -m spacy download en_core_web_lg")
 
 # Start the Signal Extraction API (Metrics Engine v2)
-# Guard: only start in the main process (LiveKit dev mode spawns child processes via multiprocessing)
+# Guard: only start in the main process (LiveKit dev mode spawns child processes via multiprocessing).
+#
+# SIGNAL_API_INPROCESS=0 runs it as a SEPARATE process instead (see `npm run dev`).
+# That is required for prosody analysis: analyze_prosody shells out to ffmpeg, and a
+# blocking subprocess inside this asyncio worker process hangs on child-reaping
+# (it runs fine in a standalone process). Decoupling also keeps one wedged request
+# from blocking the whole service.
 import multiprocessing as _mp
-if _mp.current_process().name == "MainProcess":
+if _mp.current_process().name == "MainProcess" and os.getenv("SIGNAL_API_INPROCESS", "1") != "0":
     try:
         from analytics.signal_api import start_signal_api
         start_signal_api(blocking=False)
         logger_init = logging.getLogger("main")
-        logger_init.info("✅ Signal extraction API started (spaCy + textstat)")
-    except ImportError as e:
+        logger_init.info("✅ Signal extraction API started in-process (spaCy + textstat)")
+    except Exception as e:
         logger_init = logging.getLogger("main")
-        logger_init.warning(f"⚠️ Signal API not available: {e}")
-        logger_init.warning("⚠️ Install with: pip install spacy textstat && python -m spacy download en_core_web_md")
+        logger_init.warning(f"⚠️ In-process Signal API not started: {e}")
+        logger_init.warning("⚠️ Run it standalone with: python -m analytics.signal_api")
+else:
+    logging.getLogger("main").info(
+        "ℹ️ In-process Signal API disabled (SIGNAL_API_INPROCESS=0) — expecting a standalone signal service on :4001"
+    )
 
 load_dotenv()
 
@@ -67,6 +83,11 @@ logger.setLevel(logging.INFO)
 SERVER_URL = os.getenv("SERVER_URL", "http://localhost:4000")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 INTERNAL_AGENT_TOKEN = os.getenv("INTERNAL_AGENT_TOKEN", "dev-internal-agent-token")
+
+# Empirical AWS Transcribe finalize/transcription lag (seconds): a FINAL
+# transcript is delivered roughly this long after the audio it covers. Used to
+# pin the STT timeline's t0 to wall-clock for replay/karaoke alignment.
+_STT_FINALIZE_LAG_SEC = 1.1
 
 # Timezone configuration - Indian Standard Time
 IST = pytz.timezone('Asia/Kolkata')
@@ -279,6 +300,10 @@ class CoachingAgent(Agent):
         user_name: str | None = None,
         focus_area: str | None = None,
         session_name: str | None = None,
+        voice_backend: str = "nova-sonic",
+        focus_score: float | None = None,
+        monologue_guard: "MonologueGuard | None" = None,
+        is_resume: bool = False,
     ) -> None:
         super().__init__(instructions=instructions)
         self._pacing_tracker = pacing_tracker
@@ -290,9 +315,130 @@ class CoachingAgent(Agent):
         self._user_name = user_name
         self._focus_area = focus_area
         self._session_name = session_name
+        self._voice_backend = voice_backend
+        self._focus_score = focus_score
+        self._greeting_sent = False
+        self._assistant_speech_history: list[tuple[str, float]] = []
+        self._monologue_guard = monologue_guard
+        self._last_greeting_text: str | None = None
+        self._is_resume = is_resume
+        # Accumulated STT word/segment timings (stream-relative seconds), used to
+        # build per-turn replay records (SessionTurn) with audio offsets + karaoke
+        # word timings at session end. Empty for backends without timestamps.
+        self._stt_words: list[dict] = []
+        self._stt_segments: list[dict] = []
+        # Wall-clock epoch (seconds) corresponding to STT timeline t=0. AWS
+        # Transcribe word/segment times are relative to when audio starts
+        # flowing (≈ the user's first word, AFTER the greeting), whereas the
+        # browser recording starts at room-connect. Persisting this anchor lets
+        # the server realign per-turn offsets to the recording timeline so
+        # karaoke matches the audio (the lead-in gap is variable per session).
+        self._stt_t0_epoch: float | None = None
 
-    async def on_enter(self) -> None:
-        """Coach always greets first — don't wait for the user to speak."""
+    async def stt_node(self, audio, model_settings: ModelSettings):
+        """Tap the STT stream for real word/segment timestamps.
+
+        AWS Transcribe streaming returns per-segment start/end times and
+        word-level timestamps, but the high-level `user_input_transcribed`
+        event drops them. We intercept FINAL_TRANSCRIPT events here and feed
+        the measured speech duration to the pacing tracker so WPM is computed
+        from real timing instead of the VAD-paired 150-WPM estimate fallback.
+        Backends without timing (e.g. Whisper) simply never trigger this and
+        keep using the VAD path.
+        """
+        async for ev in Agent.default.stt_node(self, audio, model_settings):
+            try:
+                if (
+                    isinstance(ev, stt.SpeechEvent)
+                    and ev.type == stt.SpeechEventType.FINAL_TRANSCRIPT
+                    and ev.alternatives
+                ):
+                    self._ingest_stt_word_timing(ev.alternatives[0])
+            except Exception as e:  # never let metrics break transcription
+                logger.debug("stt word-timing ingest failed: %s", e)
+            yield ev
+
+    def _ingest_stt_word_timing(self, alt) -> None:
+        text = (getattr(alt, "text", "") or "").strip()
+        if not text:
+            return
+        start = getattr(alt, "start_time", None)
+        end = getattr(alt, "end_time", None)
+        words = getattr(alt, "words", None)
+        word_count = len(words) if words else len(text.split())
+        seconds = (end - start) if (start is not None and end is not None and end > start) else None
+        self._pacing_tracker.ingest_measured_final(text, word_count, seconds)
+        # Persist raw word/segment timings (stream-relative seconds) for the
+        # replay timeline. Best-effort: never let capture break transcription.
+        try:
+            if start is not None and end is not None:
+                # Anchor the STT timeline to wall-clock on the first timed
+                # segment so the server can realign offsets to the recording
+                # start. A FINAL transcript is delivered ~(end + finalize lag)
+                # after the stream's t0, so subtract `end` (NOT `start`):
+                # using start overshoots t0 by the whole first-utterance duration
+                # (seconds), landing karaoke that much late. The residual ~1s
+                # finalize/transcription lag is removed by a small constant.
+                if self._stt_t0_epoch is None:
+                    self._stt_t0_epoch = time.time() - float(end) - _STT_FINALIZE_LAG_SEC
+                self._stt_segments.append(
+                    {"text": text, "start": float(start), "end": float(end)}
+                )
+            appended = 0
+            if words:
+                for w in words:
+                    wtext = (
+                        getattr(w, "word", None) or getattr(w, "text", "") or ""
+                    ).strip()
+                    ws = getattr(w, "start_time", None)
+                    we = getattr(w, "end_time", None)
+                    if wtext and ws is not None and we is not None:
+                        self._stt_words.append(
+                            {"w": wtext, "start": float(ws), "end": float(we)}
+                        )
+                        appended += 1
+            # AWS Transcribe via the LiveKit plugin exposes segment-level
+            # start/end but drops the per-word Items list, so `words` is usually
+            # empty. When we have a segment span but no real word timings,
+            # synthesize them by distributing the span evenly across tokens.
+            # Segments are short (a few words), so this approximation tracks the
+            # audio closely enough for karaoke highlighting + per-word seek.
+            if appended == 0 and start is not None and end is not None:
+                toks = text.split()
+                seg_start = float(start)
+                seg_span = max(float(end) - seg_start, 0.0)
+                per = (seg_span / len(toks)) if (toks and seg_span > 0) else 0.0
+                for i, tok in enumerate(toks):
+                    ws = seg_start + i * per
+                    self._stt_words.append(
+                        {"w": tok, "start": ws, "end": ws + per}
+                    )
+        except Exception as e:
+            logger.debug("stt word capture failed: %s", e)
+
+    def opening_greeting_text(self) -> str:
+        """Spoken greeting via TTS — no LLM round-trip (reliable on pipeline-bedrock)."""
+        # On a resumed session (the user paused then came back) greet with
+        # "welcome back" so it doesn't sound like a brand-new first meeting.
+        welcome = "welcome back to SpashtAI!" if self._is_resume else "welcome to SpashtAI!"
+        if self._user_name:
+            line = f"Hello {self._user_name}, {welcome}"
+        else:
+            line = f"Hello, {welcome}"
+        if self._focus_area and self._focus_score is not None:
+            line += (
+                f" Your {self._focus_area.replace('_', ' ')} score is "
+                f"{self._focus_score:.1f} out of 10 — let's work on improving that."
+            )
+        elif self._focus_area:
+            line += f" Today we'll work on your {self._focus_area.replace('_', ' ')}."
+        if self._session_name:
+            line += f" This session is {self._session_name}."
+        line += " When you're ready, go ahead and speak."
+        return line
+
+    def opening_greeting_instructions(self) -> str:
+        """Prompt for the coach's first spoken turn."""
         greeting_parts = [
             "You are starting a new SpashtAI coaching session.",
             "YOU must speak first — greet the user warmly in one or two short sentences.",
@@ -306,35 +452,236 @@ class CoachingAgent(Agent):
             greeting_parts.append(f"Mention today's focus area: {focus_label}.")
         if self._session_name:
             greeting_parts.append(f"This session is titled '{self._session_name}'.")
+        return " ".join(greeting_parts)
 
-        await self.session.generate_reply(instructions=" ".join(greeting_parts))
-        logging.getLogger("spashtai-agent").info("👋 Coach opening greeting triggered via on_enter")
+    def _strip_thinking_stream(self, text_stream, *, flush_sentinel: bool = False):
+        """Filter an async text stream, dropping <thinking> blocks before TTS/transcripts."""
+        stripper = StreamingThinkingStripper()
+
+        async def _filtered():
+            async for chunk in text_stream:
+                if isinstance(chunk, str):
+                    cleaned = stripper.feed(chunk)
+                    if cleaned:
+                        yield cleaned
+                else:
+                    text_val = getattr(chunk, "text", None) or str(chunk)
+                    cleaned = strip_thinking_blocks(text_val)
+                    if cleaned:
+                        yield cleaned
+            tail = stripper.flush()
+            if tail:
+                yield tail
+
+        return _filtered()
+
+    def tts_node(self, text, model_settings: ModelSettings):
+        """Strip <thinking> before Polly/Kokoro — transcription_node runs too late for audio."""
+        return Agent.default.tts_node(
+            self, self._strip_thinking_stream(text), model_settings
+        )
+
+    def transcription_node(self, text, model_settings: ModelSettings):
+        """Strip <thinking> blocks from aligned coach transcripts."""
+        stripper = StreamingThinkingStripper()
+
+        async def _filtered():
+            async for delta in Agent.default.transcription_node(self, text, model_settings):
+                if isinstance(delta, str):
+                    cleaned = stripper.feed(delta)
+                    if cleaned:
+                        yield cleaned
+                else:
+                    text_val = getattr(delta, "text", None) or str(delta)
+                    cleaned = strip_thinking_blocks(text_val)
+                    if cleaned:
+                        yield cleaned
+            tail = stripper.flush()
+            if tail:
+                yield tail
+
+        return _filtered()
+
+    async def _publish_assistant_line(self, text: str, *, message_id: str | None = None) -> None:
+        """Push coach text to lk.conversation — say() alone does not update Elevate chat."""
+        room = self._room_getter() if self._room_getter else None
+        if room is None or not text.strip():
+            return
+        try:
+            await room.local_participant.publish_data(
+                json.dumps({
+                    "type": "assistant",
+                    "text": text.strip(),
+                    "final": True,
+                    "id": message_id or f"assistant_{int(time.time() * 1000)}",
+                    "timestamp": int(time.time() * 1000),
+                }).encode(),
+                topic="lk.conversation",
+            )
+        except Exception as pub_err:
+            logger.debug("greeting publish to lk.conversation failed: %s", pub_err)
+
+    async def on_enter(self) -> None:
+        # Must await — fire-and-forget tasks get cancelled when on_enter speech task ends.
+        await self._send_opening_greeting()
+
+    async def _send_opening_greeting(self) -> None:
+        if self._greeting_sent:
+            return
+        self._greeting_sent = True
+        delay = 0.5 if self._voice_backend.startswith("pipeline") else 1.5
+        await asyncio.sleep(delay)
+        try:
+            if self._voice_backend.startswith("pipeline"):
+                greeting = self.opening_greeting_text()
+                self._last_greeting_text = greeting
+                await self.session.say(
+                    greeting,
+                    allow_interruptions=False,
+                )
+                record_assistant_speech(self._assistant_speech_history, greeting)
+                await self._publish_assistant_line(greeting, message_id="assistant_greeting")
+                logger.info("👋 Coach opening greeting via say() [%s]", self._voice_backend)
+            else:
+                await self.session.generate_reply(
+                    instructions=self.opening_greeting_instructions(),
+                )
+                logger.info("👋 Coach opening greeting via generate_reply [%s]", self._voice_backend)
+        except Exception as greet_err:
+            self._greeting_sent = False
+            logger.error("Opening greeting failed (%s): %s", self._voice_backend, greet_err, exc_info=True)
+            try:
+                greeting = self.opening_greeting_text()
+                self._last_greeting_text = greeting
+                await self.session.say(
+                    greeting,
+                    allow_interruptions=False,
+                )
+                record_assistant_speech(self._assistant_speech_history, greeting)
+                await self._publish_assistant_line(greeting, message_id="assistant_greeting")
+                self._greeting_sent = True
+                logger.info("👋 Coach opening greeting recovered via say() fallback")
+            except Exception as fallback_err:
+                logger.error("Opening say() fallback failed: %s", fallback_err)
+                room = self._room_getter() if self._room_getter else None
+                if room is not None:
+                    try:
+                        await room.local_participant.publish_data(
+                            json.dumps({
+                                "type": "session_state",
+                                "text": "greeting_failed",
+                                "error": str(greet_err)[:200],
+                            }).encode(),
+                            topic="lk.control",
+                        )
+                    except Exception:
+                        pass
+
+    async def on_user_turn_completed(
+        self, turn_ctx: llm.ChatContext, new_message: llm.ChatMessage
+    ) -> None:
+        """Inject metrics; reject echo phantoms and block coach on invented answers."""
+        user_text = (new_message.text_content or "").strip()
+        word_count = len(user_text.split())
+
+        if user_text and is_likely_echo(user_text, self._assistant_speech_history):
+            logger.warning("🔇 Rejecting likely speaker-echo user turn: %r", user_text[:120])
+            raise StopResponse()
+
+        # Transcribe finalizes a turn as the LAST segment only, so `new_message`
+        # under-counts a long monologue. Use the cumulative stitched turn text
+        # (all fragments so far) for the short-turn check — otherwise a 76-word
+        # answer looks "short" and the coach gets StopResponse'd forever.
+        cumulative_words = word_count
+        if self._advanced_metrics is not None:
+            try:
+                pending = self._advanced_metrics.basic_collector.peek_pending_user_text()
+                if pending:
+                    combined = pending if user_text in pending else f"{pending} {user_text}"
+                    cumulative_words = len(combined.split())
+            except Exception:
+                pass
+
+        # NOTE: We intentionally do NOT StopResponse() short turns here anymore.
+        # That suppression was for Nova Sonic's ~2s endpointing firing mid-sentence;
+        # these pipelines now use patient Silero endpointing (2–4s), so by the time
+        # this fires the user has already paused — a real handoff, not a mid-monologue
+        # micro-pause. Blocking the coach here caused a deadlock: monologue_active is
+        # armed by any user speech and is only cleared by a coach reply, so suppressing
+        # the reply meant the coach could never respond to short conversational turns
+        # (greetings, "I'm ready", questions). Anti-hallucination is handled below via
+        # the [TURN GUARD] instruction, which guides the coach without silencing it.
+        guard_parts: list[str] = []
+        # Short-turn anti-hallucination guard. This used to be gated to monologue
+        # focus areas only, which left conversational/interview sessions wide open:
+        # a 2-word "I'm ready" would get fabricated feedback ("your introduction
+        # was clear, ~135 WPM") because nothing stopped the model from inventing.
+        # Now it fires for every session type. Monologue exercises expect long
+        # answers (25+ words), so the bar is higher there; conversational sessions
+        # only need to catch non-answers and acknowledgments.
+        short_turn_limit = 25 if self._focus_area in MONOLOGUE_FOCUS_AREAS else 12
+        if cumulative_words < short_turn_limit:
+            guard_parts.append(
+                f"The user's last turn was only {cumulative_words} words — a short turn, "
+                "not a full spoken answer. Do NOT claim they delivered an introduction, "
+                "pitch, or answer, or that they completed an exercise (PREP, signposting, etc.). "
+                "Do NOT quote, paraphrase, or invent what they said, and do NOT cite a WPM, "
+                "filler count, or any metric for a turn this short. "
+                "Respond only to what they actually said; if they have not given a real answer "
+                "yet, invite them to begin. If they ask you to recall or quote earlier words you "
+                "do not have on record, say so honestly instead of guessing."
+            )
+
+        parts: list[str] = []
+        snap = self._pacing_tracker.get_live_metrics()
+        pacing = snap.to_dict()
+        if pacing.get("qualitative") != "not-enough-data":
+            wpm_rounded = round(pacing["wpm"] / 5) * 5
+            parts.append(
+                f"Session pace ~{wpm_rounded} WPM ({pacing['qualitative']}); "
+                f"{pacing['total_words']} words in {pacing['total_speaking_seconds']:.0f}s speaking time."
+            )
+        last = self._pacing_tracker.peek_last_utterance()
+        if last:
+            last_wpm = round(last.wpm / 5) * 5
+            parts.append(
+                f"Last utterance ~{last_wpm} WPM ({last.qualitative}), {last.words} words."
+            )
+        if self._advanced_metrics is not None:
+            stats = self._advanced_metrics.basic_collector.get_live_speech_stats()
+            if stats.get("last_turn_word_count", 0) > 0:
+                parts.append(
+                    f"Last turn fillers {stats.get('last_turn_filler_count', 0)}, "
+                    f"hedging {stats.get('last_turn_hedging_count', 0)}; "
+                    f"session fillers {stats.get('session_filler_count', 0)}."
+                )
+        if guard_parts:
+            turn_ctx.add_message(
+                role="system",
+                content="[TURN GUARD — follow strictly]\n" + " ".join(guard_parts),
+            )
+        if parts:
+            turn_ctx.add_message(
+                role="system",
+                content=(
+                    "[LIVE METRICS — coach context only; the user sees these on their metrics card. "
+                    "Respond immediately with qualitative coaching. Do NOT call get_live_pacing or "
+                    "get_speech_metrics unless the user explicitly asks for a precise number.]\n"
+                    + " ".join(parts)
+                ),
+            )
 
     @function_tool
     async def get_live_pacing(self, context: RunContext) -> dict:
-        """Get the user's CURRENT (fresh, just-measured) speaking pace.
+        """Get the user's measured speaking pace (optional fallback).
 
-        FRESHNESS RULE: This value is only valid for ~5 seconds. If you
-        previously called this tool and the user is still talking, you MUST
-        call it AGAIN before quoting a number — do not reuse values from
-        earlier in the conversation. Cumulative WPM shifts as the user
-        speaks more, so a 30-second-old number is likely wrong.
-
-        WHEN TO CALL: every time you are about to mention WPM, speed, pace,
-        rhythm, or how fast/slow the user is speaking. Especially when the
-        user asks "what is my current speed?" — that ALWAYS warrants a
-        fresh call, even if you called this tool a moment ago.
-
-        WHAT TO QUOTE: round to the nearest 5 (e.g. 158 → "around 160 WPM")
-        to feel natural, and pair the number with the qualitative label.
+        The user's app already shows live WPM. Fresh metrics are also injected
+        into your context on each user turn — prefer those and respond without
+        calling this tool. Only call when the user explicitly asks for a precise
+        WPM number and you need confirmation.
 
         Returns:
-            wpm: Measured words per minute across the session so far.
-            total_words: Total user words counted.
-            total_speaking_seconds: Total user speaking time in seconds.
-            samples: Number of speaking turns measured.
-            qualitative: One of slow|measured|ideal|fast|rapid|not-enough-data.
-            ideal_range_wpm: The reference range for natural speech.
+            wpm, total_words, total_speaking_seconds, samples, qualitative, ideal_range_wpm.
         """
         snap = self._pacing_tracker.get_live_metrics()
         result = snap.to_dict()
@@ -360,13 +707,10 @@ class CoachingAgent(Agent):
 
     @function_tool
     async def get_speech_metrics(self, context: RunContext) -> dict:
-        """Get measured filler, hedging, and acknowledgment counts from the transcript.
+        """Get measured filler, hedging, and acknowledgment counts (optional fallback).
 
-        CALL THIS before stating how many filler words the user used, giving a
-        filler rate, or comparing filler usage across rounds. NEVER guess or
-        invent a filler count — the user sees the real numbers on their metrics card.
-
-        Returns session totals plus counts for the user's most recent turn.
+        Live metrics are injected on each user turn and shown on the user's
+        metrics card. Only call this if the user explicitly asks for exact counts.
         """
         if self._advanced_metrics is None:
             return {
@@ -497,7 +841,17 @@ class EgressRecorder:
                 return self.egress_id
             
         except Exception as e:
-            logger.error(f"❌ Failed to start Egress recording: {e}", exc_info=True)
+            msg = str(e).lower()
+            # Egress is a separate LiveKit service (livekit-egress + Redis). It's
+            # usually not running in local dev, so a 503/unavailable is expected —
+            # log a concise warning instead of a full traceback. Session is unaffected.
+            if "unavailable" in msg or "503" in msg or "no response from servers" in msg:
+                logger.warning(
+                    "🎙️ Egress recording unavailable (server-side recording skipped). "
+                    "This is expected without a running livekit-egress service. Session continues."
+                )
+            else:
+                logger.error(f"❌ Failed to start Egress recording: {e}", exc_info=True)
             return None
     
     async def stop_recording(self) -> dict:
@@ -1148,9 +1502,14 @@ async def entrypoint(ctx: JobContext):
     # Set by the server in apps/server/src/routes/livekit.ts. Defaults to
     # Nova Sonic if the field is missing (e.g. older client / pre-feature room).
     voice_cfg = VoiceBackendConfig.from_room_meta(room_meta)
+    # Single source of truth for per-path behavior. Every backend-specific branch
+    # below reads from `profile` instead of inlining `if backend == ...`, so the
+    # three voice paths stay isolated (see backend_profiles.py).
+    profile = profile_for(voice_cfg)
     logger.info(
-        "🎚️  Voice backend selected: %s (voice=%s, llm=%s)",
-        voice_cfg.backend, voice_cfg.voice_name, voice_cfg.pipeline_llm,
+        "🎚️  Voice backend selected: %s (path=%s, voice=%s, llm=%s, turn_detection=%s, stt_mode=%s)",
+        voice_cfg.backend, profile.path, voice_cfg.voice_name, voice_cfg.pipeline_llm,
+        voice_cfg.turn_detection, profile.stt_mode.value,
     )
 
     try:
@@ -1195,27 +1554,41 @@ async def entrypoint(ctx: JobContext):
         logger.info(f"👤 User name: {user_name or '(unknown)'}, focus: {focus_area or 'general'}, context: {focus_context or '(none)'}")
 
         TOOL_GROUNDING = (
-            "GROUNDING RULE — speaking-pace metrics:\n"
-            "• Whenever you reference the user's speaking pace, words-per-minute, or speed, "
-            "you MUST first call the `get_live_pacing` tool to obtain the measured value. "
-            "Quote that number to the user (you may round to the nearest 5 — e.g. 158 → 'around 160 WPM').\n"
-            "• FRESHNESS — the value goes stale within ~5 seconds. ALWAYS call the tool again "
-            "before quoting WPM, even if you called it a moment ago. NEVER reuse a number "
-            "from earlier in the conversation.\n"
-            "• Never invent, estimate, or guess a WPM number.\n\n"
-            "GROUNDING RULE — filler & hedging counts:\n"
-            "• Before stating how many filler words the user used (session or last round), "
-            "you MUST call `get_speech_metrics` and quote those counts.\n"
-            "• NEVER invent filler numbers (e.g. do not say '21 fillers' unless the tool returns ~21).\n"
+            "VOICE OUTPUT RULES:\n"
+            "• Never output <thinking> tags, XML, markdown, or internal reasoning.\n"
+            "• Never say the word 'thinking' or describe your planning process aloud.\n"
+            "• Plan silently — only speak words the user should hear.\n"
+            "• No bullet lists or markdown in spoken replies.\n\n"
+            "LIVE METRICS (critical path — do not block on tools):\n"
+            "• The user's app shows real-time WPM, fillers, hedges, and turn cards.\n"
+            "• Fresh metrics are injected into your context after each user turn — use those.\n"
+            "• Respond immediately with warm, qualitative coaching ('your pace felt steady', "
+            "'I noticed a few fillers when you got excited').\n"
+            "• Do NOT call get_live_pacing or get_speech_metrics before speaking — tools are "
+            "only for when the user explicitly asks for a precise number.\n"
+            "• Never invent WPM or filler counts. If you lack data, coach qualitatively "
+            "or say 'keep going — I'm tracking your pace on screen'.\n"
             "• Acknowledgments like 'okay' or 'yeah' are tracked separately — not strict fillers.\n"
-            "• 'Like' in 'I like cricket' is NOT a filler; discourse 'like' is counted."
+            "• 'Like' in 'I like cricket' is NOT a filler; discourse 'like' is counted.\n\n"
+            "ANTI-HALLUCINATION (critical):\n"
+            "• NEVER quote, paraphrase, or attribute speech the user did not say in this session.\n"
+            "• NEVER fabricate a 'previous session', 'last time', or past conversation. Only "
+            "reference prior sessions if real data is explicitly provided in your context "
+            "(USER DATA / LAST PRACTICE SESSION). If no such data is provided, you have NO "
+            "record of past sessions — say so honestly and do not invent recaps or quotes.\n"
+            "• If the user asks you to quote their earlier words and you have no provided "
+            "transcript of them, say you don't have that on record rather than guessing.\n"
+            "• NEVER give PREP or signposting feedback unless the user's last turn was a "
+            "substantial answer (roughly 25+ words).\n"
+            "• If they have not delivered a full exercise answer, ask them to speak — "
+            "do not invent their content.\n"
+            "• Past skill scores from USER DATA are real; invented user quotes are not."
         )
 
         default_persona = (
             "You are a voice AI coach for SpashtAI, a platform that helps people become better communicators. "
             "Your interface with users will be voice. Use short and concise responses, "
-            "and avoid unpronounceable punctuation. Be warm, encouraging, and professional. "
-            "Always take the initiative at session start: greet the user first before they speak."
+            "and avoid unpronounceable punctuation. Be warm, encouraging, and professional."
         )
         custom_persona = await fetch_agent_prompt("elevate_coach_persona")
         base_instructions = f"{custom_persona or default_persona}\n\n{TOOL_GROUNDING}"
@@ -1264,6 +1637,22 @@ async def entrypoint(ctx: JobContext):
                 exercise_instructions = get_exercise_instructions(focus_area, focus_context, coaching_context)
             _debug_log(f"Exercise instructions length: {len(exercise_instructions)}, has coaching data: {'USER DATA' in exercise_instructions}")
 
+        # Auto-select coach patience from the session type — no manual UI control.
+        # Monologue/long-answer exercises need patient endpointing so natural
+        # mid-sentence pauses don't trigger the coach. Conversational sessions
+        # use a balanced wait for snappy back-and-forth.
+        is_monologue_session = bool(
+            focus_area in MONOLOGUE_FOCUS_AREAS or exercise_instructions
+        )
+        auto_turn_detection = "LOW" if is_monologue_session else "MEDIUM"
+        voice_cfg.turn_detection = auto_turn_detection
+        logger.info(
+            "🎚️ Auto-selected coach patience: %s (%s session, focus=%s)",
+            auto_turn_detection,
+            "monologue" if is_monologue_session else "conversational",
+            focus_area or "none",
+        )
+
         if exercise_instructions:
             base_instructions += f"\n\n{exercise_instructions}"
         elif focus_context:
@@ -1295,12 +1684,43 @@ async def entrypoint(ctx: JobContext):
             else base_instructions
         )
 
+        focus_score: float | None = None
+        if coaching_context and focus_area:
+            focus_skill = coaching_context.get("skillSummaries", {}).get(focus_area)
+            if focus_skill and focus_skill.get("current") is not None:
+                focus_score = float(focus_skill["current"])
+
+        if profile.is_pipeline:
+            combined_instructions += (
+                "\n\nPIPELINE MODE:\n"
+                "• Your opening greeting is spoken automatically via TTS at session start.\n"
+                "• Do NOT greet again or repeat the welcome — wait for the user to speak.\n"
+                "• After asking a PREP or long-form question, stay silent until they finish. "
+                "Silence is NOT an answer — never invent feedback during quiet.\n"
+            )
+
         # ── Live pacing tracker (real WPM grounded in audio events) ──
         # Populated via session.on(...) handlers below. The CoachingAgent
         # exposes a `get_live_pacing` tool that the LLM can call to retrieve
         # measured numbers — this is what makes "you're speaking at 187 WPM"
         # grounded instead of hallucinated.
         pacing_tracker = LivePacingTracker()
+
+        # Monologue guard is nova-sonic-only. Nova Sonic is speech-to-speech with
+        # aggressive (~2s) streaming endpointing that can emit premature backchannels
+        # mid-monologue — the guard cuts those. The pipeline backends are turn-based
+        # with patient Silero endpointing (2–4s) and no preemptive generation, so the
+        # coach can't interject mid-answer; there the guard is redundant and can
+        # falsely cut short coach replies. Anti-hallucination on short turns is handled
+        # separately by the [TURN GUARD] instruction, which is not gated.
+        monologue_guard = MonologueGuard(
+            enabled=bool(
+                profile.monologue_guard_supported
+                and (focus_area in MONOLOGUE_FOCUS_AREAS or exercise_instructions)
+            ),
+        )
+        if monologue_guard.enabled:
+            logger.info("🎙️ Monologue guard enabled (nova-sonic long-answer exercises)")
 
         agent = CoachingAgent(
             instructions=combined_instructions,
@@ -1313,15 +1733,31 @@ async def entrypoint(ctx: JobContext):
             user_name=user_name,
             focus_area=focus_area,
             session_name=session_name,
+            voice_backend=voice_cfg.backend,
+            focus_score=focus_score,
+            monologue_guard=monologue_guard,
+            is_resume=bool(history_messages),
         )
         logger.info("✅ CoachingAgent created (with get_live_pacing tool + live-sync push)")
         
         # Create AgentSession via the voice-backend factory.
         # • nova-sonic        → AWS Bedrock RealtimeModel (legacy default)
         # • pipeline-premium  → faster-whisper + Ollama + Kokoro
+        # • pipeline-bedrock  → Whisper/Transcribe + Nova Lite + Kokoro/Polly
         # • unknown / pipeline servers down → falls back to nova-sonic.
         session = await build_session(voice_cfg)
         logger.info("✅ AgentSession created with transcript support")
+
+        async def _suppress_premature_coach_speech(assistant_text: str) -> None:
+            try:
+                await session.interrupt(force=True)
+                logger.info(
+                    "🔇 Suppressed premature coach backchannel (%d chars): %s",
+                    len(assistant_text),
+                    assistant_text[:80],
+                )
+            except Exception as exc:
+                logger.debug("monologue interrupt failed: %s", exc)
 
         _user_metrics_debounce_task: asyncio.Task | None = None
         USER_METRICS_DEBOUNCE_SEC = 2.0
@@ -1342,6 +1778,18 @@ async def entrypoint(ctx: JobContext):
                 _user_metrics_debounce_task.cancel()
             _user_metrics_debounce_task = asyncio.create_task(_publish_after_quiet())
 
+        # Per-stage latency instrumentation: LiveKit emits one MetricsCollectedEvent
+        # per pipeline stage (STT / EOU / LLM / TTS). This was previously never
+        # subscribed, so TTFT/TTFB were silently 0. The collector logs each stage
+        # and stitches them into a per-turn user-perceived latency line.
+        @session.on("metrics_collected")
+        def _on_metrics_collected(ev):  # noqa: ANN001
+            if advanced_metrics:
+                try:
+                    advanced_metrics.on_metrics_collected(ev)
+                except Exception as e:
+                    logger.debug(f"metrics_collected hook failed: {e}")
+
         # Hook live-pacing measurement into VAD + transcript signals.
         @session.on("user_state_changed")
         def _on_user_state(ev):  # noqa: ANN001
@@ -1353,16 +1801,84 @@ async def entrypoint(ctx: JobContext):
             except Exception as e:
                 logger.debug(f"pacing user_state hook failed: {e}")
 
+        # AWS Transcribe interims contain only the CURRENT segment, not the whole
+        # turn. The turn stitcher's pending text isn't populated until turn end
+        # (conversation_item_added), so we accumulate finalized segments here to
+        # keep the live bubble growing instead of snapping back to the last
+        # segment between pauses. Reset per turn (keyed on the turn index).
+        _live_partial_state: dict = {"index": None, "finals": []}
+
+        def _current_user_turn_index() -> int:
+            if advanced_metrics:
+                return advanced_metrics.basic_collector.current_user_turn_index()
+            return 1
+
+        def _reset_live_partial_if_new_turn(turn_index: int) -> None:
+            if _live_partial_state["index"] != turn_index:
+                _live_partial_state["index"] = turn_index
+                _live_partial_state["finals"] = []
+
+        def _publish_live_user_partial(interim: str) -> None:
+            """Stream the user's in-progress speech to the UI (word-by-word display)."""
+            try:
+                turn_index = _current_user_turn_index()
+                _reset_live_partial_if_new_turn(turn_index)
+                prefix = " ".join(_live_partial_state["finals"]).strip()
+                interim = (interim or "").strip()
+                live_text = f"{prefix} {interim}".strip()
+                if not live_text:
+                    return
+                payload = {
+                    "type": "user",
+                    "text": live_text,
+                    "final": False,
+                    "id": f"user_turn_{turn_index}",
+                    "timestamp": int(datetime.now().timestamp() * 1000),
+                }
+                asyncio.create_task(ctx.room.local_participant.publish_data(
+                    json.dumps(payload).encode(),
+                    topic="lk.conversation",
+                ))
+            except Exception as pub_err:
+                logger.debug("live user partial publish failed: %s", pub_err)
+
         @session.on("user_input_transcribed")
         def _on_user_transcribed(ev):  # noqa: ANN001
             try:
-                pacing_tracker.on_user_transcript(
-                    getattr(ev, "transcript", "") or "",
-                    bool(getattr(ev, "is_final", False)),
-                )
+                transcript = getattr(ev, "transcript", "") or ""
+                is_final = bool(getattr(ev, "is_final", False))
+                pacing_tracker.on_user_transcript(transcript, is_final)
+                text = transcript.strip()
+                if not text:
+                    return
+                # Live-partial bubble is a pipeline-path feature. nova-sonic (S2S)
+                # surfaces the user transcript via conversation_item_added instead
+                # (publish_user_fragments), so running this too would double-publish.
+                # Works for both STT modes: streaming (Transcribe interims grow the
+                # bubble) and batch (Whisper finalizes per VAD segment).
+                if not profile.is_pipeline:
+                    return
+                if is_final:
+                    # Fold the completed segment into the running prefix so the
+                    # next segment's interims append to it (no snap-back).
+                    _reset_live_partial_if_new_turn(_current_user_turn_index())
+                    _live_partial_state["finals"].append(text)
+                    _publish_live_user_partial("")
+                else:
+                    _publish_live_user_partial(text)
             except Exception as e:
                 logger.debug(f"pacing transcript hook failed: {e}")
         
+        # User-transcript publishing is backend-specific:
+        #   • pipeline-bedrock / pipeline-premium stream live partials + a stitched
+        #     commit via the user_turn_N path (_publish_live_user_partial +
+        #     _publish_user_turn_metrics). Publishing raw STT fragments here too would
+        #     create duplicate bubbles (a different id, user_<ts>).
+        #   • nova-sonic is speech-to-speech and does NOT use that path, so it still
+        #     needs on_conversation_item_added to surface the user's transcript.
+        # DB logging below is unaffected (it runs outside this publish guard).
+        publish_user_fragments = profile.publish_user_fragments
+
         # Register event handlers for transcripts
         @session.on("conversation_item_added")
         def on_conversation_item_added(item):
@@ -1393,27 +1909,58 @@ async def entrypoint(ctx: JobContext):
                     content = content_attr.strip()
                 else:
                     content = str(content_attr).strip()
-                
+
+                if role == "assistant":
+                    raw_content = content
+                    content = strip_thinking_blocks(content)
+                    if is_thinking_only(raw_content):
+                        asyncio.create_task(_suppress_premature_coach_speech(raw_content))
+                        logger.debug("⏭️ Suppressed thinking-only coach utterance")
+                        return
+
+                if role == "user" and is_likely_echo(content, agent._assistant_speech_history):
+                    logger.warning("🔇 Dropping likely echo user transcript: %r", content[:120])
+                    return
+
                 # Skip empty/invalid content
                 if not content or len(content) < 3:
                     logger.debug(f"⏭️ Skipping empty content")
                     return
+
+                if role == "assistant" and monologue_guard.should_suppress_assistant(content):
+                    asyncio.create_task(_suppress_premature_coach_speech(content))
+                    return
+
+                if role == "assistant":
+                    record_assistant_speech(agent._assistant_speech_history, content)
+                    if len(content) > 100:
+                        monologue_guard.mark_answer_complete()
+                    if agent._last_greeting_text and content.strip() == agent._last_greeting_text.strip():
+                        logger.debug("⏭️ Skipping duplicate greeting publish")
+                        # Still ingest metrics below; only skip lk.conversation duplicate.
+                        publish_this_message = False
+                    else:
+                        publish_this_message = True
+                elif role == "user":
+                    publish_this_message = publish_user_fragments
+                else:
+                    publish_this_message = True
                 
                 logger.info(f"📝 {role}: {content[:100]}...")
                 
-                # Publish to frontend
-                message_data = {
-                    "type": role,
-                    "text": content,
-                    "final": True,
-                    "id": getattr(item, 'id', f"{role}_{int(datetime.now().timestamp() * 1000)}"),
-                    "timestamp": int(datetime.now().timestamp() * 1000)
-                }
-                
-                asyncio.create_task(ctx.room.local_participant.publish_data(
-                    json.dumps(message_data).encode(),
-                    topic="lk.conversation"
-                ))
+                if publish_this_message:
+                    message_data = {
+                        "type": role,
+                        "text": content,
+                        "final": True,
+                        "id": getattr(item, 'id', f"{role}_{int(datetime.now().timestamp() * 1000)}"),
+                        "timestamp": int(datetime.now().timestamp() * 1000)
+                    }
+                    
+                    asyncio.create_task(ctx.room.local_participant.publish_data(
+                        json.dumps(message_data).encode(),
+                        topic="lk.conversation"
+                    ))
                 
                 # Log to database
                 if conversation_logger:
@@ -1433,6 +1980,7 @@ async def entrypoint(ctx: JobContext):
                 # the canonical source. The tracker dedups against doubles.
                 if role == 'user':
                     try:
+                        monologue_guard.on_user_fragment(content)
                         pacing_tracker.on_user_transcript(content, is_final=True)
                     except Exception as pace_err:
                         logger.debug(f"pacing fallback hook failed: {pace_err}")
@@ -1442,7 +1990,63 @@ async def entrypoint(ctx: JobContext):
                 logger.warning("⚠️ Error in conversation_item_added: %s", e)
         
         logger.info("✅ Event handlers registered")
-        
+
+        _last_turn_detection_apply = 0.0
+        TURN_DETECTION_MIN_INTERVAL_SEC = 45.0
+
+        async def _apply_turn_detection_from_client(new_level: str) -> None:
+            nonlocal _last_turn_detection_apply
+            now = asyncio.get_event_loop().time()
+            if now - _last_turn_detection_apply < TURN_DETECTION_MIN_INTERVAL_SEC:
+                logger.warning(
+                    "Ignoring turn_detection=%s — recycled %.0fs ago (min %.0fs)",
+                    new_level,
+                    now - _last_turn_detection_apply,
+                    TURN_DETECTION_MIN_INTERVAL_SEC,
+                )
+                try:
+                    await ctx.room.local_participant.publish_data(
+                        json.dumps({
+                            "type": "turn_detection_ack",
+                            "value": voice_cfg.turn_detection,
+                            "applied": False,
+                            "backend": voice_cfg.backend,
+                            "reason": "throttled",
+                        }).encode(),
+                        topic="lk.settings",
+                    )
+                except Exception:
+                    pass
+                return
+
+            applied = await apply_turn_detection_update(session, voice_cfg, new_level)
+            if applied:
+                _last_turn_detection_apply = now
+            try:
+                await ctx.room.local_participant.publish_data(
+                    json.dumps({
+                        "type": "turn_detection_ack",
+                        "value": voice_cfg.turn_detection,
+                        "applied": applied,
+                        "backend": voice_cfg.backend,
+                    }).encode(),
+                    topic="lk.settings",
+                )
+            except Exception as ack_err:
+                logger.debug("turn_detection ack failed: %s", ack_err)
+
+        @ctx.room.on("data_received")
+        def on_settings_data(packet):  # noqa: ANN001
+            if getattr(packet, "topic", None) != "lk.settings":
+                return
+            try:
+                payload = json.loads(packet.data.decode())
+            except Exception:
+                return
+            msg_type = payload.get("type")
+            if msg_type == "turn_detection":
+                asyncio.create_task(_apply_turn_detection_from_client(payload.get("value", "MEDIUM")))
+
         # Send ready status to frontend
         await asyncio.sleep(0.5)  # Brief delay for connection stability
         await ctx.room.local_participant.publish_data(
@@ -1478,34 +2082,66 @@ async def entrypoint(ctx: JobContext):
             except Exception as e:
                 logger.warning(f"⚠️ Could not attach pacing tracker: {e}")
 
+            # Buffer committed user-turn metrics keyed by user turn index (1-based)
+            # so we can persist them as SessionTurn rows at session end (replay).
+            committed_user_turns: dict[int, dict] = {}
+
             async def _publish_user_turn_metrics(
-                stitched_text: str, turn_metrics_snapshot, turn_index: int = 0
+                stitched_text: str, turn_metrics_snapshot, turn_index: int = 0,
+                is_commit: bool = False,
             ) -> None:
                 try:
+                    ts = int(datetime.now().timestamp() * 1000)
+                    if is_commit and turn_index > 0:
+                        try:
+                            committed_user_turns[turn_index] = {
+                                "text": stitched_text,
+                                "metrics": turn_metrics_snapshot.to_dict(),
+                            }
+                        except Exception:
+                            pass
                     payload = {
                         "type": "turn_metrics",
                         "text": stitched_text,
                         "turnMetrics": turn_metrics_snapshot.to_dict(),
                         "turnIndex": turn_index,
-                        "timestamp": int(datetime.now().timestamp() * 1000),
+                        "timestamp": ts,
                     }
                     await ctx.room.local_participant.publish_data(
                         json.dumps(payload).encode(),
                         topic="lk.conversation",
                     )
+                    # Only publish the user bubble on a real turn commit. The
+                    # live interim partials already drive the bubble; republishing
+                    # the (shorter) committed text mid-turn makes it jump/flicker.
+                    if is_commit and stitched_text.strip() and turn_index > 0:
+                        user_payload = {
+                            "type": "user",
+                            "text": stitched_text.strip(),
+                            "final": True,
+                            "id": f"user_turn_{turn_index}",
+                            "timestamp": ts,
+                            "stitched": True,
+                        }
+                        await ctx.room.local_participant.publish_data(
+                            json.dumps(user_payload).encode(),
+                            topic="lk.conversation",
+                        )
                 except Exception as pub_err:
                     logger.warning("⚠️ Failed to publish turn metrics: %s", pub_err)
 
             def _schedule_user_turn_metrics(
-                text: str, metrics_snapshot, turn_index: int = 0
+                text: str, metrics_snapshot, turn_index: int = 0,
+                is_commit: bool = False,
             ) -> None:
                 asyncio.create_task(
-                    _publish_user_turn_metrics(text, metrics_snapshot, turn_index)
+                    _publish_user_turn_metrics(text, metrics_snapshot, turn_index, is_commit)
                 )
 
             try:
                 bc = advanced_metrics.basic_collector
                 bc.set_utterance_peeker(pacing_tracker.peek_last_utterance)
+                bc.set_session_totals_peeker(pacing_tracker.get_session_totals)
                 bc.set_user_turn_metrics_callback(_schedule_user_turn_metrics)
                 bc.set_turn_committed_callback(advanced_metrics.record_committed_turn)
                 logger.info("🔗 Turn stitcher wired (utterance peeker + per-turn metrics publish)")
@@ -1538,60 +2174,90 @@ async def entrypoint(ctx: JobContext):
         # Start session (proven pattern - this handles everything)
         logger.info("🎯 Starting AgentSession...")
         session_task = asyncio.create_task(session.start(room=ctx.room, agent=agent))
+
+        async def _greeting_watchdog() -> None:
+            """Fallback if on_enter greeting was cancelled or never ran."""
+            for _ in range(24):
+                if agent._greeting_sent:
+                    return
+                await asyncio.sleep(0.5)
+            if agent._greeting_sent:
+                return
+            logger.warning("⚠️ Opening greeting not sent from on_enter — entrypoint fallback")
+            try:
+                await agent._send_opening_greeting()
+            except Exception as wd_err:
+                logger.error("Greeting watchdog failed: %s", wd_err, exc_info=True)
+
+        asyncio.create_task(_greeting_watchdog())
         
-        # Wait for agent to publish audio tracks before starting recording
-        logger.info("⏳ Waiting for agent audio tracks to be published...")
+        # Egress (server-side recording) needs a running livekit-egress service.
+        # It's off by default in dev (no egress server → 503s) and on in production.
+        # Override with EGRESS_ENABLED=true/false.
+        egress_enabled = os.getenv(
+            "EGRESS_ENABLED",
+            "true" if os.getenv("ENVIRONMENT", "development") == "production" else "false",
+        ).lower() in ("1", "true", "yes")
+
         agent_track_id = None
-        
-        # Wait up to 10 seconds for agent tracks
-        for i in range(20):  # 20 attempts * 0.5s = 10 seconds max
-            await asyncio.sleep(0.5)
-            local_participant = ctx.room.local_participant
-            if local_participant and local_participant.track_publications:
-                for track_pub in local_participant.track_publications.values():
-                    if track_pub.kind == rtc.TrackKind.KIND_AUDIO and track_pub.track:
-                        agent_track_id = track_pub.sid
-                        logger.info(f"✅ Agent audio track found: {agent_track_id}")
-                        break
-            if agent_track_id:
-                break
-        
-        if not agent_track_id:
-            logger.warning("⚠️ Agent audio tracks not detected after 10s, will only record user audio")
-        
-        try:
-            # Update user participant if needed
-            if not user_recorder.participant_identity and ctx.room.remote_participants:
-                user_participant = list(ctx.room.remote_participants.values())[0]
-                user_recorder.participant_identity = user_participant.identity
-                logger.info(f"👤 Updated user participant: {user_participant.identity}")
-            
-            # Start all three recordings in parallel
-            # 1. User recording (ParticipantEgress)
-            user_recording_id = await user_recorder.start_recording()
-            if user_recording_id:
-                logger.info(f"🎬 User audio recording started: {user_recording_id}")
-            
-            # 2. Agent recording if track ID found (TrackEgress)
-            agent_recording_id = None
-            if agent_track_id:
-                agent_recorder.track_id = agent_track_id
-                logger.info(f"🎙️ Starting agent track recording for: {agent_track_id}")
-                agent_recording_id = await agent_recorder.start_recording()
-                if agent_recording_id:
-                    logger.info(f"🎬 Agent audio recording started: {agent_recording_id}")
-            else:
-                logger.warning("⚠️ Skipping agent recording - no audio tracks published")
-            
-            # 3. Room composite recording (combined audio from all participants)
-            room_recording_id = await room_recorder.start_recording()
-            if room_recording_id:
-                logger.info(f"🎬 Room composite recording started: {room_recording_id}")
-                
-            if not user_recording_id and not agent_recording_id and not room_recording_id:
-                logger.warning("⚠️ Failed to start any recordings - continuing without recording")
-        except Exception as e:
-            logger.warning(f"⚠️ Recording start failed: {e}")
+        if not egress_enabled:
+            logger.info(
+                "🎙️ Egress recording disabled (set EGRESS_ENABLED=true to enable). "
+                "Session continues; use the in-UI recorder for client-side capture."
+            )
+        else:
+            # Wait for agent to publish audio tracks before starting recording
+            logger.info("⏳ Waiting for agent audio tracks to be published...")
+
+            # Wait up to 10 seconds for agent tracks
+            for i in range(20):  # 20 attempts * 0.5s = 10 seconds max
+                await asyncio.sleep(0.5)
+                local_participant = ctx.room.local_participant
+                if local_participant and local_participant.track_publications:
+                    for track_pub in local_participant.track_publications.values():
+                        if track_pub.kind == rtc.TrackKind.KIND_AUDIO and track_pub.track:
+                            agent_track_id = track_pub.sid
+                            logger.info(f"✅ Agent audio track found: {agent_track_id}")
+                            break
+                if agent_track_id:
+                    break
+
+            if not agent_track_id:
+                logger.warning("⚠️ Agent audio tracks not detected after 10s, will only record user audio")
+
+            try:
+                # Update user participant if needed
+                if not user_recorder.participant_identity and ctx.room.remote_participants:
+                    user_participant = list(ctx.room.remote_participants.values())[0]
+                    user_recorder.participant_identity = user_participant.identity
+                    logger.info(f"👤 Updated user participant: {user_participant.identity}")
+
+                # Start all three recordings in parallel
+                # 1. User recording (ParticipantEgress)
+                user_recording_id = await user_recorder.start_recording()
+                if user_recording_id:
+                    logger.info(f"🎬 User audio recording started: {user_recording_id}")
+
+                # 2. Agent recording if track ID found (TrackEgress)
+                agent_recording_id = None
+                if agent_track_id:
+                    agent_recorder.track_id = agent_track_id
+                    logger.info(f"🎙️ Starting agent track recording for: {agent_track_id}")
+                    agent_recording_id = await agent_recorder.start_recording()
+                    if agent_recording_id:
+                        logger.info(f"🎬 Agent audio recording started: {agent_recording_id}")
+                else:
+                    logger.warning("⚠️ Skipping agent recording - no audio tracks published")
+
+                # 3. Room composite recording (combined audio from all participants)
+                room_recording_id = await room_recorder.start_recording()
+                if room_recording_id:
+                    logger.info(f"🎬 Room composite recording started: {room_recording_id}")
+
+                if not user_recording_id and not agent_recording_id and not room_recording_id:
+                    logger.warning("⚠️ Failed to start any recordings - continuing without recording")
+            except Exception as e:
+                logger.warning(f"⚠️ Recording start failed: {e}")
         
         # Wait for the session to ACTUALLY close (not just start)
         await session_closed.wait()
@@ -1733,8 +2399,29 @@ async def entrypoint(ctx: JobContext):
                 except Exception as _e:
                     logger.warning(f"⚠️  Could not plumb pacing data into metrics: {_e}")
 
-                await advanced_metrics.finalize_session(user_audio_file_path=local_user_audio_path)
-                logger.info("✅ Advanced analytics processing complete!")
+                # Time-bound the heavy analytics. finalize_session() flushes basic
+                # metrics (turns, WPM) FIRST, then runs optional Gentle/Praat audio
+                # alignment which can take 1–2× realtime. LiveKit cancels the whole
+                # entrypoint at its ~30s shutdown deadline, so an unbounded Gentle
+                # call here would starve the per-turn (SessionTurn) persistence that
+                # runs afterward — leaving every session stuck on the degraded
+                # transcript fallback. Cap it so the basic metrics land and the
+                # slow delivery pass is abandoned within budget (the v2 /analyze
+                # pipeline recomputes delivery server-side anyway).
+                try:
+                    await asyncio.wait_for(
+                        advanced_metrics.finalize_session(
+                            user_audio_file_path=local_user_audio_path
+                        ),
+                        timeout=12.0,
+                    )
+                    logger.info("✅ Advanced analytics processing complete!")
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "⏱️ finalize_session exceeded 12s (likely Gentle alignment) — "
+                        "basic metrics kept, delivery pass abandoned so SessionTurn "
+                        "persistence can run within the shutdown budget"
+                    )
                 
                 # Log summary of results
                 if advanced_metrics.session_metrics.basic_metrics:
@@ -1779,11 +2466,92 @@ async def entrypoint(ctx: JobContext):
                         logger.error(f"❌ Error marking session as ended: {end_error}")
                 else:
                     logger.warning("⚠️ Skipping session end DB mark (ephemeral mode)")
-                
+
             except Exception as analytics_error:
                 logger.error(f"❌ Error processing advanced analytics: {analytics_error}", exc_info=True)
                 advanced_metrics.session_metrics.processing_errors.append(str(analytics_error))
-        
+
+        # ── Persist per-turn replay records (SessionTurn) ──────────────────
+        # Runs independently of audio/analytics success so the replay always has
+        # data. Build per-turn rows from committed turns + captured STT word
+        # timings. User words are sliced greedily by word count (both streams are
+        # chronological); assistant turns carry text only.
+        if persistence_enabled and advanced_metrics:
+            try:
+                stt_words = list(getattr(agent, "_stt_words", []) or [])
+                stt_segments = list(getattr(agent, "_stt_segments", []) or [])
+                committed_turns = advanced_metrics.basic_collector.session_metrics.turns or []
+                committed_user_meta = locals().get("committed_user_turns", {}) or {}
+                turns_payload: list[dict] = []
+                user_seq = 0
+                word_cursor = 0
+                for idx, t in enumerate(committed_turns):
+                    text = (t.text or "").strip()
+                    if not text:
+                        continue
+                    entry: dict = {"turnIndex": idx, "role": t.speaker, "text": text}
+                    if t.speaker == "user":
+                        user_seq += 1
+                        meta = committed_user_meta.get(user_seq)
+                        if meta and meta.get("metrics"):
+                            entry["metrics"] = meta["metrics"]
+                        n = t.word_count or len(text.split())
+                        slice_words = stt_words[word_cursor : word_cursor + n]
+                        word_cursor += n
+                        if slice_words:
+                            entry["audioStart"] = slice_words[0]["start"]
+                            entry["audioEnd"] = slice_words[-1]["end"]
+                            entry["words"] = slice_words
+                    turns_payload.append(entry)
+
+                if turns_payload:
+                    import aiohttp
+                    async with aiohttp.ClientSession() as _ts:
+                        turns_url = f"{SERVER_URL}/internal/sessions/{session_id}/turns"
+                        post_body: dict = {"turns": turns_payload}
+                        # STT timeline t0 (epoch ms). The server shifts all
+                        # offsets onto the recording timeline using this anchor
+                        # vs Session.recordingStartedAt, cancelling the variable
+                        # greeting/lead-in gap so karaoke matches the audio.
+                        if agent._stt_t0_epoch is not None:
+                            post_body["sttEpochMs"] = int(agent._stt_t0_epoch * 1000)
+                        async with _ts.post(
+                            turns_url,
+                            json=post_body,
+                            headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
+                            timeout=aiohttp.ClientTimeout(total=10.0),
+                        ) as resp:
+                            if resp.status in (200, 201):
+                                logger.info(
+                                    f"✅ Persisted {len(turns_payload)} SessionTurn rows "
+                                    f"({len(stt_words)} STT words from {len(stt_segments)} segments)"
+                                )
+                            else:
+                                logger.warning(f"⚠️ SessionTurn persist returned {resp.status}")
+            except Exception as turns_error:
+                logger.error(f"❌ Error persisting session turns: {turns_error}")
+
+        # ── Auto-trigger v2 analytics so insights are never empty ──────────
+        # Runs server-side (signal API + skill scores + Bedrock) even if the user
+        # closes the tab before the frontend can call /analyze.
+        if persistence_enabled:
+            try:
+                import aiohttp
+                async with aiohttp.ClientSession() as _as:
+                    analyze_url = f"{SERVER_URL}/sessions/{session_id}/analyze"
+                    async with _as.post(
+                        analyze_url,
+                        json={"autoTrackPulse": True, "source": "elevate"},
+                        headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
+                        timeout=aiohttp.ClientTimeout(total=60.0),
+                    ) as resp:
+                        if resp.status == 200:
+                            logger.info("✅ v2 analytics pipeline triggered at session end")
+                        else:
+                            logger.warning(f"⚠️ /analyze returned {resp.status}")
+            except Exception as analyze_error:
+                logger.error(f"❌ Error triggering v2 analytics: {analyze_error}")
+
         if conversation_logger:
             await conversation_logger.close()
         logger.info("🧹 Cleanup completed")

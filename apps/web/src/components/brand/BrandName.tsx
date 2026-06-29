@@ -18,11 +18,11 @@ export function BrandName({ className, size = 'md', showBeta = true }: BrandName
       SpashtAI
       {showBeta && (
         <sup className="ml-0.5 text-[0.5em] font-medium text-muted-foreground align-super leading-none">
-          Beta
+          beta
         </sup>
       )}
     </span>
   )
 }
 
-export const BRAND_ALT = 'SpashtAI Beta'
+export const BRAND_ALT = 'SpashtAI beta'

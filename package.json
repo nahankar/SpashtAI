@@ -8,14 +8,20 @@
   "scripts": {
     "dev:web": "npm --workspace apps/web run dev",
     "dev:server": "npm --workspace apps/server run dev",
-    "dev": "concurrently -n web,server -c cyan,magenta \"npm:dev:web\" \"npm:dev:server\"",
+    "dev": "concurrently -n web,server,signal,agent -c cyan,magenta,yellow,green \"npm:dev:web\" \"npm:dev:server\" \"npm:signal:dev\" \"npm:agent:dev:ext\"",
+    "dev:noagent": "concurrently -n web,server -c cyan,magenta \"npm:dev:web\" \"npm:dev:server\"",
     "dev:postgres": "docker compose -f infra/postgres/docker-compose.yml up -d",
     "dev:postgres:stop": "docker compose -f infra/postgres/docker-compose.yml down",
     "build:web": "npm --workspace apps/web run build",
     "build:server": "npm --workspace apps/server run build",
     "build": "npm run build:web && npm run build:server",
-    "agent:setup": "python3 -m venv .venv && . .venv/bin/activate && pip install -r apps/agent/requirements.txt",
-    "agent:run": ". .venv/bin/activate && python apps/agent/main.py"
+    "agent:setup": "cd apps/agent && python3.12 -m venv .venv312 && . .venv312/bin/activate && pip install -r requirements.txt",
+    "agent:run": "cd apps/agent && . .venv312/bin/activate && python main.py",
+    "signal:kill": "PIDS=$(lsof -nP -iTCP:4001 -sTCP:LISTEN 2>/dev/null | grep -i python | awk '{print $2}' | sort -u); [ -n \"$PIDS\" ] && kill -9 $PIDS; echo 'signal-api killed'",
+    "signal:dev": "npm run signal:kill; cd apps/agent && . .venv312/bin/activate && python -m analytics.signal_api",
+    "agent:kill": "pkill -f 'python.*main.py' 2>/dev/null; sleep 1; echo 'agents killed'",
+    "agent:dev": "npm run agent:kill; cd apps/agent && . .venv312/bin/activate && python main.py dev",
+    "agent:dev:ext": "npm run agent:kill; cd apps/agent && . .venv312/bin/activate && SIGNAL_API_INPROCESS=0 python main.py dev"
   },
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",

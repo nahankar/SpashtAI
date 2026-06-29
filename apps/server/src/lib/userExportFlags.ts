@@ -5,12 +5,24 @@ export interface UserExportFlags {
   hideTranscriptText: boolean
   hideTranscriptJsonExport: boolean
   hideAudioDownload: boolean
+  // Capability flags for the download/reprocess action buttons. Default OFF;
+  // only true once an admin enables them (privileged users get all true).
+  enableTxtExport: boolean
+  enableJsonExport: boolean
+  enableAudioExport: boolean
+  enableReprocess: boolean
 }
 
+// "Unrestricted" defaults used for privileged (admin) users: nothing hidden and
+// every export/reprocess action enabled.
 export const DEFAULT_EXPORT_FLAGS: UserExportFlags = {
   hideTranscriptText: false,
   hideTranscriptJsonExport: false,
   hideAudioDownload: false,
+  enableTxtExport: true,
+  enableJsonExport: true,
+  enableAudioExport: true,
+  enableReprocess: true,
 }
 
 export function isPrivilegedRole(role?: string): boolean {
@@ -24,13 +36,32 @@ export async function fetchUserExportFlags(userId: string): Promise<UserExportFl
       hideTranscriptText: true,
       hideTranscriptJsonExport: true,
       hideAudioDownload: true,
+      enableTxtExport: true,
+      enableJsonExport: true,
+      enableAudioExport: true,
+      enableReprocess: true,
     },
   })
-  if (!user) return DEFAULT_EXPORT_FLAGS
+  if (!user) {
+    // Unknown user: nothing hidden, but no export/reprocess actions enabled.
+    return {
+      hideTranscriptText: false,
+      hideTranscriptJsonExport: false,
+      hideAudioDownload: false,
+      enableTxtExport: false,
+      enableJsonExport: false,
+      enableAudioExport: false,
+      enableReprocess: false,
+    }
+  }
   return {
     hideTranscriptText: user.hideTranscriptText,
     hideTranscriptJsonExport: user.hideTranscriptJsonExport,
     hideAudioDownload: user.hideAudioDownload,
+    enableTxtExport: user.enableTxtExport,
+    enableJsonExport: user.enableJsonExport,
+    enableAudioExport: user.enableAudioExport,
+    enableReprocess: user.enableReprocess,
   }
 }
 
@@ -68,7 +99,19 @@ export async function resolveRequestExportFlags(
   ownerUserId: string | null,
 ): Promise<{ flags: UserExportFlags; accessDenied: boolean }> {
   if (!req.user) {
-    return { flags: DEFAULT_EXPORT_FLAGS, accessDenied: false }
+    // No authenticated user: nothing hidden, but no export actions enabled.
+    return {
+      flags: {
+        hideTranscriptText: false,
+        hideTranscriptJsonExport: false,
+        hideAudioDownload: false,
+        enableTxtExport: false,
+        enableJsonExport: false,
+        enableAudioExport: false,
+        enableReprocess: false,
+      },
+      accessDenied: false,
+    }
   }
 
   if (isPrivilegedRole(req.user.role)) {

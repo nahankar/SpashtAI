@@ -31,6 +31,12 @@ interface UserDetailData {
   hideTranscriptText: boolean
   hideTranscriptJsonExport: boolean
   hideAudioDownload: boolean
+  enableTxtExport: boolean
+  enableJsonExport: boolean
+  enableAudioExport: boolean
+  enableReprocess: boolean
+  enablePro: boolean
+  enableUltra: boolean
   _count: { sessions: number; replaySessions: number; featureUsage: number }
 }
 
@@ -80,14 +86,34 @@ export function UserDetail() {
   }
 
   async function updateExportFlag(
-    key: 'hideTranscriptText' | 'hideTranscriptJsonExport' | 'hideAudioDownload',
+    key:
+      | 'hideTranscriptText'
+      | 'hideTranscriptJsonExport'
+      | 'hideAudioDownload'
+      | 'enableTxtExport'
+      | 'enableJsonExport'
+      | 'enableAudioExport'
+      | 'enableReprocess'
+      | 'enablePro'
+      | 'enableUltra',
     value: boolean,
   ) {
     if (!id || !user) return
     setSavingFlags(true)
     try {
       const data = await apiClient<{
-        user: Pick<UserDetailData, 'hideTranscriptText' | 'hideTranscriptJsonExport' | 'hideAudioDownload'>
+        user: Pick<
+          UserDetailData,
+          | 'hideTranscriptText'
+          | 'hideTranscriptJsonExport'
+          | 'hideAudioDownload'
+          | 'enableTxtExport'
+          | 'enableJsonExport'
+          | 'enableAudioExport'
+          | 'enableReprocess'
+          | 'enablePro'
+          | 'enableUltra'
+        >
       }>(`/api/admin/users/${id}/export-flags`, {
         method: 'PATCH',
         body: JSON.stringify({ [key]: value }),
@@ -246,9 +272,10 @@ export function UserDetail() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Export & content</CardTitle>
+            <CardTitle className="text-base">Subscription plans</CardTitle>
             <CardDescription>
-              Restrict what this user can view or download. Metrics and coaching scores remain visible.
+              Unlock paid-tier features for this user. Off by default; admins
+              always have access regardless of these flags.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
@@ -256,14 +283,14 @@ export function UserDetail() {
               <input
                 type="checkbox"
                 className="mt-0.5 h-4 w-4 rounded border"
-                checked={user.hideTranscriptText}
+                checked={user.enablePro}
                 disabled={savingFlags}
-                onChange={(e) => updateExportFlag('hideTranscriptText', e.target.checked)}
+                onChange={(e) => updateExportFlag('enablePro', e.target.checked)}
               />
               <span>
-                <span className="font-medium">Hide transcript text</span>
-                <span className="block text-muted-foreground text-xs">
-                  Hides in-app conversation/transcript views and TXT downloads
+                <span className="font-medium">Enable Pro features</span>
+                <span className="block text-xs text-muted-foreground">
+                  Playback “Key Moments” and the “Ask AI Coach” assistant.
                 </span>
               </span>
             </label>
@@ -271,32 +298,85 @@ export function UserDetail() {
               <input
                 type="checkbox"
                 className="mt-0.5 h-4 w-4 rounded border"
-                checked={user.hideTranscriptJsonExport}
+                checked={user.enableUltra}
                 disabled={savingFlags}
-                onChange={(e) => updateExportFlag('hideTranscriptJsonExport', e.target.checked)}
+                onChange={(e) => updateExportFlag('enableUltra', e.target.checked)}
               />
               <span>
-                <span className="font-medium">Hide transcript JSON export</span>
-                <span className="block text-muted-foreground text-xs">
-                  Blocks JSON transcript downloads (Elevate and Replay)
+                <span className="font-medium">Enable Ultra features</span>
+                <span className="block text-xs text-muted-foreground">
+                  Replay video-file uploads (MP4, MOV, WebM).
                 </span>
               </span>
             </label>
-            <label className="flex items-start gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                className="mt-0.5 h-4 w-4 rounded border"
-                checked={user.hideAudioDownload}
-                disabled={savingFlags}
-                onChange={(e) => updateExportFlag('hideAudioDownload', e.target.checked)}
-              />
-              <span>
-                <span className="font-medium">Hide audio download</span>
-                <span className="block text-muted-foreground text-xs">
-                  Blocks server audio downloads and in-session record/download controls
-                </span>
-              </span>
-            </label>
+            {savingFlags && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Saving…
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Session Analytics actions</CardTitle>
+            <CardDescription>
+              These buttons are hidden by default. Enable them to let this user
+              download exports or reprocess audio.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+              <div className="space-y-3">
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 rounded border"
+                    checked={user.enableTxtExport}
+                    disabled={savingFlags}
+                    onChange={(e) => updateExportFlag('enableTxtExport', e.target.checked)}
+                  />
+                  <span>
+                    <span className="font-medium">Enable “Download TXT”</span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 rounded border"
+                    checked={user.enableJsonExport}
+                    disabled={savingFlags}
+                    onChange={(e) => updateExportFlag('enableJsonExport', e.target.checked)}
+                  />
+                  <span>
+                    <span className="font-medium">Enable “Download JSON”</span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 rounded border"
+                    checked={user.enableAudioExport}
+                    disabled={savingFlags}
+                    onChange={(e) => updateExportFlag('enableAudioExport', e.target.checked)}
+                  />
+                  <span>
+                    <span className="font-medium">Enable “Download My Audio”</span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 rounded border"
+                    checked={user.enableReprocess}
+                    disabled={savingFlags}
+                    onChange={(e) => updateExportFlag('enableReprocess', e.target.checked)}
+                  />
+                  <span>
+                    <span className="font-medium">Enable “Reprocess Audio”</span>
+                  </span>
+                </label>
+              </div>
             {savingFlags && (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Loader2 className="h-3 w-3 animate-spin" />

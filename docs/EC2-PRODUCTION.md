@@ -123,6 +123,11 @@ chmod +x infra/ec2/*.sh
 ./infra/ec2/bootstrap.sh
 ```
 
+> **ffmpeg is required.** `bootstrap.sh` installs it (used for Playback audio-onset
+> alignment, per-turn audio slicing, and dev streaming transcription). On an
+> instance that was bootstrapped before this was added, install it manually:
+> `sudo apt install -y ffmpeg && ffmpeg -version`.
+
 Log out and back in (docker group), then install origin certs (step 2), then:
 
 ```bash
@@ -273,20 +278,70 @@ pm2 logs spashtai-agent
 
 ---
 
-## 9 — What we intentionally skip in prod
+## 9 — Pipeline Bedrock (composable hybrid)
 
-| Local dev service | Prod |
-|-------------------|------|
-| Ollama (`:11434`) | **Off** — use Bedrock |
-| STT speaches (`:8001`) | **Off** — Nova Sonic |
-| TTS Kokoro (`:8002`) | **Off** — Nova Sonic |
-| `start-local-stack.sh` | **Do not run** |
-| `pipeline-premium` voice backend | **Off** — use `nova-sonic` only |
-| Vite dev server (`:5173`) | **Off** — Nginx serves `dist/` |
+Admin → **Voice Backend** → configure `pipeline-bedrock`:
+
+```text
+LiveKit → Silero VAD → STT → Nova Pro → TTS
+```
+
+| Component | Option A (eco) | Option B (cloud) |
+|-----------|----------------|------------------|
+| STT | Self-hosted Whisper (speaches) `localhost:8001` | AWS Transcribe Streaming |
+| LLM | Bedrock Nova Lite | Bedrock Nova Lite |
+| TTS | Kokoro @ SpashtAI `localhost:8002` | AWS Polly (generative) |
+
+> **Recommended for full-AWS prod:** Option B (Transcribe + Polly). The self-hosted
+> Whisper option assumes you run the speaches STT server on the SpashtAI instance
+> (or another reachable host) at `:8001`. There is no separate dedicated STT box.
+
+### Self-hosted Whisper (only if not using Transcribe)
+
+```bash
+chmod +x infra/ec2/spashtai/start-whisper.sh
+./infra/ec2/spashtai/start-whisper.sh start
+./infra/ec2/spashtai/start-whisper.sh status
+```
+
+If Whisper runs on a separate host, set `PIPELINE_STT_URL` to that host's `:8001`
+and allow **TCP 8001** from the SpashtAI instance SG only.
+
+### SpashtAI EC2 (Kokoro, when not using Polly)
+
+```bash
+chmod +x infra/ec2/spashtai/start-kokoro.sh
+./infra/ec2/spashtai/start-kokoro.sh start
+```
+
+IAM role on SpashtAI agent needs: `bedrock:InvokeModel`, `transcribe:StartStreamTranscription`, `polly:SynthesizeSpeech` when using cloud STT/TTS.
+
+Activate in admin UI, then start a **new** Elevate session. Agent falls back to Nova Sonic if Whisper/Kokoro TCP checks fail.
+
+Optional env on SpashtAI server/agent:
+
+```bash
+PIPELINE_STT_URL=http://localhost:8001/v1
+PIPELINE_TTS_URL=http://localhost:8002/v1
+BEDROCK_PIPELINE_LLM=amazon.nova-lite-v1:0
+```
 
 ---
 
-## 10 — Updates
+## 10 — What we intentionally skip in prod (Nova Sonic only mode)
+
+| Local dev service | Nova Sonic prod | Pipeline Bedrock prod |
+|-------------------|-----------------|------------------------|
+| Ollama (`:11434`) | **Off** | **Off** |
+| STT speaches (`:8001`) | **Off** | Self-hosted Whisper OR Transcribe |
+| TTS Kokoro (`:8002`) | **Off** | On SpashtAI OR Polly |
+| `start-local-stack.sh` | **Do not run** | Use `start-whisper.sh` + `start-kokoro.sh` |
+| `pipeline-premium` | **Off** | Dev only |
+| Vite dev server (`:5173`) | **Off** | **Off** |
+
+---
+
+## 11 — Updates
 
 ```bash
 cd /opt/spashtai
@@ -296,7 +351,7 @@ git pull
 
 ---
 
-## 11 — Troubleshooting
+## 12 — Troubleshooting
 
 | Symptom | Check |
 |---------|-------|

@@ -355,10 +355,10 @@ export async function downloadSessionTranscript(req: Request, res: Response) {
       return exportDenied(res, 'Access denied')
     }
 
-    if (format === 'json' && flags.hideTranscriptJsonExport) {
+    if (format === 'json' && (flags.hideTranscriptJsonExport || !flags.enableJsonExport)) {
       return exportDenied(res, 'Transcript JSON export is disabled for your account')
     }
-    if (format === 'txt' && flags.hideTranscriptText) {
+    if (format === 'txt' && (flags.hideTranscriptText || !flags.enableTxtExport)) {
       return exportDenied(res, 'Transcript download is disabled for your account')
     }
 
@@ -699,7 +699,9 @@ export async function calculateTextMetrics(req: Request, res: Response) {
       userFillerRate: userWordCount > 0 ? (userFillerCount / userWordCount) * 100 : 0,
       userAvgSentenceLength: userSentenceCount > 0 ? userWordCount / userSentenceCount : 0,
       userSpeakingTime,
-      userVocabDiversity: userWordCount > 0 ? (userUniqueWords.size / userWordCount) * 100 : 0,
+      // Stored as a 0–1 ratio (unique/total), matching the agent's convention.
+      // The UI multiplies by 100 for display, so do NOT pre-scale here.
+      userVocabDiversity: userWordCount > 0 ? userUniqueWords.size / userWordCount : 0,
       userResponseTimeAvg: avgUserResponseTime,
 
       // Assistant metrics
@@ -708,7 +710,8 @@ export async function calculateTextMetrics(req: Request, res: Response) {
       assistantFillerRate: assistantWordCount > 0 ? (assistantFillerCount / assistantWordCount) * 100 : 0,
       assistantAvgSentenceLength: assistantSentenceCount > 0 ? assistantWordCount / assistantSentenceCount : 0,
       assistantSpeakingTime,
-      assistantVocabDiversity: assistantWordCount > 0 ? (assistantUniqueWords.size / assistantWordCount) * 100 : 0,
+      // 0–1 ratio (see userVocabDiversity note above).
+      assistantVocabDiversity: assistantWordCount > 0 ? assistantUniqueWords.size / assistantWordCount : 0,
       assistantResponseTimeAvg: avgAssistantResponseTime,
 
       // General metrics
@@ -758,7 +761,18 @@ export async function calculateTextMetrics(req: Request, res: Response) {
 export async function reprocessSessionMetrics(req: Request, res: Response) {
   try {
     const { sessionId } = req.params
-    
+
+    // Reprocess is an admin-gated capability — only available when an admin has
+    // enabled it for this user (privileged users always have it).
+    const ownerId = await getElevateSessionOwnerId(sessionId)
+    const { flags, accessDenied } = await resolveRequestExportFlags(req, ownerId)
+    if (accessDenied) {
+      return exportDenied(res, 'Access denied')
+    }
+    if (!flags.enableReprocess) {
+      return exportDenied(res, 'Audio reprocessing is disabled for your account')
+    }
+
     // Validate session exists
     const session = await prisma.session.findUnique({
       where: { id: sessionId },

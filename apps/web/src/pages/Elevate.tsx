@@ -6,33 +6,43 @@ import { useSearchParams, useNavigate, Link } from 'react-router-dom'
 import {
   LiveKitRoom,
   RoomAudioRenderer,
+  StartAudio,
   useConnectionState,
   useRoomContext,
   useVoiceAssistant,
   BarVisualizer
 } from '@livekit/components-react'
 import '@livekit/components-styles'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { RoomEvent, Track } from 'livekit-client'
 import { RealTimeMetrics } from '@/components/analytics/RealTimeMetrics'
 import { SessionMetrics } from '@/components/analytics/SessionMetrics'
-import { AdvancedInsights } from '@/components/analytics/AdvancedInsights'
+import { SessionMetricsSummary } from '@/components/analytics/SessionMetricsSummary'
+import { AdvancedInsights, CONTENT_VERDICTS, DELIVERY_VERDICTS } from '@/components/analytics/AdvancedInsights'
 import { SkillScoresCard } from '@/components/analytics/SkillScoresCard'
-import { useRealTimeMetrics, useSessionMetrics } from '@/hooks/useSessionMetrics'
+import { CoachingInsightsCard } from '@/components/analytics/CoachingInsightsCard'
+import { PaceTrend, PaceTrendCard, type PacePoint } from '@/components/analytics/PaceTrend'
+import { SessionReplay } from '@/pages/SessionReplay'
+import { useRealTimeMetrics, useSessionMetrics, useSessionTurns } from '@/hooks/useSessionMetrics'
 import { useAudioRecording } from '@/hooks/useAudioRecording'
 import { useConversationPersistence } from '@/hooks/useConversationPersistence'
 import { AgentVisualizer, SessionStatusBar } from '@/components/layout/AgentVisualizer'
 import { toast } from 'sonner'
 import { getAuthHeaders } from '@/lib/api-client'
-import { FOCUS_AREAS, getFocusAreaLabel } from '@/lib/focus-areas'
+import { FOCUS_AREAS, getFocusAreaLabel, EXERCISE_PREVIEWS } from '@/lib/focus-areas'
+import { pulseSkillLabel } from '@/lib/pulse-skills'
 import { useAuth } from '@/hooks/useAuth'
 import { useUserExportFlags } from '@/hooks/useUserExportFlags'
 import { useConfirm } from '@/hooks/useConfirm'
-import { Trash2, CheckSquare, Square, Target, ArrowRight, Info } from 'lucide-react'
+import { Trash2, CheckSquare, Square, Target, ArrowRight, Info, Play, ChevronDown, ChevronUp, BarChart3, Gauge, CheckCircle2 } from 'lucide-react'
 import { generateSessionPdf, type SessionReport } from '@/lib/generate-session-pdf'
+import { CoachAudioBootstrap } from '@/components/session/CoachAudioBootstrap'
+import { SessionRecorder } from '@/components/session/SessionRecorder'
+import { stripThinkingBlocks } from '@/lib/stripThinking'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 
@@ -91,11 +101,30 @@ export function Elevate() {
   const [assistantState, setAssistantState] = useState<'restarting' | 'ready' | 'recovering' | 'unknown'>('unknown')
   const [isSessionPaused, setIsSessionPaused] = useState(false)
   const [isCompletedSessionView, setIsCompletedSessionView] = useState(false)
+  const [viewSessionName, setViewSessionName] = useState<string | null>(null)
+  const [viewSessionPulse, setViewSessionPulse] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<string | null>(viewSessionId) // Initialize with URL param if present
   const [showMetrics, setShowMetrics] = useState(false)
   const [turnMetricsByIndex, setTurnMetricsByIndex] = useState<Record<number, TurnMetrics>>({})
+  const [turnTextByIndex, setTurnTextByIndex] = useState<Record<number, string>>({})
   const [turnMetricsByText, setTurnMetricsByText] = useState<Record<string, TurnMetrics>>({})
   const [showHistory, setShowHistory] = useState(!viewSessionId && !inboundNewSession)
+
+  // Live pace trend: one WPM point per user turn, in turn order. Drives the
+  // green pace-variation chart shown during the conversation.
+  const livePacePoints = useMemo<PacePoint[]>(() => {
+    let n = 0
+    return Object.keys(turnMetricsByIndex)
+      .map(Number)
+      .filter((i) => Number.isFinite(i))
+      .sort((a, b) => a - b)
+      .map((idx) => turnMetricsByIndex[idx])
+      .filter((m) => m && m.wpm != null && (m.wpm as number) > 0)
+      .map((m) => {
+        n += 1
+        return { label: n, wpm: Math.round(Number(m.wpm)) }
+      })
+  }, [turnMetricsByIndex])
 
   interface ElevateSessionItem {
     id: string
@@ -107,6 +136,7 @@ export function Elevate() {
     durationSec?: number
     words?: number
     fillerRate?: number
+    progressPulseStatus?: string | null
   }
   const [pastSessions, setPastSessions] = useState<ElevateSessionItem[]>([])
   const [pastLoading, setPastLoading] = useState(true)
@@ -262,44 +292,310 @@ export function Elevate() {
   
   // Historical metrics for completed sessions
   const { metrics: historicalMetrics, downloadTranscript } = useSessionMetrics(sessionId)
+
+  // Per-turn records fetched once and shared by the summary strip + pace trend.
+  const { turns: completedTurns } = useSessionTurns(sessionId, !!sessionId)
+  const completedPacePoints = useMemo<PacePoint[]>(() => {
+    let n = 0
+    return completedTurns
+      .filter((t) => t.role === 'user' && t.metrics?.wpm != null && t.metrics.wpm > 0)
+      .map((t) => {
+        n += 1
+        return { label: n, wpm: Math.round(Number(t.metrics.wpm)) }
+      })
+  }, [completedTurns])
   
   const [elevatePdfLoading, setElevatePdfLoading] = useState(false)
+  // Results view: which tab is showing, plus a one-shot request to deep-link the
+  // Playback tab to the moment behind a skill score ("Hear it").
+  const [resultsTab, setResultsTab] = useState('playback')
+  const [playbackFocus, setPlaybackFocus] = useState<{ skill: string; nonce: number } | null>(null)
+  const hearSkillMoment = (skill: string) => {
+    setPlaybackFocus({ skill, nonce: Date.now() })
+    setResultsTab('playback')
+  }
   const handleElevateExportPdf = async () => {
     if (!sessionId || !historicalMetrics) return
     setElevatePdfLoading(true)
     try {
       const m = historicalMetrics
+      const headers = getAuthHeaders()
+
+      // Pull the full v2 analysis so the PDF matches the on-screen report
+      // (skill scores, coaching, content & delivery signals, transcript).
+      const [scoresRes, coachingRes, signalsRes, turnsRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/sessions/${sessionId}/skill-scores`, { headers }).catch(() => null),
+        fetch(`${API_BASE_URL}/sessions/${sessionId}/coaching-insights`, { headers }).catch(() => null),
+        fetch(`${API_BASE_URL}/sessions/${sessionId}/communication-signals`, { headers }).catch(() => null),
+        fetch(`${API_BASE_URL}/sessions/${sessionId}/turns`, { headers }).catch(() => null),
+      ])
+
+      const skill = scoresRes && scoresRes.ok ? await scoresRes.json() : null
+      const coaching = coachingRes && coachingRes.ok ? await coachingRes.json() : null
+      const signals = signalsRes && signalsRes.ok ? await signalsRes.json() : null
+      const turnsData = turnsRes && turnsRes.ok ? await turnsRes.json() : null
+
+      const scores: Record<string, number | null> = skill?.scores ?? {}
+      const scoreVals = Object.values(scores).filter((v): v is number => typeof v === 'number')
+      const overallScore = scoreVals.length
+        ? scoreVals.reduce((s, v) => s + v, 0) / scoreVals.length
+        : null
+
+      const sr = signals?.speechRate ?? {}
+      const vocab = signals?.vocabDiversity ?? {}
+      const sc = signals?.sentenceComplexity ?? {}
+      const prosody = signals?.prosody ?? null
+
+      // Reuse the exact on-screen verdicts so the PDF colors/tips match Session Analytics.
+      const diversityPct = (vocab.ratio ?? 0) * 100
+      const avgSentenceLen = sc.avgLength ?? 0
+      const syntacticComplexity = (sc.subordinateRatio ?? 0) * 10
+      const sophistication = vocab.sophistication ?? 0
+
+      const metricSections: SessionReport['metrics'] = [
+        {
+          section: 'Speaking Performance',
+          description: 'Your headline pace, fillers and fluency for this session',
+          items: [
+            {
+              label: 'Words Per Minute',
+              value: String(m.userWpm),
+              unit: 'WPM',
+              tone: DELIVERY_VERDICTS.speechRate(m.userWpm).tone,
+              hint: DELIVERY_VERDICTS.speechRate(m.userWpm).tip,
+            },
+            {
+              label: 'Filler Rate',
+              value: m.userFillerRate.toFixed(1),
+              unit: '%',
+              tone: DELIVERY_VERDICTS.fillerRate(m.userFillerRate).tone,
+              hint: DELIVERY_VERDICTS.fillerRate(m.userFillerRate).tip,
+            },
+            { label: 'Avg Sentence Length', value: m.userAvgSentenceLength.toFixed(1), unit: 'words' },
+            { label: 'Vocab Diversity', value: `${(m.userVocabDiversity * 100).toFixed(0)}`, unit: '%' },
+            { label: 'Speaking Time', value: m.userSpeakingTime.toFixed(0), unit: 's' },
+            { label: 'Avg Response Time', value: m.userResponseTimeAvg.toFixed(1), unit: 's' },
+          ],
+        },
+      ]
+
+      if (signals) {
+        metricSections.push({
+          section: 'Content — Vocabulary & Structure',
+          description: 'What you said and how your sentences are built',
+          items: [
+            { label: 'Total Words', value: String(vocab.totalWords ?? sr.totalWords ?? 0) },
+            { label: 'Unique Words', value: String(vocab.uniqueWords ?? 0) },
+            {
+              label: 'Diversity',
+              value: diversityPct.toFixed(0),
+              unit: '%',
+              tone: CONTENT_VERDICTS.diversity(diversityPct).tone,
+              hint: CONTENT_VERDICTS.diversity(diversityPct).tip,
+            },
+            {
+              label: 'Sophistication',
+              value: sophistication.toFixed(1),
+              unit: '/10',
+              score: sophistication,
+              tone: CONTENT_VERDICTS.sophistication(sophistication).tone,
+              hint: CONTENT_VERDICTS.sophistication(sophistication).tip,
+            },
+            {
+              label: 'Avg Sentence Len',
+              value: avgSentenceLen.toFixed(1),
+              unit: 'words',
+              tone: CONTENT_VERDICTS.avgSentenceLength(avgSentenceLen).tone,
+              hint: CONTENT_VERDICTS.avgSentenceLength(avgSentenceLen).tip,
+            },
+            {
+              label: 'Syntactic Complexity',
+              value: syntacticComplexity.toFixed(1),
+              unit: '/10',
+              score: syntacticComplexity,
+              tone: CONTENT_VERDICTS.syntacticComplexity(syntacticComplexity).tone,
+              hint: CONTENT_VERDICTS.syntacticComplexity(syntacticComplexity).tip,
+            },
+          ],
+        })
+      }
+
+      if (prosody && (prosody.voiceQuality || prosody.pitchVariation || prosody.energyStability)) {
+        const vq = prosody.voiceQuality ?? 0
+        const pv = prosody.pitchVariation ?? 0
+        const es = prosody.energyStability ?? 0
+        metricSections.push({
+          section: 'Delivery — Voice Quality',
+          description: 'How you sounded — acoustic analysis of your recording',
+          items: [
+            {
+              label: 'Voice Quality',
+              value: vq.toFixed(1),
+              unit: '/10',
+              score: vq,
+              tone: DELIVERY_VERDICTS.voiceQuality(vq).tone,
+              hint: DELIVERY_VERDICTS.voiceQuality(vq).tip,
+            },
+            {
+              label: 'Pitch Variation',
+              value: pv.toFixed(1),
+              unit: '/10',
+              score: pv,
+              tone: DELIVERY_VERDICTS.pitchVariation(pv).tone,
+              hint: DELIVERY_VERDICTS.pitchVariation(pv).tip,
+            },
+            {
+              label: 'Energy Stability',
+              value: es.toFixed(1),
+              unit: '/10',
+              score: es,
+              tone: DELIVERY_VERDICTS.energyStability(es).tone,
+              hint: DELIVERY_VERDICTS.energyStability(es).tip,
+            },
+            { label: 'Pauses', value: String(prosody.pauseCount ?? 0) },
+            { label: 'Avg Pause', value: `${(prosody.meanPauseDuration ?? 0).toFixed(2)}`, unit: 's' },
+          ],
+        })
+      }
+
+      // Pace variation chart points — one WPM per user turn, in order.
+      let paceN = 0
+      const pacePoints = Array.isArray(turnsData?.turns)
+        ? turnsData.turns
+            .filter((t: any) => t.role === 'user' && t.metrics?.wpm != null && t.metrics.wpm > 0)
+            .map((t: any) => {
+              paceN += 1
+              return { label: paceN, wpm: Math.round(Number(t.metrics.wpm)) }
+            })
+        : []
+
+      // Progress Pulse (cross-session trends), without the "Practice in Elevate" CTA.
+      let progressPulse: SessionReport['progressPulse'] = null
+      try {
+        const pulseRes = await fetch(`${API_BASE_URL}/api/progress-pulse/summary`, { headers })
+        if (pulseRes.ok) {
+          const pulseData = await pulseRes.json()
+          const items = Array.isArray(pulseData?.summary) ? pulseData.summary : []
+          if (items.length) {
+            progressPulse = items.map((it: any) => ({
+              skill: it.skill,
+              label: pulseSkillLabel(it.skill),
+              currentScore: Number(it.currentScore) || 0,
+              delta: it.delta ?? null,
+            }))
+          }
+        }
+      } catch {
+        /* pulse is optional */
+      }
+
+      const recommendations = coaching
+        ? [coaching.actionableAdvice, coaching.practiceExercise, coaching.overallNarrative].filter(
+            (x: unknown): x is string => typeof x === 'string' && x.trim().length > 0,
+          )
+        : []
+
+      // ── Report summary: how the conversation went + Progress Pulse standing ──
+      const summaryParts: string[] = []
+      if (overallScore != null) {
+        summaryParts.push(`This session scored ${overallScore.toFixed(1)}/10 overall.`)
+      }
+      if (coaching?.overallNarrative) {
+        summaryParts.push(coaching.overallNarrative)
+      } else if (coaching?.topStrength) {
+        summaryParts.push(coaching.topStrength)
+      }
+      if (progressPulse && progressPulse.length) {
+        const pulseAvg =
+          progressPulse.reduce((s, p) => s + (p.currentScore || 0), 0) / progressPulse.length
+        const improving = progressPulse
+          .filter((p) => (p.delta ?? 0) > 0.3)
+          .sort((a, b) => (b.delta ?? 0) - (a.delta ?? 0))
+          .map((p) => p.label)
+        const weakest = [...progressPulse].sort((a, b) => a.currentScore - b.currentScore)[0]
+        let pulseLine = `Across your tracked sessions, your communication skills average ${pulseAvg.toFixed(1)}/10.`
+        if (improving.length) {
+          pulseLine += ` You're improving in ${improving.slice(0, 2).join(' and ')}.`
+        }
+        if (weakest && weakest.currentScore < 7) {
+          pulseLine += ` ${weakest.label} needs the most attention right now.`
+        }
+        summaryParts.push(pulseLine)
+      }
+      const summary = summaryParts.length ? summaryParts.join(' ') : null
+
+      // ── Recommended next steps: targeted practice with deep links to Elevate ──
+      const SKILL_TO_FOCUS: Record<string, string> = {
+        clarity: 'clarity',
+        conciseness: 'conciseness',
+        confidence: 'confidence',
+        structure: 'structure',
+        engagement: 'engagement',
+        pacing: 'pacing',
+        delivery: 'pacing',
+        emotionalControl: 'confidence',
+      }
+      // Prefer the weakest tracked skills; fall back to this session's skill scores.
+      const weakSource: { key: string; score: number }[] = progressPulse?.length
+        ? progressPulse.map((p) => ({ key: p.skill, score: p.currentScore }))
+        : Object.entries(scores)
+            .filter(([, v]) => typeof v === 'number')
+            .map(([k, v]) => ({ key: k, score: v as number }))
+      const targetFocus: string[] = []
+      for (const { key } of weakSource.sort((a, b) => a.score - b.score)) {
+        const fid = SKILL_TO_FOCUS[key] ?? key
+        if (FOCUS_AREAS.some((f) => f.id === fid) && !targetFocus.includes(fid)) targetFocus.push(fid)
+        if (targetFocus.length >= 3) break
+      }
+      if (targetFocus.length === 0) targetFocus.push('clarity', 'pacing')
+      const origin = window.location.origin
+      const nextSteps = targetFocus.map((fid) => {
+        const fa = FOCUS_AREAS.find((f) => f.id === fid)
+        const ex = EXERCISE_PREVIEWS[fid]
+        const title = ex?.name ? `${ex.name} (${fa?.label ?? fid})` : `Practice: ${fa?.label ?? fid}`
+        const description = [fa?.description, ex?.duration ? `~${ex.duration}.` : '', ex?.steps?.[0]]
+          .filter(Boolean)
+          .join(' — ')
+        return { title, description, url: `${origin}/elevate?focusArea=${encodeURIComponent(fid)}` }
+      })
+
+      // Title must match the session's name in the SpashtAI sessions list so the
+      // user can search for the PDF by that name.
+      const sess = turnsData?.session ?? null
+      const moduleLabel = sess?.module
+        ? sess.module.charAt(0).toUpperCase() + sess.module.slice(1)
+        : 'Elevate'
+      const displayName = (sess?.sessionName as string)?.trim() || `${moduleLabel} Session`
+
       const pdfReport: SessionReport = {
-        title: `Elevate Practice — ${sessionId.slice(0, 8)}`,
-        subtitle: 'Practice Session Analytics',
+        title: displayName,
+        subtitle: sess?.focusArea ? getFocusAreaLabel(sess.focusArea) : 'Practice Session Analytics',
         source: 'elevate',
         metadata: [
-          { label: 'Session', value: sessionId.slice(0, 8) },
+          { label: 'Session', value: displayName },
           { label: 'Total Turns', value: String(m.totalTurns) },
+          { label: 'Generated', value: new Date().toLocaleString() },
         ],
-        skillScores: null,
-        coachingInsights: null,
-        metrics: [
-          {
-            section: 'Your Performance',
-            items: [
-              { label: 'Words Per Minute', value: String(m.userWpm), unit: 'WPM' },
-              { label: 'Filler Rate', value: `${m.userFillerRate.toFixed(1)}`, unit: '%' },
-              { label: 'Avg Sentence Length', value: String(m.userAvgSentenceLength), unit: 'words' },
-              { label: 'Vocab Diversity', value: `${(m.userVocabDiversity * 100).toFixed(0)}`, unit: '%' },
-              { label: 'Speaking Time', value: `${m.userSpeakingTime.toFixed(0)}`, unit: 's' },
-              { label: 'Avg Response Time', value: `${m.userResponseTimeAvg.toFixed(1)}`, unit: 's' },
-            ],
-          },
-          {
-            section: 'Session Stats',
-            items: [
-              { label: 'Total Turns', value: String(m.totalTurns) },
-              { label: 'LLM Tokens', value: String(m.totalLlmTokens) },
-              { label: 'Avg TTFT', value: `${m.avgTtft.toFixed(0)}`, unit: 'ms' },
-            ],
-          },
-        ],
+        summary,
+        overallScore,
+        skillScores: skill?.scores ? { scores, components: skill.components } : null,
+        coachingInsights:
+          coaching && !coaching.error
+            ? {
+                topStrength: coaching.topStrength,
+                primaryImprovement: coaching.primaryImprovement,
+                actionableAdvice: coaching.actionableAdvice,
+                practiceExercise: coaching.practiceExercise,
+                overallNarrative: coaching.overallNarrative,
+              }
+            : null,
+        metrics: metricSections,
+        paceTrend: pacePoints.length >= 2 ? { points: pacePoints, idealMin: 120, idealMax: 160 } : null,
+        progressPulse,
+        nextSteps: nextSteps.length ? nextSteps : null,
+        strengths: coaching?.topStrength ? [{ point: coaching.topStrength }] : undefined,
+        improvements: coaching?.primaryImprovement ? [{ point: coaching.primaryImprovement }] : undefined,
+        recommendations: recommendations.length ? recommendations : undefined,
       }
       await generateSessionPdf(pdfReport)
     } catch (e) {
@@ -322,6 +618,94 @@ export function Elevate() {
     subscribeToUpdates
   } = useConversationPersistence()
 
+  const messagesRef = useRef(messages)
+  useEffect(() => {
+    messagesRef.current = messages
+  }, [messages])
+
+  // Each pause→resume connects to a NEW LiveKit room while keeping the same
+  // sessionId, and the agent restarts turn numbering at 1 (user_turn_1,
+  // assistant_greeting, …). Without per-connection namespacing those ids collide
+  // with the pre-resume segment's bubbles and silently overwrite them. We prefix
+  // every live id with the current room so each connection's turns are distinct.
+  const currentSegmentRef = useRef('')
+  useEffect(() => {
+    currentSegmentRef.current = roomName
+  }, [roomName])
+
+  const handleNewMessage = useCallback(
+    (message: { id?: string; role: string; content: string; partial?: boolean }) => {
+      if (isSessionPaused) {
+        console.log('⏸️ Dropping message while session is paused')
+        return
+      }
+      let finalContent = message.content?.trim() || ''
+      if (message.role === 'assistant') {
+        finalContent = stripThinkingBlocks(finalContent)
+      }
+      if (!finalContent || finalContent === '[]' || finalContent.length < 2) {
+        return
+      }
+
+      // Namespace every live id with the current connection segment so a
+      // paused→resumed session (new room, agent restarts at turn 1) cannot
+      // overwrite the previous segment's bubbles. Partials and the final of the
+      // same turn arrive within one segment, so they still share one bubble.
+      const seg = currentSegmentRef.current
+      const nsId = (rawId?: string) =>
+        rawId ? (seg ? `${seg}::${rawId}` : rawId) : undefined
+
+      // Stitched user turns share one bubble per turn (id = user_turn_N):
+      //  • partials stream the live text (UI only, not persisted)
+      //  • the agent's committed final (partial=false) is authoritative — it
+      //    updates that same bubble in place and persists it. Using the same
+      //    streamId for both prevents the duplicate/divergent bubbles caused by
+      //    a separate finalize path racing the committed publish.
+      if (message.role === 'user' && message.id?.startsWith('user_turn_')) {
+        const storeId = nsId(message.id)!
+        if (message.partial) {
+          upsertStreamingMessage('user', finalContent, storeId)
+        } else {
+          // Agent's conversation_logger persists this turn server-side; keep the
+          // browser write UI-only to avoid duplicate transcript entries.
+          addMessage('user', finalContent, storeId, false)
+        }
+        return
+      }
+
+      if (message.partial) {
+        const streamId = nsId(message.id) || `stream_${seg}_${message.role}`
+        upsertStreamingMessage(
+          message.role as 'user' | 'assistant',
+          finalContent,
+          streamId,
+        )
+        return
+      }
+
+      const storeId = nsId(message.id)
+      const isDuplicate = messagesRef.current.some(
+        (msg) =>
+          msg.role === message.role &&
+          msg.content === finalContent &&
+          (storeId ? msg.id === storeId : true),
+      )
+      if (isDuplicate) return
+
+      // UI-only: the agent is the single writer for the persisted transcript.
+      addMessage(message.role as 'user' | 'assistant', finalContent, storeId, false)
+    },
+    [isSessionPaused, upsertStreamingMessage, addMessage],
+  )
+
+  const handleConversationRestart = useCallback(() => {
+    clearMessages()
+    resetMetrics()
+    setTurnMetricsByIndex({})
+    setTurnTextByIndex({})
+    setTurnMetricsByText({})
+  }, [clearMessages, resetMetrics])
+
   // Check if URL parameter session is completed (for "View Details & Metrics" button)
   useEffect(() => {
     if (!viewSessionId) return
@@ -334,6 +718,8 @@ export function Elevate() {
         if (!response.ok) return
         const data = await response.json()
         const session = data.session || data
+        setViewSessionName(session.sessionName || null)
+        setViewSessionPulse(session.progressPulseStatus || null)
 
         if (session.endedAt) {
           console.log('📊 Viewing completed session:', viewSessionId)
@@ -587,7 +973,7 @@ export function Elevate() {
       console.error('Error joining session:', error)
       throw error
     }
-  }, [identity, roomName, resetMetrics])
+  }, [identity, roomName, elevateSessionName, focusArea, inboundContext, resetMetrics, user])
 
   // Called when LiveKit disconnects unexpectedly (refresh, network drop, etc.)
   // Does NOT end the session — leaves it resumable.
@@ -729,6 +1115,18 @@ export function Elevate() {
     setShowHistory(true)
     navigate('/elevate')
   }, [sessionId, clearMessages, resetMetrics, navigate, confirmDialog])
+
+  // Return from a viewed session's results back to the Elevate session list.
+  const handleBackToElevate = useCallback(() => {
+    setSessionId(null)
+    setIsCompletedSessionView(false)
+    setViewSessionName(null)
+    setViewSessionPulse(null)
+    setShowHistory(true)
+    clearMessages()
+    resetMetrics()
+    navigate('/elevate')
+  }, [clearMessages, resetMetrics, navigate])
 
   const breadcrumbLabel = viewSessionId
     ? 'Session Analytics'
@@ -889,6 +1287,11 @@ export function Elevate() {
                               {getFocusAreaLabel(s.focusArea)}
                             </Badge>
                           )}
+                          {s.progressPulseStatus === 'tracked' && (
+                            <span className="flex items-center gap-0.5 text-green-600" title="Tracked in Progress Pulse">
+                              <CheckCircle2 className="h-4 w-4" />
+                            </span>
+                          )}
                         </div>
                         <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
                           <span>{formatRelDate(s.startedAt)}</span>
@@ -927,10 +1330,19 @@ export function Elevate() {
   return (
     <div className="grid gap-6">
       {/* Back navigation */}
-      {!joined && viewSessionId && cameFromHistory && (
-        <Link to="/history?tab=elevate" className="text-sm text-muted-foreground hover:text-foreground w-fit">
-          &larr; Back to Sessions
-        </Link>
+      {!joined && viewSessionId && (
+        cameFromHistory ? (
+          <Link to="/history?tab=elevate" className="text-sm text-muted-foreground hover:text-foreground w-fit">
+            &larr; Back to Sessions
+          </Link>
+        ) : (
+          <button
+            onClick={handleBackToElevate}
+            className="text-sm text-muted-foreground hover:text-foreground w-fit"
+          >
+            &larr; Back to Elevate
+          </button>
+        )
       )}
       {!joined && !viewSessionId && !showHistory && !sessionId && (
         <button
@@ -943,7 +1355,19 @@ export function Elevate() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Elevate Session</CardTitle>
+          <div className="flex items-start justify-between gap-3">
+            <CardTitle>
+              {viewSessionId && viewSessionName ? viewSessionName : 'Elevate Session'}
+            </CardTitle>
+            {viewSessionId && isCompletedSessionView && viewSessionPulse === 'tracked' && (
+              <span
+                className="inline-flex shrink-0 items-center gap-1 rounded-md border border-green-300 bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700"
+                title="This session is tracked in Progress Pulse"
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" /> Tracked in Pulse
+              </span>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           {!joined && !viewSessionId && !sessionId ? (
@@ -998,44 +1422,103 @@ export function Elevate() {
               </div>
             </div>
           ) : !joined && viewSessionId && isCompletedSessionView ? (
-            <div className="space-y-4">
-              {/* Viewing completed session - show chat and metrics */}
-              <ChatPanel
-                messages={messages}
-                turnMetricsByIndex={turnMetricsByIndex}
-                turnMetricsByText={turnMetricsByText}
-                transcriptHidden={exportFlags.hideTranscriptText}
-              />
-              
-              {/* Historical metrics display */}
-              {sessionId && historicalMetrics && (
-                <>
-                  <SessionMetrics 
-                    sessionId={sessionId}
-                    metrics={historicalMetrics}
-                    onDownloadTranscript={downloadTranscript}
-                    onExportPdf={handleElevateExportPdf}
-                    pdfLoading={elevatePdfLoading}
-                  />
-                  
-                  {/* Skill Scores & Coaching Insights */}
-                  <div className="mt-6">
-                    <SkillScoresCard
-                      sessionId={sessionId}
-                      isSessionEnded={true}
-                    />
-                  </div>
+            <Tabs
+              value={resultsTab}
+              onValueChange={(v) => {
+                // User-initiated tab change: drop any pending deep-link so it
+                // doesn't replay when Playback re-mounts.
+                setResultsTab(v)
+                setPlaybackFocus(null)
+              }}
+              className="space-y-4"
+            >
+              <div className="flex">
+                {/* The metrics summary lives INSIDE the Session Analytics trigger so it
+                    inherits the tab's background (muted when unselected, white when
+                    selected) — it reads as part of the tab, not a separate element. */}
+                <TabsList className="h-auto w-full flex-wrap justify-start sm:w-auto">
+                  <TabsTrigger value="playback" className="py-1.5">
+                    <Play className="mr-2 h-4 w-4" /> Playback
+                  </TabsTrigger>
+                  <TabsTrigger value="analytics" className="gap-3 py-1.5">
+                    <span className="flex items-center">
+                      <BarChart3 className="mr-2 h-4 w-4" /> Session Analytics
+                    </span>
+                    {sessionId && (
+                      <>
+                        <span className="hidden h-4 w-px bg-border lg:block" />
+                        <span className="hidden min-w-0 lg:inline-flex">
+                          <SessionMetricsSummary
+                            sessionId={sessionId}
+                            metrics={historicalMetrics}
+                            variant="inline"
+                            turns={completedTurns}
+                          />
+                        </span>
+                      </>
+                    )}
+                  </TabsTrigger>
+                </TabsList>
+              </div>
 
-                  {/* Legacy Advanced Analytics */}
-                  <div className="mt-6">
-                    <AdvancedInsights 
+              <TabsContent value="analytics" className="space-y-4">
+                {/* Conversation chat — collapsed by default to keep analytics front and center */}
+                <ChatPanel
+                  messages={messages}
+                  turnMetricsByIndex={turnMetricsByIndex}
+                  turnTextByIndex={turnTextByIndex}
+                  turnMetricsByText={turnMetricsByText}
+                  transcriptHidden={exportFlags.hideTranscriptText}
+                  collapsible
+                  defaultCollapsed
+                />
+
+                {/* Historical metrics display */}
+                {sessionId && historicalMetrics && (
+                  <>
+                    <SessionMetrics
                       sessionId={sessionId}
-                      isSessionEnded={true}
+                      metrics={historicalMetrics}
+                      onDownloadTranscript={downloadTranscript}
+                      onExportPdf={handleElevateExportPdf}
+                      pdfLoading={elevatePdfLoading}
+                      aside={<CoachingInsightsCard sessionId={sessionId} isSessionEnded fill />}
                     />
-                  </div>
-                </>
-              )}
-            </div>
+
+                    {/* Pace variation across turns */}
+                    <div className="mt-6">
+                      <PaceTrendCard
+                        sessionId={sessionId}
+                        isSessionEnded={true}
+                        points={completedPacePoints}
+                      />
+                    </div>
+
+                    {/* Communication Score (with inline skill breakdown) */}
+                    <div className="mt-6">
+                      <SkillScoresCard
+                        sessionId={sessionId}
+                        isSessionEnded={true}
+                        onHearMoment={hearSkillMoment}
+                      />
+                    </div>
+
+                    {/* Content & Delivery analysis */}
+                    <div className="mt-6">
+                      <AdvancedInsights sessionId={sessionId} isSessionEnded={true} />
+                    </div>
+                  </>
+                )}
+              </TabsContent>
+
+              <TabsContent value="playback">
+                <SessionReplay
+                  sessionId={sessionId ?? viewSessionId ?? undefined}
+                  embedded
+                  focusRequest={playbackFocus}
+                />
+              </TabsContent>
+            </Tabs>
           ) : (
             <div className="space-y-4">
               {idleWarning && (
@@ -1112,57 +1595,32 @@ export function Elevate() {
                   onDisconnected={handleDisconnected}
                 >
                   <RoomAudioRenderer />
+                  <CoachAudioBootstrap />
+                  <SessionRecorder sessionId={sessionId} disabled={exportFlags.hideAudioDownload} />
+                  <StartAudio label="Click to enable coach audio" />
                   <div className="flex justify-center w-full mb-2">
                     <AgentVisualizer className="bg-muted/20 rounded-lg w-full" isPaused={isSessionPaused} compact />
                   </div>
                   <ConnectionStatus assistantState={assistantState} />
-                  <LiveKitConversation 
+                  <LiveKitConversation
+                    key={roomName}
                     sessionId={sessionId}
                     isSessionPaused={isSessionPaused}
-                    onNewMessage={(message) => {
-                      if (isSessionPaused) {
-                        console.log('⏸️ Dropping message while session is paused')
-                        return
-                      }
-                      const content = message.content?.trim() || ''
-                      if (!content || content === '[]' || content.length < 2) {
-                        return
-                      }
-
-                      if (message.partial) {
-                        const streamId = message.id || `stream_${message.role}`
-                        upsertStreamingMessage(
-                          message.role as 'user' | 'assistant',
-                          content,
-                          streamId,
-                        )
-                        return
-                      }
-
-                      const isDuplicate = messages.some(
-                        (msg) =>
-                          msg.role === message.role &&
-                          msg.content === content &&
-                          (msg.id === message.id || !message.partial),
-                      )
-                      if (isDuplicate) return
-
-                      addMessage(
-                        message.role as 'user' | 'assistant',
-                        content,
-                        message.id,
-                      )
-                    }}
+                    onNewMessage={handleNewMessage}
                     onStateChange={setAssistantState}
-                    onRestart={() => {
-                      clearMessages()
-                      resetMetrics()
-                      setTurnMetricsByIndex({})
-                      setTurnMetricsByText({})
-                    }}
+                    onRestart={handleConversationRestart}
                     onTurnMetrics={(text, metrics, turnIndex) => {
                       if (turnIndex != null && turnIndex > 0) {
+                        // Metrics only — the bubble text is driven by live interim
+                        // partials + the committed final, not by turn_metrics
+                        // (which carries shorter committed text and caused flicker).
+                        // We keep the committed text per index so a stitched UI
+                        // bubble (which can contain several agent sub-turns) can
+                        // aggregate all the sub-turn metrics it spans.
                         setTurnMetricsByIndex((prev) => ({ ...prev, [turnIndex]: metrics }))
+                        if (text) {
+                          setTurnTextByIndex((prev) => ({ ...prev, [turnIndex]: text }))
+                        }
                       } else if (text) {
                         const key = normalizeTurnText(text)
                         setTurnMetricsByText((prev) => ({ ...prev, [key]: metrics }))
@@ -1192,12 +1650,29 @@ export function Elevate() {
               <ChatPanel
                 messages={messages}
                 turnMetricsByIndex={turnMetricsByIndex}
+                turnTextByIndex={turnTextByIndex}
                 turnMetricsByText={turnMetricsByText}
                 liveMetrics={currentMetrics}
                 showLiveMetrics={showMetrics}
                 transcriptHidden={exportFlags.hideTranscriptText}
               />
-              
+
+              {/* Live pace variation — green chart updates as you take turns */}
+              {joined && livePacePoints.length >= 2 && (
+                <Card className="mt-4">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <Gauge className="h-5 w-5" />
+                      Pace Variation
+                    </CardTitle>
+                    <CardDescription>Your speaking speed (WPM) so far, turn by turn</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <PaceTrend points={livePacePoints} />
+                  </CardContent>
+                </Card>
+              )}
+
               {/* Historical metrics display */}
               {!joined && sessionId && historicalMetrics && !isSessionPaused && (
                 <>
@@ -1207,9 +1682,15 @@ export function Elevate() {
                     onDownloadTranscript={downloadTranscript}
                     onExportPdf={handleElevateExportPdf}
                     pdfLoading={elevatePdfLoading}
+                    aside={<CoachingInsightsCard sessionId={sessionId} isSessionEnded={!joined} fill />}
                   />
-                  
-                  {/* Skill Scores & Coaching Insights */}
+
+                  {/* Pace variation across turns */}
+                  <div className="mt-6">
+                    <PaceTrendCard sessionId={sessionId} isSessionEnded={!joined} />
+                  </div>
+
+                  {/* Communication Score (with inline skill breakdown) */}
                   <div className="mt-6">
                     <SkillScoresCard
                       sessionId={sessionId}
@@ -1217,7 +1698,7 @@ export function Elevate() {
                     />
                   </div>
 
-                  {/* Legacy Advanced Analytics */}
+                  {/* Content & Delivery analysis */}
                   <div className="mt-6">
                     <AdvancedInsights 
                       sessionId={sessionId}
@@ -1309,22 +1790,39 @@ function LiveKitConversation({
   const { agentTranscriptions } = useVoiceAssistant()
   const seenFragmentsRef = useRef<Map<string, string>>(new Map())
   const lastControlStateRef = useRef<string>('unknown')
+  const onNewMessageRef = useRef(onNewMessage)
+  const lastAgentStreamRef = useRef<{ id: string; text: string; final: boolean } | null>(null)
+  const activeAssistantMsgIdRef = useRef<string | null>(null)
 
-  // Stream coach speech via LiveKit agent transcriptions
+  useEffect(() => {
+    lastAgentStreamRef.current = null
+    activeAssistantMsgIdRef.current = null
+    seenFragmentsRef.current.clear()
+  }, [sessionId])
+
+  useEffect(() => {
+    onNewMessageRef.current = onNewMessage
+  }, [onNewMessage])
+
+  // Live typing indicator while coach speaks (finals come from lk.conversation)
   useEffect(() => {
     if (isSessionPaused || agentTranscriptions.length === 0) return
     const latest = agentTranscriptions[agentTranscriptions.length - 1]
-    const text = latest.text?.trim()
+    if (latest.final) return
+    const text = stripThinkingBlocks(latest.text?.trim() || '')
     if (!text) return
-    const streamId = latest.id || 'agent-live'
-    onNewMessage({
+
+    const streamId = activeAssistantMsgIdRef.current || latest.id || `agent-live-${Date.now()}`
+    activeAssistantMsgIdRef.current = streamId
+
+    onNewMessageRef.current({
       role: 'assistant',
       content: text,
       id: streamId,
-      partial: !latest.final,
+      partial: true,
       timestamp: new Date().toISOString(),
     })
-  }, [agentTranscriptions, isSessionPaused, onNewMessage])
+  }, [agentTranscriptions, isSessionPaused])
 
   const processPayload = useCallback(
     (payload: string, source: 'dataChannel' | 'roomEvent') => {
@@ -1353,7 +1851,7 @@ function LiveKitConversation({
           console.log('♻️ Replacement message received', { key, source })
           seenFragmentsRef.current.delete(key)
           const role = parsed.type === 'assistant' ? 'assistant' : 'user'
-          onNewMessage({ role, content: parsed.text, id: parsed.id, timestamp: new Date().toISOString() })
+          onNewMessageRef.current({ role, content: parsed.text, id: parsed.id, timestamp: new Date().toISOString() })
           return
         }
 
@@ -1362,7 +1860,7 @@ function LiveKitConversation({
         if (parsed.final) {
           seenFragmentsRef.current.delete(key)
           const role = parsed.type === 'assistant' ? 'assistant' : 'user'
-          onNewMessage({
+          onNewMessageRef.current({
             role,
             content: next,
             id: parsed.id || key,
@@ -1374,7 +1872,7 @@ function LiveKitConversation({
 
         seenFragmentsRef.current.set(key, next)
         const role = parsed.type === 'assistant' ? 'assistant' : 'user'
-        onNewMessage({
+        onNewMessageRef.current({
           role,
           content: next,
           id: parsed.id || key,
@@ -1385,7 +1883,7 @@ function LiveKitConversation({
         console.log('❌ LiveKit message parse error:', error, { payload, source })
       }
     },
-    [onNewMessage]
+    [],
   )
 
 
@@ -1470,20 +1968,50 @@ function LiveKitConversation({
               break
             }
             
-            // User turns only — coach speech comes from agentTranscriptions
-            if (conversationData.type === 'user') {
+            // Final coach turns — one id per utterance from the agent
+            if (conversationData.type === 'assistant') {
+              const content = stripThinkingBlocks(
+                conversationData.text || conversationData.content || '',
+              )
+              const timestamp = conversationData.timestamp
+                ? new Date(conversationData.timestamp).toISOString()
+                : new Date().toISOString()
+
+              if (content) {
+                // Reuse the live-streamed bubble's id so the authoritative
+                // final REPLACES the streaming partial in place rather than
+                // creating a second identical bubble. The live coach text is
+                // streamed under activeAssistantMsgIdRef (from the TTS
+                // transcription); the agent's own item id differs, so using it
+                // here would never reconcile with the partial. Fall back to the
+                // item id only when no live stream was active for this turn.
+                const finalId =
+                  activeAssistantMsgIdRef.current ||
+                  conversationData.id ||
+                  `assistant-${Date.now()}`
+                onNewMessageRef.current({
+                  role: 'assistant',
+                  content,
+                  id: finalId,
+                  timestamp,
+                  partial: false,
+                })
+                activeAssistantMsgIdRef.current = null
+                lastAgentStreamRef.current = null
+              }
+            } else if (conversationData.type === 'user') {
               const content = conversationData.text || conversationData.content || ''
               const timestamp = conversationData.timestamp 
                 ? new Date(conversationData.timestamp).toISOString() 
                 : new Date().toISOString()
               
               if (content) {
-                onNewMessage({ 
+                onNewMessageRef.current({ 
                   role: 'user', 
                   content, 
                   id: conversationData.id,
                   timestamp,
-                  partial: false,
+                  partial: conversationData.final === false,
                 })
               }
             }
@@ -1521,6 +2049,10 @@ function LiveKitConversation({
           }
           break
           
+        case 'lk.settings':
+          // Coach patience is auto-selected by the agent; ignore setting acks.
+          break
+
         default:
           console.log('📨 Unknown data channel topic:', topic)
       }
@@ -1644,6 +2176,73 @@ function lookupTurnMetrics(content: string, map: Record<string, TurnMetrics>): T
   return undefined
 }
 
+function qualitativePaceFromWpm(wpm: number): string {
+  if (wpm <= 0) return 'not-enough-data'
+  if (wpm < 100) return 'slow'
+  if (wpm < 120) return 'measured'
+  if (wpm <= 160) return 'ideal'
+  if (wpm <= 180) return 'fast'
+  return 'rapid'
+}
+
+function vocabDiversityOf(text: string): number {
+  const words = (text.toLowerCase().match(/[a-z']+/g) || [])
+  if (words.length === 0) return 0
+  return new Set(words).size / words.length
+}
+
+// A user "turn" the coach replies to is split by the endpointer into multiple
+// agent sub-turns, but the UI stitches them into one bubble. Aggregate every
+// sub-turn metric whose committed text falls inside the bubble so the popover
+// reflects the WHOLE paragraph (additive counts; WPM from summed words/seconds;
+// vocab recomputed from the full bubble text).
+function aggregateTurnMetrics(parts: TurnMetrics[], bubbleContent: string): TurnMetrics {
+  if (parts.length === 1) return parts[0]
+  const sum = (pick: (m: TurnMetrics) => number) => parts.reduce((a, m) => a + (pick(m) || 0), 0)
+  const word_count = sum((m) => m.word_count)
+  const filler_count = sum((m) => m.filler_count)
+  const hedging_count = sum((m) => m.hedging_count)
+  const acknowledgment_count = sum((m) => m.acknowledgment_count ?? 0)
+  const speaking_seconds = sum((m) => m.speaking_seconds ?? 0)
+  const filler_rate = word_count > 0 ? (filler_count / word_count) * 100 : 0
+  const wpm = speaking_seconds > 0 ? (word_count / speaking_seconds) * 60 : null
+  return {
+    word_count,
+    filler_count,
+    filler_rate,
+    hedging_count,
+    acknowledgment_count,
+    vocab_diversity: vocabDiversityOf(bubbleContent),
+    wpm,
+    speaking_seconds: speaking_seconds > 0 ? speaking_seconds : null,
+    qualitative_pace: wpm != null ? qualitativePaceFromWpm(wpm) : null,
+    coaching_tip: parts[parts.length - 1]?.coaching_tip ?? null,
+  }
+}
+
+// Collect all sub-turn metrics whose committed text is contained in a bubble.
+// Uses an 8-word probe (or the whole text if shorter) to avoid mis-matching
+// short fragments, and a `consumed` set so a sub-turn is attributed once.
+function collectTurnMetricsForBubble(
+  bubbleContent: string,
+  ordered: { idx: number; text: string; metrics: TurnMetrics }[],
+  consumed: Set<number>,
+): TurnMetrics[] {
+  const bubbleNorm = normalizeTurnText(bubbleContent)
+  const parts: TurnMetrics[] = []
+  for (const entry of ordered) {
+    if (consumed.has(entry.idx)) continue
+    const t = normalizeTurnText(entry.text)
+    if (!t) continue
+    const probe = t.split(' ').slice(0, 8).join(' ')
+    if (probe && bubbleNorm.includes(probe)) {
+      parts.push(entry.metrics)
+      consumed.add(entry.idx)
+    }
+  }
+  return parts
+}
+
 function paceLabel(pace?: string | null): string {
   if (!pace || pace === 'not-enough-data') return '—'
   return pace.charAt(0).toUpperCase() + pace.slice(1)
@@ -1697,13 +2296,9 @@ function TurnMetricsPopover({
   const PANEL_W = 240
   const PANEL_H = 300
 
-  const setOpenState = useCallback(
-    (next: boolean) => {
-      setOpen(next)
-      onOpenChange?.(next)
-    },
-    [onOpenChange],
-  )
+  const setOpenState = useCallback((next: boolean) => {
+    setOpen(next)
+  }, [])
 
   const updatePosition = useCallback(() => {
     if (!btnRef.current) return
@@ -1726,10 +2321,13 @@ function TurnMetricsPopover({
       if (next) {
         requestAnimationFrame(updatePosition)
       }
-      onOpenChange?.(next)
       return next
     })
-  }, [onOpenChange, updatePosition])
+  }, [updatePosition])
+
+  useEffect(() => {
+    onOpenChange?.(open)
+  }, [open, onOpenChange])
 
   useLayoutEffect(() => {
     if (!open) return
@@ -1837,43 +2435,55 @@ function TurnMetricsPopover({
   )
 }
 
-// Stitch consecutive same-role messages from the same conversational pause into
-// a single bubble for display. Underlying `messages` array (and DB) is unchanged
-// — this is purely a render-time grouping so a user that pauses mid-sentence
-// doesn't get spammed with 10 separate bubbles for one logical turn.
-const STITCH_GAP_MS = 90_000 // 90 seconds gap = considered same turn
+// One persisted/streaming message → one chat bubble. Partial updates share the same id
+// via upsertStreamingMessage; stitched user turns use user_turn_{n} ids from the agent.
+const USER_STITCH_GAP_MS = 90_000
+
+function parseMessageTimestamp(ts: string | undefined): number {
+  if (!ts) return 0
+  const n = Date.parse(ts)
+  return Number.isNaN(n) ? 0 : n
+}
 
 interface ChatGroup {
   id: string
   role: string
   content: string
-  timestamp: string // last message in the group (used for display)
+  timestamp: string
   count: number
 }
 
 function groupConsecutive(messages: ChatMessage[]): ChatGroup[] {
   const groups: ChatGroup[] = []
+
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i]
-    const last = groups[groups.length - 1]
-    const ts = m.timestamp ? new Date(m.timestamp).getTime() : 0
-    const lastTs = last?.timestamp ? new Date(last.timestamp).getTime() : 0
-    const sameRole = last && last.role === m.role
-    const closeInTime = sameRole && ts - lastTs <= STITCH_GAP_MS
+    const content =
+      m.role === 'assistant' ? stripThinkingBlocks(m.content) : m.content
+    if (!content) continue
 
-    if (sameRole && closeInTime) {
-      // Append with a space; collapse if the previous fragment already ended
-      // with sentence-final punctuation so "Hello." + "How are you?" reads
-      // naturally as "Hello. How are you?".
-      const sep = /[.!?…]\s*$/.test(last.content) ? ' ' : ' '
-      last.content = `${last.content}${sep}${m.content}`.replace(/\s+/g, ' ').trim()
+    const last = groups[groups.length - 1]
+    const sameStream = last && last.role === m.role && m.id && last.id === m.id
+    const userTimeStitch =
+      last &&
+      last.role === 'user' &&
+      m.role === 'user' &&
+      !m.id?.startsWith('user_turn_') &&
+      parseMessageTimestamp(m.timestamp) - parseMessageTimestamp(last.timestamp) <=
+        USER_STITCH_GAP_MS
+
+    if (sameStream) {
+      last.content = content
+      last.timestamp = m.timestamp || last.timestamp
+    } else if (userTimeStitch) {
+      last.content = `${last.content} ${content}`.replace(/\s+/g, ' ').trim()
       last.timestamp = m.timestamp || last.timestamp
       last.count += 1
     } else {
       groups.push({
         id: m.id || `g-${i}`,
         role: m.role,
-        content: m.content,
+        content,
         timestamp: m.timestamp,
         count: 1,
       })
@@ -1885,20 +2495,39 @@ function groupConsecutive(messages: ChatMessage[]): ChatGroup[] {
 function ChatPanel({
   messages,
   turnMetricsByIndex = {},
+  turnTextByIndex = {},
   turnMetricsByText = {},
   liveMetrics = null,
   showLiveMetrics = false,
   transcriptHidden = false,
+  collapsible = false,
+  defaultCollapsed = false,
 }: {
   messages: ChatMessage[]
   turnMetricsByIndex?: Record<number, TurnMetrics>
+  turnTextByIndex?: Record<number, string>
   turnMetricsByText?: Record<string, TurnMetrics>
   liveMetrics?: import('@/hooks/useSessionMetrics').LiveMetricsSnapshot | null
   showLiveMetrics?: boolean
   transcriptHidden?: boolean
+  collapsible?: boolean
+  defaultCollapsed?: boolean
 }) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const groups = useMemo(() => groupConsecutive(messages), [messages])
+  const [collapsed, setCollapsed] = useState(collapsible && defaultCollapsed)
+  // Render strictly in chronological (creation) order. Bubbles keep their
+  // earliest timestamp, so a stitched user-turn final that arrives alongside the
+  // coach reply can't push the user's turn below the response that answers it.
+  const groups = useMemo(() => {
+    const ordered = messages
+      .map((m, i) => ({ m, i }))
+      .sort((a, b) => {
+        const dt = parseMessageTimestamp(a.m.timestamp) - parseMessageTimestamp(b.m.timestamp)
+        return dt !== 0 ? dt : a.i - b.i
+      })
+      .map((x) => x.m)
+    return groupConsecutive(ordered)
+  }, [messages])
   const userTurnCount = useMemo(() => groups.filter((g) => g.role === 'user').length, [groups])
 
   // Auto-scroll to bottom when new messages arrive
@@ -1925,15 +2554,30 @@ function ChatPanel({
       {/* Header */}
       <div className="border-b bg-muted/50 px-4 py-2.5">
         <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
-          <div className="shrink-0">
-            <div className="text-sm font-semibold">Conversation</div>
-            <div className="text-xs text-muted-foreground mt-0.5">
-              {userTurnCount} {userTurnCount === 1 ? 'your turn' : 'your turns'}
-              {groups.length !== userTurnCount && (
-                <span className="ml-1 opacity-70">· {groups.length} messages</span>
-              )}
-            </div>
-          </div>
+          <button
+            type="button"
+            onClick={() => collapsible && setCollapsed((c) => !c)}
+            disabled={!collapsible}
+            className={`flex shrink-0 items-center gap-2 text-left ${collapsible ? 'cursor-pointer' : 'cursor-default'}`}
+            aria-expanded={!collapsed}
+          >
+            {collapsible &&
+              (collapsed ? (
+                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <ChevronUp className="h-4 w-4 text-muted-foreground" />
+              ))}
+            <span>
+              <span className="block text-sm font-semibold">Conversation</span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">
+                {userTurnCount} {userTurnCount === 1 ? 'your turn' : 'your turns'}
+                {groups.length !== userTurnCount && (
+                  <span className="ml-1 opacity-70">· {groups.length} messages</span>
+                )}
+                {collapsible && collapsed && <span className="ml-1 opacity-70">· click to expand</span>}
+              </span>
+            </span>
+          </button>
           {showLiveMetrics && (
             <RealTimeMetrics
               metrics={liveMetrics}
@@ -1946,7 +2590,11 @@ function ChatPanel({
       </div>
       
       {/* Messages Container */}
-      <div className="p-4 space-y-3 max-h-[32rem] min-h-[12rem] overflow-y-auto overflow-x-hidden bg-gradient-to-b from-background to-muted/10">
+      <div
+        className={`p-4 space-y-3 max-h-[32rem] min-h-[12rem] overflow-y-auto overflow-x-hidden bg-gradient-to-b from-background to-muted/10 ${
+          collapsed ? 'hidden' : ''
+        }`}
+      >
         {transcriptHidden ? (
           <div className="flex items-center justify-center h-32">
             <div className="text-center px-4">
@@ -1967,12 +2615,22 @@ function ChatPanel({
           <>
             {(() => {
               let userTurnIdx = 0
+              // Sub-turn metrics in commit order, with their committed text, so a
+              // stitched bubble can aggregate every sub-turn it spans.
+              const orderedTurnMetrics = Object.keys(turnMetricsByIndex)
+                .map(Number)
+                .sort((a, b) => a - b)
+                .map((idx) => ({ idx, text: turnTextByIndex[idx] || '', metrics: turnMetricsByIndex[idx] }))
+              const consumedTurnMetrics = new Set<number>()
               return groups.map((g, i) => {
-              const turnMetrics =
-                g.role === 'user'
-                  ? (turnMetricsByIndex[++userTurnIdx] ??
-                      lookupTurnMetrics(g.content, turnMetricsByText))
-                  : undefined
+              let turnMetrics: TurnMetrics | undefined
+              if (g.role === 'user') {
+                userTurnIdx++
+                const parts = collectTurnMetricsForBubble(g.content, orderedTurnMetrics, consumedTurnMetrics)
+                turnMetrics = parts.length
+                  ? aggregateTurnMetrics(parts, g.content)
+                  : (turnMetricsByIndex[userTurnIdx] ?? lookupTurnMetrics(g.content, turnMetricsByText))
+              }
               return (
               <div 
                 key={g.id || i} 

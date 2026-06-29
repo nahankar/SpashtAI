@@ -82,12 +82,6 @@ function formatRelativeDate(dateString: string): string {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-function scoreColor(score: number) {
-  if (score >= 8) return 'text-green-600'
-  if (score >= 6) return 'text-amber-600'
-  return 'text-red-600'
-}
-
 const STATUS_BADGE: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline'; label: string }> = {
   completed: { variant: 'default', label: 'Completed' },
   pending: { variant: 'outline', label: 'Pending' },
@@ -660,7 +654,8 @@ export function Replay() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {sessions.some((s) => s.status === 'completed' || s.status === 'failed') && (
+          {exportFlags.enableReprocess &&
+            sessions.some((s) => s.status === 'completed' || s.status === 'failed') && (
             <Button variant="outline" onClick={handleReprocessAll}>
               <RefreshCw className="mr-2 h-4 w-4" /> Reprocess All
             </Button>
@@ -739,7 +734,7 @@ export function Replay() {
       )}
 
       {!sessionsLoading && !sessionsError && filteredSessions.length > 0 && (
-        <div className="grid gap-3">
+        <div className="mt-4 grid gap-3">
           {filteredSessions.map((s) => {
             const badge = STATUS_BADGE[s.status] || STATUS_BADGE.pending
             const hasResult = s.status === 'completed' && s.result
@@ -764,17 +759,6 @@ export function Replay() {
                       <Square className="h-5 w-5 text-muted-foreground" />
                     )}
                   </button>
-
-                  {/* Score circle or status icon */}
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 border-muted">
-                    {hasResult ? (
-                      <span className={`text-lg font-bold ${scoreColor(s.result!.overallScore)}`}>
-                        {s.result!.overallScore.toFixed(0)}
-                      </span>
-                    ) : (
-                      <FileText className="h-5 w-5 text-muted-foreground" />
-                    )}
-                  </div>
 
                   {/* Details */}
                   <div className="min-w-0 flex-1">

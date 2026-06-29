@@ -13,8 +13,10 @@ sudo apt update
 sudo apt upgrade -y
 
 echo "==> Base packages"
+# ffmpeg is required by the API for audio onset alignment (Playback karaoke),
+# per-turn audio slicing, and dev streaming transcription (PCM conversion).
 sudo apt install -y \
-  curl git build-essential nginx rsync \
+  curl git build-essential nginx rsync ffmpeg \
   python3 python3-venv python3-pip \
   ca-certificates gnupg
 

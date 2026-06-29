@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Progress } from '../ui/progress';
-import { Clock, MessageSquare, Zap, TrendingUp, Download, RefreshCw, FileText, Loader2, Mic } from 'lucide-react';
+import { MessageSquare, TrendingUp, Download, RefreshCw, FileText, Loader2, Mic } from 'lucide-react';
 import { Button } from '../ui/button';
 import { getAuthHeaders } from '@/lib/api-client';
 import { useUserExportFlags } from '@/hooks/useUserExportFlags';
@@ -38,9 +38,11 @@ interface SessionMetricsProps {
   onDownloadTranscript?: (format: 'json' | 'txt') => void;
   onExportPdf?: () => Promise<void>;
   pdfLoading?: boolean;
+  /** Optional content rendered beside Speaking Performance (e.g. Coaching Insights). */
+  aside?: ReactNode;
 }
 
-export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExportPdf, pdfLoading }: SessionMetricsProps) {
+export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExportPdf, pdfLoading, aside }: SessionMetricsProps) {
   const [isReprocessing, setIsReprocessing] = useState(false);
   const [isDownloadingAudio, setIsDownloadingAudio] = useState(false);
   const [reprocessStatus, setReprocessStatus] = useState<string>('');
@@ -156,39 +158,24 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExp
     return NEEDS_WORK
   }
 
-  const rateLatency = (latency: number): Rating => {
-    if (latency <= 2.0) return GOOD
-    if (latency <= 4.0) return AVERAGE
-    return NEEDS_WORK
-  }
-
   const rateVocabDiversity = (diversity: number): Rating => {
     if (diversity >= 60) return GOOD
     if (diversity >= 40) return AVERAGE
     return NEEDS_WORK
   }
 
-  const rateResponseTime = (time: number): Rating => {
-    if (time <= 3.0) return GOOD
-    if (time <= 8.0) return AVERAGE
-    return NEEDS_WORK
-  }
-
-  const rateSpeakingRatio = (ratio: number): Rating => {
-    if (ratio >= 30 && ratio <= 70) return GOOD
-    if (ratio >= 20 && ratio <= 80) return AVERAGE
-    return NEEDS_WORK
-  }
+  // Vocabulary diversity is a type/token ratio, so it is always ≤ 1 when stored
+  // correctly (0–1). Some older sessions persisted it pre-scaled as a 0–100
+  // percentage; normalize both to a single 0–100 percentage for display/rating
+  // so we never show absurd values like 2141%.
+  const vocabDiversityPct =
+    metrics.userVocabDiversity > 1
+      ? metrics.userVocabDiversity
+      : metrics.userVocabDiversity * 100
 
   const wpmRating = rateWpm(metrics.userWpm)
   const fillerRating = rateFillerRate(metrics.userFillerRate)
-  const latencyRating = rateLatency(metrics.conversationLatencyAvg)
-  const vocabRating = rateVocabDiversity(metrics.userVocabDiversity)
-  const responseTimeRating = rateResponseTime(metrics.userResponseTimeAvg)
-  const speakingRatio = (metrics.userSpeakingTime + metrics.assistantSpeakingTime) > 0
-    ? (metrics.userSpeakingTime / (metrics.userSpeakingTime + metrics.assistantSpeakingTime)) * 100
-    : 0
-  const speakingRatioRating = rateSpeakingRatio(speakingRatio)
+  const vocabRating = rateVocabDiversity(vocabDiversityPct)
 
   const RatingBadge = ({ rating }: { rating: Rating }) => (
     <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${rating.bgColor} ${rating.textColor}`}>
@@ -206,21 +193,20 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExp
               <TrendingUp className="h-5 w-5" />
               Session Analytics
             </CardTitle>
-            <CardDescription>
-              Comprehensive metrics for session {sessionId.slice(0, 8)}...
-            </CardDescription>
           </div>
           <div className="flex flex-col gap-2">
             <div className="flex gap-2">
-              <Button
-                variant="default"
-                size="sm"
-                onClick={handleReprocess}
-                disabled={isReprocessing}
-              >
-                <RefreshCw className={`h-4 w-4 mr-2 ${isReprocessing ? 'animate-spin' : ''}`} />
-                {isReprocessing ? 'Reprocessing...' : 'Reprocess Audio'}
-              </Button>
+              {exportFlags.enableReprocess && (
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={handleReprocess}
+                  disabled={isReprocessing}
+                >
+                  <RefreshCw className={`h-4 w-4 mr-2 ${isReprocessing ? 'animate-spin' : ''}`} />
+                  {isReprocessing ? 'Reprocessing...' : 'Reprocess Audio'}
+                </Button>
+              )}
               {onExportPdf && (
                 <Button
                   variant="outline"
@@ -232,36 +218,37 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExp
                   Export PDF
                 </Button>
               )}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onDownloadTranscript?.('txt')}
-                disabled={exportFlags.hideTranscriptText}
-                title={exportFlags.hideTranscriptText ? 'Transcript download disabled for your account' : undefined}
-              >
-                <Download className="h-4 w-4 mr-2" />
-                Download TXT
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onDownloadTranscript?.('json')}
-                disabled={exportFlags.hideTranscriptJsonExport}
-                title={exportFlags.hideTranscriptJsonExport ? 'JSON export disabled for your account' : undefined}
-              >
-              <Download className="h-4 w-4 mr-2" />
-              Download JSON
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => downloadAudioFiles(true)}
-              disabled={isDownloadingAudio || exportFlags.hideAudioDownload}
-              title={exportFlags.hideAudioDownload ? 'Audio download disabled for your account' : undefined}
-            >
-              {isDownloadingAudio ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Mic className="h-4 w-4 mr-2" />}
-              Download My Audio
-            </Button>
+              {exportFlags.enableTxtExport && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onDownloadTranscript?.('txt')}
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Download TXT
+                </Button>
+              )}
+              {exportFlags.enableJsonExport && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onDownloadTranscript?.('json')}
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Download JSON
+                </Button>
+              )}
+              {exportFlags.enableAudioExport && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => downloadAudioFiles(true)}
+                  disabled={isDownloadingAudio}
+                >
+                  {isDownloadingAudio ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Mic className="h-4 w-4 mr-2" />}
+                  Download My Audio
+                </Button>
+              )}
             </div>
             {reprocessStatus && (
               <div className="text-sm text-muted-foreground mt-2">
@@ -273,7 +260,7 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExp
       </Card>
 
       {/* Key Performance Indicators */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className={`grid gap-6 ${aside ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
         {/* Speaking Performance */}
         <Card>
           <CardHeader>
@@ -308,8 +295,8 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExp
                 <span className="text-sm font-medium">Vocabulary Diversity</span>
                 <RatingBadge rating={vocabRating} />
               </div>
-              <div className="text-2xl font-bold">{(metrics.userVocabDiversity * 100).toFixed(1)}%</div>
-              <Progress value={metrics.userVocabDiversity * 100} className="mt-2" />
+              <div className="text-2xl font-bold">{vocabDiversityPct.toFixed(1)}%</div>
+              <Progress value={Math.min(vocabDiversityPct, 100)} className="mt-2" />
             </div>
 
             <div>
@@ -332,90 +319,7 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExp
           </CardContent>
         </Card>
 
-        {/* Conversation Flow */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Clock className="h-5 w-5" />
-              Conversation Flow
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-sm font-medium">Response Time</span>
-                <RatingBadge rating={responseTimeRating} />
-              </div>
-              <div className="text-2xl font-bold">{metrics.userResponseTimeAvg.toFixed(1)}s</div>
-              <div className="text-sm text-muted-foreground">
-                Average time to respond
-              </div>
-            </div>
-
-            <div>
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-sm font-medium">Conversation Latency</span>
-                <RatingBadge rating={latencyRating} />
-              </div>
-              <div className="text-2xl font-bold">{metrics.conversationLatencyAvg.toFixed(2)}s</div>
-              <div className="text-sm text-muted-foreground">
-                System response delay
-              </div>
-            </div>
-
-            <div>
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-sm font-medium">Total Turns</span>
-              </div>
-              <div className="text-2xl font-bold">{metrics.totalTurns}</div>
-              <div className="text-sm text-muted-foreground">
-                Back-and-forth exchanges
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Technical Metrics */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Zap className="h-5 w-5" />
-              Technical Performance
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-sm font-medium">LLM Tokens Used</span>
-              </div>
-              <div className="text-2xl font-bold">{metrics.totalLlmTokens.toLocaleString()}</div>
-              <div className="text-sm text-muted-foreground">
-                Total processing cost
-              </div>
-            </div>
-
-            <div>
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-sm font-medium">Time to First Token</span>
-              </div>
-              <div className="text-2xl font-bold">{metrics.avgTtft.toFixed(2)}s</div>
-              <div className="text-sm text-muted-foreground">
-                AI thinking time
-              </div>
-            </div>
-
-            <div>
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-sm font-medium">Speaking Time Ratio</span>
-                <RatingBadge rating={speakingRatioRating} />
-              </div>
-              <div className="text-2xl font-bold">{speakingRatio.toFixed(0)}%</div>
-              <div className="text-sm text-muted-foreground">
-                You vs Assistant
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        {aside}
       </div>
     </div>
   );

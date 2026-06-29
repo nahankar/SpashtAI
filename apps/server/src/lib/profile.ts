@@ -89,6 +89,12 @@ export function toAuthUser(user: {
   hideTranscriptText?: boolean
   hideTranscriptJsonExport?: boolean
   hideAudioDownload?: boolean
+  enableTxtExport?: boolean
+  enableJsonExport?: boolean
+  enableAudioExport?: boolean
+  enableReprocess?: boolean
+  enablePro?: boolean
+  enableUltra?: boolean
 }) {
   return {
     id: user.id,
@@ -106,5 +112,11 @@ export function toAuthUser(user: {
     hideTranscriptText: user.hideTranscriptText ?? false,
     hideTranscriptJsonExport: user.hideTranscriptJsonExport ?? false,
     hideAudioDownload: user.hideAudioDownload ?? false,
+    enableTxtExport: user.enableTxtExport ?? false,
+    enableJsonExport: user.enableJsonExport ?? false,
+    enableAudioExport: user.enableAudioExport ?? false,
+    enableReprocess: user.enableReprocess ?? false,
+    enablePro: user.enablePro ?? false,
+    enableUltra: user.enableUltra ?? false,
   }
 }

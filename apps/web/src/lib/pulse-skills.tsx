@@ -56,7 +56,7 @@ export function highlightSkillTerms(text: string): ReactNode[] {
     nodes.push(
       <span
         key={`${span.start}-${span.id}`}
-        className="inline-flex items-center rounded-md bg-primary/15 px-1.5 py-0.5 text-xs font-semibold text-primary ring-1 ring-primary/25"
+        className="font-semibold text-foreground"
         title={`Progress Pulse skill: ${span.label}`}
       >
         {text.slice(span.start, span.end)}

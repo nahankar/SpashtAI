@@ -185,6 +185,47 @@ export function useSessionMetrics(sessionId: string | null): UseSessionMetricsRe
   };
 }
 
+// Shared per-turn records fetch (powers the pace trend + summary strip) so the
+// completed-session view only hits /turns once instead of per-component.
+export interface SessionTurnRecord {
+  turnIndex: number
+  role: string
+  text?: string
+  audioStart?: number | null
+  audioEnd?: number | null
+  metrics?: any
+  score?: any
+}
+
+export function useSessionTurns(
+  sessionId: string | null,
+  enabled = true,
+): { turns: SessionTurnRecord[]; loading: boolean } {
+  const [turns, setTurns] = useState<SessionTurnRecord[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!sessionId || !enabled) return;
+    let cancelled = false;
+    setLoading(true);
+    fetch(`${API_BASE_URL}/sessions/${sessionId}/turns`, { headers: getAuthHeaders() })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        setTurns(Array.isArray(data.turns) ? data.turns : []);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, enabled]);
+
+  return { turns, loading };
+}
+
 // Hook for real-time metrics updates during active sessions.
 // The agent publishes a snapshot to the LiveKit `lk.metrics` data-channel
 // topic every ~12s; this hook stores the latest one for the live overlay.
