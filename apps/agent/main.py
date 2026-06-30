@@ -109,6 +109,16 @@ def to_ist_isoformat(dt: datetime = None) -> str:
     return dt.isoformat()
 
 
+def _recording_bucket() -> str:
+    """S3 bucket for LiveKit egress recordings.
+
+    Must match the bucket in egress.yaml (s3.bucket / S3_RECORDING_BUCKET).
+    Previously this was hardcoded to the placeholder 'your-bucket', which made
+    every recording target a non-existent bucket and broke delivery analysis.
+    """
+    return os.getenv("S3_RECORDING_BUCKET", "spashtai-s3-prod")
+
+
 async def fetch_session_history(session_id: str, max_messages: int = 12) -> list[dict]:
     """
     Fetch prior conversation messages for a session from server.
@@ -135,6 +145,31 @@ async def fetch_session_history(session_id: str, max_messages: int = 12) -> list
     except Exception as e:
         logger.warning("⚠️ Failed to fetch session history: %s", e)
         return []
+
+
+async def fetch_session_ended(session_id: str) -> bool:
+    """Return True if the session is already finalized (endedAt set).
+
+    Used to refuse resuming a finalized session — otherwise a re-dispatch or
+    reconnect can spawn a phantom duplicate job on a dead session that just
+    burns resources and crashes on the no-audio STT timeout. Fails open
+    (returns False) so a transient lookup error never blocks a real session.
+    """
+    url = f"{SERVER_URL}/internal/sessions/{session_id}/conversation"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                url,
+                headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
+                timeout=aiohttp.ClientTimeout(total=5.0),
+            ) as response:
+                if response.status != 200:
+                    return False
+                payload = await response.json()
+                return bool(payload.get("ended"))
+    except Exception as e:
+        logger.warning("⚠️ Failed to check session ended-state: %s", e)
+        return False
 
 
 def _debug_log(msg: str):
@@ -798,7 +833,7 @@ class EgressRecorder:
             filepath = f"/out/{filename}"  # Egress container path
             
             if self.use_s3:
-                s3_path = f"s3://your-bucket/participant_{self.participant_type}_{self.session_id}_{timestamp}.mp4"
+                s3_path = f"s3://{_recording_bucket()}/participant_{self.participant_type}_{self.session_id}_{timestamp}.mp4"
                 request = lk_api.ParticipantEgressRequest(
                     room_name=self.room_name,
                     identity=self.participant_identity,
@@ -976,7 +1011,7 @@ class TrackEgressRecorder:
             filepath = f"/out/{filename}"
             
             if self.use_s3:
-                s3_path = f"s3://your-bucket/track_{self.participant_type}_{self.session_id}_{timestamp}.mp4"
+                s3_path = f"s3://{_recording_bucket()}/track_{self.participant_type}_{self.session_id}_{timestamp}.mp4"
                 request = lk_api.TrackEgressRequest(
                     room_name=self.room_name,
                     track_id=self.track_id,
@@ -1130,7 +1165,7 @@ class RoomCompositeEgressRecorder:
             
             # Build file path - using audio-only for now (can be changed to video)
             if self.use_s3:
-                self.file_path = f"s3://your-bucket/room_{self.room_name}_session_{self.session_id}_{timestamp}.mp4"
+                self.file_path = f"s3://{_recording_bucket()}/room_{self.room_name}_session_{self.session_id}_{timestamp}.mp4"
             else:
                 # Local file output
                 self.file_path = f"/out/room_composite_session_{self.session_id}_{timestamp}.mp4"
@@ -1451,6 +1486,19 @@ async def entrypoint(ctx: JobContext):
         )
     
     logger.info(f"📋 Session ID: {session_id}")
+
+    # Refuse to resume a session that is already finalized. A re-dispatch or
+    # reconnect can hand us an ended session's ID via room metadata; starting a
+    # full coaching session on it produces a phantom duplicate that has no live
+    # audio and crashes on the 15s no-audio STT timeout. Exit gracefully.
+    if persistence_enabled and await fetch_session_ended(session_id):
+        logger.warning(
+            "🛑 Session %s is already ended — refusing to resume a finalized session; "
+            "shutting down this job to avoid a phantom duplicate.",
+            session_id,
+        )
+        return
+
     history_messages = await fetch_session_history(session_id) if persistence_enabled else []
     resume_context = build_resume_context(history_messages)
     if history_messages:

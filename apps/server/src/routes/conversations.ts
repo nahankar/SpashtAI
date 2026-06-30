@@ -240,6 +240,14 @@ export async function getConversationForAgent(req: Request, res: Response) {
 
     const { sessionId } = req.params
 
+    // Expose whether the session is already ended so the agent can refuse to
+    // resume a finalized session (prevents phantom re-dispatched sessions).
+    const sessionRow = await prisma.session.findUnique({
+      where: { id: sessionId },
+      select: { endedAt: true },
+    })
+    const ended = Boolean(sessionRow?.endedAt)
+
     const transcript = await prisma.sessionTranscript.findUnique({
       where: { sessionId },
     })
@@ -247,6 +255,7 @@ export async function getConversationForAgent(req: Request, res: Response) {
     if (!transcript) {
       return res.json({
         sessionId,
+        ended,
         messages: [],
         metadata: {
           created: null,
@@ -261,6 +270,7 @@ export async function getConversationForAgent(req: Request, res: Response) {
 
     res.json({
       sessionId,
+      ended,
       messages,
       metadata: {
         created: conversationData.created,

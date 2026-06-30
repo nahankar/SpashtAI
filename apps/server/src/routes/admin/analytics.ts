@@ -26,7 +26,12 @@ router.get('/overview', async (_req: Request, res: Response) => {
       prisma.user.count(),
       prisma.user.count({ where: { createdAt: { gte: todayStart } } }),
       prisma.user.count({ where: { createdAt: { gte: weekAgo } } }),
-      prisma.user.count({ where: { lastActiveAt: { gte: weekAgo } } }),
+      prisma.user.count({
+        where: {
+          lastActiveAt: { gte: weekAgo },
+          role: { notIn: ['ADMIN', 'SUPER_ADMIN'] },
+        },
+      }),
       enabled.includes('elevate') ? prisma.session.count() : Promise.resolve(0),
       enabled.includes('replay') ? prisma.replaySession.count() : Promise.resolve(0),
       enabled.includes('elevate')
@@ -64,15 +69,30 @@ router.get('/features', async (req: Request, res: Response) => {
 
     const trackedFeatures = [...enabled, 'app']
 
+    // Analytics reflect end-user behavior only — exclude admin/super-admin activity.
+    const adminUsers = await prisma.user.findMany({
+      where: { role: { in: ['ADMIN', 'SUPER_ADMIN'] } },
+      select: { id: true },
+    })
+    const adminIds = adminUsers.map((u) => u.id)
+
     const usage = await prisma.featureUsage.groupBy({
       by: ['feature', 'action'],
       _count: { id: true },
-      where: { timestamp: { gte: since }, feature: { in: trackedFeatures } },
+      where: {
+        timestamp: { gte: since },
+        feature: { in: trackedFeatures },
+        userId: { notIn: adminIds },
+      },
       orderBy: { _count: { id: 'desc' } },
     })
 
     const recentUsage = await prisma.featureUsage.findMany({
-      where: { timestamp: { gte: since }, feature: { in: trackedFeatures } },
+      where: {
+        timestamp: { gte: since },
+        feature: { in: trackedFeatures },
+        userId: { notIn: adminIds },
+      },
       orderBy: { timestamp: 'desc' },
       take: 100,
       select: {

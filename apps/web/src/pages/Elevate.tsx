@@ -25,7 +25,7 @@ import { SessionMetricsSummary } from '@/components/analytics/SessionMetricsSumm
 import { AdvancedInsights, CONTENT_VERDICTS, DELIVERY_VERDICTS } from '@/components/analytics/AdvancedInsights'
 import { SkillScoresCard } from '@/components/analytics/SkillScoresCard'
 import { CoachingInsightsCard } from '@/components/analytics/CoachingInsightsCard'
-import { PaceTrend, PaceTrendCard, type PacePoint } from '@/components/analytics/PaceTrend'
+import { PaceTrendCard, type PacePoint } from '@/components/analytics/PaceTrend'
 import { SessionReplay } from '@/pages/SessionReplay'
 import { useRealTimeMetrics, useSessionMetrics, useSessionTurns } from '@/hooks/useSessionMetrics'
 import { useAudioRecording } from '@/hooks/useAudioRecording'
@@ -38,7 +38,7 @@ import { pulseSkillLabel } from '@/lib/pulse-skills'
 import { useAuth } from '@/hooks/useAuth'
 import { useUserExportFlags } from '@/hooks/useUserExportFlags'
 import { useConfirm } from '@/hooks/useConfirm'
-import { Trash2, CheckSquare, Square, Target, ArrowRight, Info, Play, ChevronDown, ChevronUp, BarChart3, Gauge, CheckCircle2 } from 'lucide-react'
+import { Trash2, CheckSquare, Square, Target, ArrowRight, Info, Play, ChevronDown, ChevronUp, BarChart3, CheckCircle2 } from 'lucide-react'
 import { generateSessionPdf, type SessionReport } from '@/lib/generate-session-pdf'
 import { CoachAudioBootstrap } from '@/components/session/CoachAudioBootstrap'
 import { SessionRecorder } from '@/components/session/SessionRecorder'
@@ -109,22 +109,6 @@ export function Elevate() {
   const [turnTextByIndex, setTurnTextByIndex] = useState<Record<number, string>>({})
   const [turnMetricsByText, setTurnMetricsByText] = useState<Record<string, TurnMetrics>>({})
   const [showHistory, setShowHistory] = useState(!viewSessionId && !inboundNewSession)
-
-  // Live pace trend: one WPM point per user turn, in turn order. Drives the
-  // green pace-variation chart shown during the conversation.
-  const livePacePoints = useMemo<PacePoint[]>(() => {
-    let n = 0
-    return Object.keys(turnMetricsByIndex)
-      .map(Number)
-      .filter((i) => Number.isFinite(i))
-      .sort((a, b) => a - b)
-      .map((idx) => turnMetricsByIndex[idx])
-      .filter((m) => m && m.wpm != null && (m.wpm as number) > 0)
-      .map((m) => {
-        n += 1
-        return { label: n, wpm: Math.round(Number(m.wpm)) }
-      })
-  }, [turnMetricsByIndex])
 
   interface ElevateSessionItem {
     id: string
@@ -249,18 +233,19 @@ export function Elevate() {
     }
   }, [selectedElevate, confirmDialog])
 
+  const loadPastSessions = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
+    try {
+      if (!silent) setPastLoading(true)
+      const res = await fetch(`${API_BASE_URL}/sessions`, { headers: getAuthHeaders() })
+      if (res.ok) {
+        const data = await res.json()
+        setPastSessions(data.sessions || [])
+      }
+    } catch { /* non-critical */ }
+    finally { if (!silent) setPastLoading(false) }
+  }, [])
+
   useEffect(() => {
-    async function loadPastSessions() {
-      try {
-        setPastLoading(true)
-        const res = await fetch(`${API_BASE_URL}/sessions`, { headers: getAuthHeaders() })
-        if (res.ok) {
-          const data = await res.json()
-          setPastSessions(data.sessions || [])
-        }
-      } catch { /* non-critical */ }
-      finally { setPastLoading(false) }
-    }
     async function loadRecommendation() {
       try {
         const res = await fetch(`${API_BASE_URL}/api/progress-pulse/summary`, { headers: getAuthHeaders() })
@@ -285,7 +270,26 @@ export function Elevate() {
     }
     loadPastSessions()
     loadRecommendation()
-  }, [])
+  }, [loadPastSessions])
+
+  // Auto-refresh the past-sessions list: a just-finished session (or one still
+  // being analyzed server-side) should appear without a manual reload. Since
+  // finishing a live session only flips component state (no remount), we also
+  // refetch on tab focus/visibility and on a light interval. Background
+  // refreshes are silent (no spinner) to avoid list flicker.
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === 'visible') loadPastSessions({ silent: true })
+    }
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', refresh)
+    const interval = window.setInterval(refresh, 15000)
+    return () => {
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', refresh)
+      window.clearInterval(interval)
+    }
+  }, [loadPastSessions])
   
   // Real-time metrics for active session
   const { currentMetrics, updateMetrics, resetMetrics } = useRealTimeMetrics()
@@ -715,7 +719,17 @@ export function Elevate() {
         const response = await fetch(`${API_BASE_URL}/sessions/${viewSessionId}`, {
           headers: getAuthHeaders(),
         })
-        if (!response.ok) return
+        if (!response.ok) {
+          // Stale/foreign session pointer (deleted, or not owned): clear it so
+          // we don't keep trying to resume a session we can't access.
+          if (response.status === 403 || response.status === 404) {
+            if (localStorage.getItem('spashtai_active_session') === viewSessionId) {
+              localStorage.removeItem('spashtai_active_session')
+              localStorage.removeItem('spashtai_session_timestamp')
+            }
+          }
+          return
+        }
         const data = await response.json()
         const session = data.session || data
         setViewSessionName(session.sessionName || null)
@@ -1073,9 +1087,13 @@ export function Elevate() {
       )
     )
 
+    // A session started this visit won't exist in the list that was loaded on
+    // mount, so the optimistic map above can't add it — refetch to surface it.
+    loadPastSessions({ silent: true })
+
     setShowHistory(true)
     navigate(cameFromHistory ? '/history?tab=elevate' : '/elevate')
-  }, [sessionId, clearMessages, resetMetrics, navigate, cameFromHistory, confirmDialog, updateUser])
+  }, [sessionId, clearMessages, resetMetrics, navigate, cameFromHistory, confirmDialog, updateUser, loadPastSessions])
 
   const handleDiscard = useCallback(async () => {
     const yes = await confirmDialog({
@@ -1656,22 +1674,6 @@ export function Elevate() {
                 showLiveMetrics={showMetrics}
                 transcriptHidden={exportFlags.hideTranscriptText}
               />
-
-              {/* Live pace variation — green chart updates as you take turns */}
-              {joined && livePacePoints.length >= 2 && (
-                <Card className="mt-4">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-base">
-                      <Gauge className="h-5 w-5" />
-                      Pace Variation
-                    </CardTitle>
-                    <CardDescription>Your speaking speed (WPM) so far, turn by turn</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <PaceTrend points={livePacePoints} />
-                  </CardContent>
-                </Card>
-              )}
 
               {/* Historical metrics display */}
               {!joined && sessionId && historicalMetrics && !isSessionPaused && (

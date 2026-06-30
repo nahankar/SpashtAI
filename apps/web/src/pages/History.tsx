@@ -229,33 +229,56 @@ export function History() {
     else setElevateLoading(false)
   }, [replayOn, elevateOn])
 
-  async function fetchReplay() {
+  // Auto-refresh: a session that just finished (or is still being analyzed
+  // server-side) should appear without a manual reload. We refetch when the
+  // tab regains focus/visibility, and poll on a light interval while visible.
+  // Background refreshes are "silent" (no spinner) to avoid list flicker.
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState !== 'visible') return
+      if (replayOn) fetchReplay({ silent: true })
+      if (elevateOn) fetchElevate({ silent: true })
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') refresh()
+    }
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', onVisibility)
+    const interval = window.setInterval(refresh, 15000)
+    return () => {
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.clearInterval(interval)
+    }
+  }, [replayOn, elevateOn])
+
+  async function fetchReplay({ silent = false }: { silent?: boolean } = {}) {
     try {
-      setReplayLoading(true)
+      if (!silent) setReplayLoading(true)
       setReplayError(null)
       const res = await fetch(`${API_BASE_URL}/api/replay/sessions`, { headers: getAuthHeaders() })
       if (!res.ok) throw new Error('Failed to load replay sessions')
       const data = await res.json()
       setReplaySessions(data.sessions || [])
     } catch (err) {
-      setReplayError(err instanceof Error ? err.message : 'Something went wrong')
+      if (!silent) setReplayError(err instanceof Error ? err.message : 'Something went wrong')
     } finally {
-      setReplayLoading(false)
+      if (!silent) setReplayLoading(false)
     }
   }
 
-  async function fetchElevate() {
+  async function fetchElevate({ silent = false }: { silent?: boolean } = {}) {
     try {
-      setElevateLoading(true)
+      if (!silent) setElevateLoading(true)
       setElevateError(null)
       const res = await fetch(`${API_BASE_URL}/sessions`, { headers: getAuthHeaders() })
       if (!res.ok) throw new Error('Failed to load elevate sessions')
       const data = await res.json()
       setElevateSessions(data.sessions || [])
     } catch (err) {
-      setElevateError(err instanceof Error ? err.message : 'Something went wrong')
+      if (!silent) setElevateError(err instanceof Error ? err.message : 'Something went wrong')
     } finally {
-      setElevateLoading(false)
+      if (!silent) setElevateLoading(false)
     }
   }
 

@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/prisma'
+import { isPrivilegedRole } from '../lib/userExportFlags'
 
 const router = Router()
 
@@ -29,6 +30,12 @@ router.post('/track', async (req: Request, res: Response) => {
     }
 
     const safeAction = String(action).slice(0, MAX_ACTION_LEN)
+
+    // Admin views/actions must not pollute product analytics — count users only.
+    if (isPrivilegedRole(req.user.role)) {
+      res.json({ ok: true })
+      return
+    }
 
     await prisma.featureUsage.create({
       data: {

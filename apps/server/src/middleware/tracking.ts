@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express'
 import { prisma } from '../lib/prisma'
+import { isPrivilegedRole } from '../lib/userExportFlags'
 
 export function trackFeatureUsage(feature: string, action: string) {
   return (req: Request, res: Response, next: NextFunction) => {
@@ -9,7 +10,8 @@ export function trackFeatureUsage(feature: string, action: string) {
     res.send = function (data: any) {
       const duration = Date.now() - startTime
 
-      if (req.user) {
+      // Only count real end-user activity in analytics — never admin views/actions.
+      if (req.user && !isPrivilegedRole(req.user.role)) {
         prisma.featureUsage.create({
           data: {
             userId: req.user.userId,

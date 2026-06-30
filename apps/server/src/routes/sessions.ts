@@ -1,10 +1,15 @@
 import type { Request, Response } from 'express'
 import { prisma } from '../lib/prisma'
 import { awardSessionActivePoints } from '../lib/points'
+import { isPrivilegedRole } from '../lib/userExportFlags'
 
-export async function listSessions(_req: Request, res: Response) {
+export async function listSessions(req: Request, res: Response) {
   try {
+    // Non-privileged users only see their own sessions. Admins/super-admins
+    // keep the full list so admin views don't regress.
+    const where = isPrivilegedRole(req.user?.role) ? {} : { userId: req.user!.userId }
     const sessions = await prisma.session.findMany({
+      where,
       orderBy: { startedAt: 'desc' },
       include: {
         user: {
@@ -36,7 +41,12 @@ export async function getSession(req: Request, res: Response) {
     if (!session) {
       return res.status(404).json({ error: 'Session not found' })
     }
-    
+
+    // Ownership check: only the owner (or a privileged role) may read a session.
+    if (!isPrivilegedRole(req.user?.role) && session.userId !== req.user?.userId) {
+      return res.status(403).json({ error: 'Access denied' })
+    }
+
     res.json({ session })
   } catch (error) {
     console.error('Error getting session:', error)
@@ -241,7 +251,12 @@ export async function deleteSession(req: Request, res: Response) {
     if (!session) {
       return res.status(404).json({ error: 'Session not found' })
     }
-    
+
+    // Ownership check: only the owner (or a privileged role) may delete a session.
+    if (!isPrivilegedRole(req.user?.role) && session.userId !== req.user?.userId) {
+      return res.status(403).json({ error: 'Access denied' })
+    }
+
     // Remove associated Progress Pulse entries
     await prisma.progressPulse.deleteMany({
       where: { sessionId: id, source: 'elevate' },
