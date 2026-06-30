@@ -45,7 +45,7 @@ export function validateProfileFields(body: {
   }
 
   if (!PROFILE_GENDERS.includes(gender as Gender)) {
-    return { error: 'Please select M or F' }
+    return { error: 'Please select Male or Female' }
   }
 
   const dob = new Date(dateOfBirth)

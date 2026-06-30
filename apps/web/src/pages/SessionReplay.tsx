@@ -26,6 +26,7 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { getAuthHeaders, getAuthenticatedMediaUrl } from '@/lib/api-client'
 import { useIsPro } from '@/hooks/useIsPro'
+import { UserTurnBubble, normalizeTurnMetricsFromApi } from '@/components/session/UserTurnMetrics'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 
@@ -1589,6 +1590,33 @@ function TurnBubble({
   const tip = turn.coachNote || m?.coaching_tip
   const playStart = presentation?.playStart ?? turn.audioStart
   const karaokeWords = presentation?.words?.length ? presentation.words : turn.words
+  const turnMetrics = normalizeTurnMetricsFromApi(
+    m
+      ? {
+          ...m,
+          coaching_tip: tip ?? m.coaching_tip,
+        }
+      : null,
+    turn.text,
+  )
+
+  const turnBody =
+    transcriptHidden ? (
+      <span className={`italic ${isUser ? 'text-white/80' : 'text-muted-foreground'}`}>
+        Transcript hidden for your account
+      </span>
+    ) : isUser && karaokeWords && karaokeWords.length > 0 ? (
+      <KaraokeText
+        text={turn.text}
+        words={karaokeWords}
+        currentTime={currentTime}
+        active={isActive}
+        onSeek={(t) => onPlayFrom(t)}
+        lightOnDark={isUser}
+      />
+    ) : (
+      <p className="whitespace-pre-wrap break-words">{turn.text}</p>
+    )
 
   return (
     <div
@@ -1621,46 +1649,12 @@ function TurnBubble({
           )}
 
           <div className="text-[13px] leading-relaxed">
-            {transcriptHidden ? (
-              <span className={`italic ${isUser ? 'text-white/80' : 'text-muted-foreground'}`}>
-                Transcript hidden for your account
-              </span>
-            ) : isUser && karaokeWords && karaokeWords.length > 0 ? (
-              <KaraokeText
-                text={turn.text}
-                words={karaokeWords}
-                currentTime={currentTime}
-                active={isActive}
-                onSeek={(t) => onPlayFrom(t)}
-                lightOnDark={isUser}
-              />
+            {isUser && turnMetrics ? (
+              <UserTurnBubble metrics={turnMetrics}>{turnBody}</UserTurnBubble>
             ) : (
-              <p className="whitespace-pre-wrap break-words">{turn.text}</p>
+              turnBody
             )}
           </div>
-
-          {isUser && m && (
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              {m.wpm != null && (
-                <Badge
-                  variant="secondary"
-                  className="border-0 bg-white/20 text-[10px] text-white hover:bg-white/20"
-                >
-                  {Math.round(m.wpm)} WPM
-                </Badge>
-              )}
-              {m.filler_count != null && m.filler_count > 0 && (
-                <Badge variant="secondary" className="border-0 bg-white/20 text-[10px] text-white">
-                  {m.filler_count} filler{m.filler_count === 1 ? '' : 's'}
-                </Badge>
-              )}
-              {m.vocab_diversity != null && (
-                <Badge variant="secondary" className="border-0 bg-white/20 text-[10px] text-white">
-                  {Math.round(m.vocab_diversity * 100)}% variety
-                </Badge>
-              )}
-            </div>
-          )}
 
           {isUser && turn.score?.stars != null && (
             <span className="mt-1 inline-flex items-center gap-0.5 text-amber-200">

@@ -16,7 +16,6 @@ export function CompleteProfile() {
   const [dateOfBirth, setDateOfBirth] = useState('')
   const [gender, setGender] = useState<ProfileGender>('')
   const [pincode, setPincode] = useState('')
-  const [acceptedTerms, setAcceptedTerms] = useState(false)
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -31,12 +30,7 @@ export function CompleteProfile() {
     setError('')
 
     if (!gender) {
-      setError('Please select M or F')
-      return
-    }
-
-    if (!acceptedTerms) {
-      setError('Please accept the Terms and Privacy Policy to continue')
+      setError('Please select Male or Female')
       return
     }
 
@@ -99,25 +93,17 @@ export function CompleteProfile() {
               onPincodeChange={setPincode}
             />
 
-            <label className="flex items-start gap-2 text-sm cursor-pointer">
-              <input
-                type="checkbox"
-                className="mt-1 h-4 w-4 rounded border"
-                checked={acceptedTerms}
-                onChange={(e) => setAcceptedTerms(e.target.checked)}
-                required
-              />
-              <span className="text-muted-foreground">
-                I agree to the{' '}
-                <Link to="/terms?from=register" className="text-primary hover:underline" target="_blank">
-                  Terms
-                </Link>{' '}
-                and{' '}
-                <Link to="/privacy?from=register" className="text-primary hover:underline" target="_blank">
-                  Privacy Policy
-                </Link>
-              </span>
-            </label>
+            <p className="text-center text-xs text-muted-foreground">
+              By signing up you agree to the{' '}
+              <Link to="/terms?from=register" className="text-primary hover:underline" target="_blank">
+                Terms
+              </Link>{' '}
+              and{' '}
+              <Link to="/privacy?from=register" className="text-primary hover:underline" target="_blank">
+                Privacy Policy
+              </Link>
+              .
+            </p>
 
             <Button type="submit" className="w-full" disabled={submitting}>
               {submitting ? 'Saving…' : 'Continue'}

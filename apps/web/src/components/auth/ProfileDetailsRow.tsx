@@ -4,42 +4,51 @@ import { Label } from '@/components/ui/label'
 
 export type ProfileGender = 'MALE' | 'FEMALE' | ''
 
-export function GenderToggle({
+export function GenderSelect({
   value,
   onChange,
+  compact = false,
 }: {
   value: ProfileGender
   onChange: (gender: 'MALE' | 'FEMALE') => void
+  compact?: boolean
 }) {
-  const isFemale = value === 'FEMALE'
-  const isMale = value === 'MALE'
-
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={isFemale}
-      aria-label="Gender"
-      onClick={() => onChange(isFemale ? 'MALE' : 'FEMALE')}
-      className={cn(
-        'relative h-9 w-[4.25rem] shrink-0 rounded-full border transition-colors',
-        value ? 'border-primary/40 bg-primary/5' : 'border-input bg-muted/40',
-      )}
-    >
-      <span className="absolute inset-0 flex items-center justify-between px-2.5 text-[11px] font-semibold">
-        <span className={isMale ? 'text-primary' : 'text-muted-foreground'}>M</span>
-        <span className={isFemale ? 'text-primary' : 'text-muted-foreground'}>F</span>
-      </span>
-      <span
+    <div className="grid w-full grid-cols-2 gap-1" role="group" aria-label="Gender">
+      <button
+        type="button"
+        aria-pressed={value === 'MALE'}
+        onClick={() => onChange('MALE')}
         className={cn(
-          'absolute top-0.5 left-0.5 h-8 w-8 rounded-full bg-background shadow-sm transition-transform',
-          isFemale && 'translate-x-[1.85rem]',
-          !value && 'opacity-60',
+          'h-9 rounded-md border font-medium transition-colors',
+          compact ? 'px-1 text-[11px]' : 'text-xs',
+          value === 'MALE'
+            ? 'border-primary bg-primary text-primary-foreground shadow-sm'
+            : 'border-input bg-background text-foreground hover:bg-muted',
         )}
-      />
-    </button>
+      >
+        Male
+      </button>
+      <button
+        type="button"
+        aria-pressed={value === 'FEMALE'}
+        onClick={() => onChange('FEMALE')}
+        className={cn(
+          'h-9 rounded-md border font-medium transition-colors',
+          compact ? 'px-1 text-[11px]' : 'text-xs',
+          value === 'FEMALE'
+            ? 'border-primary bg-primary text-primary-foreground shadow-sm'
+            : 'border-input bg-background text-foreground hover:bg-muted',
+        )}
+      >
+        Female
+      </button>
+    </div>
   )
 }
+
+/** @deprecated Use GenderSelect — kept as alias for any stale imports. */
+export const GenderToggle = GenderSelect
 
 export function ProfileDetailsRow({
   dateOfBirth,
@@ -58,7 +67,7 @@ export function ProfileDetailsRow({
 }) {
   return (
     <div className="grid grid-cols-3 gap-2 items-end">
-      <div className="space-y-1.5 min-w-0">
+      <div className="min-w-0 space-y-1.5">
         <Label htmlFor="dob" className="text-xs">
           Date of birth
         </Label>
@@ -68,14 +77,14 @@ export function ProfileDetailsRow({
           value={dateOfBirth}
           onChange={(e) => onDateOfBirthChange(e.target.value)}
           required
-          className="text-xs px-2"
+          className="px-2 text-xs"
         />
       </div>
-      <div className="space-y-1.5 flex flex-col items-center">
+      <div className="min-w-0 space-y-1.5">
         <Label className="text-xs">Gender</Label>
-        <GenderToggle value={gender} onChange={onGenderChange} />
+        <GenderSelect value={gender} onChange={onGenderChange} compact />
       </div>
-      <div className="space-y-1.5 min-w-0">
+      <div className="min-w-0 space-y-1.5">
         <Label htmlFor="pincode" className="text-xs">
           Pincode
         </Label>
@@ -87,7 +96,7 @@ export function ProfileDetailsRow({
           required
           maxLength={12}
           autoComplete="postal-code"
-          className="text-xs px-2"
+          className="px-2 text-xs"
         />
       </div>
     </div>

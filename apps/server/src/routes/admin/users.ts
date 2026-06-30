@@ -1,6 +1,9 @@
 import { Router, Request, Response } from 'express'
+import type { Gender } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { hashPassword } from '../../lib/password'
+import { resolveProfileLocation, PROFILE_GENDERS } from '../../lib/profile'
+import { isValidPhone, isValidPincodeFormat } from '../../lib/pincode'
 const router = Router()
 
 // GET /api/admin/users
@@ -253,6 +256,96 @@ router.post('/:id/change-role', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Change role error:', err)
     res.status(500).json({ error: 'Failed to change role' })
+  }
+})
+
+// PATCH /api/admin/users/:id/profile — edit signup profile fields (phone, DOB, gender, pincode)
+router.patch('/:id/profile', async (req: Request, res: Response) => {
+  try {
+    const { phone, dateOfBirth, gender, pincode, firstName, lastName } = req.body
+    const data: Record<string, unknown> = {}
+
+    if (firstName !== undefined) data.firstName = firstName ? String(firstName).trim() : null
+    if (lastName !== undefined) data.lastName = lastName ? String(lastName).trim() : null
+
+    if (phone !== undefined) {
+      if (!phone || !isValidPhone(String(phone))) {
+        res.status(400).json({ error: 'Please enter a valid phone number (10–15 digits)' })
+        return
+      }
+      data.phone = String(phone).replace(/\D/g, '')
+    }
+
+    if (dateOfBirth !== undefined) {
+      if (!dateOfBirth) {
+        res.status(400).json({ error: 'Date of birth is required' })
+        return
+      }
+      const dob = new Date(dateOfBirth)
+      if (Number.isNaN(dob.getTime())) {
+        res.status(400).json({ error: 'Please enter a valid date of birth' })
+        return
+      }
+      data.dateOfBirth = dob
+    }
+
+    if (gender !== undefined) {
+      if (!PROFILE_GENDERS.includes(gender as Gender)) {
+        res.status(400).json({ error: 'Please select Male or Female' })
+        return
+      }
+      data.gender = gender as Gender
+    }
+
+    if (pincode !== undefined) {
+      if (!pincode || !isValidPincodeFormat(String(pincode))) {
+        res.status(400).json({ error: 'Please enter a valid pincode or postal code' })
+        return
+      }
+      const normalized = String(pincode).trim().toUpperCase()
+      data.pincode = normalized
+      const location = await resolveProfileLocation(normalized)
+      data.city = location.city
+      data.state = location.state
+      data.country = location.country
+    }
+
+    if (Object.keys(data).length === 0) {
+      res.status(400).json({ error: 'No profile fields to update' })
+      return
+    }
+
+    const user = await prisma.user.update({
+      where: { id: req.params.id },
+      data,
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        phone: true,
+        dateOfBirth: true,
+        gender: true,
+        pincode: true,
+        city: true,
+        state: true,
+        country: true,
+      },
+    })
+
+    await prisma.adminAction.create({
+      data: {
+        adminId: req.user!.userId,
+        action: 'user_profile_updated',
+        targetUserId: user.id,
+        metadata: { fields: Object.keys(data) },
+      },
+    })
+
+    res.json({ user })
+  } catch (err) {
+    console.error('Update user profile error:', err)
+    res.status(500).json({ error: 'Failed to update profile' })
   }
 })
 

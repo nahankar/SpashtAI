@@ -6,6 +6,9 @@ import { useConfirm } from '@/hooks/useConfirm'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { GenderSelect, type ProfileGender } from '@/components/auth/ProfileDetailsRow'
 import { Loader2 } from 'lucide-react'
 
 interface UserDetailData {
@@ -56,6 +59,16 @@ export function UserDetail() {
   const [activities, setActivities] = useState<Activity[]>([])
   const [loading, setLoading] = useState(true)
   const [savingFlags, setSavingFlags] = useState(false)
+  const [editingProfile, setEditingProfile] = useState(false)
+  const [savingProfile, setSavingProfile] = useState(false)
+  const [profileForm, setProfileForm] = useState({
+    firstName: '',
+    lastName: '',
+    phone: '',
+    dateOfBirth: '',
+    gender: '' as ProfileGender,
+    pincode: '',
+  })
 
   useEffect(() => {
     if (!id) return
@@ -67,6 +80,15 @@ export function UserDetail() {
       .then(([userData, activityData]) => {
         setUser(userData.user)
         setActivities(activityData.activities)
+        const u = userData.user
+        setProfileForm({
+          firstName: u.firstName || '',
+          lastName: u.lastName || '',
+          phone: u.phone || '',
+          dateOfBirth: u.dateOfBirth ? new Date(u.dateOfBirth).toISOString().slice(0, 10) : '',
+          gender: (u.gender === 'MALE' || u.gender === 'FEMALE' ? u.gender : '') as ProfileGender,
+          pincode: u.pincode || '',
+        })
       })
       .catch(console.error)
       .finally(() => setLoading(false))
@@ -125,6 +147,36 @@ export function UserDetail() {
       toast.error('Failed to update export settings')
     } finally {
       setSavingFlags(false)
+    }
+  }
+
+  async function handleSaveProfile() {
+    if (!id || !user) return
+    if (!profileForm.gender) {
+      toast.error('Please select Male or Female')
+      return
+    }
+    setSavingProfile(true)
+    try {
+      const data = await apiClient<{ user: UserDetailData }>(`/api/admin/users/${id}/profile`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          firstName: profileForm.firstName.trim() || null,
+          lastName: profileForm.lastName.trim() || null,
+          phone: profileForm.phone,
+          dateOfBirth: profileForm.dateOfBirth,
+          gender: profileForm.gender,
+          pincode: profileForm.pincode,
+        }),
+      })
+      setUser((prev) => (prev ? { ...prev, ...data.user } : null))
+      setEditingProfile(false)
+      toast.success('Profile updated')
+    } catch (err) {
+      console.error('Failed to update profile:', err)
+      toast.error(err instanceof Error ? err.message : 'Failed to update profile')
+    } finally {
+      setSavingProfile(false)
     }
   }
 
@@ -210,28 +262,134 @@ export function UserDetail() {
         </Card>
 
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Contact & location</CardTitle>
+          <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0">
+            <div>
+              <CardTitle className="text-base">Contact & location</CardTitle>
+              <CardDescription className="text-xs mt-1">
+                Signup details — editable by admin
+              </CardDescription>
+            </div>
+            {!editingProfile ? (
+              <Button variant="outline" size="sm" onClick={() => setEditingProfile(true)}>
+                Edit
+              </Button>
+            ) : (
+              <div className="flex gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={savingProfile}
+                  onClick={() => {
+                    setEditingProfile(false)
+                    setProfileForm({
+                      firstName: user.firstName || '',
+                      lastName: user.lastName || '',
+                      phone: user.phone || '',
+                      dateOfBirth: user.dateOfBirth
+                        ? new Date(user.dateOfBirth).toISOString().slice(0, 10)
+                        : '',
+                      gender: (user.gender === 'MALE' || user.gender === 'FEMALE'
+                        ? user.gender
+                        : '') as ProfileGender,
+                      pincode: user.pincode || '',
+                    })
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button size="sm" disabled={savingProfile} onClick={handleSaveProfile}>
+                  {savingProfile ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
+                </Button>
+              </div>
+            )}
           </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <div className="flex justify-between gap-4">
-              <span className="text-muted-foreground shrink-0">Phone</span>
-              <span className="text-right">{user.phone || '—'}</span>
-            </div>
-            <div className="flex justify-between gap-4">
-              <span className="text-muted-foreground shrink-0">Date of birth</span>
-              <span className="text-right">
-                {user.dateOfBirth ? new Date(user.dateOfBirth).toLocaleDateString() : '—'}
-              </span>
-            </div>
-            <div className="flex justify-between gap-4">
-              <span className="text-muted-foreground shrink-0">Gender</span>
-              <span className="text-right">{user.gender ? genderLabel[user.gender] || user.gender : '—'}</span>
-            </div>
-            <div className="flex justify-between gap-4">
-              <span className="text-muted-foreground shrink-0">Pincode</span>
-              <span className="text-right">{user.pincode || '—'}</span>
-            </div>
+          <CardContent className="space-y-3 text-sm">
+            {editingProfile ? (
+              <>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="admin-firstName">First name</Label>
+                    <Input
+                      id="admin-firstName"
+                      value={profileForm.firstName}
+                      onChange={(e) => setProfileForm((p) => ({ ...p, firstName: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="admin-lastName">Last name</Label>
+                    <Input
+                      id="admin-lastName"
+                      value={profileForm.lastName}
+                      onChange={(e) => setProfileForm((p) => ({ ...p, lastName: e.target.value }))}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="admin-phone">Phone</Label>
+                  <Input
+                    id="admin-phone"
+                    type="tel"
+                    value={profileForm.phone}
+                    onChange={(e) => setProfileForm((p) => ({ ...p, phone: e.target.value }))}
+                  />
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="admin-dob">Date of birth</Label>
+                    <Input
+                      id="admin-dob"
+                      type="date"
+                      value={profileForm.dateOfBirth}
+                      onChange={(e) => setProfileForm((p) => ({ ...p, dateOfBirth: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="admin-pincode">Pincode</Label>
+                    <Input
+                      id="admin-pincode"
+                      value={profileForm.pincode}
+                      onChange={(e) =>
+                        setProfileForm((p) => ({ ...p, pincode: e.target.value.toUpperCase() }))
+                      }
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Gender</Label>
+                  <GenderSelect
+                    value={profileForm.gender}
+                    onChange={(g) => setProfileForm((p) => ({ ...p, gender: g }))}
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted-foreground shrink-0">Name</span>
+                  <span className="text-right">{displayName}</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted-foreground shrink-0">Phone</span>
+                  <span className="text-right">{user.phone || '—'}</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted-foreground shrink-0">Date of birth</span>
+                  <span className="text-right">
+                    {user.dateOfBirth ? new Date(user.dateOfBirth).toLocaleDateString() : '—'}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted-foreground shrink-0">Gender</span>
+                  <span className="text-right">
+                    {user.gender ? genderLabel[user.gender] || user.gender : '—'}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted-foreground shrink-0">Pincode</span>
+                  <span className="text-right">{user.pincode || '—'}</span>
+                </div>
+              </>
+            )}
             <div className="border-t pt-2 mt-2 space-y-2">
               <p className="text-xs text-muted-foreground uppercase tracking-wide">Resolved (admin only)</p>
               <div className="flex justify-between gap-4">

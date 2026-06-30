@@ -1,6 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from 'react'
-import { createPortal } from 'react-dom'
-import { findSpeechSpans, SPEECH_HIGHLIGHT_CLASS } from '@/lib/speechPatterns'
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { SessionFilters, type SortField, type SortDir } from '@/components/SessionFilters'
 import { useSearchParams, useNavigate, Link } from 'react-router-dom'
 import {
@@ -38,11 +36,17 @@ import { pulseSkillLabel } from '@/lib/pulse-skills'
 import { useAuth } from '@/hooks/useAuth'
 import { useUserExportFlags } from '@/hooks/useUserExportFlags'
 import { useConfirm } from '@/hooks/useConfirm'
-import { Trash2, CheckSquare, Square, Target, ArrowRight, Info, Play, ChevronDown, ChevronUp, BarChart3, CheckCircle2, RefreshCw, Download, Loader2 } from 'lucide-react'
+import { Trash2, CheckSquare, Square, Target, ArrowRight, Play, ChevronDown, ChevronUp, BarChart3, CheckCircle2, RefreshCw, Download, Loader2 } from 'lucide-react'
 import { generateSessionPdf, type SessionReport } from '@/lib/generate-session-pdf'
 import { CoachAudioBootstrap } from '@/components/session/CoachAudioBootstrap'
 import { SessionRecorder } from '@/components/session/SessionRecorder'
 import { stripThinkingBlocks } from '@/lib/stripThinking'
+import {
+  UserTurnBubble,
+  normalizeTurnMetricsFromApi,
+  type TurnMetrics,
+} from '@/components/session/UserTurnMetrics'
+import type { SessionTurnRecord } from '@/hooks/useSessionMetrics'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 
@@ -1554,6 +1558,7 @@ export function Elevate() {
                   turnMetricsByIndex={turnMetricsByIndex}
                   turnTextByIndex={turnTextByIndex}
                   turnMetricsByText={turnMetricsByText}
+                  sessionTurns={completedTurns}
                   transcriptHidden={exportFlags.hideTranscriptText}
                   collapsible
                   defaultCollapsed
@@ -2217,19 +2222,6 @@ function InRoomControls({
   )
 }
 
-interface TurnMetrics {
-  word_count: number
-  filler_count: number
-  filler_rate: number
-  hedging_count: number
-  acknowledgment_count?: number
-  vocab_diversity?: number
-  wpm?: number | null
-  speaking_seconds?: number | null
-  qualitative_pace?: string | null
-  coaching_tip?: string | null
-}
-
 interface ChatMessage {
   id?: string;
   role: string;
@@ -2317,198 +2309,6 @@ function collectTurnMetricsForBubble(
   return parts
 }
 
-function paceLabel(pace?: string | null): string {
-  if (!pace || pace === 'not-enough-data') return '—'
-  return pace.charAt(0).toUpperCase() + pace.slice(1)
-}
-
-function HighlightedSpeechText({ text }: { text: string }) {
-  const spans = useMemo(() => findSpeechSpans(text), [text])
-  if (spans.length === 0) return <>{text}</>
-
-  const nodes: React.ReactNode[] = []
-  let cursor = 0
-  for (const span of spans) {
-    if (span.start > cursor) nodes.push(text.slice(cursor, span.start))
-    const slice = text.slice(span.start, span.end)
-    nodes.push(
-      <mark key={`${span.start}-${span.kind}`} className={SPEECH_HIGHLIGHT_CLASS[span.kind]}>
-        {slice}
-      </mark>,
-    )
-    cursor = span.end
-  }
-  if (cursor < text.length) nodes.push(text.slice(cursor))
-  return <>{nodes}</>
-}
-
-function UserTurnBubble({ content, metrics }: { content: string; metrics: TurnMetrics }) {
-  const [highlight, setHighlight] = useState(false)
-
-  return (
-    <div className="flex items-start gap-2">
-      <p className="flex-1 min-w-0 text-[13px] leading-relaxed whitespace-pre-wrap break-words">
-        {highlight ? <HighlightedSpeechText text={content} /> : content}
-      </p>
-      <div className="flex-shrink-0 self-end">
-        <TurnMetricsPopover metrics={metrics} onOpenChange={setHighlight} />
-      </div>
-    </div>
-  )
-}
-
-function TurnMetricsPopover({
-  metrics,
-  onOpenChange,
-}: {
-  metrics: TurnMetrics
-  onOpenChange?: (open: boolean) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const btnRef = useRef<HTMLButtonElement>(null)
-  const [pos, setPos] = useState({ top: 0, left: 0 })
-  const PANEL_W = 240
-  const PANEL_H = 300
-
-  const setOpenState = useCallback((next: boolean) => {
-    setOpen(next)
-  }, [])
-
-  const updatePosition = useCallback(() => {
-    if (!btnRef.current) return
-    const rect = btnRef.current.getBoundingClientRect()
-    const margin = 8
-    let top = rect.bottom + margin
-    let left = Math.max(margin, rect.right - PANEL_W)
-    if (top + PANEL_H > window.innerHeight - margin) {
-      top = Math.max(margin, rect.top - PANEL_H - margin)
-    }
-    if (left + PANEL_W > window.innerWidth - margin) {
-      left = window.innerWidth - PANEL_W - margin
-    }
-    setPos({ top, left })
-  }, [])
-
-  const toggle = useCallback(() => {
-    setOpen((wasOpen) => {
-      const next = !wasOpen
-      if (next) {
-        requestAnimationFrame(updatePosition)
-      }
-      return next
-    })
-  }, [updatePosition])
-
-  useEffect(() => {
-    onOpenChange?.(open)
-  }, [open, onOpenChange])
-
-  useLayoutEffect(() => {
-    if (!open) return
-    updatePosition()
-    window.addEventListener('scroll', updatePosition, true)
-    window.addEventListener('resize', updatePosition)
-    return () => {
-      window.removeEventListener('scroll', updatePosition, true)
-      window.removeEventListener('resize', updatePosition)
-    }
-  }, [open, updatePosition])
-
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpenState(false)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, setOpenState])
-
-  const vocabPct =
-    metrics.vocab_diversity != null ? Math.round(metrics.vocab_diversity * 100) : null
-
-  const panel = open ? (
-    <>
-      <div className="fixed inset-0 z-40" aria-hidden onClick={() => setOpenState(false)} />
-      <div
-        role="tooltip"
-        className="fixed z-50 w-60 max-h-[min(320px,calc(100vh-16px))] overflow-y-auto rounded-lg border border-border bg-popover p-3 text-left text-popover-foreground shadow-lg"
-        style={{ top: pos.top, left: pos.left }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="text-[11px] font-semibold mb-2">This turn</div>
-        <dl className="space-y-1 text-[10px]">
-          <div className="flex justify-between gap-2">
-            <dt className="text-muted-foreground">WPM</dt>
-            <dd>{metrics.wpm != null ? metrics.wpm.toFixed(0) : '—'}</dd>
-          </div>
-          <div className="flex justify-between gap-2">
-            <dt className="text-muted-foreground">Fillers</dt>
-            <dd>{metrics.filler_count} ({metrics.filler_rate.toFixed(1)}%)</dd>
-          </div>
-          <div className="flex justify-between gap-2">
-            <dt className="text-muted-foreground">Hedging</dt>
-            <dd>{metrics.hedging_count}</dd>
-          </div>
-          {(metrics.acknowledgment_count ?? 0) > 0 && (
-            <div className="flex justify-between gap-2">
-              <dt className="text-muted-foreground">Acknowledgments</dt>
-              <dd>{metrics.acknowledgment_count}</dd>
-            </div>
-          )}
-          {vocabPct != null && (
-            <div className="flex justify-between gap-2">
-              <dt className="text-muted-foreground">Vocabulary</dt>
-              <dd>{vocabPct}%</dd>
-            </div>
-          )}
-          <div className="flex justify-between gap-2">
-            <dt className="text-muted-foreground">Pace</dt>
-            <dd>{paceLabel(metrics.qualitative_pace)}</dd>
-          </div>
-        </dl>
-        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[9px] text-muted-foreground border-t pt-2">
-          <span className="inline-flex items-center gap-1">
-            <span className={`${SPEECH_HIGHLIGHT_CLASS.filler} text-[8px] px-1 py-0`}>filler</span>
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <span className={`${SPEECH_HIGHLIGHT_CLASS.hedging} text-[8px] px-1 py-0`}>hedging</span>
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <span className={`${SPEECH_HIGHLIGHT_CLASS.acknowledgment} text-[8px] px-1 py-0`}>okay/yeah</span>
-          </span>
-        </div>
-        <p className="mt-2 text-[9px] leading-snug text-muted-foreground/80">
-          Fillers = um/uh/discourse-like. Okay/yeah = acknowledgments (softer signal). Vocabulary = distinct words ÷ total.
-        </p>
-        {metrics.coaching_tip && (
-          <p className="mt-2 text-[10px] leading-snug text-muted-foreground border-t pt-2">
-            {metrics.coaching_tip}
-          </p>
-        )}
-      </div>
-    </>
-  ) : null
-
-  return (
-    <>
-      <button
-        ref={btnRef}
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation()
-          toggle()
-        }}
-        className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-blue-100/90 hover:text-white focus:outline-none focus-visible:ring-1 focus-visible:ring-white/60"
-        aria-label="View turn metrics"
-        aria-expanded={open}
-      >
-        <Info className="h-3.5 w-3.5" />
-      </button>
-      {panel && createPortal(panel, document.body)}
-    </>
-  )
-}
-
 // One persisted/streaming message → one chat bubble. Partial updates share the same id
 // via upsertStreamingMessage; stitched user turns use user_turn_{n} ids from the agent.
 const USER_STITCH_GAP_MS = 90_000
@@ -2571,6 +2371,7 @@ function ChatPanel({
   turnMetricsByIndex = {},
   turnTextByIndex = {},
   turnMetricsByText = {},
+  sessionTurns = [],
   liveMetrics = null,
   showLiveMetrics = false,
   transcriptHidden = false,
@@ -2581,6 +2382,8 @@ function ChatPanel({
   turnMetricsByIndex?: Record<number, TurnMetrics>
   turnTextByIndex?: Record<number, string>
   turnMetricsByText?: Record<string, TurnMetrics>
+  /** Persisted /turns records — powers the ⓘ popover on completed sessions. */
+  sessionTurns?: SessionTurnRecord[]
   liveMetrics?: import('@/hooks/useSessionMetrics').LiveMetricsSnapshot | null
   showLiveMetrics?: boolean
   transcriptHidden?: boolean
@@ -2589,6 +2392,28 @@ function ChatPanel({
 }) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [collapsed, setCollapsed] = useState(collapsible && defaultCollapsed)
+  const metricsByText = useMemo(() => {
+    const map = { ...turnMetricsByText }
+    for (const t of sessionTurns) {
+      if (t.role !== 'user' || !t.text) continue
+      const metrics = normalizeTurnMetricsFromApi(t.metrics, t.text)
+      if (metrics) map[normalizeTurnText(t.text)] = metrics
+    }
+    return map
+  }, [turnMetricsByText, sessionTurns])
+  const orderedSessionTurnMetrics = useMemo(
+    () =>
+      sessionTurns
+        .filter((t) => t.role === 'user')
+        .sort((a, b) => a.turnIndex - b.turnIndex)
+        .map((t) => ({
+          idx: t.turnIndex,
+          text: t.text || '',
+          metrics: normalizeTurnMetricsFromApi(t.metrics, t.text),
+        }))
+        .filter((e): e is { idx: number; text: string; metrics: TurnMetrics } => Boolean(e.metrics)),
+    [sessionTurns],
+  )
   // Render strictly in chronological (creation) order. Bubbles keep their
   // earliest timestamp, so a stitched user-turn final that arrives alongside the
   // coach reply can't push the user's turn below the response that answers it.
@@ -2691,10 +2516,17 @@ function ChatPanel({
               let userTurnIdx = 0
               // Sub-turn metrics in commit order, with their committed text, so a
               // stitched bubble can aggregate every sub-turn it spans.
-              const orderedTurnMetrics = Object.keys(turnMetricsByIndex)
-                .map(Number)
-                .sort((a, b) => a - b)
-                .map((idx) => ({ idx, text: turnTextByIndex[idx] || '', metrics: turnMetricsByIndex[idx] }))
+              const orderedTurnMetrics = [
+                ...Object.keys(turnMetricsByIndex)
+                  .map(Number)
+                  .sort((a, b) => a - b)
+                  .map((idx) => ({
+                    idx,
+                    text: turnTextByIndex[idx] || '',
+                    metrics: turnMetricsByIndex[idx],
+                  })),
+                ...orderedSessionTurnMetrics,
+              ].sort((a, b) => a.idx - b.idx)
               const consumedTurnMetrics = new Set<number>()
               return groups.map((g, i) => {
               let turnMetrics: TurnMetrics | undefined
@@ -2703,7 +2535,7 @@ function ChatPanel({
                 const parts = collectTurnMetricsForBubble(g.content, orderedTurnMetrics, consumedTurnMetrics)
                 turnMetrics = parts.length
                   ? aggregateTurnMetrics(parts, g.content)
-                  : (turnMetricsByIndex[userTurnIdx] ?? lookupTurnMetrics(g.content, turnMetricsByText))
+                  : (turnMetricsByIndex[userTurnIdx] ?? lookupTurnMetrics(g.content, metricsByText))
               }
               return (
               <div 
