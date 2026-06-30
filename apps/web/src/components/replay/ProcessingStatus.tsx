@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { Loader2, CheckCircle2, XCircle, AlertTriangle, User, ArrowRight } from 'lucide-react'
@@ -75,27 +75,13 @@ export function ProcessingStatus({
   const isFailed = status === 'failed'
   const isComplete = status === 'completed'
 
-  const [countdown, setCountdown] = useState(3)
   const redirectedRef = useRef(false)
 
   useEffect(() => {
     if (!isComplete || !onViewResults) return
-    redirectedRef.current = false
-    setCountdown(3)
-    const timer = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer)
-          if (!redirectedRef.current) {
-            redirectedRef.current = true
-            onViewResults()
-          }
-          return 0
-        }
-        return prev - 1
-      })
-    }, 1000)
-    return () => clearInterval(timer)
+    if (redirectedRef.current) return
+    redirectedRef.current = true
+    onViewResults()
   }, [isComplete, onViewResults])
 
   return (
@@ -113,10 +99,7 @@ export function ProcessingStatus({
 
         {isComplete && (
           <div className="overflow-hidden rounded-full bg-muted h-2">
-            <div
-              className="h-full bg-green-500 transition-all duration-1000 ease-linear"
-              style={{ width: `${((3 - countdown) / 3) * 100}%` }}
-            />
+            <div className="h-full w-full bg-green-500" />
           </div>
         )}
 
@@ -165,7 +148,7 @@ export function ProcessingStatus({
               <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
             </Button>
             <p className="mt-2 text-center text-xs text-muted-foreground">
-              Redirecting in {countdown} second{countdown !== 1 ? 's' : ''}…
+              Opening analysis…
             </p>
           </div>
         )}

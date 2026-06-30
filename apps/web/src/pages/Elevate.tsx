@@ -1091,8 +1091,17 @@ export function Elevate() {
     // mount, so the optimistic map above can't add it — refetch to surface it.
     loadPastSessions({ silent: true })
 
-    setShowHistory(true)
-    navigate(cameFromHistory ? '/history?tab=elevate' : '/elevate')
+    if (currentSessionId) {
+      setShowHistory(false)
+      setResultsTab('playback')
+      setPlaybackFocus(null)
+      setIsCompletedSessionView(true)
+      setSessionId(currentSessionId)
+      navigate(`/elevate?session=${encodeURIComponent(currentSessionId)}`)
+    } else {
+      setShowHistory(true)
+      navigate(cameFromHistory ? '/history?tab=elevate' : '/elevate')
+    }
   }, [sessionId, clearMessages, resetMetrics, navigate, cameFromHistory, confirmDialog, updateUser, loadPastSessions])
 
   const handleDiscard = useCallback(async () => {

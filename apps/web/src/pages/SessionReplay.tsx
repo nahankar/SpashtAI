@@ -237,10 +237,10 @@ export function SessionReplay({
   const [currentTime, setCurrentTime] = useState(0)
   const [rate, setRate] = useState(1)
 
-  const [roleFilter, setRoleFilter] = useState<RoleFilter>('all')
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>('user')
   const [chips, setChips] = useState<Set<QualityChip>>(new Set())
-  const [skipGaps, setSkipGaps] = useState(false)
-  const [showTrends, setShowTrends] = useState(false)
+  const [skipGaps, setSkipGaps] = useState(true)
+  const [showTrends, setShowTrends] = useState(true)
   const [suggestions, setSuggestions] = useState<Record<number, TurnSuggestion>>({})
   // Used to line the trends ribbon up horizontally with the seek track (the
   // track is only the middle flex-1 region, not the full transport width).
