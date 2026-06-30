@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -24,7 +24,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { getAuthHeaders } from '@/lib/api-client'
+import { getAuthHeaders, getAuthenticatedMediaUrl } from '@/lib/api-client'
 import { useIsPro } from '@/hooks/useIsPro'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
@@ -199,22 +199,158 @@ function formatTime(sec: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
+const WORD_CLUSTER_GAP_SEC = 2.5
+/** Short orphan blips at a turn start (e.g. "schedule?") belong on the prior turn. */
+const LEAD_WORDS_MERGE_TO_PREV = 3
+
+type WordCluster = { words: TurnWord[]; start: number; end: number; weight: number }
+
+function clusterTurnWords(words: TurnWord[], gapSec = WORD_CLUSTER_GAP_SEC): WordCluster[] {
+  const sorted = words
+    .filter((w) => Number.isFinite(w.start) && Number.isFinite(w.end))
+    .sort((a, b) => a.start - b.start)
+  if (sorted.length === 0) return []
+
+  const clusters: WordCluster[] = []
+  let cur: WordCluster = {
+    words: [sorted[0]],
+    start: sorted[0].start,
+    end: sorted[0].end,
+    weight: 1,
+  }
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].start - cur.end > gapSec) {
+      clusters.push(cur)
+      cur = { words: [sorted[i]], start: sorted[i].start, end: sorted[i].end, weight: 1 }
+    } else {
+      cur.words.push(sorted[i])
+      cur.end = Math.max(cur.end, sorted[i].end)
+      cur.weight += 1
+    }
+  }
+  clusters.push(cur)
+  return clusters
+}
+
+function pickMainWordCluster(clusters: WordCluster[]): WordCluster | null {
+  if (clusters.length === 0) return null
+  return clusters.reduce((a, b) => {
+    const scoreA = (a.end - a.start) * a.weight
+    const scoreB = (b.end - b.start) * b.weight
+    return scoreB > scoreA ? b : a
+  })
+}
+
+function isNoiseWordCluster(cluster: WordCluster): boolean {
+  return (
+    cluster.words.length === 1 && cluster.words[0].w.replace(/[^\w]/g, '').length <= 1
+  )
+}
+
+interface TurnPresentation {
+  words: TurnWord[]
+  playStart: number | null
+  playEnd: number | null
+}
+
+/** Fix STT word bleed across turns; keep conversation text from turn.text (Analytics). */
+function normalizeTurnPresentations(turns: ReplayTurn[]): Map<number, TurnPresentation> {
+  const userTurns = turns.filter((t) => t.role === 'user')
+  const out = new Map<number, TurnPresentation>()
+  let prevTurnIndex: number | null = null
+
+  for (const turn of userTurns) {
+    if (!turn.words?.length) {
+      out.set(turn.turnIndex, {
+        words: [],
+        playStart: turn.audioStart ?? null,
+        playEnd: turn.audioEnd ?? null,
+      })
+      prevTurnIndex = turn.turnIndex
+      continue
+    }
+
+    let clusters = clusterTurnWords(turn.words)
+
+    while (
+      clusters.length > 1 &&
+      prevTurnIndex != null &&
+      clusters[0].words.length <= LEAD_WORDS_MERGE_TO_PREV
+    ) {
+      const lead = clusters.shift()!
+      const prev = out.get(prevTurnIndex)
+      if (prev) {
+        out.set(prevTurnIndex, {
+          words: [...prev.words, ...lead.words],
+          playStart: prev.playStart ?? lead.start,
+          playEnd: lead.end,
+        })
+      }
+    }
+
+    while (clusters.length > 1 && isNoiseWordCluster(clusters[0])) {
+      clusters.shift()
+    }
+
+    const main = pickMainWordCluster(clusters)
+    if (main) {
+      out.set(turn.turnIndex, {
+        words: main.words,
+        playStart: main.start,
+        playEnd: main.end,
+      })
+    } else {
+      out.set(turn.turnIndex, {
+        words: [],
+        playStart: turn.audioStart ?? null,
+        playEnd: turn.audioEnd ?? null,
+      })
+    }
+    prevTurnIndex = turn.turnIndex
+  }
+
+  return out
+}
+
+function buildSkipIntervalsFromTurnWords(
+  turns: ReplayTurn[],
+  gapSec = WORD_CLUSTER_GAP_SEC,
+): { start: number; end: number }[] {
+  const presentations = normalizeTurnPresentations(turns)
+  const out: { start: number; end: number }[] = []
+
+  for (const turn of turns) {
+    if (turn.role !== 'user') continue
+    const pres = presentations.get(turn.turnIndex)
+    if (pres?.playStart != null && pres.playEnd != null) {
+      out.push({ start: pres.playStart, end: pres.playEnd })
+    } else if (turn.audioStart != null) {
+      out.push({
+        start: turn.audioStart,
+        end: turn.audioEnd ?? turn.audioStart + 0.1,
+      })
+    }
+  }
+
+  return out.sort((a, b) => a.start - b.start)
+}
+
 const SPEEDS = [0.75, 1, 1.25, 1.5, 2]
 
 export function SessionReplay({
   sessionId: sessionIdProp,
   embedded = false,
   focusRequest = null,
+  autoPlayNonce = null,
 }: {
   /** Override the route param so this can render inside the Elevate results tab. */
   sessionId?: string
   /** Hide the page header (back link + title) when shown inside another view. */
   embedded?: boolean
-  /**
-   * A one-shot request (from the analytics "Hear it" links) to jump playback to
-   * the most relevant moment for a given skill. Bumping `nonce` re-triggers it.
-   */
+  /** @deprecated Use autoPlayNonce — kept so older callers compile. */
   focusRequest?: { skill: string; nonce: number } | null
+  /** Bump to auto-press Play once the transport is ready (Elevate "Hear it"). */
+  autoPlayNonce?: number | null
 } = {}) {
   const params = useParams<{ sessionId: string }>()
   const sessionId = sessionIdProp ?? params.sessionId
@@ -241,6 +377,8 @@ export function SessionReplay({
   const [chips, setChips] = useState<Set<QualityChip>>(new Set())
   const [skipGaps, setSkipGaps] = useState(true)
   const [showTrends, setShowTrends] = useState(true)
+  const [speechRegions, setSpeechRegions] = useState<{ start: number; end: number }[]>([])
+  const [skipPlaybackRegions, setSkipPlaybackRegions] = useState<{ start: number; end: number }[]>([])
   const [suggestions, setSuggestions] = useState<Record<number, TurnSuggestion>>({})
   // Used to line the trends ribbon up horizontally with the seek track (the
   // track is only the middle flex-1 region, not the full transport width).
@@ -249,9 +387,10 @@ export function SessionReplay({
   const [trackBox, setTrackBox] = useState<{ left: number; width: number } | null>(null)
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const skipSeekingRef = useRef(false)
   const turnRefs = useRef<Record<number, HTMLDivElement | null>>({})
-  const objectUrlRef = useRef<string | null>(null)
   const handledFocusRef = useRef<number | null>(null)
+  const effectiveAutoPlayNonce = autoPlayNonce ?? focusRequest?.nonce ?? null
 
   // ── Data: per-turn records ───────────────────────────────────────────
   useEffect(() => {
@@ -270,6 +409,22 @@ export function SessionReplay({
         setTranscriptHidden(Boolean(data.transcriptHidden))
         setDegraded(Boolean(data.degraded))
         setSessionInfo(data.session ?? null)
+        setSpeechRegions(
+          Array.isArray(data.speechRegions)
+            ? data.speechRegions.filter(
+                (r: { start?: unknown; end?: unknown }) =>
+                  typeof r?.start === 'number' && typeof r?.end === 'number',
+              )
+            : [],
+        )
+        setSkipPlaybackRegions(
+          Array.isArray(data.skipPlaybackRegions)
+            ? data.skipPlaybackRegions.filter(
+                (r: { start?: unknown; end?: unknown }) =>
+                  typeof r?.start === 'number' && typeof r?.end === 'number',
+              )
+            : [],
+        )
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load replay')
@@ -282,43 +437,19 @@ export function SessionReplay({
     }
   }, [sessionId])
 
-  // ── Data: audio (fetched as a blob so we can pass the auth header) ────
+  // Stream via authenticated URL so the browser can range-seek (blob WebM skips fail).
   useEffect(() => {
     if (!sessionId) return
-    let cancelled = false
     setAudioLoading(true)
-    fetch(`${API_BASE_URL}/sessions/${sessionId}/recording/stream`, { headers: getAuthHeaders() })
-      .then(async (res) => {
-        if (res.status === 404) {
-          setAudioAvailable(false)
-          return null
-        }
-        if (!res.ok) {
-          setAudioAvailable(false)
-          return null
-        }
-        return res.blob()
-      })
-      .then((blob) => {
-        if (cancelled || !blob) return
-        const url = URL.createObjectURL(blob)
-        objectUrlRef.current = url
-        setAudioUrl(url)
-        setAudioAvailable(true)
-      })
-      .catch(() => {
-        if (!cancelled) setAudioAvailable(false)
-      })
-      .finally(() => {
-        if (!cancelled) setAudioLoading(false)
-      })
-    return () => {
-      cancelled = true
-      if (objectUrlRef.current) {
-        URL.revokeObjectURL(objectUrlRef.current)
-        objectUrlRef.current = null
-      }
+    const url = getAuthenticatedMediaUrl(`/sessions/${sessionId}/recording/stream`)
+    if (!url) {
+      setAudioUrl(null)
+      setAudioAvailable(false)
+      setAudioLoading(false)
+      return
     }
+    setAudioUrl(url)
+    setAudioAvailable(true)
   }, [sessionId])
 
   // Keep playback rate in sync.
@@ -362,34 +493,177 @@ export function SessionReplay({
   }, [turns])
 
   const timelineEnd = useMemo(() => {
-    if (!duration || !Number.isFinite(duration)) return duration
-    if (lastUserEnd > 0 && lastUserEnd < duration) return lastUserEnd
-    return duration
+    const audioDuration =
+      duration && Number.isFinite(duration) && duration > 0 ? duration : null
+    if (lastUserEnd > 0) {
+      if (audioDuration == null) return lastUserEnd
+      if (lastUserEnd < audioDuration) return lastUserEnd
+      return audioDuration
+    }
+    if (audioDuration == null) return duration ?? 0
+    return audioDuration
   }, [lastUserEnd, duration])
 
   // ── Transport ────────────────────────────────────────────────────────
-  const togglePlay = useCallback(() => {
+  const userIntervals = useMemo(
+    () =>
+      turns
+        .filter((t) => t.role === 'user' && t.audioStart != null)
+        .map((t) => ({
+          start: t.audioStart as number,
+          end: t.audioEnd ?? (t.audioStart as number) + 0.1,
+        }))
+        .sort((a, b) => a.start - b.start),
+    [turns],
+  )
+
+  // Per-turn word clusters match manual playback (e.g. 0:18–0:49, 1:18–1:20, …).
+  const wordSkipIntervals = useMemo(
+    () => buildSkipIntervalsFromTurnWords(turns),
+    [turns],
+  )
+
+  const skipIntervals = useMemo(() => {
+    if (wordSkipIntervals.length > 0) return wordSkipIntervals
+
+    const firstUserStart = turns.find(
+      (t) => t.role === 'user' && t.audioStart != null,
+    )?.audioStart as number | undefined
+    const minStart = firstUserStart != null ? firstUserStart - 1.5 : 0
+
+    const regions =
+      skipPlaybackRegions.length > 0
+        ? skipPlaybackRegions
+        : speechRegions.length > 0
+          ? speechRegions
+          : []
+    if (regions.length > 0) {
+      return regions
+        .filter((r) => r.end > minStart)
+        .sort((a, b) => a.start - b.start)
+    }
+    return userIntervals
+  }, [wordSkipIntervals, speechRegions, skipPlaybackRegions, userIntervals, turns])
+
+  const resolveSkipGapsTime = useCallback(
+    (t: number): number | 'stop' | null => {
+      if (!skipGaps || skipIntervals.length === 0) return null
+      const inside = skipIntervals.some(
+        (iv) => t >= iv.start - 0.05 && t <= iv.end + 0.05,
+      )
+      if (inside) return null
+      const next = skipIntervals.find((iv) => iv.start > t + 0.08)
+      if (next) return next.start
+      return 'stop'
+    },
+    [skipGaps, skipIntervals],
+  )
+
+  const applySkipGapsSeek = useCallback(
+    (audio: HTMLAudioElement): Promise<void> =>
+      new Promise((resolve) => {
+        const finish = () => {
+          skipSeekingRef.current = false
+          resolve()
+        }
+
+        if (skipSeekingRef.current) {
+          const wait = window.setInterval(() => {
+            if (!skipSeekingRef.current) {
+              window.clearInterval(wait)
+              void applySkipGapsSeek(audio).then(resolve)
+            }
+          }, 20)
+          return
+        }
+
+        const resolved = resolveSkipGapsTime(audio.currentTime)
+        if (resolved === null) {
+          resolve()
+          return
+        }
+        if (resolved === 'stop') {
+          const end =
+            timelineEnd && Number.isFinite(timelineEnd) ? timelineEnd : audio.currentTime
+          audio.pause()
+          audio.currentTime = end
+          setCurrentTime(end)
+          resolve()
+          return
+        }
+        if (Math.abs(audio.currentTime - resolved) < 0.05) {
+          resolve()
+          return
+        }
+
+        skipSeekingRef.current = true
+        audio.pause()
+        const onSeeked = () => {
+          audio.removeEventListener('seeked', onSeeked)
+          finish()
+        }
+        audio.addEventListener('seeked', onSeeked)
+        audio.currentTime = resolved
+        setCurrentTime(resolved)
+        window.setTimeout(() => {
+          if (skipSeekingRef.current) onSeeked()
+        }, 150)
+      }),
+    [resolveSkipGapsTime, timelineEnd],
+  )
+
+  const syncSkipGapsDuringPlay = useCallback(
+    async (audio: HTMLAudioElement) => {
+      const wasPlaying = !audio.paused
+      await applySkipGapsSeek(audio)
+      if (wasPlaying && audio.paused) void audio.play()
+    },
+    [applySkipGapsSeek],
+  )
+
+  const togglePlay = useCallback(async () => {
     const a = audioRef.current
     if (!a) return
-    if (a.paused) void a.play()
-    else a.pause()
-  }, [])
+    if (a.paused) {
+      const end =
+        timelineEnd && Number.isFinite(timelineEnd) ? timelineEnd : duration
+      if (end && Number.isFinite(end) && a.currentTime >= end - 0.15) {
+        a.currentTime = 0
+        setCurrentTime(0)
+      }
+      await applySkipGapsSeek(a)
+      void a.play()
+    } else {
+      a.pause()
+    }
+  }, [applySkipGapsSeek, timelineEnd, duration])
 
-  const seekTo = useCallback((t: number) => {
-    const a = audioRef.current
-    // Guard against non-finite values (e.g. webm blobs report duration=Infinity
-    // until metadata is fully decoded). Setting currentTime to NaN/Infinity throws.
-    if (!a || !Number.isFinite(t)) return
-    a.currentTime = Math.max(0, t)
-    setCurrentTime(a.currentTime)
-  }, [])
+  const seekTo = useCallback(
+    async (t: number) => {
+      const a = audioRef.current
+      if (!a || !Number.isFinite(t)) return
+      a.currentTime = Math.max(0, t)
+      if (skipGaps) await applySkipGapsSeek(a)
+      setCurrentTime(a.currentTime)
+    },
+    [skipGaps, applySkipGapsSeek],
+  )
 
-  const playFrom = useCallback((t: number) => {
-    const a = audioRef.current
-    if (!a || !Number.isFinite(t)) return
-    a.currentTime = Math.max(0, t)
-    void a.play()
-  }, [])
+  const playFrom = useCallback(
+    async (t: number) => {
+      const a = audioRef.current
+      if (!a || !Number.isFinite(t)) return
+      a.currentTime = Math.max(0, t)
+      if (skipGaps) await applySkipGapsSeek(a)
+      setCurrentTime(a.currentTime)
+      try {
+        await a.play()
+      } catch {
+        /* browser may block autoplay when not directly tied to a click */
+      }
+    },
+    [skipGaps, applySkipGapsSeek],
+  )
 
   const onScrubberClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -402,16 +676,22 @@ export function SessionReplay({
   )
 
   // ── Active turn / word (karaoke) ─────────────────────────────────────
+  const turnPresentations = useMemo(() => normalizeTurnPresentations(turns), [turns])
+
   const activeTurnIndex = useMemo(() => {
     let active = -1
     for (const t of turns) {
-      if (t.audioStart == null) continue
-      if (currentTime >= t.audioStart && (t.audioEnd == null || currentTime <= t.audioEnd)) {
+      if (t.role !== 'user') continue
+      const pres = turnPresentations.get(t.turnIndex)
+      const start = pres?.playStart ?? t.audioStart
+      const end = pres?.playEnd ?? t.audioEnd
+      if (start == null) continue
+      if (currentTime >= start && (end == null || currentTime <= end + 0.05)) {
         active = t.turnIndex
       }
     }
     return active
-  }, [turns, currentTime])
+  }, [turns, turnPresentations, currentTime])
 
   // Auto-scroll the active turn into view while playing.
   useEffect(() => {
@@ -590,69 +870,37 @@ export function SessionReplay({
     return out.sort((a, b) => a.time - b.time)
   }, [turns])
 
-  // Map an analytics skill → the most relevant per-turn moment to "hear". Only
-  // skills backed by real per-turn signals resolve to a time; the rest return
-  // null so the analytics card can hide the link (no fake evidence).
-  const momentTimeForSkill = useCallback(
-    (skill: string): number | null => {
-      const us = turns.filter((t) => t.role === 'user' && t.audioStart != null)
-      if (!us.length) return null
-      if (skill === 'pacing') {
-        const w = us.filter((t) => t.metrics?.wpm != null)
-        if (!w.length) return null
-        const f = w.reduce((a, b) => ((b.metrics!.wpm as number) > (a.metrics!.wpm as number) ? b : a))
-        return f.audioStart as number
-      }
-      if (skill === 'conciseness') {
-        const w = us.filter((t) => (t.metrics?.filler_count ?? 0) > 0)
-        if (!w.length) return null
-        const f = w.reduce((a, b) =>
-          (b.metrics!.filler_count as number) > (a.metrics!.filler_count as number) ? b : a,
-        )
-        return f.audioStart as number
-      }
-      if (skill === 'confidence' || skill === 'emotionalControl') {
-        const val = (t: ReplayTurn): number | null => {
-          if (t.score?.confidence != null) return t.score.confidence > 1 ? t.score.confidence / 10 : t.score.confidence
-          if (t.score?.stars != null) return t.score.stars / 5
-          return null
-        }
-        const w = us.filter((t) => val(t) != null)
-        if (!w.length) return null
-        const f = w.reduce((a, b) => ((val(b) as number) < (val(a) as number) ? b : a))
-        return f.audioStart as number
-      }
-      return null
-    },
-    [turns],
-  )
-
-  // Consume a focus request once both turns and (when present) audio are ready.
+  // "Hear it" / Elevate deep link: land on Playback and press Play (skip gaps on).
   useEffect(() => {
-    if (!focusRequest) return
-    if (handledFocusRef.current === focusRequest.nonce) return
+    if (!effectiveAutoPlayNonce) return
+    if (handledFocusRef.current === effectiveAutoPlayNonce) return
     if (turns.length === 0) return
-    const time = momentTimeForSkill(focusRequest.skill)
-    if (time == null) {
-      handledFocusRef.current = focusRequest.nonce
+    if (audioAvailable && !audioUrl) return
+    const audio = audioRef.current
+    if (audioAvailable && audioUrl && !audio) return
+    if (audioLoading) return
+    if (!timelineEnd || !Number.isFinite(timelineEnd) || timelineEnd <= 0) return
+    // WebM often reports duration=Infinity until probed — wait so Play doesn't race it.
+    if (
+      audio &&
+      (!duration || duration <= 0) &&
+      (audio.duration === Infinity || !Number.isFinite(audio.duration))
+    ) {
       return
     }
-    // Wait for audio to be ready so we can actually play the moment.
-    if (audioAvailable && !audioUrl) return
-    handledFocusRef.current = focusRequest.nonce
 
-    // Scroll the matching turn into view immediately for visual confirmation.
-    const target = turns.find(
-      (t) => t.role === 'user' && t.audioStart != null && Math.abs((t.audioStart as number) - time) < 0.01,
-    )
-    if (target) {
-      const el = turnRefs.current[target.turnIndex]
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    }
-
-    if (audioUrl) playFrom(time)
-    else seekTo(time)
-  }, [focusRequest, turns, audioUrl, audioAvailable, momentTimeForSkill, playFrom, seekTo])
+    handledFocusRef.current = effectiveAutoPlayNonce
+    void togglePlay()
+  }, [
+    effectiveAutoPlayNonce,
+    turns,
+    audioUrl,
+    audioAvailable,
+    audioLoading,
+    duration,
+    timelineEnd,
+    togglePlay,
+  ])
 
   useLayoutEffect(() => {
     const measure = () => {
@@ -674,23 +922,38 @@ export function SessionReplay({
     }
   }, [showTrends, duration, turns.length, hasTimings, roleFilter])
 
-  // Contiguous spans of YOUR speech (from the audio-aligned turns). Used to skip
-  // the blank stretches where the coach is replying (silent on the user track).
-  const userIntervals = useMemo(
-    () =>
-      turns
-        .filter((t) => t.role === 'user' && t.audioStart != null)
-        .map((t) => ({
-          start: t.audioStart as number,
-          end: t.audioEnd ?? (t.audioStart as number) + 0.1,
-        }))
-        .sort((a, b) => a.start - b.start),
-    [turns],
-  )
+  // Contiguous spans of YOUR speech (from the audio-aligned turns). Used for
+  // karaoke / timeline when turn alignment succeeded.
+  // skipIntervals (above) prefers ffmpeg speechRegions for gap skipping.
 
-  // When "Skip gaps" is on, hop the playhead over any time that isn't inside one
-  // of your speech spans (greeting lead-in + coach replies) so playback is a
-  // back-to-back reel of just your turns.
+  // Snap immediately when skip-gaps is toggled on mid-session.
+  useEffect(() => {
+    if (!skipGaps) return
+    const a = audioRef.current
+    if (a) void applySkipGapsSeek(a)
+  }, [skipGaps, applySkipGapsSeek])
+
+  // timeupdate fires ~4×/s — poll faster while playing so gaps are not audible.
+  useEffect(() => {
+    if (!skipGaps || !isPlaying || skipIntervals.length === 0) return
+    let raf = 0
+    const tick = () => {
+      const a = audioRef.current
+      if (a && !a.paused && !skipSeekingRef.current) {
+        const resolved = resolveSkipGapsTime(a.currentTime)
+        if (
+          resolved !== null &&
+          (resolved === 'stop' || Math.abs(a.currentTime - resolved) >= 0.05)
+        ) {
+          void syncSkipGapsDuringPlay(a)
+        }
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [skipGaps, isPlaying, skipIntervals.length, resolveSkipGapsTime, syncSkipGapsDuringPlay])
+
   const handleTimeUpdate = useCallback(
     (e: React.SyntheticEvent<HTMLAudioElement>) => {
       const a = e.currentTarget
@@ -702,23 +965,19 @@ export function SessionReplay({
         setCurrentTime(timelineEnd)
         return
       }
-      if (skipGaps && userIntervals.length > 0 && !a.paused) {
-        const inside = userIntervals.some(
-          (iv) => t >= iv.start - 0.08 && t <= iv.end + 0.25,
-        )
-        if (!inside) {
-          const next = userIntervals.find((iv) => iv.start > t + 0.08)
-          if (next) {
-            a.currentTime = next.start
-            setCurrentTime(next.start)
-            return
-          }
-          a.pause()
+      if (skipGaps && skipIntervals.length > 0 && !a.paused && !skipSeekingRef.current) {
+        const resolved = resolveSkipGapsTime(t)
+        if (
+          resolved !== null &&
+          (resolved === 'stop' || Math.abs(t - resolved) >= 0.05)
+        ) {
+          void syncSkipGapsDuringPlay(a)
+          return
         }
       }
       setCurrentTime(t)
     },
-    [skipGaps, userIntervals, timelineEnd],
+    [skipGaps, skipIntervals.length, timelineEnd, resolveSkipGapsTime, syncSkipGapsDuringPlay],
   )
 
   // ── Render ───────────────────────────────────────────────────────────
@@ -949,9 +1208,10 @@ export function SessionReplay({
           <TurnBubble
             key={turn.id}
             turn={turn}
+            presentation={turnPresentations.get(turn.turnIndex)}
             isActive={turn.turnIndex === activeTurnIndex}
             currentTime={currentTime}
-            audioAvailable={audioAvailable && turn.audioStart != null}
+            audioAvailable={audioAvailable}
             transcriptHidden={transcriptHidden}
             onPlayFrom={playFrom}
             suggestion={suggestions[turn.turnIndex]}
@@ -1113,13 +1373,13 @@ export function SessionReplay({
           src={audioUrl}
           onLoadedMetadata={(e) => {
             const a = e.currentTarget
+            setAudioLoading(false)
             const d = a.duration
             if (Number.isFinite(d) && d > 0) {
               setDuration(d)
               return
             }
-            // MediaRecorder webm blobs report duration=Infinity until the browser
-            // seeks to the end. Force it to resolve, then snap back to the start.
+            // Some WebM files report duration=Infinity until the browser seeks to the end.
             const resolve = () => {
               a.removeEventListener('timeupdate', resolve)
               setDuration(Number.isFinite(a.duration) ? a.duration : 0)
@@ -1131,6 +1391,10 @@ export function SessionReplay({
             } catch {
               a.removeEventListener('timeupdate', resolve)
             }
+          }}
+          onError={() => {
+            setAudioLoading(false)
+            setAudioAvailable(false)
           }}
           onTimeUpdate={handleTimeUpdate}
           onPlay={() => setIsPlaying(true)}
@@ -1298,9 +1562,10 @@ function TrendsRibbon({
   )
 }
 
-// ── Per-turn bubble ────────────────────────────────────────────────────
+// ── Per-turn bubble (matches Elevate conversation styling) ─────────────
 function TurnBubble({
   turn,
+  presentation,
   isActive,
   currentTime,
   audioAvailable,
@@ -1310,6 +1575,7 @@ function TurnBubble({
   registerRef,
 }: {
   turn: ReplayTurn
+  presentation?: TurnPresentation
   isActive: boolean
   currentTime: number
   audioAvailable: boolean
@@ -1321,34 +1587,83 @@ function TurnBubble({
   const isUser = turn.role === 'user'
   const m = turn.metrics
   const tip = turn.coachNote || m?.coaching_tip
+  const playStart = presentation?.playStart ?? turn.audioStart
+  const karaokeWords = presentation?.words?.length ? presentation.words : turn.words
 
   return (
     <div
       ref={registerRef}
-      className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
+      className={`flex animate-in fade-in slide-in-from-bottom-2 duration-300 ${
+        isUser ? 'justify-end' : 'justify-start'
+      }`}
     >
       <div
-        className={`max-w-[85%] rounded-2xl border p-3 transition-shadow ${
-          isUser ? 'bg-primary/5' : 'bg-muted/40'
-        } ${isActive ? 'ring-2 ring-primary shadow-md' : ''}`}
+        className={`flex max-w-[85%] flex-col ${isUser ? 'items-end' : 'items-start'}`}
       >
-        {/* Header row */}
-        <div className="mb-1 flex items-center gap-2">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            {isUser ? 'You' : 'Coach'}
-          </span>
-          {turn.audioStart != null && (
+        <div
+          className={`rounded-2xl px-4 py-2.5 shadow-sm transition-shadow ${
+            isUser
+              ? `rounded-tr-sm bg-blue-500 text-white ${isActive ? 'ring-2 ring-blue-300 ring-offset-2' : ''}`
+              : `rounded-tl-sm border border-gray-200 bg-gray-100 text-gray-900 dark:border-gray-700 dark:bg-muted dark:text-foreground ${
+                  isActive ? 'ring-2 ring-primary/40 ring-offset-2' : ''
+                }`
+          }`}
+        >
+          {isUser && playStart != null && (
             <button
-              onClick={() => audioAvailable && onPlayFrom(turn.audioStart as number)}
+              onClick={() => audioAvailable && onPlayFrom(playStart)}
               disabled={!audioAvailable}
-              className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/20 disabled:opacity-40"
+              className="mb-1.5 inline-flex items-center gap-1 rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-medium text-white/90 hover:bg-white/30 disabled:opacity-40"
               title={audioAvailable ? 'Play from here' : 'Audio unavailable'}
             >
-              <Play className="h-3 w-3" /> {formatTime(turn.audioStart)}
+              <Play className="h-3 w-3" /> {formatTime(playStart)}
             </button>
           )}
-          {turn.score?.stars != null && (
-            <span className="inline-flex items-center gap-0.5 text-amber-500">
+
+          <div className="text-[13px] leading-relaxed">
+            {transcriptHidden ? (
+              <span className={`italic ${isUser ? 'text-white/80' : 'text-muted-foreground'}`}>
+                Transcript hidden for your account
+              </span>
+            ) : isUser && karaokeWords && karaokeWords.length > 0 ? (
+              <KaraokeText
+                text={turn.text}
+                words={karaokeWords}
+                currentTime={currentTime}
+                active={isActive}
+                onSeek={(t) => onPlayFrom(t)}
+                lightOnDark={isUser}
+              />
+            ) : (
+              <p className="whitespace-pre-wrap break-words">{turn.text}</p>
+            )}
+          </div>
+
+          {isUser && m && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              {m.wpm != null && (
+                <Badge
+                  variant="secondary"
+                  className="border-0 bg-white/20 text-[10px] text-white hover:bg-white/20"
+                >
+                  {Math.round(m.wpm)} WPM
+                </Badge>
+              )}
+              {m.filler_count != null && m.filler_count > 0 && (
+                <Badge variant="secondary" className="border-0 bg-white/20 text-[10px] text-white">
+                  {m.filler_count} filler{m.filler_count === 1 ? '' : 's'}
+                </Badge>
+              )}
+              {m.vocab_diversity != null && (
+                <Badge variant="secondary" className="border-0 bg-white/20 text-[10px] text-white">
+                  {Math.round(m.vocab_diversity * 100)}% variety
+                </Badge>
+              )}
+            </div>
+          )}
+
+          {isUser && turn.score?.stars != null && (
+            <span className="mt-1 inline-flex items-center gap-0.5 text-amber-200">
               {Array.from({ length: 5 }).map((_, i) => (
                 <Star
                   key={i}
@@ -1359,75 +1674,30 @@ function TurnBubble({
           )}
         </div>
 
-        {/* Text (with karaoke when active + word timings present) */}
-        <div className="text-sm leading-relaxed">
-          {transcriptHidden ? (
-            <span className="italic text-muted-foreground">Transcript hidden for your account</span>
-          ) : isUser && turn.words && turn.words.length > 0 ? (
-            <Karaoke
-              words={turn.words}
-              currentTime={currentTime}
-              active={isActive}
-              onSeek={(t) => onPlayFrom(t)}
-            />
-          ) : (
-            turn.text
-          )}
-        </div>
-
-        {/* Metric chips (user turns) */}
-        {isUser && m && (
-          <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            {m.wpm != null && (
-              <Badge variant="secondary" className="text-[10px]">
-                {Math.round(m.wpm)} WPM
-              </Badge>
-            )}
-            {m.filler_count != null && m.filler_count > 0 && (
-              <Badge variant="outline" className="text-[10px]">
-                {m.filler_count} filler{m.filler_count === 1 ? '' : 's'}
-              </Badge>
-            )}
-            {m.hedging_count != null && m.hedging_count > 0 && (
-              <Badge variant="outline" className="text-[10px]">
-                {m.hedging_count} hedge{m.hedging_count === 1 ? '' : 's'}
-              </Badge>
-            )}
-            {m.vocab_diversity != null && (
-              <Badge variant="outline" className="text-[10px]">
-                {Math.round(m.vocab_diversity * 100)}% variety
-              </Badge>
-            )}
-            {turn.score?.tags?.map((t) => (
-              <Badge key={t} variant="secondary" className="text-[10px]">
-                {t}
-              </Badge>
-            ))}
-          </div>
+        {!isUser && (
+          <span className="mt-1 px-1 text-[10px] text-muted-foreground">Coach</span>
         )}
 
-        {/* AI phrasing suggestion (preferred over the rule-based tip — it's
-            more specific) when the coach found something worth rephrasing. */}
         {isUser && suggestion ? (
-          <div className="mt-2 rounded-md border border-violet-300/60 bg-violet-500/10 p-2 text-[11px] text-violet-800 dark:text-violet-300">
+          <div className="mt-2 w-full rounded-xl border border-violet-200 bg-violet-50 p-3 text-[11px] text-violet-900 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-200">
             <div className="flex items-center gap-1.5 font-medium">
               <Sparkles className="h-3 w-3 shrink-0" />
               <span>AI coach</span>
-              <span className="rounded bg-violet-500/15 px-1 py-px text-[9px] uppercase tracking-wide">
+              <Badge variant="secondary" className="px-1 py-0 text-[9px] uppercase">
                 {SUGGESTION_KIND_LABEL[suggestion.kind]}
-              </span>
+              </Badge>
             </div>
             <p className="mt-1 leading-snug">{suggestion.suggestion}</p>
             {suggestion.rewrite && (
-              <p className="mt-1 border-l-2 border-violet-400/50 pl-2 italic leading-snug text-violet-700/90 dark:text-violet-200/80">
-                Try: “{suggestion.rewrite}”
+              <p className="mt-1 border-l-2 border-violet-300 pl-2 italic leading-snug opacity-90">
+                Try: &ldquo;{suggestion.rewrite}&rdquo;
               </p>
             )}
           </div>
         ) : (
           isUser &&
           tip && (
-            <div className="mt-2 flex items-start gap-1.5 rounded-md bg-amber-500/10 p-2 text-[11px] text-amber-700 dark:text-amber-400">
+            <div className="mt-2 flex w-full items-start gap-1.5 rounded-xl border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
               <Lightbulb className="mt-0.5 h-3 w-3 shrink-0" />
               <span>{tip}</span>
             </div>
@@ -1438,60 +1708,113 @@ function TurnBubble({
   )
 }
 
-// ── Karaoke word highlighting ──────────────────────────────────────────
-// Band of words highlighted around the current position. Per-word timings are
-// estimated (no forced alignment), so highlighting a span keeps the spoken word
-// inside the lit region even when a single-word estimate would drift.
+// ── Karaoke highlighting on conversation text ──────────────────────────
 const KARAOKE_BEHIND = 3
 const KARAOKE_AHEAD = 3
 
-function Karaoke({
+function normalizeToken(s: string): string {
+  return s.toLowerCase().replace(/[^\w]/g, '')
+}
+
+function KaraokeText({
+  text,
   words,
   currentTime,
   active,
   onSeek,
+  lightOnDark = false,
 }: {
+  text: string
   words: TurnWord[]
   currentTime: number
   active: boolean
   onSeek: (t: number) => void
+  lightOnDark?: boolean
 }) {
-  // Index of the latest word whose estimated start has passed — the centre of
-  // the highlighted band.
   let cur = -1
   if (active) {
     for (let i = 0; i < words.length; i++) {
       if (currentTime >= words[i].start) cur = i
       else break
     }
-    if (cur < 0 && currentTime > 0) cur = 0
   }
+
   const bandStart = cur - KARAOKE_BEHIND
   const bandEnd = cur + KARAOKE_AHEAD
 
-  return (
-    <span>
-      {words.map((word, i) => {
-        const inBand = active && cur >= 0 && i >= bandStart && i <= bandEnd
-        const isPast = active && cur >= 0 && i < bandStart
-        return (
-          <span
-            key={i}
-            onClick={() => onSeek(word.start)}
-            className={`cursor-pointer px-0.5 transition-colors ${
-              inBand
-                ? 'bg-primary/25 text-foreground'
-                : isPast
-                  ? 'text-foreground/90'
-                  : 'text-muted-foreground/70'
-            } hover:bg-primary/10`}
-          >
-            {word.w}{' '}
-          </span>
-        )
-      })}
-    </span>
-  )
+  // Walk turn.text and align timed words in order so trailing words (e.g.
+  // "schedule?") stay on the correct turn even when STT attached them elsewhere.
+  const parts: ReactNode[] = []
+  let textIdx = 0
+  let matched = 0
+
+  for (let i = 0; i < words.length; i++) {
+    const token = normalizeToken(words[i].w)
+    if (!token) continue
+
+    let pos = -1
+    for (let scan = textIdx; scan < text.length; scan++) {
+      const chunk = text.slice(scan)
+      const m = chunk.match(/^[\s,;:.!?'"()-]*/)
+      const afterPunct = scan + (m?.[0]?.length ?? 0)
+      const candidate = text.slice(afterPunct, afterPunct + words[i].w.length + 4)
+      if (normalizeToken(candidate.split(/\s/)[0] ?? '') === token) {
+        pos = afterPunct
+        break
+      }
+    }
+    if (pos < 0) continue
+
+    if (pos > textIdx) {
+      parts.push(
+        <span key={`gap-${i}`} className={lightOnDark ? 'text-white/90' : undefined}>
+          {text.slice(textIdx, pos)}
+        </span>,
+      )
+    }
+
+    const surface = text.slice(pos).match(/^[^\s]+/)?.[0] ?? words[i].w
+    const inBand = active && cur >= 0 && i >= bandStart && i <= bandEnd
+    const isPast = active && cur >= 0 && i < bandStart
+
+    parts.push(
+      <span
+        key={`w-${i}-${matched}`}
+        onClick={() => onSeek(words[i].start)}
+        className={`cursor-pointer rounded px-0.5 transition-colors ${
+          inBand
+            ? lightOnDark
+              ? 'bg-white/30 text-white'
+              : 'bg-primary/20 text-foreground'
+            : isPast
+              ? lightOnDark
+                ? 'text-white'
+                : 'text-foreground'
+              : lightOnDark
+                ? 'text-white/75'
+                : 'text-muted-foreground'
+        }`}
+      >
+        {surface}
+      </span>,
+    )
+    textIdx = pos + surface.length
+    matched++
+  }
+
+  if (textIdx < text.length) {
+    parts.push(
+      <span key="tail" className={lightOnDark ? 'text-white/90' : undefined}>
+        {text.slice(textIdx)}
+      </span>,
+    )
+  }
+
+  if (matched === 0) {
+    return <p className="whitespace-pre-wrap break-words">{text}</p>
+  }
+
+  return <p className="whitespace-pre-wrap break-words">{parts}</p>
 }
 
 export default SessionReplay

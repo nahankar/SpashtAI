@@ -682,9 +682,11 @@ export function Replay() {
 
       {selectedReplay.size > 0 && (
         <div className="mb-4 flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handleReprocessSelected}>
-            <RefreshCw className="mr-2 h-4 w-4" /> Reprocess {selectedReplay.size} Selected
-          </Button>
+          {exportFlags.enableReprocess && (
+            <Button variant="outline" size="sm" onClick={handleReprocessSelected}>
+              <RefreshCw className="mr-2 h-4 w-4" /> Reprocess {selectedReplay.size} Selected
+            </Button>
+          )}
           <Button variant="destructive" size="sm" onClick={handleDeleteSelected}>
             <Trash2 className="mr-2 h-4 w-4" /> Delete {selectedReplay.size} Selected
           </Button>
@@ -829,7 +831,7 @@ export function Replay() {
                             <Download className="mr-2 h-4 w-4" /> Download Transcript
                           </DropdownMenuItem>
                         )}
-                        {(s.status === 'completed' || s.status === 'failed') && (
+                        {exportFlags.enableReprocess && (s.status === 'completed' || s.status === 'failed') && (
                           <DropdownMenuItem
                             onClick={() => handleReprocess(s.id)}
                             disabled={reprocessing.has(s.id)}

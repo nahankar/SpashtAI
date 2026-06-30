@@ -12,6 +12,15 @@ export function getAuthHeaders(extra: Record<string, string> = {}): Record<strin
   return headers
 }
 
+/** Authenticated media URL for `<audio src>` (cannot send Authorization headers). */
+export function getAuthenticatedMediaUrl(path: string): string | null {
+  const token = localStorage.getItem('spashtai_token')
+  if (!token) return null
+  const base = API_BASE.replace(/\/$/, '')
+  const normalized = path.startsWith('/') ? path : `/${path}`
+  return `${base}${normalized}?access_token=${encodeURIComponent(token)}`
+}
+
 interface RequestOptions extends RequestInit {
   skipAuth?: boolean
 }

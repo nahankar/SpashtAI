@@ -109,6 +109,123 @@ export async function detectSpeechRegions(
   return merged.filter((r) => r.end - r.start >= minSpeechSec)
 }
 
+/**
+ * When silencedetect finds more speech blips than user turns (extra coughs,
+ * short backchannels), merge adjacent regions — smallest gap first — until
+ * the count matches so per-turn alignment can still succeed.
+ */
+export function mergeRegionsToCount(
+  regions: SpeechRegion[],
+  targetCount: number,
+): SpeechRegion[] {
+  if (targetCount <= 0 || regions.length <= targetCount) return regions
+  const merged = regions.map((r) => ({ ...r }))
+  while (merged.length > targetCount) {
+    let bestIdx = 0
+    let bestGap = Infinity
+    for (let i = 0; i < merged.length - 1; i++) {
+      const gap = merged[i + 1].start - merged[i].end
+      if (gap < bestGap) {
+        bestGap = gap
+        bestIdx = i
+      }
+    }
+    merged[bestIdx] = {
+      start: merged[bestIdx].start,
+      end: merged[bestIdx + 1].end,
+    }
+    merged.splice(bestIdx + 1, 1)
+  }
+  return merged
+}
+
+/**
+ * Per-speech-blip intervals for “Skip gaps” playback. Returns filtered
+ * silencedetect regions (not merged across turns) so coach-silent gaps
+ * between blips are skipped. Merging into one span per turn hid those gaps.
+ */
+export function buildSkipPlaybackRegions(
+  regions: SpeechRegion[],
+  _userTurnCount: number,
+  opts: { minTurnStart?: number } = {},
+): SpeechRegion[] {
+  if (regions.length === 0) return []
+  let sorted = [...regions].sort((a, b) => a.start - b.start)
+  if (opts.minTurnStart != null) {
+    sorted = sorted.filter((r) => r.end > opts.minTurnStart!)
+  }
+  return sorted
+}
+
+/** Word timestamps on a single turn (STT karaoke). */
+export interface TurnWordTiming {
+  start?: number | null
+  end?: number | null
+}
+
+/**
+ * Derive skip-playback windows from per-word STT timings on user turns.
+ * When STT turn boundaries are contiguous, a long coach gap sits inside the
+ * turn's word list as a separate cluster — we keep the main speech cluster only.
+ */
+export function buildSkipIntervalsFromTurnWords(
+  turns: {
+    role: string
+    audioStart?: number | null
+    audioEnd?: number | null
+    words?: unknown
+  }[],
+  gapSec = 2.5,
+): SpeechRegion[] {
+  const out: SpeechRegion[] = []
+
+  for (const turn of turns) {
+    if (turn.role !== 'user') continue
+    const raw = turn.words
+    if (!Array.isArray(raw) || raw.length === 0) {
+      if (turn.audioStart != null) {
+        out.push({
+          start: turn.audioStart,
+          end: turn.audioEnd ?? turn.audioStart + 0.1,
+        })
+      }
+      continue
+    }
+
+    const words = raw
+      .map((w: TurnWordTiming) => ({
+        start: typeof w?.start === 'number' ? w.start : null,
+        end: typeof w?.end === 'number' ? w.end : null,
+      }))
+      .filter((w): w is { start: number; end: number } => w.start != null && w.end != null)
+      .sort((a, b) => a.start - b.start)
+    if (words.length === 0) continue
+
+    type Cluster = { start: number; end: number; weight: number }
+    const clusters: Cluster[] = []
+    let cur: Cluster = { start: words[0].start, end: words[0].end, weight: 1 }
+    for (let i = 1; i < words.length; i++) {
+      if (words[i].start - cur.end > gapSec) {
+        clusters.push(cur)
+        cur = { start: words[i].start, end: words[i].end, weight: 1 }
+      } else {
+        cur.end = Math.max(cur.end, words[i].end)
+        cur.weight += 1
+      }
+    }
+    clusters.push(cur)
+
+    const best = clusters.reduce((a, b) => {
+      const scoreA = (a.end - a.start) * a.weight
+      const scoreB = (b.end - b.start) * b.weight
+      return scoreB > scoreA ? b : a
+    })
+    out.push({ start: best.start, end: best.end })
+  }
+
+  return out.sort((a, b) => a.start - b.start)
+}
+
 function distributeWords(
   words: unknown,
   start: number,
@@ -166,6 +283,11 @@ export async function alignTurnsToAudio(
       if (regions.length <= userTurns.length) break
       regions = await detectSpeechRegions(audioPath, { ...opts, mergeGapSec: gap })
     }
+  }
+  // Still too many blips — merge adjacent regions (smallest gap first) down to
+  // the user-turn count so alignment can proceed instead of falling back to STT.
+  if (regions.length > userTurns.length) {
+    regions = mergeRegionsToCount(regions, userTurns.length)
   }
 
   if (regions.length !== userTurns.length || userTurns.length === 0) {

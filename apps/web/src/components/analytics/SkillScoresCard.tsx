@@ -252,33 +252,36 @@ export function SkillScoresCard({
                   const Icon = skill.icon
                   return (
                     <AccordionItem key={skill.key} value={skill.key} className="border-b-0">
-                      <div className="flex items-center gap-1">
-                        <AccordionTrigger className="flex-1 py-2 hover:no-underline" disabled={!comp}>
-                          <div className="flex flex-1 flex-col gap-1 pr-2 text-left">
-                            <div className="flex items-center gap-3">
-                              <span className="flex w-32 items-center gap-1.5 text-sm font-medium">
-                                <Icon className="h-3.5 w-3.5 text-muted-foreground" />
-                                {skill.label}
-                              </span>
-                              <span className={`w-9 text-right text-sm font-bold ${getScoreColor(val)}`}>
-                                {val.toFixed(1)}
-                              </span>
-                              <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                                <Progress value={val * 10} className={`h-2 ${getProgressColor(val)}`} />
-                              </div>
-                            </div>
+                      <div className="space-y-1.5 py-1.5">
+                        <div className="flex items-center gap-2">
+                          <div className="flex min-w-0 flex-1 items-center justify-between gap-3 text-sm">
+                            <span className="flex min-w-0 items-center gap-1.5 font-medium">
+                              <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                              {skill.label}
+                            </span>
+                            <span className={`shrink-0 text-sm font-bold ${getScoreColor(val)}`}>
+                              {val.toFixed(1)}
+                            </span>
                           </div>
-                        </AccordionTrigger>
-                        {onHearMoment && HEARABLE_SKILLS.has(skill.key) && (
-                          <button
-                            type="button"
-                            onClick={() => onHearMoment(skill.key)}
-                            title="Jump to a moment in Playback that shaped this score"
-                            className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 px-2 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/10"
-                          >
-                            <Play className="h-3 w-3" /> Hear it
-                          </button>
-                        )}
+                          {onHearMoment && HEARABLE_SKILLS.has(skill.key) && (
+                            <button
+                              type="button"
+                              onClick={() => onHearMoment(skill.key)}
+                              title="Jump to a moment in Playback that shaped this score"
+                              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 px-2 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/10"
+                            >
+                              <Play className="h-3 w-3" /> Hear it
+                            </button>
+                          )}
+                          {comp ? (
+                            <AccordionTrigger className="flex-none shrink-0 py-0 pl-1 pr-0 hover:no-underline">
+                              <span className="sr-only">Show {skill.label} breakdown</span>
+                            </AccordionTrigger>
+                          ) : (
+                            <span className="w-4 shrink-0" aria-hidden />
+                          )}
+                        </div>
+                        <Progress value={val * 10} className={`h-2 w-full ${getProgressColor(val)}`} />
                       </div>
                       {comp && (
                         <AccordionContent className="pb-2 pl-2 pt-0">

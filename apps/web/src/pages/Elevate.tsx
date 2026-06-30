@@ -38,7 +38,7 @@ import { pulseSkillLabel } from '@/lib/pulse-skills'
 import { useAuth } from '@/hooks/useAuth'
 import { useUserExportFlags } from '@/hooks/useUserExportFlags'
 import { useConfirm } from '@/hooks/useConfirm'
-import { Trash2, CheckSquare, Square, Target, ArrowRight, Info, Play, ChevronDown, ChevronUp, BarChart3, CheckCircle2 } from 'lucide-react'
+import { Trash2, CheckSquare, Square, Target, ArrowRight, Info, Play, ChevronDown, ChevronUp, BarChart3, CheckCircle2, RefreshCw, Download, Loader2 } from 'lucide-react'
 import { generateSessionPdf, type SessionReport } from '@/lib/generate-session-pdf'
 import { CoachAudioBootstrap } from '@/components/session/CoachAudioBootstrap'
 import { SessionRecorder } from '@/components/session/SessionRecorder'
@@ -233,6 +233,48 @@ export function Elevate() {
     }
   }, [selectedElevate, confirmDialog])
 
+  const [reprocessingElevate, setReprocessingElevate] = useState<Set<string>>(new Set())
+
+  const handleReprocessElevate = useCallback(async (id: string) => {
+    setReprocessingElevate((prev) => new Set(prev).add(id))
+    try {
+      const res = await fetch(`${API_BASE_URL}/sessions/${id}/reprocess`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error || 'Reprocessing failed')
+      }
+      toast.success('Session reprocessed')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to reprocess session')
+    } finally {
+      setReprocessingElevate((prev) => {
+        const n = new Set(prev)
+        n.delete(id)
+        return n
+      })
+    }
+  }, [])
+
+  const handleReprocessAllElevate = useCallback(async () => {
+    const eligible = pastSessions.filter((s) => s.endedAt != null)
+    if (eligible.length === 0) {
+      toast.info('No completed sessions to reprocess')
+      return
+    }
+    const ok = await confirmDialog({
+      title: 'Reprocess All Sessions',
+      description: `Re-run audio analysis on ${eligible.length} completed session(s)?`,
+      confirmLabel: `Reprocess ${eligible.length}`,
+    })
+    if (!ok) return
+    for (const s of eligible) {
+      await handleReprocessElevate(s.id)
+    }
+  }, [pastSessions, confirmDialog, handleReprocessElevate])
+
   const loadPastSessions = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     try {
       if (!silent) setPastLoading(true)
@@ -313,10 +355,10 @@ export function Elevate() {
   // Results view: which tab is showing, plus a one-shot request to deep-link the
   // Playback tab to the moment behind a skill score ("Hear it").
   const [resultsTab, setResultsTab] = useState('playback')
-  const [playbackFocus, setPlaybackFocus] = useState<{ skill: string; nonce: number } | null>(null)
-  const hearSkillMoment = (skill: string) => {
-    setPlaybackFocus({ skill, nonce: Date.now() })
+  const [playbackAutoPlayNonce, setPlaybackAutoPlayNonce] = useState<number | null>(null)
+  const hearSkillMoment = (_skill: string) => {
     setResultsTab('playback')
+    setPlaybackAutoPlayNonce(Date.now())
   }
   const handleElevateExportPdf = async () => {
     if (!sessionId || !historicalMetrics) return
@@ -1094,7 +1136,7 @@ export function Elevate() {
     if (currentSessionId) {
       setShowHistory(false)
       setResultsTab('playback')
-      setPlaybackFocus(null)
+      setPlaybackAutoPlayNonce(null)
       setIsCompletedSessionView(true)
       setSessionId(currentSessionId)
       navigate(`/elevate?session=${encodeURIComponent(currentSessionId)}`)
@@ -1183,9 +1225,17 @@ export function Elevate() {
               Practice with a live AI coach and elevate your communication skills.
             </p>
           </div>
-          <Button className="w-full sm:w-auto shrink-0" onClick={() => setShowHistory(false)}>
-            + New Elevate Session
-          </Button>
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+            {exportFlags.enableReprocess &&
+              pastSessions.some((s) => s.endedAt != null) && (
+              <Button variant="outline" className="w-full sm:w-auto" onClick={handleReprocessAllElevate}>
+                <RefreshCw className="mr-2 h-4 w-4" /> Reprocess All
+              </Button>
+            )}
+            <Button className="w-full sm:w-auto shrink-0" onClick={() => setShowHistory(false)}>
+              + New Elevate Session
+            </Button>
+          </div>
         </div>
 
         {recommendation && !inboundNewSession && (
@@ -1453,42 +1503,51 @@ export function Elevate() {
               value={resultsTab}
               onValueChange={(v) => {
                 // User-initiated tab change: drop any pending deep-link so it
-                // doesn't replay when Playback re-mounts.
+                // doesn't replay when Playback re-mounts (unless switching TO playback).
                 setResultsTab(v)
-                setPlaybackFocus(null)
+                if (v !== 'playback') {
+                  setPlaybackAutoPlayNonce(null)
+                }
               }}
               className="space-y-4"
             >
-              <div className="flex">
-                {/* The metrics summary lives INSIDE the Session Analytics trigger so it
-                    inherits the tab's background (muted when unselected, white when
-                    selected) — it reads as part of the tab, not a separate element. */}
-                <TabsList className="h-auto w-full flex-wrap justify-start sm:w-auto">
-                  <TabsTrigger value="playback" className="py-1.5">
+              <div className="flex w-full items-center gap-2">
+                <TabsList className="inline-flex h-10 shrink-0 flex-nowrap items-center">
+                  <TabsTrigger value="playback" className="h-9 py-1.5">
                     <Play className="mr-2 h-4 w-4" /> Playback
                   </TabsTrigger>
-                  <TabsTrigger value="analytics" className="gap-3 py-1.5">
-                    <span className="flex items-center">
-                      <BarChart3 className="mr-2 h-4 w-4" /> Session Analytics
-                    </span>
-                    {sessionId && (
-                      <>
-                        <span className="hidden h-4 w-px bg-border lg:block" />
-                        <span className="hidden min-w-0 lg:inline-flex">
-                          <SessionMetricsSummary
-                            sessionId={sessionId}
-                            metrics={historicalMetrics}
-                            variant="inline"
-                            turns={completedTurns}
-                          />
-                        </span>
-                      </>
-                    )}
+                  <TabsTrigger value="analytics" className="h-9 py-1.5">
+                    <BarChart3 className="mr-2 h-4 w-4" /> Session Analytics
                   </TabsTrigger>
                 </TabsList>
+                {resultsTab === 'analytics' && historicalMetrics && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="ml-auto h-9 shrink-0 px-2.5"
+                    onClick={handleElevateExportPdf}
+                    disabled={elevatePdfLoading}
+                    title="Export PDF"
+                  >
+                    {elevatePdfLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Download className="h-4 w-4" />
+                    )}
+                    <span className="ml-1.5">PDF</span>
+                  </Button>
+                )}
               </div>
 
               <TabsContent value="analytics" className="space-y-4">
+                {sessionId && historicalMetrics && (
+                  <SessionMetricsSummary
+                    sessionId={sessionId}
+                    metrics={historicalMetrics}
+                    variant="card"
+                    turns={completedTurns}
+                  />
+                )}
                 {/* Conversation chat — collapsed by default to keep analytics front and center */}
                 <ChatPanel
                   messages={messages}
@@ -1509,6 +1568,7 @@ export function Elevate() {
                       onDownloadTranscript={downloadTranscript}
                       onExportPdf={handleElevateExportPdf}
                       pdfLoading={elevatePdfLoading}
+                      showExportPdf={false}
                       aside={<CoachingInsightsCard sessionId={sessionId} isSessionEnded fill />}
                     />
 
@@ -1542,7 +1602,7 @@ export function Elevate() {
                 <SessionReplay
                   sessionId={sessionId ?? viewSessionId ?? undefined}
                   embedded
-                  focusRequest={playbackFocus}
+                  autoPlayNonce={playbackAutoPlayNonce}
                 />
               </TabsContent>
             </Tabs>
@@ -1603,9 +1663,11 @@ export function Elevate() {
                     >
                       Resume
                     </Button>
-                    <Button variant="outline" disabled title="Resume session to record audio">
-                      Record My Audio
-                    </Button>
+                    {exportFlags.enableAudioExport && (
+                      <Button variant="outline" disabled title="Resume session to record audio">
+                        Record My Audio
+                      </Button>
+                    )}
                     <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={handleDiscard}>
                       Discard Session
                     </Button>
@@ -1623,7 +1685,7 @@ export function Elevate() {
                 >
                   <RoomAudioRenderer />
                   <CoachAudioBootstrap />
-                  <SessionRecorder sessionId={sessionId} disabled={exportFlags.hideAudioDownload} />
+                  <SessionRecorder sessionId={sessionId} />
                   <StartAudio label="Click to enable coach audio" />
                   <div className="flex justify-center w-full mb-2">
                     <AgentVisualizer className="bg-muted/20 rounded-lg w-full" isPaused={isSessionPaused} compact />
@@ -1666,7 +1728,7 @@ export function Elevate() {
                     <InRoomControls
                       sessionId={sessionId}
                       onPauseSession={pauseLiveSession}
-                      hideAudioDownload={exportFlags.hideAudioDownload}
+                      enableAudioRecord={exportFlags.enableAudioExport}
                     />
                     <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={handleDiscard}>
                       Discard Session
@@ -2085,11 +2147,12 @@ function LiveKitConversation({
 function InRoomControls({
   sessionId,
   onPauseSession,
-  hideAudioDownload = false,
+  enableAudioRecord = false,
 }: {
   sessionId: string | null
   onPauseSession: () => void
-  hideAudioDownload?: boolean
+  /** Admin-enabled: live “Record My Audio” download during the session. */
+  enableAudioRecord?: boolean
 }) {
   const room = useRoomContext()
   const { isRecording, startRecording, stopRecording } = useAudioRecording()
@@ -2145,7 +2208,7 @@ function InRoomControls({
       <Button variant="secondary" onClick={toggle}>
         Pause
       </Button>
-      {!hideAudioDownload && (
+      {enableAudioRecord && (
         <Button variant={isRecording ? 'destructive' : 'outline'} onClick={handleToggleRecording}>
           {isRecording ? 'Stop & Download Audio' : 'Record My Audio'}
         </Button>

@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Progress } from '../ui/progress';
-import { MessageSquare, TrendingUp, Download, RefreshCw, FileText, Loader2, Mic } from 'lucide-react';
+import { MessageSquare, Download, RefreshCw, FileText, Loader2, Mic } from 'lucide-react';
 import { Button } from '../ui/button';
 import { getAuthHeaders } from '@/lib/api-client';
 import { useUserExportFlags } from '@/hooks/useUserExportFlags';
@@ -40,9 +40,11 @@ interface SessionMetricsProps {
   pdfLoading?: boolean;
   /** Optional content rendered beside Speaking Performance (e.g. Coaching Insights). */
   aside?: ReactNode;
+  /** When false, Export PDF is rendered elsewhere (e.g. tab bar). Defaults to true. */
+  showExportPdf?: boolean;
 }
 
-export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExportPdf, pdfLoading, aside }: SessionMetricsProps) {
+export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExportPdf, pdfLoading, aside, showExportPdf = true }: SessionMetricsProps) {
   const [isReprocessing, setIsReprocessing] = useState(false);
   const [isDownloadingAudio, setIsDownloadingAudio] = useState(false);
   const [reprocessStatus, setReprocessStatus] = useState<string>('');
@@ -132,10 +134,9 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExp
   if (!metrics) {
     return (
       <Card>
-        <CardHeader>
-          <CardTitle>Session Analytics</CardTitle>
-          <CardDescription>No metrics available for this session</CardDescription>
-        </CardHeader>
+        <CardContent className="py-6 text-center text-sm text-muted-foreground">
+          No metrics available for this session
+        </CardContent>
       </Card>
     );
   }
@@ -183,81 +184,79 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExp
     </span>
   )
 
+  const showToolbar =
+    exportFlags.enableReprocess ||
+    (showExportPdf && onExportPdf) ||
+    exportFlags.enableTxtExport ||
+    exportFlags.enableJsonExport ||
+    exportFlags.enableAudioExport
+
   return (
     <div className="space-y-6">
-      {/* Header with Download Options */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <TrendingUp className="h-5 w-5" />
-              Session Analytics
-            </CardTitle>
-          </div>
-          <div className="flex flex-col gap-2">
-            <div className="flex gap-2">
-              {exportFlags.enableReprocess && (
-                <Button
-                  variant="default"
-                  size="sm"
-                  onClick={handleReprocess}
-                  disabled={isReprocessing}
-                >
-                  <RefreshCw className={`h-4 w-4 mr-2 ${isReprocessing ? 'animate-spin' : ''}`} />
-                  {isReprocessing ? 'Reprocessing...' : 'Reprocess Audio'}
-                </Button>
-              )}
-              {onExportPdf && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={onExportPdf}
-                  disabled={pdfLoading}
-                >
-                  {pdfLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileText className="h-4 w-4 mr-2" />}
-                  Export PDF
-                </Button>
-              )}
-              {exportFlags.enableTxtExport && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onDownloadTranscript?.('txt')}
-                >
-                  <Download className="h-4 w-4 mr-2" />
-                  Download TXT
-                </Button>
-              )}
-              {exportFlags.enableJsonExport && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onDownloadTranscript?.('json')}
-                >
-                  <Download className="h-4 w-4 mr-2" />
-                  Download JSON
-                </Button>
-              )}
-              {exportFlags.enableAudioExport && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => downloadAudioFiles(true)}
-                  disabled={isDownloadingAudio}
-                >
-                  {isDownloadingAudio ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Mic className="h-4 w-4 mr-2" />}
-                  Download My Audio
-                </Button>
-              )}
-            </div>
-            {reprocessStatus && (
-              <div className="text-sm text-muted-foreground mt-2">
-                {reprocessStatus}
-              </div>
+      {showToolbar && (
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex flex-wrap justify-end gap-2">
+            {exportFlags.enableReprocess && (
+              <Button
+                variant="default"
+                size="sm"
+                onClick={handleReprocess}
+                disabled={isReprocessing}
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${isReprocessing ? 'animate-spin' : ''}`} />
+                {isReprocessing ? 'Reprocessing...' : 'Reprocess Audio'}
+              </Button>
+            )}
+            {showExportPdf && onExportPdf && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onExportPdf}
+                disabled={pdfLoading}
+              >
+                {pdfLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileText className="h-4 w-4 mr-2" />}
+                Export PDF
+              </Button>
+            )}
+            {exportFlags.enableTxtExport && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onDownloadTranscript?.('txt')}
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Download TXT
+              </Button>
+            )}
+            {exportFlags.enableJsonExport && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onDownloadTranscript?.('json')}
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Download JSON
+              </Button>
+            )}
+            {exportFlags.enableAudioExport && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => downloadAudioFiles(true)}
+                disabled={isDownloadingAudio}
+              >
+                {isDownloadingAudio ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Mic className="h-4 w-4 mr-2" />}
+                Download My Audio
+              </Button>
             )}
           </div>
-        </CardHeader>
-      </Card>
+          {reprocessStatus && (
+            <div className="text-sm text-muted-foreground">
+              {reprocessStatus}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Key Performance Indicators */}
       <div className={`grid gap-6 ${aside ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>

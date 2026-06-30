@@ -362,6 +362,9 @@ export function UserDetail() {
                   />
                   <span>
                     <span className="font-medium">Enable “Download My Audio”</span>
+                    <span className="block text-xs text-muted-foreground">
+                      Session Analytics download and live Elevate “Record My Audio”.
+                    </span>
                   </span>
                 </label>
                 <label className="flex items-start gap-2 cursor-pointer">
@@ -374,6 +377,9 @@ export function UserDetail() {
                   />
                   <span>
                     <span className="font-medium">Enable “Reprocess Audio”</span>
+                    <span className="block text-xs text-muted-foreground">
+                      Elevate “Reprocess All” / “Reprocess Audio” and Replay re-analyze actions.
+                    </span>
                   </span>
                 </label>
               </div>

@@ -6,7 +6,12 @@ import {
   resolveRequestExportFlags,
 } from '../lib/userExportFlags'
 import { dedupeConversationMessages } from '../lib/dedupeMessages'
-import { alignTurnsToAudio } from '../lib/audioAlignment'
+import {
+  alignTurnsToAudio,
+  buildSkipIntervalsFromTurnWords,
+  buildSkipPlaybackRegions,
+  detectSpeechRegions,
+} from '../lib/audioAlignment'
 import { resolveElevateSessionAudio } from '../analytics/insightProviders/resolveSessionAudio'
 
 const INTERNAL_AGENT_TOKEN =
@@ -101,11 +106,38 @@ export async function getSessionTurns(req: Request, res: Response) {
       ? turns.map((t) => ({ ...t, text: '', words: null }))
       : turns
 
+    // Prefer per-word STT clusters (matches what the user actually said per turn);
+    // fall back to ffmpeg speech blips when words are unavailable.
+    const wordSkipRegions = buildSkipIntervalsFromTurnWords(sanitized)
+    let speechRegions: { start: number; end: number }[] = []
+    let skipPlaybackRegions: { start: number; end: number }[] = wordSkipRegions
+    try {
+      const resolved = await resolveElevateSessionAudio(sessionId)
+      if (resolved?.audioPath) {
+        speechRegions = await detectSpeechRegions(resolved.audioPath)
+        if (skipPlaybackRegions.length === 0) {
+          const userTurnCount = turns.filter((t) => t.role === 'user').length
+          const firstUserStart = turns.find(
+            (t) => t.role === 'user' && t.audioStart != null,
+          )?.audioStart as number | undefined
+          skipPlaybackRegions = buildSkipPlaybackRegions(
+            speechRegions,
+            userTurnCount,
+            firstUserStart != null ? { minTurnStart: firstUserStart - 1.5 } : {},
+          )
+        }
+      }
+    } catch {
+      /* optional — playback still works without skip-gap hints */
+    }
+
     res.json({
       sessionId,
       recordingStartedAt: session?.recordingStartedAt ?? null,
       transcriptHidden: flags.hideTranscriptText,
       degraded,
+      speechRegions,
+      skipPlaybackRegions,
       session: session
         ? {
             module: session.module,

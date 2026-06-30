@@ -85,7 +85,7 @@ import { getPublicFeatures } from './routes/features'
 import { getPublicPlatform } from './routes/platform'
 import { ensureAdminExists } from './lib/init-admin'
 import { ensureLegalDocuments } from './lib/ensure-legal'
-import { requireAuth, requireAuthOrAgent } from './middleware/auth'
+import { requireAuth, requireAuthOrAgent, requireAuthOrMediaToken } from './middleware/auth'
 import { requireAdmin } from './middleware/admin'
 import { trackFeatureUsage } from './middleware/tracking'
 import eventsRouter from './routes/events'
@@ -200,7 +200,7 @@ app.post(
   recordingUpload.single('audio'),
   uploadSessionRecording,
 )
-app.get('/sessions/:sessionId/recording/stream', requireAuth, streamSessionRecording)
+app.get('/sessions/:sessionId/recording/stream', requireAuthOrMediaToken, streamSessionRecording)
 
 // Protected: per-turn replay records (GET user, POST agent-internal)
 app.get('/sessions/:sessionId/turns', requireAuth, getSessionTurns)
