@@ -31,6 +31,7 @@ import { useConversationPersistence } from '@/hooks/useConversationPersistence'
 import { AgentVisualizer, SessionStatusBar } from '@/components/layout/AgentVisualizer'
 import { toast } from 'sonner'
 import { getAuthHeaders } from '@/lib/api-client'
+import { logEvent } from '@/lib/remoteLogger'
 import { FOCUS_AREAS, getFocusAreaLabel, EXERCISE_PREVIEWS } from '@/lib/focus-areas'
 import { pulseSkillLabel } from '@/lib/pulse-skills'
 import { useAuth } from '@/hooks/useAuth'
@@ -1029,7 +1030,9 @@ export function Elevate() {
       setRoomName(uniqueRoomName)
       setIsSessionPaused(false)
       resetMetrics()
+      logEvent('event', 'elevate.session_join', { sessionId: newSessionId, focusArea: focusArea || null })
     } catch (error) {
+      logEvent('error', 'elevate.session_join_failed', error)
       console.error('Error joining session:', error)
       throw error
     }
@@ -1047,6 +1050,7 @@ export function Elevate() {
   // Ends the session permanently.
   const handleLeave = useCallback(async () => {
     const currentSessionId = sessionId
+    if (currentSessionId) logEvent('event', 'elevate.session_leave', { sessionId: currentSessionId })
 
     setToken(null)
     setUrl(null)

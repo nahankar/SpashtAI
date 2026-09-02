@@ -22,6 +22,7 @@ import {
   Square,
   CheckCircle2,
   MinusCircle,
+  LifeBuoy,
 } from 'lucide-react'
 import { getAuthHeaders } from '@/lib/api-client'
 import { SessionFilters, type SortField, type SortDir } from '@/components/SessionFilters'
@@ -549,6 +550,18 @@ export function History() {
                             </Button>
                           </Link>
                         )}
+                        <Link
+                          to={`/feedback/new?module=replay&session=${encodeURIComponent(s.id)}`}
+                          title="Report an issue with this session"
+                        >
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-muted-foreground hover:text-primary"
+                          >
+                            <LifeBuoy className="h-4 w-4" />
+                          </Button>
+                        </Link>
                         <Button
                           size="icon" variant="ghost"
                           className="h-8 w-8 text-muted-foreground hover:text-destructive"
@@ -713,6 +726,18 @@ export function History() {
                         <Link to={`/elevate?session=${session.id}&from=history`}>
                           <Button size="sm" variant="outline">
                             {isCompleted ? 'View' : 'Resume'} <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+                          </Button>
+                        </Link>
+                        <Link
+                          to={`/feedback/new?module=elevate&session=${encodeURIComponent(session.id)}`}
+                          title="Report an issue with this session"
+                        >
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-muted-foreground hover:text-primary"
+                          >
+                            <LifeBuoy className="h-4 w-4" />
                           </Button>
                         </Link>
                         <Button

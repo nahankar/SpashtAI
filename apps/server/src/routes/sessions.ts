@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express'
 import { prisma } from '../lib/prisma'
+import { logger, reqLog } from '../lib/logger'
 import { awardSessionActivePoints } from '../lib/points'
 import { isPrivilegedRole } from '../lib/userExportFlags'
 
@@ -19,7 +20,7 @@ export async function listSessions(req: Request, res: Response) {
     })
     res.json({ sessions })
   } catch (error) {
-    console.error('Error listing sessions:', error)
+    logger.error({ err: error }, 'Error listing sessions:')
     res.status(500).json({ error: 'Failed to list sessions' })
   }
 }
@@ -49,7 +50,7 @@ export async function getSession(req: Request, res: Response) {
 
     res.json({ session })
   } catch (error) {
-    console.error('Error getting session:', error)
+    logger.error({ err: error }, 'Error getting session:')
     res.status(500).json({ error: 'Failed to get session' })
   }
 }
@@ -76,9 +77,13 @@ export async function createSession(req: Request, res: Response) {
       }
     })
     
+    reqLog(req).info(
+      { event: 'elevate.session_created', sessionId: session.id, module, focusArea: focusArea?.trim() || null },
+      'session created',
+    )
     res.status(201).json({ success: true, session })
   } catch (error) {
-    console.error('Error creating session:', error)
+    logger.error({ err: error }, 'Error creating session:')
     res.status(500).json({ error: 'Failed to create session' })
   }
 }
@@ -117,13 +122,17 @@ export async function endSession(req: Request, res: Response) {
         pointsAwarded = pts.awarded
         totalPoints = pts.total
       } catch (ptsErr) {
-        console.warn('Session points award skipped:', ptsErr)
+        logger.warn({ err: ptsErr, sessionId: id }, 'session points award skipped')
       }
     }
 
+    reqLog(req).info(
+      { event: 'elevate.session_ended', sessionId: id, durationSec: session.durationSec, pointsAwarded },
+      'session ended',
+    )
     res.json({ success: true, session, pointsAwarded, totalPoints })
   } catch (error) {
-    console.error('Error ending session:', error)
+    logger.error({ err: error }, 'Error ending session:')
     res.status(500).json({ error: 'Failed to end session' })
   }
 }
@@ -143,7 +152,7 @@ export async function saveMessage(req: Request, res: Response) {
     
     res.status(201).json({ success: true, message: 'Message saved' })
   } catch (error) {
-    console.error('Error saving message:', error)
+    logger.error({ err: error }, 'Error saving message:')
     res.status(500).json({ error: 'Failed to save message' })
   }
 }
@@ -173,7 +182,7 @@ export async function saveTranscript(req: Request, res: Response) {
     console.log(`📝 Saved transcript for session ${id} with ${conversationData.length} messages`)
     res.status(201).json({ success: true, transcript })
   } catch (error) {
-    console.error('Error saving transcript:', error)
+    logger.error({ err: error }, 'Error saving transcript:')
     res.status(500).json({ error: 'Failed to save transcript' })
   }
 }
@@ -234,7 +243,7 @@ export async function saveRecording(req: Request, res: Response) {
     console.log(`🎙️ Saved recording for session ${sessionId}: ${file_path} (${recording_type || 'user'})`)
     res.status(201).json({ success: true, recording })
   } catch (error) {
-    console.error('Error saving recording:', error)
+    logger.error({ err: error }, 'Error saving recording:')
     res.status(500).json({ error: 'Failed to save recording' })
   }
 }
@@ -270,7 +279,7 @@ export async function deleteSession(req: Request, res: Response) {
     console.log(`🗑️  Deleted session: ${id}`)
     res.json({ success: true, message: 'Session deleted successfully' })
   } catch (error) {
-    console.error('Error deleting session:', error)
+    logger.error({ err: error }, 'Error deleting session:')
     res.status(500).json({ error: 'Failed to delete session' })
   }
 }

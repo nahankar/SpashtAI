@@ -532,6 +532,9 @@ model UserFeedback {
   priority       FeedbackPriority?
   pointsAwarded  Boolean             @default(false)
   acknowledgedAt DateTime?
+  sessionId      String?
+  sessionUrl     String?
+  sessionModule  String?
   attachments    UserFeedbackAttachment[]
   notes          UserFeedbackNote[]
   createdAt      DateTime            @default(now())
@@ -540,6 +543,7 @@ model UserFeedback {
   @@index([userId, createdAt])
   @@index([status])
   @@index([status, priority])
+  @@index([sessionId])
 }
 
 model UserFeedbackAttachment {

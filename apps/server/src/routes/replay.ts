@@ -5,6 +5,7 @@ import { existsSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { prisma } from '../lib/prisma'
+import { logger, reqLog } from '../lib/logger'
 import {
   exportDenied,
   getReplaySessionOwnerId,
@@ -243,7 +244,7 @@ router.post('/sessions', trackFeatureUsage('replay', 'session_create'), async (r
 
     res.json({ sessionId: session.id })
   } catch (error) {
-    console.error('Error creating replay session:', error)
+    logger.error({ err: error }, 'Error creating replay session:')
     res.status(500).json({ error: 'Failed to create replay session' })
   }
 })
@@ -392,7 +393,7 @@ router.post(
         meetingDate: fresh?.meetingDate ? fresh.meetingDate.toISOString().slice(0, 10) : null,
       })
     } catch (error) {
-      console.error('Error uploading files:', error)
+      logger.error({ err: error }, 'Error uploading files:')
       res.status(500).json({ error: 'Failed to upload files' })
     }
   }
@@ -444,17 +445,18 @@ router.post('/sessions/:id/process', trackFeatureUsage('replay', 'analyze'), asy
     res.json({ message: 'Processing started', status: 'transcribing' })
 
     // Run pipeline asynchronously
+    reqLog(req).info({ event: 'replay.process_started', sessionId: id }, 'replay processing started')
     processReplaySession(id).catch((err) => {
-      console.error(`Replay processing failed for ${id}:`, err)
+      logger.error({ err, event: 'replay.process_failed', sessionId: id }, 'replay processing failed')
       prisma.replaySession
         .update({
           where: { id },
           data: { status: 'failed', errorMessage: err.message },
         })
-        .catch(console.error)
+        .catch((updErr) => logger.error({ err: updErr, sessionId: id }, 'replay failure-status update failed'))
     })
   } catch (error) {
-    console.error('Error starting processing:', error)
+    logger.error({ err: error }, 'Error starting processing:')
     res.status(500).json({ error: 'Failed to start processing' })
   }
 })
@@ -742,7 +744,10 @@ async function processReplaySession(sessionId: string): Promise<void> {
     data: { status: 'completed' },
   })
 
-  console.log(`Replay session ${sessionId} processing completed in ${processingTimeMs}ms`)
+  logger.info(
+    { event: 'replay.process_completed', sessionId, processingTimeMs },
+    'replay processing completed',
+  )
 }
 
 // ── PATCH /api/replay/sessions/:id ──
@@ -786,7 +791,7 @@ router.patch('/sessions/:id', async (req: Request, res: Response) => {
 
     res.json(updated)
   } catch (error) {
-    console.error('Error updating replay session:', error)
+    logger.error({ err: error }, 'Error updating replay session:')
     res.status(500).json({ error: 'Failed to update replay session' })
   }
 })
@@ -803,7 +808,7 @@ router.get('/sessions/:id/status', async (req: Request, res: Response) => {
     if (!session) return res.status(404).json({ error: 'Replay session not found' })
     res.json(session)
   } catch (error) {
-    console.error('Error fetching replay status:', error)
+    logger.error({ err: error }, 'Error fetching replay status:')
     res.status(500).json({ error: 'Failed to fetch status' })
   }
 })
@@ -871,7 +876,7 @@ router.get('/sessions/:id/results', async (req: Request, res: Response) => {
       coachingInsights: session.result?.coachingInsights ?? null,
     })
   } catch (error) {
-    console.error('Error fetching replay results:', error)
+    logger.error({ err: error }, 'Error fetching replay results:')
     res.status(500).json({ error: 'Failed to fetch results' })
   }
 })
@@ -899,7 +904,7 @@ router.get('/sessions', async (req: Request, res: Response) => {
 
     res.json({ sessions })
   } catch (error) {
-    console.error('Error listing replay sessions:', error)
+    logger.error({ err: error }, 'Error listing replay sessions:')
     res.status(500).json({ error: 'Failed to list replay sessions' })
   }
 })
@@ -937,7 +942,7 @@ router.get('/sessions/:id/download/:fileId', async (req: Request, res: Response)
 
     res.download(file.storedPath, file.originalName)
   } catch (error) {
-    console.error('Error downloading file:', error)
+    logger.error({ err: error }, 'Error downloading file:')
     res.status(500).json({ error: 'Failed to download file' })
   }
 })
@@ -975,7 +980,7 @@ router.delete('/sessions/:id', async (req: Request, res: Response) => {
     await prisma.replaySession.delete({ where: { id } })
     res.json({ message: 'Replay session deleted' })
   } catch (error) {
-    console.error('Error deleting replay session:', error)
+    logger.error({ err: error }, 'Error deleting replay session:')
     res.status(500).json({ error: 'Failed to delete replay session' })
   }
 })

@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express'
 import { AccessToken, RoomServiceClient, AgentDispatchClient } from 'livekit-server-sdk'
 import { prisma } from '../lib/prisma'
+import { logger, reqLog } from '../lib/logger'
 
 function getLivekitConfig() {
   const apiKey = process.env.LIVEKIT_API_KEY
@@ -21,7 +22,7 @@ async function getActiveVoiceConfig() {
     const active = await prisma.voiceConfig.findFirst({ where: { isActive: true } })
     if (active) return active
   } catch (err) {
-    console.warn('voice-config lookup failed, using nova-sonic fallback:', err)
+    logger.warn({ err: err }, 'voice-config lookup failed, using nova-sonic fallback:')
   }
   return {
     backend: 'nova-sonic',
@@ -157,10 +158,13 @@ export async function getLivekitToken(req: Request, res: Response) {
     at.addGrant({ room, roomJoin: true, canPublish: true, canSubscribe: true })
     
     const token = await at.toJwt()
-    console.log('✅ Token generated successfully')
+    reqLog(req).info(
+      { event: 'livekit.token_issued', room, sessionId, voiceBackend: voiceCfg.backend },
+      'livekit token issued',
+    )
     res.json({ token, url: lkUrl })
   } catch (error) {
-    console.error('❌ Error generating LiveKit token:', error)
+    logger.error({ err: error }, '❌ Error generating LiveKit token:')
     res.status(500).json({ error: 'Failed to generate token' })
   }
 }
@@ -185,7 +189,7 @@ export async function dispatchAgent(req: Request, res: Response) {
     
     res.json({ success: true, dispatch })
   } catch (error: any) {
-    console.error('❌ Error dispatching agent:', error)
+    logger.error({ err: error }, '❌ Error dispatching agent:')
     res.status(500).json({ error: 'Failed to dispatch agent', details: error.message })
   }
 }

@@ -9,6 +9,7 @@
 
 import { Request, Response } from 'express'
 import { prisma } from '../lib/prisma'
+import { logger, reqLog } from '../lib/logger'
 import { calculateSkillScores, type TextSignals } from '../analytics/skillScores'
 import {
   generateCoachingInsights,
@@ -212,8 +213,12 @@ export async function analyzeSession(req: Request, res: Response) {
       },
       pulseEntriesCreated: pulseCount,
     })
+    reqLog(req).info(
+      { event: 'analyze.succeeded', sessionId, source, pulseEntriesCreated: pulseCount },
+      'session analyzed',
+    )
   } catch (error: any) {
-    console.error('Analytics pipeline error:', error)
+    reqLog(req).error({ err: error, event: 'analyze.failed', sessionId, source }, 'analytics pipeline error')
     res.status(500).json({ error: 'Analytics pipeline failed', details: error.message })
   }
 }

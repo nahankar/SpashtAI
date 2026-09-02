@@ -38,6 +38,17 @@ from voice_backends import VoiceBackendConfig, apply_turn_detection_update, buil
 from backend_profiles import BackendProfile, SttMode, profile_for
 from live_pacing import LivePacingTracker
 
+# Session log context (additive, fail-safe). Guarded so a logging helper can
+# never break the live agent: if it fails to import, fall back to no-ops.
+try:
+    from log_context import bind_log_context, install_session_log_context
+except Exception:  # pragma: no cover - defensive
+    def bind_log_context(**_kwargs):
+        pass
+
+    def install_session_log_context():
+        pass
+
 # Import analytics components (includes basic + advanced metrics)
 try:
     from advanced_metrics_collector import AdvancedMetricsCollector
@@ -1486,6 +1497,11 @@ async def entrypoint(ctx: JobContext):
         )
     
     logger.info(f"📋 Session ID: {session_id}")
+
+    # Tag every subsequent log line in this job with the session/room so a whole
+    # session can be filtered out of the agent logs by sessionId.
+    install_session_log_context()
+    bind_log_context(session_id=session_id, room=ctx.room.name)
 
     # Refuse to resume a session that is already finalized. A re-dispatch or
     # reconnect can hand us an ended session's ID via room metadata; starting a

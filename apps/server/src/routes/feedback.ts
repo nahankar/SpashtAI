@@ -4,6 +4,7 @@ import path from 'path'
 import fs from 'fs'
 import { prisma } from '../lib/prisma'
 import { generateFeedbackNumber, isFeedbackEditable } from '../lib/feedback'
+import { resolveFeedbackSessionLink } from '../lib/feedbackSession'
 
 const router = Router()
 
@@ -36,10 +37,12 @@ function userId(req: Request): string {
 router.post('/', upload.array('attachments', 5), async (req: Request, res: Response) => {
   try {
     const uid = userId(req)
-    const { type, subject, body } = req.body as {
+    const { type, subject, body, sessionModule, sessionId } = req.body as {
       type?: string
       subject?: string
       body?: string
+      sessionModule?: string
+      sessionId?: string
     }
     if (!body?.trim()) {
       return res.status(400).json({ error: 'body is required' })
@@ -48,6 +51,7 @@ router.post('/', upload.array('attachments', 5), async (req: Request, res: Respo
       type === 'ISSUE' || type === 'FEATURE_REQUEST' ? type : 'FEEDBACK'
 
     const feedbackNumber = await generateFeedbackNumber()
+    const sessionLink = await resolveFeedbackSessionLink(uid, sessionModule, sessionId)
 
     const feedback = await prisma.userFeedback.create({
       data: {
@@ -56,6 +60,9 @@ router.post('/', upload.array('attachments', 5), async (req: Request, res: Respo
         type: feedbackType,
         subject: subject?.trim() || null,
         body: body.trim(),
+        sessionId: sessionLink.sessionId,
+        sessionUrl: sessionLink.sessionUrl,
+        sessionModule: sessionLink.sessionModule,
       },
     })
 
@@ -141,10 +148,12 @@ router.put('/:id', upload.array('attachments', 5), async (req: Request, res: Res
       })
     }
 
-    const { type, subject, body } = req.body as {
+    const { type, subject, body, sessionModule, sessionId } = req.body as {
       type?: string
       subject?: string
       body?: string
+      sessionModule?: string
+      sessionId?: string
     }
     if (!body?.trim()) {
       return res.status(400).json({ error: 'body is required' })
@@ -153,12 +162,17 @@ router.put('/:id', upload.array('attachments', 5), async (req: Request, res: Res
     const feedbackType =
       type === 'ISSUE' || type === 'FEATURE_REQUEST' ? type : 'FEEDBACK'
 
+    const sessionLink = await resolveFeedbackSessionLink(uid, sessionModule, sessionId)
+
     await prisma.userFeedback.update({
       where: { id: existing.id },
       data: {
         type: feedbackType,
         subject: subject?.trim() || null,
         body: body.trim(),
+        sessionId: sessionLink.sessionId,
+        sessionUrl: sessionLink.sessionUrl,
+        sessionModule: sessionLink.sessionModule,
       },
     })
 

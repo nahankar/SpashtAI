@@ -3,6 +3,7 @@ import crypto from 'crypto'
 import { prisma } from '../lib/prisma'
 import { hashPassword, comparePassword } from '../lib/password'
 import { signToken } from '../lib/jwt'
+import { logger, reqLog } from '../lib/logger'
 import { requireAuth } from '../middleware/auth'
 import { authLimiter } from '../middleware/rate-limit'
 import { sendEmail, buildPasswordResetEmail } from '../lib/email'
@@ -105,7 +106,7 @@ router.post('/register', authLimiter, async (req: Request, res: Response) => {
       user: toAuthUser(user),
     })
   } catch (err) {
-    console.error('Register error:', err)
+    logger.error({ err: err }, 'Register error:')
     res.status(500).json({ error: 'Registration failed' })
   }
 })
@@ -123,17 +124,20 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
     const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } })
     if (!user) {
       await comparePassword(password, '$2b$12$000000000000000000000uGsInbBqMUvMJIpIGnHsOHGSJxUXeJi')
+      reqLog(req).warn({ event: 'auth.login_failed', reason: 'no_user' }, 'login failed')
       res.status(401).json({ error: 'Invalid credentials' })
       return
     }
 
     if (!user.passwordHash) {
+      reqLog(req).warn({ event: 'auth.login_failed', reason: 'google_only', userId: user.id }, 'login failed')
       res.status(401).json({ error: 'Please sign in with Google for this account' })
       return
     }
 
     const valid = await comparePassword(password, user.passwordHash)
     if (!valid) {
+      reqLog(req).warn({ event: 'auth.login_failed', reason: 'bad_password', userId: user.id }, 'login failed')
       res.status(401).json({ error: 'Invalid credentials' })
       return
     }
@@ -157,12 +161,13 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
       },
     })
 
+    reqLog(req).info({ event: 'auth.login_succeeded', userId: user.id }, 'login ok')
     res.json({
       token,
       user: toAuthUser(user),
     })
   } catch (err) {
-    console.error('Login error:', err)
+    reqLog(req).error({ err, event: 'auth.login_error' }, 'login error')
     res.status(500).json({ error: 'Login failed' })
   }
 })
@@ -247,7 +252,7 @@ router.post('/google', authLimiter, async (req: Request, res: Response) => {
 
     res.json({ token, user: toAuthUser(user) })
   } catch (err) {
-    console.error('Google auth error:', err)
+    logger.error({ err: err }, 'Google auth error:')
     const message = err instanceof Error ? err.message : 'Google sign-in failed'
     res.status(401).json({ error: message })
   }
@@ -281,7 +286,7 @@ router.post('/complete-profile', requireAuth, async (req: Request, res: Response
 
     res.json({ user: toAuthUser(user) })
   } catch (err) {
-    console.error('Complete profile error:', err)
+    logger.error({ err: err }, 'Complete profile error:')
     res.status(500).json({ error: 'Failed to save profile' })
   }
 })
@@ -316,8 +321,13 @@ router.post('/forgot-password', authLimiter, async (req: Request, res: Response)
     const emailResult = await sendEmail({ to: user.email, subject, text })
 
     if (!emailResult.sent) {
-      console.log(`🔑 Password reset token for ${email}: ${resetToken}`)
-      console.log(`   Reset URL: ${resetUrl}`)
+      // Dev convenience only — never log a live reset token/URL in production.
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`🔑 Password reset token for ${email}: ${resetToken}`)
+        console.log(`   Reset URL: ${resetUrl}`)
+      } else {
+        reqLog(req).warn({ event: 'auth.reset_email_failed', userId: user.id }, 'reset email send failed')
+      }
     }
 
     const payload: Record<string, string> = {
@@ -333,7 +343,7 @@ router.post('/forgot-password', authLimiter, async (req: Request, res: Response)
 
     res.json(payload)
   } catch (err) {
-    console.error('Forgot password error:', err)
+    logger.error({ err: err }, 'Forgot password error:')
     res.status(500).json({ error: 'Failed to process request' })
   }
 })
@@ -376,7 +386,7 @@ router.post('/reset-password', authLimiter, async (req: Request, res: Response) 
 
     res.json({ message: 'Password reset successfully' })
   } catch (err) {
-    console.error('Reset password error:', err)
+    logger.error({ err: err }, 'Reset password error:')
     res.status(500).json({ error: 'Failed to reset password' })
   }
 })
@@ -426,7 +436,7 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
 
     res.json({ user: toAuthUser(user) })
   } catch (err) {
-    console.error('Get me error:', err)
+    logger.error({ err: err }, 'Get me error:')
     res.status(500).json({ error: 'Failed to fetch user' })
   }
 })
@@ -455,7 +465,7 @@ router.put('/me', requireAuth, async (req: Request, res: Response) => {
 
     res.json({ user })
   } catch (err) {
-    console.error('Update profile error:', err)
+    logger.error({ err: err }, 'Update profile error:')
     res.status(500).json({ error: 'Failed to update profile' })
   }
 })
@@ -499,7 +509,7 @@ router.put('/change-password', requireAuth, async (req: Request, res: Response) 
 
     res.json({ message: 'Password changed successfully' })
   } catch (err) {
-    console.error('Change password error:', err)
+    logger.error({ err: err }, 'Change password error:')
     res.status(500).json({ error: 'Failed to change password' })
   }
 })
@@ -518,7 +528,7 @@ router.post('/logout', requireAuth, async (req: Request, res: Response) => {
 
     res.json({ message: 'Logged out successfully' })
   } catch (err) {
-    console.error('Logout error:', err)
+    logger.error({ err: err }, 'Logout error:')
     res.status(500).json({ error: 'Logout failed' })
   }
 })

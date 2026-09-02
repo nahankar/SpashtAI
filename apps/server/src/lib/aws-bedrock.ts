@@ -3,6 +3,7 @@ import {
   InvokeModelCommand,
 } from '@aws-sdk/client-bedrock-runtime'
 import { awsCredentialsConfig } from './awsCredentials'
+import { logger } from './logger'
 
 const BEDROCK_MODEL_ID = process.env.BEDROCK_REPLAY_MODEL_ID || 'amazon.nova-pro-v1:0'
 
@@ -180,7 +181,10 @@ IMPORTANT for annotatedTranscript:
     body,
   })
 
+  const invokedModel = modelId || BEDROCK_MODEL_ID
+  const startedAt = Date.now()
   const response = await client.send(command)
+  const latencyMs = Date.now() - startedAt
   const raw = JSON.parse(new TextDecoder().decode(response.body))
 
   const outputText: string =
@@ -211,8 +215,21 @@ IMPORTANT for annotatedTranscript:
       keyMoments: [],
       annotatedTranscript: [],
     }
-    console.error('Failed to parse Bedrock response as JSON, flagging error')
   }
+
+  // LLM stream: per-call cost + latency + parse outcome (no prompt/response text).
+  logger.info(
+    {
+      event: 'bedrock.invoke',
+      purpose: 'replay_analysis',
+      model: invokedModel,
+      promptTokens,
+      completionTokens,
+      latencyMs,
+      parseOk: !analysisError,
+    },
+    analysisError ? 'bedrock replay analysis returned unparseable JSON' : 'bedrock replay analysis ok',
+  )
 
   return {
     overallScore: parsed.overallScore ?? 0,

@@ -1,12 +1,21 @@
 version: '3.8'
+
+# Cap container log files so docker json-file logs can't fill the disk.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   livekit:
     image: livekit/livekit-server:latest
     container_name: livekit
     restart: unless-stopped
+    logging: *default-logging
     ports:
       - "7880:7880"
-      - "7881:7881" 
+      - "7881:7881"
       - "7882:7882/udp"
     # Mount config file to enable agents
     volumes:
@@ -18,6 +27,7 @@ services:
     image: redis:alpine
     container_name: livekit-redis
     restart: unless-stopped
+    logging: *default-logging
     ports:
       - "6379:6379"
 
@@ -25,6 +35,7 @@ services:
     image: livekit/egress:latest
     container_name: livekit-egress
     restart: unless-stopped
+    logging: *default-logging
     environment:
       - EGRESS_CONFIG_FILE=/etc/egress.yaml
     volumes:

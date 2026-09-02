@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { apiClient } from '@/lib/api-client'
 import { FeedbackAttachmentLink } from '@/components/feedback/FeedbackAttachmentLink'
+import { FeedbackLinkedSession } from '@/components/feedback/FeedbackLinkedSession'
 import {
   FEEDBACK_PRIORITY_BADGE,
   FEEDBACK_STATUS_BADGE,
@@ -38,6 +39,9 @@ interface FeedbackData {
   body: string
   status: string
   priority: string | null
+  sessionId?: string | null
+  sessionUrl?: string | null
+  sessionModule?: string | null
   acknowledgedAt: string | null
   createdAt: string
   updatedAt: string
@@ -230,7 +234,12 @@ export function AdminFeedbackDetail() {
                 </span>
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
+              <FeedbackLinkedSession
+                sessionId={feedback.sessionId}
+                sessionUrl={feedback.sessionUrl}
+                sessionModule={feedback.sessionModule}
+              />
               <div className="whitespace-pre-wrap text-sm">{feedback.body}</div>
               {feedback.attachments.length > 0 && (
                 <div className="mt-4 flex flex-wrap gap-2">

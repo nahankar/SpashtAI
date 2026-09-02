@@ -92,10 +92,56 @@ import eventsRouter from './routes/events'
 import { requireFeature, ensureFeatureFlags } from './lib/featureFlags'
 import { ensurePlatformSettings } from './lib/platformSettings'
 import { apiLimiter } from './middleware/rate-limit'
+import { ingestClientLogs, clientLogsLimiter } from './routes/clientLogs'
+import { logger } from './lib/logger'
+import pino from 'pino'
+import pinoHttp from 'pino-http'
+import { randomUUID } from 'crypto'
+import { prisma } from './lib/prisma'
 
 const app = express()
 // Cloudflare → Nginx → Express; required for rate limiting and client IP
 app.set('trust proxy', 1)
+
+// Structured request logging (one JSON line per request, at completion).
+// Logs at response 'finish', so req.user (set by requireAuth) is available.
+// Honors an inbound x-request-id and echoes it back; correlates to a session
+// via the optional x-conversation-id header (the client's sessionId).
+app.use(
+  pinoHttp({
+    logger,
+    genReqId: (req, res) => {
+      const hdr = req.headers['x-request-id']
+      const id = (Array.isArray(hdr) ? hdr[0] : hdr) || randomUUID()
+      res.setHeader('x-request-id', id)
+      return id
+    },
+    customProps: (req) => {
+      const conv = req.headers['x-conversation-id']
+      return {
+        userId: (req as { user?: { userId?: string } }).user?.userId,
+        sessionId: (Array.isArray(conv) ? conv[0] : conv) || undefined,
+      }
+    },
+    // Health checks would otherwise dominate the log volume.
+    autoLogging: { ignore: (req) => req.url === '/health' },
+    customLogLevel: (_req, res, err) => {
+      if (err || res.statusCode >= 500) return 'error'
+      if (res.statusCode >= 400) return 'warn'
+      return 'info'
+    },
+    // redact() covers headers/query, but the access_token also rides in the raw
+    // URL of media routes — strip it there so playback tokens never hit the logs.
+    serializers: {
+      req: pino.stdSerializers.wrapRequestSerializer((req) => {
+        if (typeof req.url === 'string' && req.url.includes('access_token=')) {
+          req.url = req.url.replace(/([?&]access_token=)[^&]+/gi, '$1[redacted]')
+        }
+        return req
+      }),
+    },
+  }),
+)
 
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
@@ -105,8 +151,34 @@ app.use(express.json())
 
 app.use('/api/', apiLimiter)
 
+// Liveness: process is up. Cheap, dependency-free (kept as-is for uptime pings).
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' })
+})
+
+// Readiness: verifies the DB is actually reachable, so a monitor/alarm can tell
+// "process up but database down" apart from a healthy box. Bounded so a hung DB
+// can't hang the probe.
+app.get('/ready', async (_req, res) => {
+  const query = prisma.$queryRaw`SELECT 1`
+  // If the query loses the race and rejects later, swallow it so it can't surface
+  // as an unhandledRejection.
+  query.catch(() => {})
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      query,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('db timeout')), 2000)
+      }),
+    ])
+    res.json({ status: 'ready' })
+  } catch (err) {
+    logger.warn({ err }, 'readiness check failed')
+    res.status(503).json({ status: 'unavailable' })
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 })
 
 // Public: platform feature flags (no secrets — drives nav visibility)
@@ -118,6 +190,10 @@ app.use('/api/legal', legalRouter)
 
 // Auth routes (authLimiter applied inside the router for login/register)
 app.use('/api/auth', authRouter)
+
+// Browser remote logs → S3 (operational only; gated by CLIENT_LOGS_ENABLED).
+// Fail-safe: never blocks or errors the app; no-ops when disabled.
+app.post('/api/client-logs', clientLogsLimiter, requireAuth, ingestClientLogs)
 
 // Admin routes
 app.use('/api/admin/users', requireAuth, requireAdmin, adminUsersRouter)
@@ -250,6 +326,23 @@ app.get('/audio/local/:date/:sessionId/:filename', (req, res) => {
       console.error('Error serving local audio:', err)
       res.status(404).json({ error: 'Audio file not found' })
     }
+  })
+})
+
+// Central error handler — safety net for errors that propagate to Express
+// (most routes still handle their own errors and return their own shapes; this
+// catches the rest instead of leaking a stack trace or hanging the request).
+// Must be registered after all routes. Honors err.status for client errors
+// (e.g. malformed JSON body) and hides internal details on 5xx.
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const status = Number(err?.status || err?.statusCode) || 500
+  ;((req as { log?: typeof logger }).log || logger).error(
+    { err, status },
+    'unhandled request error',
+  )
+  if (res.headersSent) return next(err)
+  res.status(status).json({
+    error: status < 500 ? err?.message || 'Bad request' : 'Internal server error',
   })
 })
 

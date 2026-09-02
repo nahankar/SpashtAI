@@ -1,0 +1,18 @@
+# SpashtAI log rotation for files written outside PM2.
+#
+# - PM2's own logs (logs/spashtai-*.log) are handled by pm2-logrotate.
+# - The agent writes an unbounded debug side-channel to /tmp; copytruncate
+#   rotates it in place without the agent needing to reopen the file.
+#
+# Install: sudo cp infra/ec2/logrotate/spashtai /etc/logrotate.d/spashtai
+# Verify : sudo logrotate --debug /etc/logrotate.d/spashtai
+
+/tmp/spashtai_agent_debug.log {
+  daily
+  rotate 7
+  compress
+  delaycompress
+  missingok
+  notifempty
+  copytruncate
+}

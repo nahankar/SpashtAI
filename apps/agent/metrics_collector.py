@@ -331,14 +331,28 @@ class MetricsCollector:
                 self.stt_metrics.append(m)
                 logger.info(
                     f"⏱️ STT: duration={m.duration:.2f}s "
-                    f"audio={m.audio_duration:.2f}s streamed={m.streamed}"
+                    f"audio={m.audio_duration:.2f}s streamed={m.streamed}",
+                    extra={
+                        "metric": "stage_timing",
+                        "step": "stt",
+                        "duration_ms": round(m.duration * 1000),
+                        "audio_ms": round(m.audio_duration * 1000),
+                        "streamed": m.streamed,
+                    },
                 )
 
             elif isinstance(m, EOUMetrics):
                 self.eou_metrics.append(m)
                 logger.info(
                     f"⏱️ EOU: end_of_utterance_delay={m.end_of_utterance_delay:.2f}s "
-                    f"transcription_delay={m.transcription_delay:.2f}s"
+                    f"transcription_delay={m.transcription_delay:.2f}s",
+                    extra={
+                        "metric": "stage_timing",
+                        "step": "eou",
+                        "speech_id": m.speech_id,
+                        "latency_ms": round(m.end_of_utterance_delay * 1000),
+                        "transcription_ms": round(m.transcription_delay * 1000),
+                    },
                 )
                 self._record_stage(m.speech_id, "eou", m.end_of_utterance_delay)
 
@@ -346,7 +360,15 @@ class MetricsCollector:
                 self.llm_metrics.append(m)
                 logger.info(
                     f"⏱️ LLM: ttft={m.ttft:.2f}s duration={m.duration:.2f}s "
-                    f"tokens={m.total_tokens} tok/s={m.tokens_per_second:.1f}"
+                    f"tokens={m.total_tokens} tok/s={m.tokens_per_second:.1f}",
+                    extra={
+                        "metric": "stage_timing",
+                        "step": "llm",
+                        "speech_id": m.speech_id,
+                        "ttft_ms": round(m.ttft * 1000),
+                        "duration_ms": round(m.duration * 1000),
+                        "total_tokens": m.total_tokens,
+                    },
                 )
                 self._record_stage(m.speech_id, "llm_ttft", m.ttft)
 
@@ -354,7 +376,15 @@ class MetricsCollector:
                 self.tts_metrics.append(m)
                 logger.info(
                     f"⏱️ TTS: ttfb={m.ttfb:.2f}s duration={m.duration:.2f}s "
-                    f"audio={m.audio_duration:.2f}s chars={m.characters_count}"
+                    f"audio={m.audio_duration:.2f}s chars={m.characters_count}",
+                    extra={
+                        "metric": "stage_timing",
+                        "step": "tts",
+                        "speech_id": m.speech_id,
+                        "ttfb_ms": round(m.ttfb * 1000),
+                        "duration_ms": round(m.duration * 1000),
+                        "characters": m.characters_count,
+                    },
                 )
                 self._record_stage(m.speech_id, "tts_ttfb", m.ttfb)
 
@@ -379,7 +409,15 @@ class MetricsCollector:
             total = eou + llm + tts
             logger.info(
                 f"🎯 TURN LATENCY (speech {speech_id}): {total:.2f}s "
-                f"= EOU {eou:.2f}s + LLM-ttft {llm:.2f}s + TTS-ttfb {tts:.2f}s"
+                f"= EOU {eou:.2f}s + LLM-ttft {llm:.2f}s + TTS-ttfb {tts:.2f}s",
+                extra={
+                    "metric": "turn_latency",
+                    "speech_id": speech_id,
+                    "latency_ms": round(total * 1000),
+                    "eou_ms": round(eou * 1000),
+                    "llm_ttft_ms": round(llm * 1000),
+                    "tts_ttfb_ms": round(tts * 1000),
+                },
             )
             self._latency_by_speech.pop(speech_id, None)
     

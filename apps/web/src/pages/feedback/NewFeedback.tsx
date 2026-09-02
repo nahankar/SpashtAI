@@ -1,11 +1,13 @@
-import { useState, useRef } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useState, useRef, useMemo } from 'react'
+import { useNavigate, Link, useSearchParams } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { ArrowLeft, Upload, X, Loader2 } from 'lucide-react'
+import { FeedbackSessionPicker } from '@/components/feedback/FeedbackSessionPicker'
+import { parseSessionPickerValue, type FeedbackSessionModule } from '@/lib/feedback-session'
 
 const API = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 
@@ -15,15 +17,31 @@ const TYPES = [
   { value: 'FEATURE_REQUEST', label: 'Feature Request' },
 ]
 
+function parseModuleParam(value: string | null): FeedbackSessionModule | null {
+  if (value === 'elevate' || value === 'replay') return value
+  return null
+}
+
 export function NewFeedback() {
   const navigate = useNavigate()
-  const [type, setType] = useState('FEEDBACK')
+  const [searchParams] = useSearchParams()
+  const initialModule = parseModuleParam(searchParams.get('module'))
+  const initialSessionId = searchParams.get('session')
+  const fromSession = Boolean(initialModule && initialSessionId)
+
+  const [type, setType] = useState(fromSession ? 'ISSUE' : 'FEEDBACK')
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
+  const [sessionPickerValue, setSessionPickerValue] = useState('')
   const [files, setFiles] = useState<File[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const pasteRef = useRef<HTMLDivElement>(null)
+
+  const selectedSession = useMemo(
+    () => parseSessionPickerValue(sessionPickerValue),
+    [sessionPickerValue],
+  )
 
   const canSubmit = body.trim().length > 0
 
@@ -62,6 +80,10 @@ export function NewFeedback() {
       form.append('type', type)
       if (subject.trim()) form.append('subject', subject.trim())
       form.append('body', body.trim())
+      if (selectedSession) {
+        form.append('sessionModule', selectedSession.module)
+        form.append('sessionId', selectedSession.sessionId)
+      }
       files.forEach((file) => form.append('attachments', file))
 
       const token = localStorage.getItem('spashtai_token')
@@ -122,6 +144,13 @@ export function NewFeedback() {
               ))}
             </select>
           </div>
+
+          <FeedbackSessionPicker
+            value={sessionPickerValue}
+            onChange={setSessionPickerValue}
+            initialModule={initialModule}
+            initialSessionId={initialSessionId}
+          />
 
           <div className="space-y-1">
             <Label htmlFor="fb-subject">Subject (optional)</Label>

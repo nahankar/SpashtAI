@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { ArrowLeft, Loader2, AlertCircle, Upload, X, Save } from 'lucide-react'
 import { apiClient } from '@/lib/api-client'
 import { FeedbackAttachmentLink } from '@/components/feedback/FeedbackAttachmentLink'
+import { FeedbackLinkedSession } from '@/components/feedback/FeedbackLinkedSession'
 import { FEEDBACK_STATUS_BADGE, FEEDBACK_TYPE_LABELS } from '@/lib/feedback-constants'
 import { AuthContext } from '@/contexts/AuthContext'
 
@@ -36,6 +37,9 @@ interface FeedbackData {
   body: string
   status: string
   pointsAwarded?: boolean
+  sessionId?: string | null
+  sessionUrl?: string | null
+  sessionModule?: string | null
   attachments: { id: string; fileName: string }[]
   notes: FeedbackNote[]
   createdAt: string
@@ -189,6 +193,12 @@ export function FeedbackDetail() {
               This feedback has been marked as considered and can no longer be edited.
             </p>
           )}
+
+          <FeedbackLinkedSession
+            sessionId={feedback.sessionId}
+            sessionUrl={feedback.sessionUrl}
+            sessionModule={feedback.sessionModule}
+          />
 
           {editable ? (
             <>

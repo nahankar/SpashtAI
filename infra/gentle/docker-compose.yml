@@ -1,9 +1,17 @@
 version: '3.8'
 
+# Cap container log files so docker json-file logs can't fill the disk.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   gentle:
     image: lowerquality/gentle:latest
     container_name: spashtai-gentle
+    logging: *default-logging
     ports:
       - "8765:8765"
     volumes:
@@ -20,6 +28,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: spashtai-redis
+    logging: *default-logging
     ports:
       - "6379:6379"
     volumes:

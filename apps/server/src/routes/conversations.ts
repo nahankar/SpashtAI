@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express'
 import { prisma } from '../lib/prisma'
+import { logger } from '../lib/logger'
 import { awardSessionActivePoints } from '../lib/points'
 import {
   exportDenied,
@@ -134,7 +135,7 @@ export async function addConversationMessage(req: Request, res: Response) {
     // If session already ended, a late-persisted message may be the last piece needed for points.
     if (session.endedAt && !session.sessionPointsAwarded) {
       awardSessionActivePoints(session.userId, sessionId).catch((err) => {
-        console.warn('Deferred session points award failed:', err)
+        logger.warn({ err: err }, 'Deferred session points award failed:')
       })
     }
     
@@ -144,12 +145,12 @@ export async function addConversationMessage(req: Request, res: Response) {
       transcriptId: transcript.id
     })
   } catch (error) {
-    console.error('❌ Error adding conversation message:', error)
-    console.error('  SessionId:', req.params.sessionId)
-    console.error('  Request body:', req.body)
-    console.error('  Error details:', error instanceof Error ? error.message : String(error))
-    console.error('  Stack:', error instanceof Error ? error.stack : 'No stack trace')
-    res.status(500).json({ 
+    // Don't log req.body — it contains transcript content (PII). err carries the stack.
+    logger.error(
+      { err: error, sessionId: req.params.sessionId },
+      'error adding conversation message',
+    )
+    res.status(500).json({
       error: 'Failed to add conversation message',
       details: error instanceof Error ? error.message : String(error)
     })
@@ -219,7 +220,7 @@ export async function getConversation(req: Request, res: Response) {
       session: transcript.session
     })
   } catch (error) {
-    console.error('Error getting conversation:', error)
+    logger.error({ err: error }, 'Error getting conversation:')
     res.status(500).json({ error: 'Failed to get conversation' })
   }
 }
@@ -279,7 +280,7 @@ export async function getConversationForAgent(req: Request, res: Response) {
       },
     })
   } catch (error) {
-    console.error('Error getting conversation for agent:', error)
+    logger.error({ err: error }, 'Error getting conversation for agent:')
     res.status(500).json({ error: 'Failed to get conversation' })
   }
 }
@@ -299,7 +300,7 @@ export async function updateSessionState(req: Request, res: Response) {
     
     res.json({ success: true })
   } catch (error) {
-    console.error('Error updating session state:', error)
+    logger.error({ err: error }, 'Error updating session state:')
     res.status(500).json({ error: 'Failed to update session state' })
   }
 }
@@ -377,7 +378,7 @@ export async function searchConversations(req: Request, res: Response) {
       }
     })
   } catch (error) {
-    console.error('Error searching conversations:', error)
+    logger.error({ err: error }, 'Error searching conversations:')
     res.status(500).json({ error: 'Failed to search conversations' })
   }
 }

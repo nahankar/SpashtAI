@@ -40,6 +40,13 @@ echo "==> PM2"
 sudo npm install -g pm2
 pm2 -v
 
+echo "==> PM2 log rotation (caps logs/spashtai-*.log so disk can't fill)"
+# Idempotent; '|| true' so a transient pm2 daemon hiccup never fails bootstrap.
+pm2 install pm2-logrotate || true
+pm2 set pm2-logrotate:max_size 50M || true
+pm2 set pm2-logrotate:retain 14 || true
+pm2 set pm2-logrotate:compress true || true
+
 echo "==> Docker"
 if ! command -v docker >/dev/null 2>&1; then
   sudo install -m 0755 -d /etc/apt/keyrings
@@ -88,6 +95,11 @@ if [[ -f "${REPO_ROOT}/infra/ec2/nginx/cloudflare-real-ip.conf" ]]; then
 fi
 
 mkdir -p "${REPO_ROOT}/logs"
+
+if [[ -f "${REPO_ROOT}/infra/ec2/logrotate/spashtai" ]]; then
+  echo "==> logrotate for the agent /tmp debug log"
+  sudo cp "${REPO_ROOT}/infra/ec2/logrotate/spashtai" /etc/logrotate.d/spashtai
+fi
 
 echo ""
 echo "Bootstrap complete."
