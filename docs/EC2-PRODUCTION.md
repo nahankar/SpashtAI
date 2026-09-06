@@ -350,7 +350,7 @@ cd /opt/spashtai
 ./infra/ec2/deploy.sh
 ```
 
-The script refuses a dirty working tree (does not `git reset --hard`), checks production env/LiveKit files, pulls `main`, runs `prisma migrate deploy` (never `migrate reset`), builds with `VITE_API_BASE_URL=https://api.spasht.ai` and `GOOGLE_CLIENT_ID` from `apps/server/.env`, rsyncs web to `/var/www/spashtai`, reloads Nginx/PM2, and waits for `/health`.
+The script refuses unexpected dirty files (does not `git reset --hard` or `git clean`), checks production env/LiveKit files, fast-forward-pulls `main` while restoring local LiveKit yaml overlays, runs `prisma migrate deploy` only (never `migrate reset` or `db push`), builds with `VITE_API_BASE_URL=https://api.spasht.ai` and `GOOGLE_CLIENT_ID` from `apps/server/.env`, rsyncs web to `/var/www/spashtai` only if `dist/index.html` exists, reloads Nginx/PM2, and waits for `/health`.
 
 Skip the pull with `SKIP_GIT_PULL=1` if you already pulled. Skip the health wait with `SKIP_HEALTH_WAIT=1`.
 

@@ -46,6 +46,7 @@ spashtai-user-audio-*.webm
 # Secrets & certs (never commit)
 *.pem
 client_secret_*.json
+.deploy-overlay-backup/
 
 # Local test assets
 Session Testing/

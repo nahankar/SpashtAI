@@ -8,6 +8,8 @@
 # Env:
 #   SKIP_GIT_PULL=1     skip `git pull origin main`
 #   SKIP_HEALTH_WAIT=1  skip waiting for /health after PM2 reload
+#
+# Safety: never git reset --hard, git clean, or prisma migrate reset.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -20,6 +22,26 @@ PROD_FILES=(
   apps/server/.env
 )
 
+# Tracked files with production secrets/keys. Local copies must win over GitHub.
+PROD_TRACKED_OVERLAYS=(
+  infra/livekit/livekit.yaml
+  infra/livekit/egress.yaml
+)
+
+# Last-known production LiveKit yaml. Survives a killed deploy; gitignored.
+OVERLAY_BACKUP="${ROOT}/.deploy-overlay-backup"
+
+is_prod_overlay() {
+  local path="$1"
+  local overlay
+  for overlay in "${PROD_TRACKED_OVERLAYS[@]}"; do
+    if [[ "${path}" == "${overlay}" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 load_env_val() {
   local file="$1" key="$2"
   [[ -f "${file}" ]] || return 0
@@ -29,16 +51,65 @@ load_env_val() {
   printf '%s' "${line#*=}" | tr -d '\r' | sed -e 's/^["'\'']//' -e 's/["'\'']$//'
 }
 
+backup_overlays() {
+  mkdir -p "${OVERLAY_BACKUP}"
+  local f
+  for f in "${PROD_TRACKED_OVERLAYS[@]}"; do
+    if [[ -f "${ROOT}/${f}" ]]; then
+      cp -p "${ROOT}/${f}" "${OVERLAY_BACKUP}/$(basename "${f}")"
+    fi
+  done
+}
+
+restore_overlays() {
+  [[ -d "${OVERLAY_BACKUP}" ]] || return 0
+  local f
+  for f in "${PROD_TRACKED_OVERLAYS[@]}"; do
+    local bak="${OVERLAY_BACKUP}/$(basename "${f}")"
+    if [[ -f "${bak}" ]]; then
+      cp -p "${bak}" "${ROOT}/${f}"
+    fi
+  done
+}
+
+recover_overlays_if_reset_to_git() {
+  [[ -d "${OVERLAY_BACKUP}" ]] || return 0
+  local f
+  for f in "${PROD_TRACKED_OVERLAYS[@]}"; do
+    if git diff --quiet -- "${f}"; then
+      local bak="${OVERLAY_BACKUP}/$(basename "${f}")"
+      if [[ -f "${bak}" ]]; then
+        cp -p "${bak}" "${ROOT}/${f}"
+      fi
+    fi
+  done
+}
+
+trap restore_overlays EXIT
+
 echo "==> Preflight"
+# Only restore from backup when the working copy currently matches Git (interrupted checkout --).
+# Never overwrite a live production overlay with a stale backup.
+recover_overlays_if_reset_to_git
 if [[ "$(git rev-parse --abbrev-ref HEAD)" != "main" ]]; then
   echo "Refusing to deploy from branch $(git rev-parse --abbrev-ref HEAD); expected main." >&2
   exit 1
 fi
-if ! git diff --quiet || ! git diff --cached --quiet; then
-  echo "Working tree has local modifications. Inspect them before deploying; do not git reset --hard." >&2
+
+dirty=0
+while IFS= read -r path; do
+  [[ -z "${path}" ]] && continue
+  if ! is_prod_overlay "${path}"; then
+    dirty=1
+    echo "  unexpected change: ${path}" >&2
+  fi
+done < <(git diff --name-only ; git diff --cached --name-only)
+if [[ "${dirty}" -ne 0 ]]; then
+  echo "Working tree has unexpected local modifications. Inspect them before deploying; do not git reset --hard." >&2
   git status --short
   exit 1
 fi
+
 missing=0
 for f in "${PROD_FILES[@]}"; do
   if [[ ! -f "${ROOT}/${f}" ]]; then
@@ -54,10 +125,18 @@ if [[ "${missing}" -ne 0 ]]; then
   exit 1
 fi
 
+backup_overlays
+
 if [[ "${SKIP_GIT_PULL:-}" != "1" ]]; then
-  echo "==> git pull origin main"
-  git pull origin main
+  echo "==> git pull --ff-only origin main"
+  # Match HEAD for overlay files so pull cannot refuse or merge-over production keys.
+  local_overlay=""
+  for local_overlay in "${PROD_TRACKED_OVERLAYS[@]}"; do
+    git checkout -- "${local_overlay}"
+  done
+  git pull --ff-only origin main
   git log -1 --oneline
+  restore_overlays
 fi
 
 echo "==> Python agent venv"
@@ -80,8 +159,6 @@ echo "==> Prisma"
 cd apps/server
 npm run prisma:generate
 npx prisma migrate deploy
-# Do not prisma migrate reset. db push only fills schema lag on a fresh box.
-npx prisma db push
 cd "${ROOT}"
 
 echo "==> Build server + web"
@@ -95,6 +172,11 @@ if [[ -z "${VITE_GOOGLE_CLIENT_ID:-}" ]]; then
   echo "Warning: VITE_GOOGLE_CLIENT_ID not set — Google Sign-In will fail until set." >&2
 fi
 npm run build
+
+if [[ ! -f "${ROOT}/apps/web/dist/index.html" ]]; then
+  echo "Frontend build did not produce apps/web/dist/index.html — refusing rsync --delete." >&2
+  exit 1
+fi
 
 echo "==> Sync web dist to /var/www/spashtai"
 sudo rsync -a --delete apps/web/dist/ /var/www/spashtai/
