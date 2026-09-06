@@ -343,11 +343,16 @@ BEDROCK_PIPELINE_LLM=amazon.nova-lite-v1:0
 
 ## 11 — Updates
 
+From the production checkout (`ubuntu@13.219.136.19`, project root `/opt/spashtai`):
+
 ```bash
 cd /opt/spashtai
-git pull
 ./infra/ec2/deploy.sh
 ```
+
+The script refuses a dirty working tree (does not `git reset --hard`), checks production env/LiveKit files, pulls `main`, runs `prisma migrate deploy` (never `migrate reset`), builds with `VITE_API_BASE_URL=https://api.spasht.ai` and `GOOGLE_CLIENT_ID` from `apps/server/.env`, rsyncs web to `/var/www/spashtai`, reloads Nginx/PM2, and waits for `/health`.
+
+Skip the pull with `SKIP_GIT_PULL=1` if you already pulled. Skip the health wait with `SKIP_HEALTH_WAIT=1`.
 
 ---
 
