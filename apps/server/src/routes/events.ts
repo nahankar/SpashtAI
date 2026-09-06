@@ -5,7 +5,7 @@ import { isPrivilegedRole } from '../lib/userExportFlags'
 
 const router = Router()
 
-const ALLOWED_FEATURES = new Set(['app', 'elevate', 'replay'])
+const ALLOWED_FEATURES = new Set(['app', 'elevate', 'replay', 'prepare'])
 const MAX_ACTION_LEN = 64
 
 // POST /api/events/track — lightweight product analytics (auth required)

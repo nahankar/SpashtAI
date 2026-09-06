@@ -78,6 +78,7 @@ import adminTickersRouter from './routes/admin/tickers'
 import adminPricingRouter from './routes/admin/pricing'
 import adminLegalRouter from './routes/admin/legal'
 import adminPlatformRouter from './routes/admin/platform'
+import preparationsRouter from './routes/preparations'
 import legalRouter from './routes/legal'
 import { getPublicTickers } from './routes/tickers'
 import { getPublicPricing } from './routes/pricing'
@@ -214,6 +215,9 @@ app.use('/api/events', requireAuth, eventsRouter)
 
 // Protected: user feedback
 app.use('/api/feedback', requireAuth, feedbackRouter)
+
+// Protected: Prepare interview journeys
+app.use('/api/preparations', requireAuth, requireFeature('prepare'), preparationsRouter)
 
 // Public: LiveKit (has its own auth via API keys) — Elevate only
 app.get('/livekit/token', requireFeature('elevate'), getLivekitToken)

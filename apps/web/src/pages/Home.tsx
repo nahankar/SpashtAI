@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Upload, Mic, History } from 'lucide-react';
+import { Upload, Mic, History, BriefcaseBusiness } from 'lucide-react';
 import { ProgressPulseCard } from '@/components/analytics/ProgressPulseCard';
 import { useFeatureFlags } from '@/contexts/FeatureFlagsContext';
 import { FeatureModuleCard } from '@/components/auth/FeatureModuleCard';
@@ -13,7 +13,8 @@ export function Home() {
   const { user } = useAuth()
   const showReplay = isVisible('replay')
   const showElevate = isVisible('elevate')
-  const moduleCount = [showReplay, showElevate].filter(Boolean).length
+  const showPrepare = isVisible('prepare')
+  const moduleCount = [showReplay, showElevate, showPrepare].filter(Boolean).length
 
   return (
     <div className="grid gap-6">
@@ -48,7 +49,7 @@ export function Home() {
             <Button disabled className="w-full">Unavailable</Button>
           </FeatureModuleCard>
         ) : (
-          <div className={`grid gap-4 ${moduleCount > 1 ? 'sm:grid-cols-2' : 'max-w-lg'}`}>
+          <div className={`grid gap-4 ${moduleCount > 2 ? 'lg:grid-cols-3' : moduleCount > 1 ? 'sm:grid-cols-2' : 'max-w-lg'}`}>
             {showReplay && (
               <FeatureModuleCard
                 title="Replay"
@@ -109,6 +110,25 @@ export function Home() {
                   <li>Real-time voice AI conversation</li>
                   <li>Live metrics &amp; analytics</li>
                   <li>Resume anytime</li>
+                </ul>
+              </FeatureModuleCard>
+            )}
+
+            {showPrepare && (
+              <FeatureModuleCard
+                title="Prepare"
+                description="Organise upcoming interview journeys and always know which round is next."
+                icon={<BriefcaseBusiness className="h-8 w-8 text-emerald-600 shrink-0" />}
+                flag={getFlag('prepare')}
+                accessible={isAccessible('prepare')}
+              >
+                <Link to="/prepare">
+                  <Button className="w-full" size="lg" variant="outline">Start Preparing</Button>
+                </Link>
+                <ul className="mt-3 grid gap-1 text-xs text-muted-foreground">
+                  <li>Track multiple interview journeys</li>
+                  <li>Keep role and round context together</li>
+                  <li>Know what comes next</li>
                 </ul>
               </FeatureModuleCard>
             )}

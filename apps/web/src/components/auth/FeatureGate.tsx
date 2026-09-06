@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 const FEATURE_LABELS: Record<PlatformFeature, string> = {
   elevate: 'Elevate',
   replay: 'Replay',
+  prepare: 'Prepare',
 }
 
 export function FeatureGate({

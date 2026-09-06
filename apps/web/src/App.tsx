@@ -11,6 +11,9 @@ import { ReplayResults } from '@/pages/ReplayResults'
 import { SessionReplay } from '@/pages/SessionReplay'
 import { History } from '@/pages/History'
 import { ProgressPulse } from '@/pages/ProgressPulse'
+import { Prepare } from '@/pages/Prepare'
+import { InterviewJourneys } from '@/pages/InterviewJourneys'
+import { InterviewJourney } from '@/pages/InterviewJourney'
 import { Landing } from '@/pages/Landing'
 import { Login } from '@/pages/auth/Login'
 import { AdminLogin } from '@/pages/auth/AdminLogin'
@@ -56,6 +59,8 @@ function AppBreadcrumbs() {
     '/': 'Home',
     '/replay': 'Replay',
     '/elevate': 'Elevate',
+    '/prepare': 'Prepare',
+    '/prepare/interviews': 'Your Interviews',
     '/progress': 'Progress Pulse',
     '/history': 'Sessions',
     '/feedback': 'Feedback',
@@ -72,12 +77,15 @@ function AppBreadcrumbs() {
   const isElevatePlayback = path.startsWith('/elevate/playback/')
   const isElevateResults =
     path === '/elevate' && new URLSearchParams(location.search).has('session')
+  const isInterviewJourney =
+    path.startsWith('/prepare/interviews/') && path !== '/prepare/interviews'
 
   const currentLabel =
     (isElevateResults ? 'Results' : null) ||
     routeLabelMap[path] ||
     (isReplayResults ? 'Results' : null) ||
     (isFeedbackDetail ? 'Feedback Details' : null) ||
+    (isInterviewJourney ? 'Interview Journey' : null) ||
     (isElevatePlayback ? 'Playback' : null) ||
     path
       .split('/')
@@ -110,6 +118,12 @@ function AppBreadcrumbs() {
         <>
           <span>/</span>
           <Link to="/elevate" className="hover:text-foreground transition-colors">Elevate</Link>
+        </>
+      )}
+      {(isInterviewJourney || path === '/prepare/interviews') && (
+        <>
+          <span>/</span>
+          <Link to="/prepare" className="hover:text-foreground transition-colors">Prepare</Link>
         </>
       )}
       {path !== '/' && (
@@ -199,7 +213,7 @@ function Navbar() {
     className,
     onClick,
   }: {
-    feature: 'elevate' | 'replay'
+    feature: 'elevate' | 'replay' | 'prepare'
     to: string
     label: string
     className?: string
@@ -238,6 +252,7 @@ function Navbar() {
             <>
               <NavFeatureLink feature="replay" to="/replay" label="Replay" />
               <NavFeatureLink feature="elevate" to="/elevate" label="Elevate" />
+              <NavFeatureLink feature="prepare" to="/prepare" label="Prepare" />
               <Link className="hover:underline" to="/progress">Progress Pulse</Link>
               <Link className="hover:underline" to="/history">Sessions</Link>
               <Link className="hover:underline" to="/feedback">Feedback (earn points)</Link>
@@ -283,6 +298,7 @@ function Navbar() {
             <>
               <NavFeatureLink feature="replay" to="/replay" label="Replay" className={navLinkClass} onClick={() => setMobileOpen(false)} />
               <NavFeatureLink feature="elevate" to="/elevate" label="Elevate" className={navLinkClass} onClick={() => setMobileOpen(false)} />
+              <NavFeatureLink feature="prepare" to="/prepare" label="Prepare" className={navLinkClass} onClick={() => setMobileOpen(false)} />
               <Link className={navLinkClass} to="/progress" onClick={() => setMobileOpen(false)}>Progress Pulse</Link>
               <Link className={navLinkClass} to="/history" onClick={() => setMobileOpen(false)}>Sessions</Link>
               <Link className={navLinkClass} to="/feedback" onClick={() => setMobileOpen(false)}>Feedback (earn points)</Link>
@@ -401,6 +417,30 @@ function AppRoutes() {
               <AppBreadcrumbs />
               <FeatureGate feature="elevate">
                 <SessionReplay />
+              </FeatureGate>
+            </main>
+          } />
+          <Route path="/prepare" element={
+            <main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8">
+              <AppBreadcrumbs />
+              <FeatureGate feature="prepare">
+                <Prepare />
+              </FeatureGate>
+            </main>
+          } />
+          <Route path="/prepare/interviews" element={
+            <main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8">
+              <AppBreadcrumbs />
+              <FeatureGate feature="prepare">
+                <InterviewJourneys />
+              </FeatureGate>
+            </main>
+          } />
+          <Route path="/prepare/interviews/:id" element={
+            <main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8">
+              <AppBreadcrumbs />
+              <FeatureGate feature="prepare">
+                <InterviewJourney />
               </FeatureGate>
             </main>
           } />

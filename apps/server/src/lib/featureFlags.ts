@@ -1,9 +1,9 @@
 import type { Request, Response, NextFunction } from 'express'
 import { prisma } from './prisma'
 
-export type PlatformFeature = 'elevate' | 'replay'
+export type PlatformFeature = 'elevate' | 'replay' | 'prepare'
 
-export const PLATFORM_FEATURES: PlatformFeature[] = ['elevate', 'replay']
+export const PLATFORM_FEATURES: PlatformFeature[] = ['elevate', 'replay', 'prepare']
 
 export interface FeatureFlagPublicState {
   hidden: boolean
@@ -31,6 +31,13 @@ const DEFAULT_FLAGS: Array<{
     label: 'Replay',
     description: 'Upload recordings or transcripts for post-session analysis.',
     hidden: false,
+    disabled: false,
+  },
+  {
+    feature: 'prepare',
+    label: 'Prepare',
+    description: 'Build and track preparation journeys for important conversations.',
+    hidden: true,
     disabled: false,
   },
 ]
@@ -101,6 +108,7 @@ export async function getFeatureFlagsMap(): Promise<Record<PlatformFeature, Feat
   const map: Record<PlatformFeature, FeatureFlagPublicState> = {
     elevate: { hidden: false, disabled: false, overlayComment: null, overlayPosition: 'center' },
     replay: { hidden: false, disabled: false, overlayComment: null, overlayPosition: 'center' },
+    prepare: { hidden: true, disabled: false, overlayComment: null, overlayPosition: 'center' },
   }
   for (const row of rows) {
     if (PLATFORM_FEATURES.includes(row.feature as PlatformFeature)) {

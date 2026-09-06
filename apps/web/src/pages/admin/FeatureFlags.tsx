@@ -3,10 +3,9 @@ import { apiClient } from '@/lib/api-client'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { Loader2, Mic, Upload, AlertCircle } from 'lucide-react'
+import { Loader2, Mic, Upload, AlertCircle, BriefcaseBusiness } from 'lucide-react'
 import { useFeatureFlags } from '@/contexts/FeatureFlagsContext'
 
 interface FeatureFlagRow {
@@ -24,6 +23,7 @@ interface FeatureFlagRow {
 const FEATURE_ICONS: Record<string, typeof Mic> = {
   elevate: Mic,
   replay: Upload,
+  prepare: BriefcaseBusiness,
 }
 
 function FlagToggle({

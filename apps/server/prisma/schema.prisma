@@ -20,6 +20,39 @@ enum Gender {
   PREFER_NOT_TO_SAY
 }
 
+enum PreparationType {
+  INTERVIEW
+}
+
+enum PreparationStatus {
+  ACTIVE
+  PAUSED
+  OFFERED
+  COMPLETED
+  REJECTED
+  WITHDRAWN
+}
+
+enum PreparationStageType {
+  APPLIED
+  RECRUITER
+  TECHNICAL
+  BEHAVIORAL
+  HIRING_MANAGER
+  CASE_ASSIGNMENT
+  LEADERSHIP
+  HR
+  OFFER
+  CUSTOM
+}
+
+enum PreparationStageStatus {
+  UPCOMING
+  SCHEDULED
+  COMPLETED
+  SKIPPED
+}
+
 model User {
   id             String          @id @default(cuid())
   email          String          @unique
@@ -80,6 +113,7 @@ model User {
   // Relations
   sessions       Session[]
   replaySessions ReplaySession[]
+  preparations   Preparation[]
   activityLogs   UserActivity[]
   featureUsage   FeatureUsage[]
   progressPulse  ProgressPulse[]
@@ -161,6 +195,63 @@ model SystemMetrics {
   createdAt DateTime @default(now())
 
   @@index([date])
+}
+
+model Preparation {
+  id          String            @id @default(cuid())
+  userId      String
+  user        User              @relation(fields: [userId], references: [id])
+  type        PreparationType   @default(INTERVIEW)
+  title       String
+  status      PreparationStatus @default(ACTIVE)
+  completedAt DateTime?
+
+  interview InterviewPreparation?
+  stages    PreparationStage[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([userId, status])
+}
+
+model InterviewPreparation {
+  id                 String      @id @default(cuid())
+  preparationId      String      @unique
+  preparation        Preparation @relation(fields: [preparationId], references: [id], onDelete: Cascade)
+  companyName        String
+  roleTitle          String
+  jobDescriptionText String?     @db.Text
+  interviewDate      DateTime?
+  resumeText         String?     @db.Text
+  resumeLabel        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Phase A intentionally supports one optional interviewer per stage.
+// Panel and multi-interviewer rounds will use a join model in a later phase.
+model PreparationStage {
+  id                     String                 @id @default(cuid())
+  preparationId          String
+  preparation            Preparation            @relation(fields: [preparationId], references: [id], onDelete: Cascade)
+  type                   PreparationStageType
+  name                   String
+  sequence               Int
+  status                 PreparationStageStatus @default(UPCOMING)
+  scheduledAt            DateTime?
+  completedAt            DateTime?
+  interviewerName        String?
+  interviewerRole        String?
+  interviewerProfileText String?                @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([preparationId, sequence])
+  @@index([preparationId, status])
 }
 
 model Session {
