@@ -6,6 +6,7 @@ import {
   ArrowUp,
   Calendar,
   Loader2,
+  NotebookPen,
   Plus,
   Save,
   Trash2,
@@ -19,7 +20,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
-import { StageTracker } from '@/components/prepare/StageTracker'
+import { JourneyTimeline } from '@/components/prepare/JourneyTimeline'
+import { LogInterviewDialog } from '@/components/prepare/LogInterviewDialog'
+import { QuestionMemory } from '@/components/prepare/QuestionMemory'
+import { useConfirm } from '@/hooks/useConfirm'
 import {
   addPreparationStage,
   deletePreparationStage,
@@ -30,6 +34,7 @@ import {
 } from '@/lib/prepare-api'
 import {
   PREPARE_TEXT_LIMITS,
+  ratingLabel,
   type Preparation,
   type PreparationStage,
   type PreparationStageStatus,
@@ -55,10 +60,9 @@ function displayDate(value: string | null | undefined) {
     : null
 }
 
-const STAGE_STATUSES: PreparationStageStatus[] = [
+const STAGE_PIPELINE_STATUSES: PreparationStageStatus[] = [
   'UPCOMING',
   'SCHEDULED',
-  'COMPLETED',
   'SKIPPED',
 ]
 
@@ -72,6 +76,7 @@ const JOURNEY_STATUSES: PreparationStatus[] = [
 ]
 
 export function InterviewJourney() {
+  const confirm = useConfirm()
   const { id } = useParams<{ id: string }>()
   const [journey, setJourney] = useState<Preparation | null>(null)
   const [loading, setLoading] = useState(true)
@@ -81,6 +86,13 @@ export function InterviewJourney() {
   const [editingStage, setEditingStage] = useState<string | null>(null)
   const [newStageName, setNewStageName] = useState('')
   const [tab, setTab] = useState('overview')
+  const [logOpen, setLogOpen] = useState(false)
+  const [logStageId, setLogStageId] = useState<string | null>(null)
+
+  function openLog(stageId?: string) {
+    setLogStageId(stageId ?? journey?.nextStage?.id ?? null)
+    setLogOpen(true)
+  }
 
   const load = useCallback(async (silent = false) => {
     if (!id) return
@@ -126,6 +138,10 @@ export function InterviewJourney() {
 
   async function changeStatus(stage: PreparationStage, status: PreparationStageStatus) {
     if (!journey) return
+    if (status === 'COMPLETED') {
+      openLog(stage.id)
+      return
+    }
     try {
       await updatePreparationStage(journey.id, stage.id, {
         status,
@@ -211,6 +227,22 @@ export function InterviewJourney() {
 
   async function removeStage(stage: PreparationStage) {
     if (!journey) return
+    const questionCount = stage.questionCount ?? 0
+    const accepted = await confirm({
+      title: `Remove ${stage.name}?`,
+      description: stage.reflection
+        ? `The reflection for this round will be deleted. ${
+            questionCount > 0
+              ? `${questionCount} question${questionCount === 1 ? '' : 's'} stay on the journey.`
+              : 'Questions already on this journey stay.'
+          }`
+        : questionCount > 0
+          ? `${questionCount} question${questionCount === 1 ? '' : 's'} stay on the journey, unassigned to a round.`
+          : 'This stage will be removed from the pipeline.',
+      confirmLabel: 'Remove stage',
+      variant: 'destructive',
+    })
+    if (!accepted) return
     try {
       await deletePreparationStage(journey.id, stage.id)
       await load(true)
@@ -262,11 +294,17 @@ export function InterviewJourney() {
             )}
           </div>
         </div>
-        {tab === 'overview' && (
-          <Button variant="outline" onClick={() => setEditingOverview((editing) => !editing)}>
-            {editingOverview ? 'Cancel editing' : 'Edit journey'}
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={() => openLog()}>
+            <NotebookPen className="mr-2 h-4 w-4" />
+            Log interview
           </Button>
-        )}
+          {tab === 'overview' && (
+            <Button variant="outline" onClick={() => setEditingOverview((editing) => !editing)}>
+              {editingOverview ? 'Cancel editing' : 'Edit journey'}
+            </Button>
+          )}
+        </div>
       </div>
 
       <StageTracker stages={journey.stages} />
@@ -290,6 +328,7 @@ export function InterviewJourney() {
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="stages">Stages</TabsTrigger>
+          <TabsTrigger value="questions">Questions</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="mt-5">
@@ -350,7 +389,8 @@ export function InterviewJourney() {
                   )}
                 </CardContent>
               </Card>
-              <Card>
+              <JourneyTimeline items={journey.timeline ?? []} />
+              <Card className="lg:col-span-2">
                 <CardHeader><CardTitle className="text-lg">Role context</CardTitle></CardHeader>
                 <CardContent className="space-y-4">
                   <div>
@@ -432,12 +472,15 @@ export function InterviewJourney() {
                       <div className="flex gap-1">
                         <Button size="icon" variant="ghost" disabled={index === 0} onClick={() => moveStage(index, -1)} aria-label={`Move ${stage.name} up`}><ArrowUp className="h-4 w-4" /></Button>
                         <Button size="icon" variant="ghost" disabled={index === journey.stages.length - 1} onClick={() => moveStage(index, 1)} aria-label={`Move ${stage.name} down`}><ArrowDown className="h-4 w-4" /></Button>
+                        <Button size="sm" variant="outline" onClick={() => openLog(stage.id)}>
+                          Log interview
+                        </Button>
                         <Button size="sm" variant="outline" onClick={() => setEditingStage(stage.id)}>Edit</Button>
                         <Button size="icon" variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => removeStage(stage)} aria-label={`Remove ${stage.name}`}><Trash2 className="h-4 w-4" /></Button>
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
-                      {STAGE_STATUSES.map((status) => (
+                      {STAGE_PIPELINE_STATUSES.map((status) => (
                         <Button
                           key={status}
                           size="sm"
@@ -448,7 +491,30 @@ export function InterviewJourney() {
                           {status.toLowerCase()}
                         </Button>
                       ))}
+                      <Button
+                        size="sm"
+                        variant={stage.status === 'COMPLETED' ? 'default' : 'ghost'}
+                        onClick={() => openLog(stage.id)}
+                        className="h-7 text-xs"
+                      >
+                        completed
+                      </Button>
                     </div>
+                    {(stage.questionCount || stage.reflection) && (
+                      <p className="text-xs text-muted-foreground">
+                        {stage.questionCount ? `${stage.questionCount} question${stage.questionCount === 1 ? '' : 's'}` : ''}
+                        {stage.questionCount && stage.reflection ? ' · ' : ''}
+                        {stage.reflection
+                          ? `Reflection${ratingLabel(stage.reflection.rating) ? `: ${ratingLabel(stage.reflection.rating)}` : ''}`
+                          : ''}
+                      </p>
+                    )}
+                    {stage.reflection?.surprisedBy && (
+                      <p className="text-sm">
+                        <span className="text-muted-foreground">Surprised by: </span>
+                        {stage.reflection.surprisedBy}
+                      </p>
+                    )}
                   </div>
                 )}
               </CardContent>
@@ -470,7 +536,25 @@ export function InterviewJourney() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        <TabsContent value="questions" className="mt-5">
+          <QuestionMemory journey={journey} onChanged={() => load(true)} />
+        </TabsContent>
       </Tabs>
+
+      {logOpen && (
+        <LogInterviewDialog
+          key={`${logStageId ?? 'next'}-${journey.updatedAt}`}
+          journey={journey}
+          open={logOpen}
+          defaultStageId={logStageId}
+          onOpenChange={setLogOpen}
+          onLogged={(updated) => {
+            setJourney(updated)
+            setTab('overview')
+          }}
+        />
+      )}
     </div>
   )
 }

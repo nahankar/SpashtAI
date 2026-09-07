@@ -1,9 +1,13 @@
 import {
+  InterviewOutcome,
+  InterviewQuestionSource,
+  InterviewRating,
   PreparationStageStatus,
   PreparationStageType,
   PreparationStatus,
 } from '@prisma/client'
 import { z } from 'zod'
+import { MAX_QUESTION_TEXT, MAX_QUESTIONS_PER_LOG } from './parseInterviewQuestions'
 import { MAX_PREPARATION_STAGES } from './prepareStages'
 
 /** Shared with the web client so long pastes are capped before they are submitted. */
@@ -17,6 +21,11 @@ export const PREPARE_TEXT_LIMITS = {
   jobDescriptionText: 30_000,
   resumeText: 30_000,
   interviewerProfileText: 20_000,
+  reflectionText: 8_000,
+  questionsText: 20_000,
+  questionText: MAX_QUESTION_TEXT,
+  questionMeta: 160,
+  questionNotes: 4_000,
 } as const
 
 const shortText = (label: string, max: number) =>
@@ -68,11 +77,18 @@ export const updatePreparationSchema = z
   .strict()
   .refine((value) => Object.keys(value).length > 0, 'No fields to update')
 
+const pipelineStageStatus = z
+  .nativeEnum(PreparationStageStatus)
+  .refine(
+    (status) => status !== PreparationStageStatus.COMPLETED,
+    'Log the interview to mark this round completed',
+  )
+
 export const createStageSchema = z
   .object({
     type: z.nativeEnum(PreparationStageType),
     name: shortText('Stage name', PREPARE_TEXT_LIMITS.stageName),
-    status: z.nativeEnum(PreparationStageStatus).optional(),
+    status: pipelineStageStatus.optional(),
     scheduledAt: optionalDate,
     interviewerName: optionalText(PREPARE_TEXT_LIMITS.interviewerName),
     interviewerRole: optionalText(PREPARE_TEXT_LIMITS.interviewerRole),
@@ -93,3 +109,65 @@ export const reorderStagesSchema = z
     stageIds: z.array(z.string().cuid()).min(1).max(MAX_PREPARATION_STAGES),
   })
   .strict()
+
+const reflectionFields = {
+  rating: z.nativeEnum(InterviewRating).optional().nullable(),
+  outcome: z.nativeEnum(InterviewOutcome).optional().nullable(),
+  wentWell: optionalText(PREPARE_TEXT_LIMITS.reflectionText),
+  difficulties: optionalText(PREPARE_TEXT_LIMITS.reflectionText),
+  surprisedBy: optionalText(PREPARE_TEXT_LIMITS.reflectionText),
+  feedbackReceived: optionalText(PREPARE_TEXT_LIMITS.reflectionText),
+  nextRoundHints: optionalText(PREPARE_TEXT_LIMITS.reflectionText),
+}
+
+export const upsertReflectionSchema = z.object(reflectionFields).strict().refine(
+  (value) => Object.values(value).some((field) => field !== undefined),
+  'No fields to update',
+)
+
+export const createQuestionSchema = z
+  .object({
+    questionText: shortText('Question', PREPARE_TEXT_LIMITS.questionText),
+    source: z.nativeEnum(InterviewQuestionSource).optional(),
+    stageId: z.string().cuid().optional().nullable(),
+    category: optionalText(PREPARE_TEXT_LIMITS.questionMeta),
+    topic: optionalText(PREPARE_TEXT_LIMITS.questionMeta),
+    difficulty: optionalText(PREPARE_TEXT_LIMITS.questionMeta),
+    notes: optionalText(PREPARE_TEXT_LIMITS.questionNotes),
+    askedAt: optionalDate,
+  })
+  .strict()
+
+export const updateQuestionSchema = createQuestionSchema
+  .partial()
+  .strict()
+  .refine((value) => Object.keys(value).length > 0, 'No fields to update')
+
+export const logInterviewSchema = z
+  .object({
+    stageId: z.string().cuid(),
+    ...reflectionFields,
+    questionsText: optionalText(PREPARE_TEXT_LIMITS.questionsText),
+    nextStageScheduledAt: optionalDate,
+  })
+  .strict()
+  .refine((value) => {
+    const hasQuestions = Boolean(value.questionsText?.trim())
+    return (
+      hasQuestions ||
+      value.rating != null ||
+      value.outcome != null ||
+      Boolean(value.wentWell) ||
+      Boolean(value.difficulties) ||
+      Boolean(value.surprisedBy) ||
+      Boolean(value.feedbackReceived) ||
+      Boolean(value.nextRoundHints)
+    )
+  }, 'Add what they asked, how it went, or a short reflection')
+  .refine(
+    (value) =>
+      !value.questionsText ||
+      value.questionsText.split(/\r?\n/).filter((line) => line.trim()).length <=
+        MAX_QUESTIONS_PER_LOG,
+    `Log at most ${MAX_QUESTIONS_PER_LOG} questions at a time`,
+  )

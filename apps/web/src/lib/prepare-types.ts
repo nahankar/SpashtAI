@@ -24,6 +24,52 @@ export type PreparationStageStatus =
   | 'COMPLETED'
   | 'SKIPPED'
 
+export type InterviewQuestionSource =
+  | 'ACTUAL_INTERVIEW'
+  | 'PRACTICE'
+  | 'USER_ENTERED'
+  | 'AI_SUGGESTED'
+
+export type InterviewOutcome = 'PASSED' | 'REJECTED' | 'PENDING' | 'UNKNOWN'
+
+export type InterviewRating = 'VERY_POOR' | 'POOR' | 'FAIR' | 'GOOD' | 'EXCELLENT'
+
+export type StageReflection = {
+  id: string
+  stageId: string
+  rating: InterviewRating | null
+  outcome: InterviewOutcome | null
+  wentWell: string | null
+  difficulties: string | null
+  surprisedBy: string | null
+  feedbackReceived: string | null
+  nextRoundHints: string | null
+  updatedAt: string
+}
+
+export type InterviewQuestion = {
+  id: string
+  stageId: string | null
+  questionText: string
+  source: InterviewQuestionSource
+  category: string | null
+  topic: string | null
+  difficulty: string | null
+  notes: string | null
+  askedAt: string | null
+  createdAt: string
+}
+
+export type PreparationTimelineItem = {
+  at: string
+  kind: 'stage_completed' | 'questions_added' | 'reflection'
+  stageId: string | null
+  stageName: string | null
+  questionCount?: number
+  rating?: InterviewRating | null
+  outcome?: InterviewOutcome | null
+}
+
 export type PreparationStage = {
   id: string
   type: PreparationStageType
@@ -35,6 +81,8 @@ export type PreparationStage = {
   interviewerName: string | null
   interviewerRole: string | null
   interviewerProfileText: string | null
+  reflection?: StageReflection | null
+  questionCount?: number
 }
 
 export type InterviewPreparation = {
@@ -59,6 +107,8 @@ export type Preparation = {
   stages: PreparationStage[]
   lastCompletedStage: PreparationStage | null
   nextStage: PreparationStage | null
+  questions?: InterviewQuestion[]
+  timeline?: PreparationTimelineItem[]
 }
 
 /** Mirrors PREPARE_TEXT_LIMITS on the server. */
@@ -72,6 +122,9 @@ export const PREPARE_TEXT_LIMITS = {
   jobDescriptionText: 30_000,
   resumeText: 30_000,
   interviewerProfileText: 20_000,
+  reflectionText: 8_000,
+  questionsText: 20_000,
+  questionText: 2_000,
 } as const
 
 export const JOURNEY_FINISHED_STATUSES: PreparationStatus[] = [
@@ -92,3 +145,22 @@ export const ROUND_OPTIONS: Array<{
   { type: 'HR', label: 'HR' },
   { type: null, label: 'Not sure' },
 ]
+
+export const INTERVIEW_RATINGS: Array<{ value: InterviewRating; label: string }> = [
+  { value: 'VERY_POOR', label: 'Very poor' },
+  { value: 'POOR', label: 'Poor' },
+  { value: 'FAIR', label: 'Fair' },
+  { value: 'GOOD', label: 'Good' },
+  { value: 'EXCELLENT', label: 'Excellent' },
+]
+
+export const INTERVIEW_OUTCOMES: Array<{ value: InterviewOutcome; label: string }> = [
+  { value: 'PENDING', label: 'Pending' },
+  { value: 'PASSED', label: 'Passed' },
+  { value: 'REJECTED', label: 'Rejected' },
+  { value: 'UNKNOWN', label: 'Unknown' },
+]
+
+export function ratingLabel(rating: InterviewRating | null | undefined) {
+  return INTERVIEW_RATINGS.find((option) => option.value === rating)?.label ?? null
+}

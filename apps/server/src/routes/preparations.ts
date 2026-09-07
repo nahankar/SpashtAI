@@ -1,31 +1,47 @@
 import {
+  InterviewQuestionSource,
   Prisma,
   PreparationStageStatus,
   PreparationStatus,
-  type Preparation,
   type PreparationStage,
 } from '@prisma/client'
 import { Router, type Request, type Response } from 'express'
 import type { ZodError } from 'zod'
 import { prisma } from '../lib/prisma'
 import { reqLog } from '../lib/logger'
-import { getOwnedPreparation, lockOwnedPreparation } from '../lib/prepareAccess'
+import {
+  getOwnedPreparation,
+  getOwnedPreparationDetail,
+  getOwnedStage,
+  lockOwnedPreparation,
+} from '../lib/prepareAccess'
+import {
+  MAX_QUESTIONS_PER_JOURNEY,
+  parseInterviewQuestions,
+} from '../lib/parseInterviewQuestions'
 import {
   createPreparationSchema,
+  createQuestionSchema,
   createStageSchema,
+  logInterviewSchema,
   reorderStagesSchema,
   updatePreparationSchema,
+  updateQuestionSchema,
   updateStageSchema,
+  upsertReflectionSchema,
 } from '../lib/prepareSchemas'
 import {
   deriveStageSummary,
   MAX_PREPARATION_STAGES,
   sameInstant,
 } from '../lib/prepareStages'
+import { buildPreparationTimeline } from '../lib/prepareTimeline'
 import {
   createInterviewJourney,
+  preparationDetailInclude,
   preparationInclude,
 } from '../services/preparations/createInterviewJourney'
+import { logInterview, LogInterviewError } from '../services/preparations/logInterview'
 
 const router = Router()
 
@@ -35,6 +51,20 @@ function userId(req: Request): string {
 
 function withStageSummary<T extends { stages: PreparationStage[] }>(preparation: T) {
   return { ...preparation, ...deriveStageSummary(preparation.stages) }
+}
+
+function withPreparationDetail(
+  preparation: NonNullable<Awaited<ReturnType<typeof getOwnedPreparationDetail>>>,
+) {
+  const stages = preparation.stages.map((stage) => ({
+    ...stage,
+    questionCount: preparation.questions.filter((question) => question.stageId === stage.id)
+      .length,
+  }))
+  return {
+    ...withStageSummary({ ...preparation, stages }),
+    timeline: buildPreparationTimeline(stages, preparation.questions),
+  }
 }
 
 const FIELD_LABELS: Record<string, string> = {
@@ -49,7 +79,19 @@ const FIELD_LABELS: Record<string, string> = {
   interviewerRole: 'Interviewer role',
   interviewerProfileText: 'Interviewer profile details',
   name: 'Stage name',
+  status: 'Stage status',
   scheduledAt: 'Scheduled date',
+  stageId: 'Stage',
+  questionText: 'Question',
+  questionsText: 'What they asked',
+  rating: 'How it went',
+  outcome: 'Outcome',
+  wentWell: 'What went well',
+  difficulties: 'What was difficult',
+  surprisedBy: 'What surprised you',
+  feedbackReceived: 'Feedback',
+  nextRoundHints: 'Next-round hints',
+  nextStageScheduledAt: 'Next interview date',
 }
 
 function validationError(res: Response, error: ZodError) {
@@ -113,9 +155,9 @@ router.post('/', async (req, res) => {
 
 router.get('/:id', async (req, res) => {
   try {
-    const preparation = await getOwnedPreparation(userId(req), req.params.id)
+    const preparation = await getOwnedPreparationDetail(userId(req), req.params.id)
     if (!preparation) return res.status(404).json({ error: 'Not found' })
-    res.json({ preparation: withStageSummary(preparation) })
+    res.json({ preparation: withPreparationDetail(preparation) })
   } catch (error) {
     reqLog(req).error({ err: error }, 'Failed to get preparation')
     res.status(500).json({ error: 'Failed to load preparation' })
@@ -183,9 +225,9 @@ router.patch('/:id', async (req, res) => {
             }
           : {}),
       },
-      include: preparationInclude,
+      include: preparationDetailInclude,
     })
-    res.json({ preparation: withStageSummary(preparation) })
+    res.json({ preparation: withPreparationDetail(preparation) })
   } catch (error) {
     reqLog(req).error({ err: error }, 'Failed to update preparation')
     res.status(500).json({ error: 'Failed to update preparation' })
@@ -358,10 +400,10 @@ router.post('/:id/stages/reorder', async (req, res) => {
       }
       return tx.preparation.findFirst({
         where: { id: req.params.id, userId: userId(req) },
-        include: preparationInclude,
+        include: preparationDetailInclude,
       })
     })
-    res.json({ preparation: withStageSummary(preparation!) })
+    res.json({ preparation: withPreparationDetail(preparation!) })
   } catch (error) {
     if (error instanceof Error && error.message === 'NOT_FOUND') {
       return res.status(404).json({ error: 'Not found' })
@@ -371,6 +413,181 @@ router.post('/:id/stages/reorder', async (req, res) => {
     }
     reqLog(req).error({ err: error }, 'Failed to reorder preparation stages')
     res.status(500).json({ error: 'Failed to reorder stages' })
+  }
+})
+
+router.get('/:id/questions', async (req, res) => {
+  try {
+    const preparation = await getOwnedPreparation(userId(req), req.params.id)
+    if (!preparation) return res.status(404).json({ error: 'Not found' })
+    const questions = await prisma.interviewQuestion.findMany({
+      where: { preparationId: preparation.id },
+      orderBy: { createdAt: 'asc' },
+    })
+    res.json({ questions })
+  } catch (error) {
+    reqLog(req).error({ err: error }, 'Failed to list interview questions')
+    res.status(500).json({ error: 'Failed to load questions' })
+  }
+})
+
+router.post('/:id/questions', async (req, res) => {
+  const parsed = createQuestionSchema.safeParse(req.body)
+  if (!parsed.success) return validationError(res, parsed.error)
+
+  try {
+    const preparation = await getOwnedPreparation(userId(req), req.params.id)
+    if (!preparation) return res.status(404).json({ error: 'Not found' })
+    if (parsed.data.stageId) {
+      const stage = await getOwnedStage(userId(req), preparation.id, parsed.data.stageId)
+      if (!stage) return res.status(404).json({ error: 'Not found' })
+    }
+    const count = await prisma.interviewQuestion.count({
+      where: { preparationId: preparation.id },
+    })
+    if (count >= MAX_QUESTIONS_PER_JOURNEY) {
+      return res.status(400).json({
+        error: `A journey can remember at most ${MAX_QUESTIONS_PER_JOURNEY} questions`,
+      })
+    }
+    const question = await prisma.interviewQuestion.create({
+      data: {
+        preparationId: preparation.id,
+        stageId: parsed.data.stageId ?? null,
+        questionText: parsed.data.questionText,
+        source: parsed.data.source ?? InterviewQuestionSource.USER_ENTERED,
+        category: parsed.data.category ?? null,
+        topic: parsed.data.topic ?? null,
+        difficulty: parsed.data.difficulty ?? null,
+        notes: parsed.data.notes ?? null,
+        askedAt: parsed.data.askedAt ?? null,
+      },
+    })
+    reqLog(req).info(
+      { event: 'prepare.question_added', preparationId: preparation.id, count: 1 },
+      'Interview question added',
+    )
+    res.status(201).json({ question })
+  } catch (error) {
+    reqLog(req).error({ err: error }, 'Failed to add interview question')
+    res.status(500).json({ error: 'Failed to add question' })
+  }
+})
+
+router.patch('/:id/questions/:questionId', async (req, res) => {
+  const parsed = updateQuestionSchema.safeParse(req.body)
+  if (!parsed.success) return validationError(res, parsed.error)
+
+  try {
+    const question = await prisma.interviewQuestion.findFirst({
+      where: {
+        id: req.params.questionId,
+        preparationId: req.params.id,
+        preparation: { userId: userId(req) },
+      },
+    })
+    if (!question) return res.status(404).json({ error: 'Not found' })
+    if (parsed.data.stageId) {
+      const stage = await getOwnedStage(userId(req), question.preparationId, parsed.data.stageId)
+      if (!stage) return res.status(404).json({ error: 'Not found' })
+    }
+    const updated = await prisma.interviewQuestion.update({
+      where: { id: question.id },
+      data: parsed.data,
+    })
+    res.json({ question: updated })
+  } catch (error) {
+    reqLog(req).error({ err: error }, 'Failed to update interview question')
+    res.status(500).json({ error: 'Failed to update question' })
+  }
+})
+
+router.delete('/:id/questions/:questionId', async (req, res) => {
+  try {
+    const result = await prisma.interviewQuestion.deleteMany({
+      where: {
+        id: req.params.questionId,
+        preparationId: req.params.id,
+        preparation: { userId: userId(req) },
+      },
+    })
+    if (result.count === 0) return res.status(404).json({ error: 'Not found' })
+    res.status(204).send()
+  } catch (error) {
+    reqLog(req).error({ err: error }, 'Failed to delete interview question')
+    res.status(500).json({ error: 'Failed to delete question' })
+  }
+})
+
+router.patch('/:id/stages/:stageId/reflection', async (req, res) => {
+  const parsed = upsertReflectionSchema.safeParse(req.body)
+  if (!parsed.success) return validationError(res, parsed.error)
+
+  try {
+    const stage = await getOwnedStage(userId(req), req.params.id, req.params.stageId)
+    if (!stage) return res.status(404).json({ error: 'Not found' })
+    const reflection = await prisma.stageReflection.upsert({
+      where: { stageId: stage.id },
+      create: {
+        preparationId: stage.preparationId,
+        stageId: stage.id,
+        rating: parsed.data.rating ?? null,
+        outcome: parsed.data.outcome ?? null,
+        wentWell: parsed.data.wentWell ?? null,
+        difficulties: parsed.data.difficulties ?? null,
+        surprisedBy: parsed.data.surprisedBy ?? null,
+        feedbackReceived: parsed.data.feedbackReceived ?? null,
+        nextRoundHints: parsed.data.nextRoundHints ?? null,
+      },
+      update: parsed.data,
+    })
+    res.json({ reflection })
+  } catch (error) {
+    reqLog(req).error({ err: error }, 'Failed to save stage reflection')
+    res.status(500).json({ error: 'Failed to save reflection' })
+  }
+})
+
+router.post('/:id/log-interview', async (req, res) => {
+  const parsed = logInterviewSchema.safeParse(req.body)
+  if (!parsed.success) return validationError(res, parsed.error)
+
+  try {
+    const preparation = await logInterview(userId(req), req.params.id, parsed.data)
+    if (!preparation) return res.status(404).json({ error: 'Not found' })
+    const questionCount = parseInterviewQuestions(parsed.data.questionsText).length
+    reqLog(req).info(
+      {
+        event: 'prepare.interview_logged',
+        preparationId: preparation.id,
+        count: questionCount,
+      },
+      'Interview logged',
+    )
+    reqLog(req).info(
+      { event: 'prepare.stage_completed', preparationId: preparation.id },
+      'Preparation stage completed',
+    )
+    if (questionCount > 0) {
+      reqLog(req).info(
+        {
+          event: 'prepare.question_added',
+          preparationId: preparation.id,
+          count: questionCount,
+        },
+        'Interview questions added',
+      )
+    }
+    res.status(201).json({ preparation: withPreparationDetail(preparation) })
+  } catch (error) {
+    if (error instanceof LogInterviewError && error.code === 'NOT_FOUND') {
+      return res.status(404).json({ error: 'Not found' })
+    }
+    if (error instanceof LogInterviewError && error.code === 'QUESTION_LIMIT') {
+      return res.status(400).json({ error: error.message })
+    }
+    reqLog(req).error({ err: error }, 'Failed to log interview')
+    res.status(500).json({ error: 'Failed to log interview' })
   }
 })
 

@@ -1,9 +1,14 @@
 import { apiClient, getAuthHeaders } from '@/lib/api-client'
 import type {
+  InterviewOutcome,
+  InterviewQuestion,
+  InterviewQuestionSource,
+  InterviewRating,
   Preparation,
   PreparationStageStatus,
   PreparationStageType,
   PreparationStatus,
+  StageReflection,
 } from '@/lib/prepare-types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
@@ -116,4 +121,75 @@ export async function deletePreparation(id: string) {
     headers: getAuthHeaders(),
   })
   if (!response.ok) throw new Error('Failed to delete journey')
+}
+
+export type LogInterviewInput = {
+  stageId: string
+  rating?: InterviewRating | null
+  outcome?: InterviewOutcome | null
+  wentWell?: string | null
+  difficulties?: string | null
+  surprisedBy?: string | null
+  feedbackReceived?: string | null
+  nextRoundHints?: string | null
+  questionsText?: string | null
+  nextStageScheduledAt?: string | null
+}
+
+export async function logInterview(
+  preparationId: string,
+  input: LogInterviewInput,
+): Promise<Preparation> {
+  const data = await apiClient<{ preparation: Preparation }>(
+    `/api/preparations/${encodeURIComponent(preparationId)}/log-interview`,
+    { method: 'POST', body: JSON.stringify(input) },
+  )
+  return data.preparation
+}
+
+export async function addInterviewQuestion(
+  preparationId: string,
+  input: {
+    questionText: string
+    stageId?: string | null
+    source?: InterviewQuestionSource
+    notes?: string | null
+  },
+): Promise<InterviewQuestion> {
+  const data = await apiClient<{ question: InterviewQuestion }>(
+    `/api/preparations/${encodeURIComponent(preparationId)}/questions`,
+    { method: 'POST', body: JSON.stringify(input) },
+  )
+  return data.question
+}
+
+export async function deleteInterviewQuestion(preparationId: string, questionId: string) {
+  const response = await fetch(
+    `${API_BASE}/api/preparations/${encodeURIComponent(preparationId)}/questions/${encodeURIComponent(questionId)}`,
+    { method: 'DELETE', headers: getAuthHeaders() },
+  )
+  if (!response.ok) throw new Error('Failed to delete question')
+}
+
+export async function updateStageReflection(
+  preparationId: string,
+  stageId: string,
+  input: Partial<
+    Pick<
+      StageReflection,
+      | 'rating'
+      | 'outcome'
+      | 'wentWell'
+      | 'difficulties'
+      | 'surprisedBy'
+      | 'feedbackReceived'
+      | 'nextRoundHints'
+    >
+  >,
+): Promise<StageReflection> {
+  const data = await apiClient<{ reflection: StageReflection }>(
+    `/api/preparations/${encodeURIComponent(preparationId)}/stages/${encodeURIComponent(stageId)}/reflection`,
+    { method: 'PATCH', body: JSON.stringify(input) },
+  )
+  return data.reflection
 }

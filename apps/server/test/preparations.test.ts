@@ -23,6 +23,22 @@ const prismaMock = vi.hoisted(() => ({
     update: vi.fn(),
     delete: vi.fn(),
   },
+  interviewQuestion: {
+    findFirst: vi.fn(),
+    findMany: vi.fn(),
+    count: vi.fn(),
+    create: vi.fn(),
+    createMany: vi.fn(),
+    update: vi.fn(),
+    deleteMany: vi.fn(),
+  },
+  stageReflection: {
+    upsert: vi.fn(),
+    findUnique: vi.fn(),
+  },
+  interviewPreparation: {
+    update: vi.fn(),
+  },
   platformFeatureFlag: {
     count: vi.fn(),
     findMany: vi.fn(),
@@ -42,7 +58,9 @@ vi.mock('../src/lib/prisma', () => ({ prisma: prismaMock }))
 
 import preparationsRouter from '../src/routes/preparations'
 import { invalidateFeatureFlagCache, requireFeature } from '../src/lib/featureFlags'
+import { parseInterviewQuestions } from '../src/lib/parseInterviewQuestions'
 import { buildDefaultStages, deriveStageSummary } from '../src/lib/prepareStages'
+import { buildPreparationTimeline } from '../src/lib/prepareTimeline'
 
 const PREPARATION_ID = 'caaaaaaaaaaaaaaaaaaaaaaaa'
 const STAGE_A = 'cbbbbbbbbbbbbbbbbbbbbbbbb'
@@ -61,6 +79,7 @@ const stages = [
     interviewerName: null,
     interviewerRole: null,
     interviewerProfileText: null,
+    reflection: null,
     createdAt: new Date('2026-09-01T00:00:00Z'),
     updatedAt: new Date('2026-09-01T00:00:00Z'),
   },
@@ -76,6 +95,7 @@ const stages = [
     interviewerName: null,
     interviewerRole: null,
     interviewerProfileText: null,
+    reflection: null,
     createdAt: new Date('2026-09-01T00:00:00Z'),
     updatedAt: new Date('2026-09-01T00:00:00Z'),
   },
@@ -103,6 +123,7 @@ const preparation = {
     updatedAt: new Date('2026-09-01T00:00:00Z'),
   },
   stages,
+  questions: [],
 }
 
 function appFor(userId = 'user-a', withFeatureGate = false) {
@@ -335,5 +356,246 @@ describe('Prepare API ownership and validation', () => {
       (call) => (call[0] as { data: { sequence: number } }).data.sequence,
     )
     expect(sequences).toEqual([10_000, 10_001, 0, 1])
+  })
+})
+
+describe('Prepare question capture', () => {
+  it('splits multiline questions, trims bullets, and skips blanks', () => {
+    expect(
+      parseInterviewQuestions(
+        '- Tell me about a time you disagreed\n\n* How would you design a rate limiter?\n3. What surprised you?\n',
+      ),
+    ).toEqual([
+      'Tell me about a time you disagreed',
+      'How would you design a rate limiter?',
+      'What surprised you?',
+    ])
+  })
+
+  it('builds a chronological timeline from completions, questions, and reflections', () => {
+    const timeline = buildPreparationTimeline(
+      [
+        {
+          ...stages[1],
+          status: PreparationStageStatus.COMPLETED,
+          completedAt: new Date('2026-09-07T12:00:00Z'),
+          reflection: {
+            id: 'cfffffffffffffffffffffffff',
+            preparationId: PREPARATION_ID,
+            stageId: STAGE_B,
+            rating: 'GOOD',
+            outcome: 'PENDING',
+            wentWell: null,
+            difficulties: null,
+            surprisedBy: 'Underperformer management',
+            feedbackReceived: null,
+            nextRoundHints: null,
+            createdAt: new Date('2026-09-07T12:05:00Z'),
+            updatedAt: new Date('2026-09-07T12:05:00Z'),
+          },
+        },
+      ],
+      [
+        {
+          stageId: STAGE_B,
+          createdAt: new Date('2026-09-07T12:01:00Z'),
+        },
+        {
+          stageId: STAGE_B,
+          createdAt: new Date('2026-09-07T12:02:00Z'),
+        },
+      ],
+    )
+    expect(timeline.map((item) => item.kind)).toEqual([
+      'stage_completed',
+      'questions_added',
+      'reflection',
+    ])
+    expect(timeline[1].questionCount).toBe(2)
+  })
+})
+
+describe('Prepare log-interview ownership and effects', () => {
+  function mockLogInterviewSuccess() {
+    prismaMock.$queryRaw.mockResolvedValue([{ id: PREPARATION_ID }])
+    prismaMock.preparationStage.findFirst.mockResolvedValue(stages[1])
+    prismaMock.interviewQuestion.count.mockResolvedValue(0)
+    prismaMock.preparationStage.update.mockResolvedValue({
+      ...stages[1],
+      status: PreparationStageStatus.COMPLETED,
+    })
+    prismaMock.stageReflection.upsert.mockResolvedValue({})
+    prismaMock.interviewQuestion.createMany.mockResolvedValue({ count: 2 })
+    const hiringManager = {
+      id: 'ceeeeeeeeeeeeeeeeeeeeeeee',
+      preparationId: PREPARATION_ID,
+      type: PreparationStageType.HIRING_MANAGER,
+      name: 'Hiring Manager',
+      sequence: 2,
+      status: PreparationStageStatus.UPCOMING,
+      scheduledAt: null,
+      completedAt: null,
+    }
+    prismaMock.preparationStage.findMany.mockResolvedValue([...stages, hiringManager])
+    prismaMock.interviewPreparation.update.mockResolvedValue({})
+    prismaMock.preparation.findFirst.mockResolvedValue({
+      ...preparation,
+      stages: [
+        stages[0],
+        {
+          ...stages[1],
+          status: PreparationStageStatus.COMPLETED,
+          completedAt: new Date('2026-09-07T12:00:00Z'),
+          reflection: {
+            id: 'cfffffffffffffffffffffffff',
+            rating: 'GOOD',
+            outcome: 'PENDING',
+            surprisedBy: 'Underperformer management',
+            updatedAt: new Date('2026-09-07T12:05:00Z'),
+          },
+        },
+      ],
+      questions: [
+        {
+          id: 'cgggggggggggggggggggggggg',
+          stageId: STAGE_B,
+          questionText: 'Design a rate limiter',
+          source: 'ACTUAL_INTERVIEW',
+          createdAt: new Date('2026-09-07T12:01:00Z'),
+        },
+      ],
+    })
+  }
+
+  it('completes the stage, stores questions, and schedules the next incomplete round', async () => {
+    mockLogInterviewSuccess()
+    const response = await request(appFor())
+      .post(`/api/preparations/${PREPARATION_ID}/log-interview`)
+      .send({
+        stageId: STAGE_B,
+        rating: 'GOOD',
+        outcome: 'PENDING',
+        surprisedBy: 'Underperformer management',
+        questionsText: '- Design a rate limiter\n- Tell me about a conflict',
+        nextStageScheduledAt: '2026-09-20T10:00:00.000Z',
+      })
+    expect(response.status).toBe(201)
+    expect(prismaMock.preparationStage.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: STAGE_B },
+        data: expect.objectContaining({ status: PreparationStageStatus.COMPLETED }),
+      }),
+    )
+    expect(prismaMock.interviewQuestion.createMany).toHaveBeenCalledWith({
+      data: expect.arrayContaining([
+        expect.objectContaining({
+          preparationId: PREPARATION_ID,
+          stageId: STAGE_B,
+          questionText: 'Design a rate limiter',
+          source: 'ACTUAL_INTERVIEW',
+        }),
+        expect.objectContaining({
+          questionText: 'Tell me about a conflict',
+        }),
+      ]),
+    })
+    expect(response.body.preparation.lastCompletedStage.name).toBe('Technical')
+    expect(prismaMock.interviewPreparation.update).toHaveBeenCalled()
+    const stageUpdates = prismaMock.preparationStage.update.mock.calls.map(
+      (call) => call[0] as { where: { id: string }; data: { status?: string } },
+    )
+    expect(stageUpdates.some((call) => call.where.id === 'ceeeeeeeeeeeeeeeeeeeeeeee')).toBe(
+      true,
+    )
+  })
+
+  it('does not let another user log an interview on this journey', async () => {
+    prismaMock.$queryRaw.mockResolvedValue([])
+    const response = await request(appFor('user-b'))
+      .post(`/api/preparations/${PREPARATION_ID}/log-interview`)
+      .send({
+        stageId: STAGE_B,
+        questionsText: 'Stolen question',
+      })
+    expect(response.status).toBe(404)
+    expect(prismaMock.interviewQuestion.createMany).not.toHaveBeenCalled()
+  })
+
+  it('does not attach questions to a stage that is not on this journey', async () => {
+    prismaMock.$queryRaw.mockResolvedValue([{ id: PREPARATION_ID }])
+    prismaMock.preparationStage.findFirst.mockResolvedValue(null)
+    const response = await request(appFor())
+      .post(`/api/preparations/${PREPARATION_ID}/log-interview`)
+      .send({
+        stageId: 'ceeeeeeeeeeeeeeeeeeeeeeee',
+        questionsText: 'Foreign stage question',
+      })
+    expect(response.status).toBe(404)
+    expect(prismaMock.interviewQuestion.createMany).not.toHaveBeenCalled()
+  })
+
+  it('does not let another user read questions', async () => {
+    prismaMock.preparation.findFirst.mockResolvedValue(null)
+    const response = await request(appFor('user-b')).get(
+      `/api/preparations/${PREPARATION_ID}/questions`,
+    )
+    expect(response.status).toBe(404)
+    expect(prismaMock.interviewQuestion.findMany).not.toHaveBeenCalled()
+  })
+
+  it('does not let another user write a reflection', async () => {
+    prismaMock.preparationStage.findFirst.mockResolvedValue(null)
+    const response = await request(appFor('user-b'))
+      .patch(`/api/preparations/${PREPARATION_ID}/stages/${STAGE_B}/reflection`)
+      .send({ surprisedBy: 'secret' })
+    expect(response.status).toBe(404)
+    expect(prismaMock.stageReflection.upsert).not.toHaveBeenCalled()
+  })
+
+  it('does not let another user add a question', async () => {
+    prismaMock.preparation.findFirst.mockResolvedValue(null)
+    const response = await request(appFor('user-b'))
+      .post(`/api/preparations/${PREPARATION_ID}/questions`)
+      .send({ questionText: 'Stolen' })
+    expect(response.status).toBe(404)
+    expect(prismaMock.interviewQuestion.create).not.toHaveBeenCalled()
+  })
+
+  it('does not overwrite an existing reflection when only questions are logged', async () => {
+    mockLogInterviewSuccess()
+    const response = await request(appFor())
+      .post(`/api/preparations/${PREPARATION_ID}/log-interview`)
+      .send({
+        stageId: STAGE_B,
+        questionsText: 'How would you handle a missed deadline?',
+      })
+    expect(response.status).toBe(201)
+    expect(prismaMock.stageReflection.upsert).not.toHaveBeenCalled()
+    expect(prismaMock.interviewQuestion.createMany).toHaveBeenCalled()
+  })
+
+  it('patches only provided reflection fields on re-log', async () => {
+    mockLogInterviewSuccess()
+    const response = await request(appFor())
+      .post(`/api/preparations/${PREPARATION_ID}/log-interview`)
+      .send({
+        stageId: STAGE_B,
+        surprisedBy: 'They asked about org design instead',
+      })
+    expect(response.status).toBe(201)
+    expect(prismaMock.stageReflection.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: { surprisedBy: 'They asked about org design instead' },
+      }),
+    )
+  })
+
+  it('rejects marking a stage completed without logging the interview', async () => {
+    const response = await request(appFor())
+      .patch(`/api/preparations/${PREPARATION_ID}/stages/${STAGE_B}`)
+      .send({ status: 'COMPLETED' })
+    expect(response.status).toBe(400)
+    expect(response.body.error).toMatch(/Log the interview/i)
+    expect(prismaMock.preparationStage.update).not.toHaveBeenCalled()
   })
 })

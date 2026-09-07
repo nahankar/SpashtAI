@@ -1,11 +1,32 @@
 import { prisma } from './prisma'
-import { preparationInclude } from '../services/preparations/createInterviewJourney'
+import { preparationDetailInclude, preparationInclude } from '../services/preparations/createInterviewJourney'
 import type { Prisma } from '@prisma/client'
 
 export async function getOwnedPreparation(userId: string, id: string) {
   return prisma.preparation.findFirst({
     where: { id, userId },
     include: preparationInclude,
+  })
+}
+
+export async function getOwnedPreparationDetail(userId: string, id: string) {
+  return prisma.preparation.findFirst({
+    where: { id, userId },
+    include: preparationDetailInclude,
+  })
+}
+
+export async function getOwnedStage(
+  userId: string,
+  preparationId: string,
+  stageId: string,
+) {
+  return prisma.preparationStage.findFirst({
+    where: {
+      id: stageId,
+      preparationId,
+      preparation: { userId },
+    },
   })
 }
 

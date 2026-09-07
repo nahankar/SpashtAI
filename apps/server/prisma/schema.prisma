@@ -53,6 +53,28 @@ enum PreparationStageStatus {
   SKIPPED
 }
 
+enum InterviewQuestionSource {
+  ACTUAL_INTERVIEW
+  PRACTICE
+  USER_ENTERED
+  AI_SUGGESTED
+}
+
+enum InterviewOutcome {
+  PASSED
+  REJECTED
+  PENDING
+  UNKNOWN
+}
+
+enum InterviewRating {
+  VERY_POOR
+  POOR
+  FAIR
+  GOOD
+  EXCELLENT
+}
+
 model User {
   id             String          @id @default(cuid())
   email          String          @unique
@@ -206,8 +228,10 @@ model Preparation {
   status      PreparationStatus @default(ACTIVE)
   completedAt DateTime?
 
-  interview InterviewPreparation?
-  stages    PreparationStage[]
+  interview  InterviewPreparation?
+  stages     PreparationStage[]
+  questions  InterviewQuestion[]
+  reflections StageReflection[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -247,11 +271,56 @@ model PreparationStage {
   interviewerRole        String?
   interviewerProfileText String?                @db.Text
 
+  questions  InterviewQuestion[]
+  reflection StageReflection?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([preparationId, sequence])
   @@index([preparationId, status])
+}
+
+model InterviewQuestion {
+  id             String                  @id @default(cuid())
+  preparationId  String
+  preparation    Preparation             @relation(fields: [preparationId], references: [id], onDelete: Cascade)
+  stageId        String?
+  stage          PreparationStage?       @relation(fields: [stageId], references: [id], onDelete: SetNull)
+  questionText   String                  @db.Text
+  source         InterviewQuestionSource @default(ACTUAL_INTERVIEW)
+  category       String?
+  topic          String?
+  difficulty     String?
+  notes          String?                 @db.Text
+  askedAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([preparationId])
+  @@index([preparationId, source])
+  @@index([stageId])
+}
+
+model StageReflection {
+  id               String            @id @default(cuid())
+  preparationId    String
+  preparation      Preparation       @relation(fields: [preparationId], references: [id], onDelete: Cascade)
+  stageId          String            @unique
+  stage            PreparationStage  @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  rating           InterviewRating?
+  outcome          InterviewOutcome?
+  wentWell         String?           @db.Text
+  difficulties     String?           @db.Text
+  surprisedBy      String?           @db.Text
+  feedbackReceived String?           @db.Text
+  nextRoundHints   String?           @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([preparationId])
 }
 
 model Session {
