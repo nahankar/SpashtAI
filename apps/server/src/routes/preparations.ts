@@ -83,6 +83,7 @@ const FIELD_LABELS: Record<string, string> = {
   scheduledAt: 'Scheduled date',
   stageId: 'Stage',
   questionText: 'Question',
+  source: 'Question source',
   questionsText: 'What they asked',
   rating: 'How it went',
   outcome: 'Outcome',
@@ -324,11 +325,9 @@ router.patch('/:id/stages/:stageId', async (req, res) => {
     const completedAt =
       parsed.data.completedAt !== undefined
         ? parsed.data.completedAt
-        : effectiveStatus === PreparationStageStatus.COMPLETED
-          ? new Date()
-          : effectiveStatus
-            ? null
-            : undefined
+        : effectiveStatus
+          ? null
+          : undefined
     const updated = await prisma.preparationStage.update({
       where: { id: stage.id },
       data: {

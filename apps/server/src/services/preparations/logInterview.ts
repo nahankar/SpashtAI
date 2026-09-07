@@ -8,6 +8,7 @@ import { lockOwnedPreparation } from '../../lib/prepareAccess'
 import {
   MAX_QUESTIONS_PER_JOURNEY,
   parseInterviewQuestions,
+  uniqueNewQuestions,
 } from '../../lib/parseInterviewQuestions'
 import { preparationDetailInclude } from './createInterviewJourney'
 
@@ -52,10 +53,18 @@ export async function logInterview(
       throw new LogInterviewError('Not found', 'NOT_FOUND')
     }
 
+    const existingQuestions = await tx.interviewQuestion.findMany({
+      where: { preparationId, stageId: stage.id },
+      select: { questionText: true },
+    })
+    const freshQuestions = uniqueNewQuestions(
+      questions,
+      existingQuestions.map((question) => question.questionText),
+    )
     const existingCount = await tx.interviewQuestion.count({
       where: { preparationId },
     })
-    if (existingCount + questions.length > MAX_QUESTIONS_PER_JOURNEY) {
+    if (existingCount + freshQuestions.length > MAX_QUESTIONS_PER_JOURNEY) {
       throw new LogInterviewError(
         `A journey can remember at most ${MAX_QUESTIONS_PER_JOURNEY} questions`,
         'QUESTION_LIMIT',
@@ -104,9 +113,9 @@ export async function logInterview(
       })
     }
 
-    if (questions.length > 0) {
+    if (freshQuestions.length > 0) {
       await tx.interviewQuestion.createMany({
-        data: questions.map((questionText) => ({
+        data: freshQuestions.map((questionText) => ({
           preparationId,
           stageId: stage.id,
           questionText,
@@ -135,11 +144,11 @@ export async function logInterview(
             scheduledAt: input.nextStageScheduledAt,
           },
         })
+        await tx.interviewPreparation.update({
+          where: { preparationId },
+          data: { interviewDate: input.nextStageScheduledAt },
+        })
       }
-      await tx.interviewPreparation.update({
-        where: { preparationId },
-        data: { interviewDate: input.nextStageScheduledAt },
-      })
     }
 
     return tx.preparation.findFirst({

@@ -128,7 +128,15 @@ export const upsertReflectionSchema = z.object(reflectionFields).strict().refine
 export const createQuestionSchema = z
   .object({
     questionText: shortText('Question', PREPARE_TEXT_LIMITS.questionText),
-    source: z.nativeEnum(InterviewQuestionSource).optional(),
+    source: z
+      .nativeEnum(InterviewQuestionSource)
+      .refine(
+        (source) =>
+          source === InterviewQuestionSource.USER_ENTERED ||
+          source === InterviewQuestionSource.ACTUAL_INTERVIEW,
+        'Practice and suggested questions are not available yet',
+      )
+      .optional(),
     stageId: z.string().cuid().optional().nullable(),
     category: optionalText(PREPARE_TEXT_LIMITS.questionMeta),
     topic: optionalText(PREPARE_TEXT_LIMITS.questionMeta),

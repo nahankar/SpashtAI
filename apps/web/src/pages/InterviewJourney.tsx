@@ -23,6 +23,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { JourneyTimeline } from '@/components/prepare/JourneyTimeline'
 import { LogInterviewDialog } from '@/components/prepare/LogInterviewDialog'
 import { QuestionMemory } from '@/components/prepare/QuestionMemory'
+import { StageTracker } from '@/components/prepare/StageTracker'
 import { useConfirm } from '@/hooks/useConfirm'
 import {
   addPreparationStage,

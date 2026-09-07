@@ -58,7 +58,7 @@ vi.mock('../src/lib/prisma', () => ({ prisma: prismaMock }))
 
 import preparationsRouter from '../src/routes/preparations'
 import { invalidateFeatureFlagCache, requireFeature } from '../src/lib/featureFlags'
-import { parseInterviewQuestions } from '../src/lib/parseInterviewQuestions'
+import { parseInterviewQuestions, uniqueNewQuestions } from '../src/lib/parseInterviewQuestions'
 import { buildDefaultStages, deriveStageSummary } from '../src/lib/prepareStages'
 import { buildPreparationTimeline } from '../src/lib/prepareTimeline'
 
@@ -372,6 +372,15 @@ describe('Prepare question capture', () => {
     ])
   })
 
+  it('does not re-add questions already stored for the round', () => {
+    expect(
+      uniqueNewQuestions(
+        ['Design a rate limiter', 'Tell me about a conflict'],
+        ['design a rate limiter'],
+      ),
+    ).toEqual(['Tell me about a conflict'])
+  })
+
   it('builds a chronological timeline from completions, questions, and reflections', () => {
     const timeline = buildPreparationTimeline(
       [
@@ -425,6 +434,7 @@ describe('Prepare log-interview ownership and effects', () => {
       status: PreparationStageStatus.COMPLETED,
     })
     prismaMock.stageReflection.upsert.mockResolvedValue({})
+    prismaMock.interviewQuestion.findMany.mockResolvedValue([])
     prismaMock.interviewQuestion.createMany.mockResolvedValue({ count: 2 })
     const hiringManager = {
       id: 'ceeeeeeeeeeeeeeeeeeeeeeee',
@@ -597,5 +607,50 @@ describe('Prepare log-interview ownership and effects', () => {
     expect(response.status).toBe(400)
     expect(response.body.error).toMatch(/Log the interview/i)
     expect(prismaMock.preparationStage.update).not.toHaveBeenCalled()
+  })
+
+  it('rejects practice question sources until Elevate is linked', async () => {
+    prismaMock.preparation.findFirst.mockResolvedValue(preparation)
+    const response = await request(appFor())
+      .post(`/api/preparations/${PREPARATION_ID}/questions`)
+      .send({ questionText: 'Fake practice prompt', source: 'PRACTICE' })
+    expect(response.status).toBe(400)
+    expect(prismaMock.interviewQuestion.create).not.toHaveBeenCalled()
+  })
+
+  it('does not insert duplicate questions when the same lines are logged again', async () => {
+    mockLogInterviewSuccess()
+    prismaMock.interviewQuestion.findMany.mockResolvedValue([
+      { questionText: 'Design a rate limiter' },
+    ])
+    const response = await request(appFor())
+      .post(`/api/preparations/${PREPARATION_ID}/log-interview`)
+      .send({
+        stageId: STAGE_B,
+        questionsText: '- Design a rate limiter\n- Tell me about a conflict',
+      })
+    expect(response.status).toBe(201)
+    expect(prismaMock.interviewQuestion.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          questionText: 'Tell me about a conflict',
+          source: 'ACTUAL_INTERVIEW',
+        }),
+      ],
+    })
+  })
+
+  it('does not write a next interview date when there is no later incomplete stage', async () => {
+    mockLogInterviewSuccess()
+    prismaMock.preparationStage.findMany.mockResolvedValue(stages)
+    const response = await request(appFor())
+      .post(`/api/preparations/${PREPARATION_ID}/log-interview`)
+      .send({
+        stageId: STAGE_B,
+        rating: 'GOOD',
+        nextStageScheduledAt: '2026-09-20T10:00:00.000Z',
+      })
+    expect(response.status).toBe(201)
+    expect(prismaMock.interviewPreparation.update).not.toHaveBeenCalled()
   })
 })

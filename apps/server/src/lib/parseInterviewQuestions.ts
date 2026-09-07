@@ -24,3 +24,15 @@ export function parseInterviewQuestions(text: string | null | undefined): string
   }
   return questions
 }
+
+export function uniqueNewQuestions(incoming: string[], existing: string[]): string[] {
+  const seen = new Set(existing.map((text) => text.trim().toLowerCase()).filter(Boolean))
+  const fresh: string[] = []
+  for (const question of incoming) {
+    const key = question.trim().toLowerCase()
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    fresh.push(question)
+  }
+  return fresh
+}
