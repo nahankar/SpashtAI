@@ -71,7 +71,7 @@ Prepare updates the journey **underneath**, asks only for missing high-value fac
 |-------|---------|
 | **A** | Journey foundation + conversational **shell** (no LLM, no file extract) |
 | **B** | Learn from real interviews: questions + reflections (+ what surprised you) |
-| **C1** | Elevate / Replay linkage |
+| **C1** | Prepare-owned Elevate linkage + bounded journey context |
 | **C2** | Interview role-play scenarios |
 | **D1** | Readiness / Gap Engine |
 | **D2** | Prep Sprint **generator** (uses D1; schema designed now, built in D2) |

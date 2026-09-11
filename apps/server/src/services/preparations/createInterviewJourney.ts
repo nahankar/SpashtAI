@@ -31,6 +31,15 @@ export const preparationDetailInclude = {
     include: { reflection: true },
   },
   questions: { orderBy: { createdAt: 'asc' as const } },
+  practices: {
+    orderBy: { createdAt: 'desc' as const },
+    select: {
+      id: true,
+      preparationId: true,
+      stageId: true,
+      sessionId: true,
+    },
+  },
 } satisfies Prisma.PreparationInclude
 
 export async function createInterviewJourney(

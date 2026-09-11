@@ -39,6 +39,15 @@ const prismaMock = vi.hoisted(() => ({
   interviewPreparation: {
     update: vi.fn(),
   },
+  preparationPractice: {
+    findUnique: vi.fn(),
+    findMany: vi.fn(),
+    create: vi.fn(),
+  },
+  session: {
+    findFirst: vi.fn(),
+    create: vi.fn(),
+  },
   platformFeatureFlag: {
     count: vi.fn(),
     findMany: vi.fn(),
@@ -57,10 +66,15 @@ const prismaMock = vi.hoisted(() => ({
 vi.mock('../src/lib/prisma', () => ({ prisma: prismaMock }))
 
 import preparationsRouter from '../src/routes/preparations'
+import { createSession } from '../src/routes/sessions'
 import { invalidateFeatureFlagCache, requireFeature } from '../src/lib/featureFlags'
 import { parseInterviewQuestions, uniqueNewQuestions } from '../src/lib/parseInterviewQuestions'
 import { buildDefaultStages, deriveStageSummary } from '../src/lib/prepareStages'
 import { buildPreparationTimeline } from '../src/lib/prepareTimeline'
+import {
+  buildPrepareJourneyContext,
+  MAX_PREPARE_CONTEXT_SOURCE_CHARS,
+} from '../src/lib/prepareCoachingContext'
 
 const PREPARATION_ID = 'caaaaaaaaaaaaaaaaaaaaaaaa'
 const STAGE_A = 'cbbbbbbbbbbbbbbbbbbbbbbbb'
@@ -124,6 +138,7 @@ const preparation = {
   },
   stages,
   questions: [],
+  practices: [],
 }
 
 function appFor(userId = 'user-a', withFeatureGate = false) {
@@ -138,6 +153,17 @@ function appFor(userId = 'user-a', withFeatureGate = false) {
     ...(withFeatureGate ? [requireFeature('prepare')] : []),
     preparationsRouter,
   )
+  return app
+}
+
+function sessionAppFor(userId = 'user-a') {
+  const app = express()
+  app.use(express.json())
+  app.use((req, _res, next) => {
+    req.user = { userId, email: `${userId}@example.com`, role: 'USER' }
+    next()
+  })
+  app.post('/sessions', createSession)
   return app
 }
 
@@ -652,5 +678,263 @@ describe('Prepare log-interview ownership and effects', () => {
       })
     expect(response.status).toBe(201)
     expect(prismaMock.interviewPreparation.update).not.toHaveBeenCalled()
+  })
+})
+
+describe('Prepare C1 Elevate linkage', () => {
+  const SESSION_ID = 'session_prepare_c1'
+
+  it('keeps ordinary Elevate session creation independent of Prepare', async () => {
+    prismaMock.session.create.mockResolvedValue({
+      id: SESSION_ID,
+      userId: 'user-a',
+      module: 'elevate',
+      sessionName: 'Clarity practice',
+      focusArea: 'clarity',
+      focusContext: null,
+      startedAt: new Date(),
+      user: { id: 'user-a', email: 'user-a@example.com' },
+    })
+
+    const response = await request(sessionAppFor())
+      .post('/sessions')
+      .send({
+        id: SESSION_ID,
+        module: 'elevate',
+        sessionName: 'Clarity practice',
+        focusArea: 'clarity',
+      })
+
+    expect(response.status).toBe(201)
+    expect(prismaMock.session.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          id: SESSION_ID,
+          userId: 'user-a',
+          module: 'elevate',
+        }),
+      }),
+    )
+    expect(prismaMock.preparationPractice.create).not.toHaveBeenCalled()
+  })
+
+  it('links only this user’s Elevate session to an owned journey', async () => {
+    prismaMock.preparation.findFirst.mockResolvedValue(preparation)
+    prismaMock.preparationStage.findFirst.mockResolvedValue(stages[1])
+    prismaMock.session.findFirst.mockResolvedValue({ id: SESSION_ID })
+    prismaMock.preparationPractice.findUnique.mockResolvedValue(null)
+    prismaMock.preparationPractice.create.mockResolvedValue({
+      id: 'cfffffffffffffffffffffffff',
+      preparationId: PREPARATION_ID,
+      stageId: STAGE_B,
+      sessionId: SESSION_ID,
+      createdAt: new Date(),
+    })
+
+    const response = await request(appFor())
+      .post(`/api/preparations/${PREPARATION_ID}/practices`)
+      .send({ sessionId: SESSION_ID, stageId: STAGE_B })
+
+    expect(response.status).toBe(201)
+    expect(prismaMock.session.findFirst).toHaveBeenCalledWith({
+      where: { id: SESSION_ID, userId: 'user-a', module: 'elevate' },
+      select: { id: true },
+    })
+    expect(prismaMock.preparationPractice.create).toHaveBeenCalledWith({
+      data: {
+        preparationId: PREPARATION_ID,
+        stageId: STAGE_B,
+        sessionId: SESSION_ID,
+      },
+    })
+  })
+
+  it('does not link another user’s session', async () => {
+    prismaMock.preparation.findFirst.mockResolvedValue(preparation)
+    prismaMock.preparationStage.findFirst.mockResolvedValue(stages[1])
+    prismaMock.session.findFirst.mockResolvedValue(null)
+
+    const response = await request(appFor())
+      .post(`/api/preparations/${PREPARATION_ID}/practices`)
+      .send({ sessionId: SESSION_ID, stageId: STAGE_B })
+
+    expect(response.status).toBe(404)
+    expect(prismaMock.preparationPractice.create).not.toHaveBeenCalled()
+  })
+
+  it('does not link a stage outside the owned journey', async () => {
+    prismaMock.preparation.findFirst.mockResolvedValue(preparation)
+    prismaMock.preparationStage.findFirst.mockResolvedValue(null)
+
+    const response = await request(appFor())
+      .post(`/api/preparations/${PREPARATION_ID}/practices`)
+      .send({
+        sessionId: SESSION_ID,
+        stageId: 'ceeeeeeeeeeeeeeeeeeeeeeee',
+      })
+
+    expect(response.status).toBe(404)
+    expect(prismaMock.session.findFirst).not.toHaveBeenCalled()
+  })
+
+  it('is idempotent when the same session link is retried', async () => {
+    const existing = {
+      id: 'cfffffffffffffffffffffffff',
+      preparationId: PREPARATION_ID,
+      stageId: STAGE_B,
+      sessionId: SESSION_ID,
+      createdAt: new Date(),
+    }
+    prismaMock.preparation.findFirst.mockResolvedValue(preparation)
+    prismaMock.preparationStage.findFirst.mockResolvedValue(stages[1])
+    prismaMock.session.findFirst.mockResolvedValue({ id: SESSION_ID })
+    prismaMock.preparationPractice.findUnique.mockResolvedValue(existing)
+
+    const response = await request(appFor())
+      .post(`/api/preparations/${PREPARATION_ID}/practices`)
+      .send({ sessionId: SESSION_ID, stageId: STAGE_B })
+
+    expect(response.status).toBe(200)
+    expect(response.body.practice.sessionId).toBe(SESSION_ID)
+    expect(prismaMock.preparationPractice.create).not.toHaveBeenCalled()
+  })
+
+  it('rejects moving an already-linked session to another journey or stage', async () => {
+    prismaMock.preparation.findFirst.mockResolvedValue(preparation)
+    prismaMock.preparationStage.findFirst.mockResolvedValue(stages[1])
+    prismaMock.session.findFirst.mockResolvedValue({ id: SESSION_ID })
+    prismaMock.preparationPractice.findUnique.mockResolvedValue({
+      id: 'cfffffffffffffffffffffffff',
+      preparationId: PREPARATION_ID,
+      stageId: STAGE_A,
+      sessionId: SESSION_ID,
+      createdAt: new Date(),
+    })
+
+    const response = await request(appFor())
+      .post(`/api/preparations/${PREPARATION_ID}/practices`)
+      .send({ sessionId: SESSION_ID, stageId: STAGE_B })
+
+    expect(response.status).toBe(409)
+    expect(prismaMock.preparationPractice.create).not.toHaveBeenCalled()
+  })
+
+  it('returns no Prepare context for an unlinked Elevate session', async () => {
+    prismaMock.preparationPractice.findUnique.mockResolvedValue(null)
+
+    await expect(buildPrepareJourneyContext(SESSION_ID, 'user-a')).resolves.toBeNull()
+    expect(prismaMock.interviewQuestion.findMany).not.toHaveBeenCalled()
+  })
+
+  it('does not return journey context across a user mismatch', async () => {
+    prismaMock.preparationPractice.findUnique.mockResolvedValue({
+      preparationId: PREPARATION_ID,
+      stageId: null,
+      preparation: {
+        userId: 'user-b',
+        interview: {
+          companyName: 'Private Co',
+          roleTitle: 'Private role',
+          jobDescriptionText: 'private',
+          resumeLabel: null,
+          resumeText: 'private',
+        },
+      },
+      stage: null,
+    })
+
+    await expect(buildPrepareJourneyContext(SESSION_ID, 'user-a')).resolves.toBeNull()
+    expect(prismaMock.interviewQuestion.findMany).not.toHaveBeenCalled()
+  })
+
+  it('caps the journey source text returned to the agent', async () => {
+    prismaMock.preparationPractice.findUnique.mockResolvedValue({
+      preparationId: PREPARATION_ID,
+      stageId: STAGE_B,
+      preparation: {
+        userId: 'user-a',
+        interview: {
+          companyName: 'Example',
+          roleTitle: 'Director',
+          jobDescriptionText: 'J'.repeat(30_000),
+          resumeLabel: 'Profile',
+          resumeText: 'R'.repeat(30_000),
+        },
+      },
+      stage: {
+        name: 'Technical',
+        type: PreparationStageType.TECHNICAL,
+        sequence: 2,
+        interviewerName: 'Interviewer',
+        interviewerRole: 'VP Engineering',
+        interviewerProfileText: 'I'.repeat(20_000),
+      },
+    })
+    prismaMock.interviewQuestion.findMany.mockResolvedValue(
+      Array.from({ length: 8 }, () => ({
+        questionText: 'Q'.repeat(2_000),
+        stage: { name: 'Recruiter' },
+      })),
+    )
+
+    const context = await buildPrepareJourneyContext(SESSION_ID, 'user-a')
+    const sourceChars =
+      (context?.jobDescriptionExcerpt?.length ?? 0) +
+      (context?.resumeExcerpt?.length ?? 0) +
+      (context?.interviewer?.professionalContextExcerpt?.length ?? 0) +
+      (context?.actualQuestions.reduce(
+        (total, question) => total + question.questionText.length,
+        0,
+      ) ?? 0)
+
+    expect(sourceChars).toBeLessThanOrEqual(MAX_PREPARE_CONTEXT_SOURCE_CHARS)
+    expect(context?.jobDescriptionTruncated).toBe(true)
+    expect(context?.resumeTruncated).toBe(true)
+    expect(context?.actualQuestions).toHaveLength(8)
+  })
+
+  it('sends hand-entered questions but never practice or AI-suggested ones', async () => {
+    prismaMock.preparationPractice.findUnique.mockResolvedValue({
+      preparationId: PREPARATION_ID,
+      stageId: STAGE_B,
+      preparation: {
+        userId: 'user-a',
+        interview: {
+          companyName: 'Example',
+          roleTitle: 'Director',
+          jobDescriptionText: 'Cloud platforms',
+          resumeLabel: 'Profile',
+          resumeText: 'Director with 23 yrs',
+        },
+      },
+      stage: {
+        name: 'Leadership',
+        type: PreparationStageType.TECHNICAL,
+        sequence: 4,
+        interviewerName: null,
+        interviewerRole: null,
+        interviewerProfileText: null,
+      },
+    })
+    prismaMock.interviewQuestion.findMany.mockResolvedValue([
+      { questionText: 'How many resources worked under you', stage: { name: 'Leadership' } },
+    ])
+
+    const context = await buildPrepareJourneyContext(SESSION_ID, 'user-a')
+
+    expect(context?.actualQuestions).toEqual([
+      {
+        stageName: 'Leadership',
+        questionText: 'How many resources worked under you',
+        truncated: false,
+      },
+    ])
+    expect(prismaMock.interviewQuestion.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          source: { in: ['ACTUAL_INTERVIEW', 'USER_ENTERED'] },
+        }),
+      }),
+    )
   })
 })

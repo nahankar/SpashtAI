@@ -110,6 +110,13 @@ export const reorderStagesSchema = z
   })
   .strict()
 
+export const linkPreparationPracticeSchema = z
+  .object({
+    sessionId: z.string().trim().min(1).max(200),
+    stageId: z.string().cuid().optional().nullable(),
+  })
+  .strict()
+
 const reflectionFields = {
   rating: z.nativeEnum(InterviewRating).optional().nullable(),
   outcome: z.nativeEnum(InterviewOutcome).optional().nullable(),

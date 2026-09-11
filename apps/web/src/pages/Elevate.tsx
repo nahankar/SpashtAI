@@ -48,6 +48,7 @@ import {
   type TurnMetrics,
 } from '@/components/session/UserTurnMetrics'
 import type { SessionTurnRecord } from '@/hooks/useSessionMetrics'
+import { getPreparation, linkPreparationPractice } from '@/lib/prepare-api'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 
@@ -91,6 +92,8 @@ export function Elevate() {
   const inboundFocus = searchParams.get('focus') || ''
   const inboundContext = searchParams.get('context') ? decodeURIComponent(searchParams.get('context')!) : ''
   const inboundNewSession = searchParams.get('newSession') === 'true'
+  const inboundPreparationId = searchParams.get('preparationId')
+  const inboundStageId = searchParams.get('stageId')
   
   const [identity] = useState(() => {
     const name = user?.firstName || user?.email?.split('@')[0] || 'user'
@@ -103,6 +106,9 @@ export function Elevate() {
   const [roomName, setRoomName] = useState('') // Empty initially, generated per session
   const [token, setToken] = useState<string | null>(null)
   const [url, setUrl] = useState<string | null>(null)
+  const [isJoining, setIsJoining] = useState(false)
+  const joiningRef = useRef(false)
+  const [isLeaving, setIsLeaving] = useState(false)
   const [assistantState, setAssistantState] = useState<'restarting' | 'ready' | 'recovering' | 'unknown'>('unknown')
   const [isSessionPaused, setIsSessionPaused] = useState(false)
   const [isCompletedSessionView, setIsCompletedSessionView] = useState(false)
@@ -114,6 +120,62 @@ export function Elevate() {
   const [turnTextByIndex, setTurnTextByIndex] = useState<Record<number, string>>({})
   const [turnMetricsByText, setTurnMetricsByText] = useState<Record<string, TurnMetrics>>({})
   const [showHistory, setShowHistory] = useState(!viewSessionId && !inboundNewSession)
+  const [prepareLaunch, setPrepareLaunch] = useState<{
+    preparationId: string
+    stageId: string | null
+    journeyTitle: string
+    stageName: string | null
+  } | null>(null)
+  const [prepareLaunchLoading, setPrepareLaunchLoading] = useState(Boolean(inboundPreparationId))
+  const [prepareLaunchError, setPrepareLaunchError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!inboundPreparationId) {
+      setPrepareLaunch(null)
+      setPrepareLaunchLoading(false)
+      setPrepareLaunchError(null)
+      return
+    }
+
+    let cancelled = false
+    setPrepareLaunchLoading(true)
+    getPreparation(inboundPreparationId)
+      .then((journey) => {
+        if (cancelled) return
+        const stage = inboundStageId
+          ? journey.stages.find((candidate) => candidate.id === inboundStageId)
+          : null
+        if (inboundStageId && !stage) {
+          throw new Error('The selected interview round is no longer available')
+        }
+        setPrepareLaunch({
+          preparationId: journey.id,
+          stageId: stage?.id ?? null,
+          journeyTitle: journey.title,
+          stageName: stage?.name ?? null,
+        })
+        setPrepareLaunchError(null)
+        setElevateSessionName((current) =>
+          current.trim()
+            ? current
+            : `${journey.interview.companyName} — ${stage?.name ?? 'Interview'} practice`,
+        )
+      })
+      .catch((error) => {
+        if (cancelled) return
+        setPrepareLaunch(null)
+        setPrepareLaunchError(
+          error instanceof Error ? error.message : 'Could not load interview journey',
+        )
+      })
+      .finally(() => {
+        if (!cancelled) setPrepareLaunchLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [inboundPreparationId, inboundStageId])
 
   interface ElevateSessionItem {
     id: string
@@ -781,6 +843,14 @@ export function Elevate() {
         const session = data.session || data
         setViewSessionName(session.sessionName || null)
         setViewSessionPulse(session.progressPulseStatus || null)
+        if (!inboundPreparationId && session.preparationPractice) {
+          setPrepareLaunch({
+            preparationId: session.preparationPractice.preparationId,
+            stageId: session.preparationPractice.stageId,
+            journeyTitle: session.preparationPractice.preparation.title,
+            stageName: session.preparationPractice.stage?.name ?? null,
+          })
+        }
 
         if (session.endedAt) {
           console.log('📊 Viewing completed session:', viewSessionId)
@@ -987,7 +1057,20 @@ export function Elevate() {
   }, [joined, roomName, assistantState])
 
   const handleJoin = useCallback(async () => {
+    if (prepareLaunch && joiningRef.current) return
+    if (prepareLaunch) {
+      joiningRef.current = true
+      setIsJoining(true)
+    }
+    let createdLinkedSessionId: string | null = null
     try {
+      if (inboundPreparationId && !prepareLaunch) {
+        throw new Error(prepareLaunchError || 'Interview journey is still loading')
+      }
+      if (prepareLaunch && !focusArea) {
+        throw new Error('Choose a focus area for this interview practice')
+      }
+
       // 1. Create session ID and room name
       const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
       const uniqueRoomName = roomName || `room_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
@@ -1006,8 +1089,23 @@ export function Elevate() {
         })
       })
       
+      if (!sessionResponse.ok && prepareLaunch) {
+        const body = await sessionResponse.json().catch(() => ({}))
+        throw new Error(body.error || 'Failed to create Elevate session')
+      }
       if (!sessionResponse.ok) {
         console.warn('Failed to create session in database, continuing anyway')
+      } else if (prepareLaunch) {
+        createdLinkedSessionId = newSessionId
+      }
+
+      // Prepare owns the optional journey association. Link before creating
+      // the room so the agent's first coaching-context fetch can see it.
+      if (prepareLaunch) {
+        await linkPreparationPractice(prepareLaunch.preparationId, {
+          sessionId: newSessionId,
+          stageId: prepareLaunch.stageId,
+        })
       }
 
       // 3. Get LiveKit token (creates room — agent will start after this)
@@ -1032,11 +1130,37 @@ export function Elevate() {
       resetMetrics()
       logEvent('event', 'elevate.session_join', { sessionId: newSessionId, focusArea: focusArea || null })
     } catch (error) {
+      if (createdLinkedSessionId) {
+        await fetch(`${API_BASE_URL}/sessions/${createdLinkedSessionId}`, {
+          method: 'DELETE',
+          headers: getAuthHeaders(),
+        }).catch(() => null)
+      }
       logEvent('error', 'elevate.session_join_failed', error)
       console.error('Error joining session:', error)
-      throw error
+      if (prepareLaunch) {
+        toast.error(error instanceof Error ? error.message : 'Failed to start session')
+      } else {
+        throw error
+      }
+    } finally {
+      if (prepareLaunch) {
+        joiningRef.current = false
+        setIsJoining(false)
+      }
     }
-  }, [identity, roomName, elevateSessionName, focusArea, inboundContext, resetMetrics, user])
+  }, [
+    identity,
+    roomName,
+    elevateSessionName,
+    focusArea,
+    inboundContext,
+    inboundPreparationId,
+    prepareLaunch,
+    prepareLaunchError,
+    resetMetrics,
+    user,
+  ])
 
   // Called when LiveKit disconnects unexpectedly (refresh, network drop, etc.)
   // Does NOT end the session — leaves it resumable.
@@ -1049,6 +1173,8 @@ export function Elevate() {
   // Called only when user explicitly clicks "Leave".
   // Ends the session permanently.
   const handleLeave = useCallback(async () => {
+    if (isLeaving) return
+    setIsLeaving(true)
     const currentSessionId = sessionId
     if (currentSessionId) logEvent('event', 'elevate.session_leave', { sessionId: currentSessionId })
 
@@ -1147,12 +1273,18 @@ export function Elevate() {
       setPlaybackAutoPlayNonce(null)
       setIsCompletedSessionView(true)
       setSessionId(currentSessionId)
-      navigate(`/elevate?session=${encodeURIComponent(currentSessionId)}`)
+      const resultParams = new URLSearchParams({ session: currentSessionId })
+      if (prepareLaunch) {
+        resultParams.set('preparationId', prepareLaunch.preparationId)
+        if (prepareLaunch.stageId) resultParams.set('stageId', prepareLaunch.stageId)
+      }
+      navigate(`/elevate?${resultParams.toString()}`)
     } else {
       setShowHistory(true)
       navigate(cameFromHistory ? '/history?tab=elevate' : '/elevate')
     }
-  }, [sessionId, clearMessages, resetMetrics, navigate, cameFromHistory, confirmDialog, updateUser, loadPastSessions])
+    setIsLeaving(false)
+  }, [sessionId, clearMessages, resetMetrics, navigate, cameFromHistory, confirmDialog, updateUser, loadPastSessions, prepareLaunch, isLeaving])
 
   const handleDiscard = useCallback(async () => {
     const yes = await confirmDialog({
@@ -1189,9 +1321,13 @@ export function Elevate() {
       }
     }
 
-    setShowHistory(true)
-    navigate('/elevate')
-  }, [sessionId, clearMessages, resetMetrics, navigate, confirmDialog])
+    if (prepareLaunch) {
+      navigate(`/prepare/interviews/${encodeURIComponent(prepareLaunch.preparationId)}`)
+    } else {
+      setShowHistory(true)
+      navigate('/elevate')
+    }
+  }, [sessionId, clearMessages, resetMetrics, navigate, confirmDialog, prepareLaunch])
 
   // Return from a viewed session's results back to the Elevate session list.
   const handleBackToElevate = useCallback(() => {
@@ -1415,7 +1551,21 @@ export function Elevate() {
   return (
     <div className="grid gap-6">
       {/* Back navigation */}
-      {!joined && viewSessionId && (
+      {!joined && prepareLaunch ? (
+        <Link
+          to={`/prepare/interviews/${encodeURIComponent(prepareLaunch.preparationId)}`}
+          className="text-sm text-muted-foreground hover:text-foreground w-fit"
+        >
+          &larr; Back to {prepareLaunch.journeyTitle}
+        </Link>
+      ) : !joined && prepareLaunchError && inboundPreparationId ? (
+        <Link
+          to="/prepare/interviews"
+          className="text-sm text-muted-foreground hover:text-foreground w-fit"
+        >
+          &larr; Back to interview journeys
+        </Link>
+      ) : !joined && viewSessionId && (
         cameFromHistory ? (
           <Link to="/history?tab=elevate" className="text-sm text-muted-foreground hover:text-foreground w-fit">
             &larr; Back to Sessions
@@ -1429,7 +1579,7 @@ export function Elevate() {
           </button>
         )
       )}
-      {!joined && !viewSessionId && !showHistory && !sessionId && (
+      {!joined && !inboundPreparationId && !viewSessionId && !showHistory && !sessionId && (
         <button
           onClick={() => setShowHistory(true)}
           className="text-sm text-muted-foreground hover:text-foreground w-fit"
@@ -1455,8 +1605,38 @@ export function Elevate() {
           </div>
         </CardHeader>
         <CardContent>
-          {!joined && !viewSessionId && !sessionId ? (
+          {isLeaving ? (
+            <div className="flex min-h-40 items-center justify-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Saving your session and preparing results…
+            </div>
+          ) : !joined && !viewSessionId && !sessionId ? (
             <div className="grid gap-3">
+              {prepareLaunchLoading && (
+                <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading interview journey…
+                </div>
+              )}
+              {prepareLaunchError && (
+                <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                  {prepareLaunchError}
+                </div>
+              )}
+              {prepareLaunch && (
+                <div className="rounded-md border bg-primary/5 px-3 py-2">
+                  <p className="text-sm font-medium">
+                    Preparing for {prepareLaunch.journeyTitle}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {prepareLaunch.stageName
+                      ? `${prepareLaunch.stageName} round · `
+                      : ''}
+                    Your saved JD, profile, interviewer context, and actual questions are
+                    loaded securely after the session starts.
+                  </p>
+                </div>
+              )}
               <div>
                 <label className="text-sm font-medium">Session Name *</label>
                 <Input
@@ -1471,16 +1651,39 @@ export function Elevate() {
               </div>
               <div>
                 <label className="text-sm font-medium">Focus Area</label>
-                <select
-                  value={focusArea}
-                  onChange={(e) => setFocusArea(e.target.value)}
-                  className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <option value="">General practice (no specific focus)</option>
-                  {FOCUS_AREAS.map((a) => (
-                    <option key={a.id} value={a.id}>{a.label} — {a.description}</option>
-                  ))}
-                </select>
+                {prepareLaunch ? (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {FOCUS_AREAS.map((area) => (
+                      <Button
+                        key={area.id}
+                        type="button"
+                        size="sm"
+                        variant={focusArea === area.id ? 'default' : 'outline'}
+                        className="rounded-full"
+                        onClick={() => setFocusArea(area.id)}
+                        title={area.description}
+                      >
+                        {area.label}
+                      </Button>
+                    ))}
+                  </div>
+                ) : (
+                  <select
+                    value={focusArea}
+                    onChange={(e) => setFocusArea(e.target.value)}
+                    className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value="">General practice (no specific focus)</option>
+                    {FOCUS_AREAS.map((a) => (
+                      <option key={a.id} value={a.id}>{a.label} — {a.description}</option>
+                    ))}
+                  </select>
+                )}
+                {prepareLaunch && !focusArea && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Choose the communication skill Elevate should coach in this interview context.
+                  </p>
+                )}
                 {inboundContext && (
                   <p className="mt-1 rounded-md bg-primary/5 px-2 py-1.5 text-xs text-primary">
                     From Replay: <span className="font-medium">{inboundContext}</span>
@@ -1500,9 +1703,16 @@ export function Elevate() {
                   size="lg"
                   className="flex-1"
                   onClick={handleJoin}
-                  disabled={!elevateSessionName.trim()}
+                  disabled={
+                    isJoining ||
+                    !elevateSessionName.trim() ||
+                    prepareLaunchLoading ||
+                    Boolean(prepareLaunchError) ||
+                    Boolean(prepareLaunch && !focusArea)
+                  }
                 >
-                  Start Session
+                  {isJoining && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {isJoining ? 'Starting…' : 'Start Session'}
                 </Button>
               </div>
             </div>

@@ -83,6 +83,21 @@ export type PreparationStage = {
   interviewerProfileText: string | null
   reflection?: StageReflection | null
   questionCount?: number
+  practiceCount?: number
+}
+
+export type PreparationPractice = {
+  id: string
+  preparationId: string
+  stageId: string | null
+  sessionId: string
+  createdAt?: string
+  session?: {
+    sessionName: string | null
+    focusArea: string | null
+    startedAt: string
+    endedAt: string | null
+  }
 }
 
 export type InterviewPreparation = {
@@ -109,6 +124,7 @@ export type Preparation = {
   nextStage: PreparationStage | null
   questions?: InterviewQuestion[]
   timeline?: PreparationTimelineItem[]
+  practices?: PreparationPractice[]
 }
 
 /** Mirrors PREPARE_TEXT_LIMITS on the server. */

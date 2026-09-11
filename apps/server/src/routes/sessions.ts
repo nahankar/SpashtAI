@@ -35,7 +35,15 @@ export async function getSession(req: Request, res: Response) {
           select: { id: true, email: true }
         },
         metrics: true,
-        transcript: true
+        transcript: true,
+        preparationPractice: {
+          select: {
+            preparationId: true,
+            stageId: true,
+            preparation: { select: { title: true } },
+            stage: { select: { name: true } },
+          },
+        },
       }
     })
     

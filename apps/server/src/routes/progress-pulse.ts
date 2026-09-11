@@ -2,6 +2,7 @@ import type { Request, Response } from 'express'
 import { prisma } from '../lib/prisma'
 import { Prisma } from '@prisma/client'
 import { getEnabledFeatures, isFeatureEnabled, type PlatformFeature } from '../lib/featureFlags'
+import { buildPrepareJourneyContext } from '../lib/prepareCoachingContext'
 
 function enabledSources(): Promise<PlatformFeature[]> {
   return getEnabledFeatures()
@@ -253,7 +254,12 @@ export async function skipProgressPulse(req: Request, res: Response) {
  * - User's specific examples (filler phrases, hedging phrases, etc.)
  * - Previous Elevate practice sessions for the same focus area
  */
-async function buildCoachingContext(userId: string, focusArea: string, replaySessionId?: string) {
+async function buildCoachingContext(
+  userId: string,
+  focusArea: string,
+  replaySessionId?: string,
+  elevateSessionId?: string,
+) {
     const enabled = await getEnabledFeatures()
 
     // 1. All Progress Pulse scores (latest per skill + trend) — enabled sources only
@@ -442,13 +448,18 @@ async function buildCoachingContext(userId: string, focusArea: string, replaySes
     })
     }
 
-    return {
+    const prepareJourney = elevateSessionId
+      ? await buildPrepareJourneyContext(elevateSessionId, userId)
+      : null
+
+    const context = {
       focusArea,
       skillSummaries,
       replayInsights,
       lastPracticeSummary,
       elevateSessionCount,
     }
+    return prepareJourney ? { ...context, prepareJourney } : context
 }
 
 /** Authenticated endpoint for the frontend */
@@ -509,7 +520,7 @@ export async function getCoachingContextForAgent(req: Request, res: Response) {
       return res.status(404).json({ error: 'Session not found' })
     }
 
-    const result = await buildCoachingContext(userId, focusArea)
+    const result = await buildCoachingContext(userId, focusArea, undefined, sessionId)
     res.json(result)
   } catch (error) {
     console.error('Error fetching coaching context for agent:', error)

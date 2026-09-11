@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   ArrowUp,
   Calendar,
+  Dumbbell,
   Loader2,
   NotebookPen,
   Plus,
@@ -59,6 +60,15 @@ function displayDate(value: string | null | undefined) {
         minute: '2-digit',
       })
     : null
+}
+
+function practiceHref(preparationId: string, stageId?: string | null) {
+  const params = new URLSearchParams({
+    newSession: 'true',
+    preparationId,
+  })
+  if (stageId) params.set('stageId', stageId)
+  return `/elevate?${params.toString()}`
 }
 
 const STAGE_PIPELINE_STATUSES: PreparationStageStatus[] = [
@@ -287,6 +297,12 @@ export function InterviewJourney() {
           <h1 className="text-3xl font-bold tracking-tight">{journey.interview.roleTitle}</h1>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <Badge>{journey.status.toLowerCase()}</Badge>
+            {(journey.practices?.length ?? 0) > 0 && (
+              <Badge variant="outline">
+                {journey.practices?.length} Elevate practice
+                {journey.practices?.length === 1 ? '' : 's'}
+              </Badge>
+            )}
             {journey.nextStage && (
               <span className="text-sm text-muted-foreground">
                 Next: <strong className="text-foreground">{journey.nextStage.name}</strong>
@@ -296,6 +312,14 @@ export function InterviewJourney() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          {journey.nextStage && (
+            <Link to={practiceHref(journey.id, journey.nextStage.id)}>
+              <Button variant="outline">
+                <Dumbbell className="mr-2 h-4 w-4" />
+                Practice next round
+              </Button>
+            </Link>
+          )}
           <Button onClick={() => openLog()}>
             <NotebookPen className="mr-2 h-4 w-4" />
             Log interview
@@ -476,6 +500,12 @@ export function InterviewJourney() {
                         <Button size="sm" variant="outline" onClick={() => openLog(stage.id)}>
                           Log interview
                         </Button>
+                        <Link to={practiceHref(journey.id, stage.id)}>
+                          <Button size="sm" variant="outline">
+                            <Dumbbell className="mr-1.5 h-3.5 w-3.5" />
+                            Practice
+                          </Button>
+                        </Link>
                         <Button size="sm" variant="outline" onClick={() => setEditingStage(stage.id)}>Edit</Button>
                         <Button size="icon" variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => removeStage(stage)} aria-label={`Remove ${stage.name}`}><Trash2 className="h-4 w-4" /></Button>
                       </div>
@@ -501,12 +531,16 @@ export function InterviewJourney() {
                         completed
                       </Button>
                     </div>
-                    {(stage.questionCount || stage.reflection) && (
+                    {(stage.questionCount || stage.reflection || stage.practiceCount) && (
                       <p className="text-xs text-muted-foreground">
                         {stage.questionCount ? `${stage.questionCount} question${stage.questionCount === 1 ? '' : 's'}` : ''}
-                        {stage.questionCount && stage.reflection ? ' · ' : ''}
+                        {stage.questionCount && (stage.reflection || stage.practiceCount) ? ' · ' : ''}
                         {stage.reflection
                           ? `Reflection${ratingLabel(stage.reflection.rating) ? `: ${ratingLabel(stage.reflection.rating)}` : ''}`
+                          : ''}
+                        {stage.reflection && stage.practiceCount ? ' · ' : ''}
+                        {stage.practiceCount
+                          ? `${stage.practiceCount} practice session${stage.practiceCount === 1 ? '' : 's'}`
                           : ''}
                       </p>
                     )}

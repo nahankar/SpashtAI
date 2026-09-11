@@ -5,6 +5,7 @@ import type {
   InterviewQuestionSource,
   InterviewRating,
   Preparation,
+  PreparationPractice,
   PreparationStageStatus,
   PreparationStageType,
   PreparationStatus,
@@ -145,6 +146,17 @@ export async function logInterview(
     { method: 'POST', body: JSON.stringify(input) },
   )
   return data.preparation
+}
+
+export async function linkPreparationPractice(
+  preparationId: string,
+  input: { sessionId: string; stageId?: string | null },
+): Promise<PreparationPractice> {
+  const data = await apiClient<{ practice: PreparationPractice }>(
+    `/api/preparations/${encodeURIComponent(preparationId)}/practices`,
+    { method: 'POST', body: JSON.stringify(input) },
+  )
+  return data.practice
 }
 
 export async function addInterviewQuestion(

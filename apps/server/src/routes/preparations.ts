@@ -23,6 +23,7 @@ import {
   createPreparationSchema,
   createQuestionSchema,
   createStageSchema,
+  linkPreparationPracticeSchema,
   logInterviewSchema,
   reorderStagesSchema,
   updatePreparationSchema,
@@ -60,6 +61,8 @@ function withPreparationDetail(
     ...stage,
     questionCount: preparation.questions.filter((question) => question.stageId === stage.id)
       .length,
+    practiceCount: preparation.practices.filter((practice) => practice.stageId === stage.id)
+      .length,
   }))
   return {
     ...withStageSummary({ ...preparation, stages }),
@@ -82,6 +85,7 @@ const FIELD_LABELS: Record<string, string> = {
   status: 'Stage status',
   scheduledAt: 'Scheduled date',
   stageId: 'Stage',
+  sessionId: 'Elevate session',
   questionText: 'Question',
   source: 'Question source',
   questionsText: 'What they asked',
@@ -412,6 +416,97 @@ router.post('/:id/stages/reorder', async (req, res) => {
     }
     reqLog(req).error({ err: error }, 'Failed to reorder preparation stages')
     res.status(500).json({ error: 'Failed to reorder stages' })
+  }
+})
+
+router.get('/:id/practices', async (req, res) => {
+  try {
+    const preparation = await getOwnedPreparation(userId(req), req.params.id)
+    if (!preparation) return res.status(404).json({ error: 'Not found' })
+    const practices = await prisma.preparationPractice.findMany({
+      where: { preparationId: preparation.id },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        preparationId: true,
+        stageId: true,
+        sessionId: true,
+        createdAt: true,
+        session: {
+          select: {
+            sessionName: true,
+            focusArea: true,
+            startedAt: true,
+            endedAt: true,
+          },
+        },
+      },
+    })
+    res.json({ practices })
+  } catch (error) {
+    reqLog(req).error({ err: error }, 'Failed to list preparation practices')
+    res.status(500).json({ error: 'Failed to load practices' })
+  }
+})
+
+router.post('/:id/practices', async (req, res) => {
+  const parsed = linkPreparationPracticeSchema.safeParse(req.body)
+  if (!parsed.success) return validationError(res, parsed.error)
+
+  try {
+    const preparation = await getOwnedPreparation(userId(req), req.params.id)
+    if (!preparation) return res.status(404).json({ error: 'Not found' })
+
+    if (parsed.data.stageId) {
+      const stage = await getOwnedStage(userId(req), preparation.id, parsed.data.stageId)
+      if (!stage) return res.status(404).json({ error: 'Not found' })
+    }
+
+    const session = await prisma.session.findFirst({
+      where: {
+        id: parsed.data.sessionId,
+        userId: userId(req),
+        module: 'elevate',
+      },
+      select: { id: true },
+    })
+    if (!session) return res.status(404).json({ error: 'Not found' })
+
+    const existing = await prisma.preparationPractice.findUnique({
+      where: { sessionId: session.id },
+    })
+    if (existing) {
+      if (
+        existing.preparationId === preparation.id &&
+        existing.stageId === (parsed.data.stageId ?? null)
+      ) {
+        return res.json({ practice: existing })
+      }
+      return res.status(409).json({ error: 'This Elevate session is already linked' })
+    }
+
+    const practice = await prisma.preparationPractice.create({
+      data: {
+        preparationId: preparation.id,
+        stageId: parsed.data.stageId ?? null,
+        sessionId: session.id,
+      },
+    })
+    reqLog(req).info(
+      {
+        event: 'prepare.practice_linked',
+        preparationId: preparation.id,
+        sessionId: session.id,
+      },
+      'Elevate practice linked to interview journey',
+    )
+    res.status(201).json({ practice })
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      return res.status(409).json({ error: 'This Elevate session is already linked' })
+    }
+    reqLog(req).error({ err: error }, 'Failed to link preparation practice')
+    res.status(500).json({ error: 'Failed to link practice session' })
   }
 })
 

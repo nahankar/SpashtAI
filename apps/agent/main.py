@@ -30,7 +30,7 @@ from livekit.agents import AgentSession, Agent, function_tool, RunContext, llm, 
 from livekit.agents.llm import StopResponse
 from livekit.agents.voice.agent import ModelSettings
 from livekit.plugins import aws
-from exercise_templates import get_exercise_instructions
+from exercise_templates import get_exercise_instructions, get_prepare_journey_instructions
 from monologue_guard import MONOLOGUE_FOCUS_AREAS, MonologueGuard
 from echo_guard import is_likely_echo, record_assistant_speech
 from text_sanitize import StreamingThinkingStripper, is_thinking_only, strip_thinking_blocks
@@ -1697,6 +1697,9 @@ async def entrypoint(ctx: JobContext):
             custom_exercise = await fetch_agent_prompt(f"elevate_exercise_{focus_area}")
             if custom_exercise:
                 exercise_instructions = custom_exercise
+                prepare_instructions = get_prepare_journey_instructions(coaching_context)
+                if prepare_instructions:
+                    exercise_instructions += "\n\n" + prepare_instructions
             else:
                 exercise_instructions = get_exercise_instructions(focus_area, focus_context, coaching_context)
             _debug_log(f"Exercise instructions length: {len(exercise_instructions)}, has coaching data: {'USER DATA' in exercise_instructions}")
