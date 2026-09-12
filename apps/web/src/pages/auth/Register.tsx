@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
+import { safeAppPath } from '@/lib/safe-next-path'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
 import { LogoWithBeta } from '@/components/brand/LogoWithBeta'
@@ -12,6 +13,8 @@ export function Register() {
   const [checkingPlatform, setCheckingPlatform] = useState(true)
   const { loginWithGoogle } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const next = safeAppPath(searchParams.get('next'))
 
   useEffect(() => {
     const API = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
@@ -31,7 +34,11 @@ export function Register() {
   async function handleGoogleCredential(credential: string) {
     const user = await loginWithGoogle(credential)
     // New Google users still complete phone, DOB, gender and pincode before entering.
-    navigate(user.needsProfileCompletion ? '/auth/complete-profile' : '/')
+    if (user.needsProfileCompletion) {
+      navigate(next ? `/auth/complete-profile?next=${encodeURIComponent(next)}` : '/auth/complete-profile')
+      return
+    }
+    navigate(next || '/')
   }
 
   return (
@@ -54,7 +61,10 @@ export function Register() {
               </div>
               <p className="text-sm text-muted-foreground">
                 Already have an account?{' '}
-                <Link to="/auth/login" className="text-foreground font-medium hover:underline">
+                <Link
+                  to={next ? `/auth/login?next=${encodeURIComponent(next)}` : '/auth/login'}
+                  className="text-foreground font-medium hover:underline"
+                >
                   Sign in
                 </Link>
               </p>
@@ -87,7 +97,10 @@ export function Register() {
 
               <div className="text-center text-sm text-muted-foreground">
                 Already have an account?{' '}
-                <Link to="/auth/login" className="text-foreground font-medium hover:underline">
+                <Link
+                  to={next ? `/auth/login?next=${encodeURIComponent(next)}` : '/auth/login'}
+                  className="text-foreground font-medium hover:underline"
+                >
                   Sign in
                 </Link>
               </div>

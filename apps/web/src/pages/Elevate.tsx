@@ -23,6 +23,7 @@ import { SessionMetricsSummary } from '@/components/analytics/SessionMetricsSumm
 import { AdvancedInsights, CONTENT_VERDICTS, DELIVERY_VERDICTS } from '@/components/analytics/AdvancedInsights'
 import { SkillScoresCard } from '@/components/analytics/SkillScoresCard'
 import { CoachingInsightsCard } from '@/components/analytics/CoachingInsightsCard'
+import { SnapshotReveal } from '@/components/elevate/SnapshotReveal'
 import { PaceTrendCard, type PacePoint } from '@/components/analytics/PaceTrend'
 import { SessionReplay } from '@/pages/SessionReplay'
 import { useRealTimeMetrics, useSessionMetrics, useSessionTurns } from '@/hooks/useSessionMetrics'
@@ -32,7 +33,7 @@ import { AgentVisualizer, SessionStatusBar } from '@/components/layout/AgentVisu
 import { toast } from 'sonner'
 import { getAuthHeaders } from '@/lib/api-client'
 import { logEvent } from '@/lib/remoteLogger'
-import { FOCUS_AREAS, getFocusAreaLabel, EXERCISE_PREVIEWS } from '@/lib/focus-areas'
+import { FOCUS_AREAS, PRACTICE_FOCUS_AREAS, getFocusAreaLabel, EXERCISE_PREVIEWS } from '@/lib/focus-areas'
 import { pulseSkillLabel } from '@/lib/pulse-skills'
 import { useAuth } from '@/hooks/useAuth'
 import { useUserExportFlags } from '@/hooks/useUserExportFlags'
@@ -96,6 +97,7 @@ export function Elevate() {
   const inboundStageId = searchParams.get('stageId')
   const inboundBoothDemo =
     searchParams.get('demo') === '1' || searchParams.get('booth') === '1'
+  const inboundFullReport = searchParams.get('full') === '1'
   
   const [identity] = useState(() => {
     const name = user?.firstName || user?.email?.split('@')[0] || 'user'
@@ -109,7 +111,7 @@ export function Elevate() {
         : ''
   )
   const [focusArea, setFocusArea] = useState(
-    inboundFocus || (inboundBoothDemo ? 'filler_words' : '')
+    inboundFocus || (inboundBoothDemo ? 'snapshot' : '')
   )
   const [roomName, setRoomName] = useState('') // Empty initially, generated per session
   const [token, setToken] = useState<string | null>(null)
@@ -122,6 +124,7 @@ export function Elevate() {
   const [isCompletedSessionView, setIsCompletedSessionView] = useState(false)
   const [viewSessionName, setViewSessionName] = useState<string | null>(null)
   const [viewSessionPulse, setViewSessionPulse] = useState<string | null>(null)
+  const [viewFocusArea, setViewFocusArea] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<string | null>(viewSessionId) // Initialize with URL param if present
   const [showMetrics, setShowMetrics] = useState(false)
   const [turnMetricsByIndex, setTurnMetricsByIndex] = useState<Record<number, TurnMetrics>>({})
@@ -851,6 +854,7 @@ export function Elevate() {
         const session = data.session || data
         setViewSessionName(session.sessionName || null)
         setViewSessionPulse(session.progressPulseStatus || null)
+        setViewFocusArea(session.focusArea || null)
         if (!inboundPreparationId && session.preparationPractice) {
           setPrepareLaunch({
             preparationId: session.preparationPractice.preparationId,
@@ -881,7 +885,7 @@ export function Elevate() {
           if (session.focusArea) u.searchParams.set('focusArea', session.focusArea)
           if (session.focusContext) u.searchParams.set('focusContext', session.focusContext)
           if (session.sessionName) u.searchParams.set('sessionName', session.sessionName)
-          if (inboundBoothDemo) u.searchParams.set('boothDemo', '1')
+          if (inboundBoothDemo || session.focusArea === 'snapshot') u.searchParams.set('boothDemo', '1')
 
           const res = await fetch(u.toString())
           if (!res.ok) throw new Error('Failed to get token')
@@ -932,7 +936,7 @@ export function Elevate() {
     u.searchParams.set('identity', identity)
     u.searchParams.set('room', newRoomName)
     u.searchParams.set('sessionId', resumeSessionId)
-    if (inboundBoothDemo) u.searchParams.set('boothDemo', '1')
+    if (inboundBoothDemo || focusArea === 'snapshot') u.searchParams.set('boothDemo', '1')
     const res = await fetch(u.toString())
     if (!res.ok) throw new Error('Failed to get token')
     const json = await res.json()
@@ -942,7 +946,7 @@ export function Elevate() {
     setRoomName(newRoomName)
     setIsSessionPaused(false)
     resetMetrics()
-  }, [identity, inboundBoothDemo, resetMetrics])
+  }, [focusArea, identity, inboundBoothDemo, resetMetrics])
 
   // ── Screen Wake Lock: prevent macOS from sleeping during active voice session ──
   useEffect(() => {
@@ -1127,7 +1131,7 @@ export function Elevate() {
       if (focusArea) u.searchParams.set('focusArea', focusArea)
       if (inboundContext) u.searchParams.set('focusContext', inboundContext)
       if (elevateSessionName.trim()) u.searchParams.set('sessionName', elevateSessionName.trim())
-      if (inboundBoothDemo) u.searchParams.set('boothDemo', '1')
+      if (inboundBoothDemo || focusArea === 'snapshot') u.searchParams.set('boothDemo', '1')
       const res = await fetch(u.toString())
       if (!res.ok) throw new Error('Failed to get token')
       const json = await res.json()
@@ -1225,13 +1229,16 @@ export function Elevate() {
         console.warn('Failed to finalize session:', err)
       }
 
-      // Ask user whether to track this session in Progress Pulse
-      const trackIt = await confirmDialog({
-        title: 'Track in Progress Pulse?',
-        description: 'Would you like to include this session\'s skill scores in your progress tracking?',
-        confirmLabel: 'Yes, track this',
-        cancelLabel: 'Skip — won\'t be added later',
-      })
+      // Snapshot / booth is a first impression, not a Pulse sample.
+      const isSnapshot = inboundBoothDemo || focusArea === 'snapshot'
+      const trackIt = isSnapshot
+        ? false
+        : await confirmDialog({
+            title: 'Track in Progress Pulse?',
+            description: 'Would you like to include this session\'s skill scores in your progress tracking?',
+            confirmLabel: 'Yes, track this',
+            cancelLabel: 'Skip — won\'t be added later',
+          })
 
       // Run the full analytics pipeline (signal extraction + skill scores + coaching insights)
       try {
@@ -1296,7 +1303,7 @@ export function Elevate() {
       navigate(cameFromHistory ? '/history?tab=elevate' : '/elevate')
     }
     setIsLeaving(false)
-  }, [sessionId, clearMessages, resetMetrics, navigate, cameFromHistory, confirmDialog, updateUser, loadPastSessions, prepareLaunch, isLeaving])
+  }, [sessionId, clearMessages, resetMetrics, navigate, cameFromHistory, confirmDialog, updateUser, loadPastSessions, prepareLaunch, isLeaving, inboundBoothDemo, focusArea])
 
   const handleDiscard = useCallback(async () => {
     const yes = await confirmDialog({
@@ -1606,7 +1613,7 @@ export function Elevate() {
             <CardTitle>
               {viewSessionId && viewSessionName ? viewSessionName : 'Elevate Session'}
             </CardTitle>
-            {viewSessionId && isCompletedSessionView && viewSessionPulse === 'tracked' && (
+            {viewSessionId && isCompletedSessionView && viewFocusArea !== 'snapshot' && viewSessionPulse === 'tracked' && (
               <span
                 className="inline-flex shrink-0 items-center gap-1 rounded-md border border-green-300 bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700"
                 title="This session is tracked in Progress Pulse"
@@ -1665,7 +1672,7 @@ export function Elevate() {
                 <label className="text-sm font-medium">Focus Area</label>
                 {prepareLaunch ? (
                   <div className="mt-2 flex flex-wrap gap-2">
-                    {FOCUS_AREAS.map((area) => (
+                    {PRACTICE_FOCUS_AREAS.map((area) => (
                       <Button
                         key={area.id}
                         type="button"
@@ -1728,6 +1735,28 @@ export function Elevate() {
                 </Button>
               </div>
             </div>
+          ) : !joined && viewSessionId && isCompletedSessionView && viewFocusArea === 'snapshot' && !inboundFullReport ? (
+            <SnapshotReveal
+              sessionId={viewSessionId}
+              messages={messages}
+              onSeeFull={() => {
+                const params = new URLSearchParams(searchParams)
+                params.set('session', viewSessionId)
+                params.set('full', '1')
+                params.delete('demo')
+                params.delete('newSession')
+                navigate(`/elevate?${params.toString()}`)
+              }}
+              onPlayClip={() => {
+                setResultsTab('playback')
+                const params = new URLSearchParams(searchParams)
+                params.set('session', viewSessionId)
+                params.set('full', '1')
+                params.delete('demo')
+                params.delete('newSession')
+                navigate(`/elevate?${params.toString()}`)
+              }}
+            />
           ) : !joined && viewSessionId && isCompletedSessionView ? (
             <Tabs
               value={resultsTab}
@@ -1741,6 +1770,20 @@ export function Elevate() {
               }}
               className="space-y-4"
             >
+              {viewFocusArea === 'snapshot' && inboundFullReport && viewSessionId && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="-ml-2 h-8 px-2 text-muted-foreground"
+                  onClick={() => {
+                    const params = new URLSearchParams(searchParams)
+                    params.delete('full')
+                    navigate(`/elevate?${params.toString()}`)
+                  }}
+                >
+                  &larr; Back to snapshot
+                </Button>
+              )}
               <div className="flex w-full items-center gap-2">
                 <TabsList className="inline-flex h-10 shrink-0 flex-nowrap items-center">
                   <TabsTrigger value="playback" className="h-9 py-1.5">

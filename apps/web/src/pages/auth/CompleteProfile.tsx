@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
+import { safeAppPath } from '@/lib/safe-next-path'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,6 +13,8 @@ import { LogoWithBeta } from '@/components/brand/LogoWithBeta'
 export function CompleteProfile() {
   const { user, updateUser, fetchCurrentUser } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const next = safeAppPath(searchParams.get('next'))
   const [phone, setPhone] = useState('')
   const [dateOfBirth, setDateOfBirth] = useState('')
   const [gender, setGender] = useState<ProfileGender>('')
@@ -21,9 +24,9 @@ export function CompleteProfile() {
 
   useEffect(() => {
     if (user && !user.needsProfileCompletion) {
-      navigate('/', { replace: true })
+      navigate(next || '/', { replace: true })
     }
-  }, [user, navigate])
+  }, [next, user, navigate])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -42,7 +45,7 @@ export function CompleteProfile() {
       })
       if (data.user) updateUser(data.user)
       else await fetchCurrentUser()
-      navigate('/')
+      navigate(next || '/')
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to save profile')
     } finally {

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { BrowserRouter, Link, Navigate, Route, Routes, useLocation, useSearchParams } from 'react-router-dom'
 import { Menu, X } from 'lucide-react'
 import { AuthProvider } from '@/contexts/AuthContext'
 import { useAuth } from '@/hooks/useAuth'
@@ -47,6 +47,7 @@ import { LogoWithBeta } from '@/components/brand/LogoWithBeta'
 import { usePageTracking } from '@/hooks/usePageTracking'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { safeAppPath } from '@/lib/safe-next-path'
 
 function AppBreadcrumbs() {
   const location = useLocation()
@@ -339,9 +340,18 @@ function Navbar() {
  */
 function HomeRoute() {
   const { user, loading } = useAuth()
+  const [homeParams] = useSearchParams()
+  const pendingNext = safeAppPath(homeParams.get('next'))
   if (loading) return null
   if (!user) return <Landing />
-  if (user.needsProfileCompletion) return <Navigate to="/auth/complete-profile" replace />
+  if (user.needsProfileCompletion) {
+    return (
+      <Navigate
+        to={pendingNext ? `/auth/complete-profile?next=${encodeURIComponent(pendingNext)}` : '/auth/complete-profile'}
+        replace
+      />
+    )
+  }
   return (
     <main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8">
       <AppBreadcrumbs />

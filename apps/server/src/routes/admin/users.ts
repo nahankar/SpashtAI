@@ -210,6 +210,8 @@ router.delete('/:id', async (req: Request, res: Response) => {
       return
     }
 
+    await prisma.user.delete({ where: { id: req.params.id } })
+
     await prisma.adminAction.create({
       data: {
         adminId: req.user!.userId,
@@ -218,8 +220,6 @@ router.delete('/:id', async (req: Request, res: Response) => {
         reason: req.body.reason || null,
       },
     })
-
-    await prisma.user.delete({ where: { id: req.params.id } })
 
     res.json({ message: 'User deleted' })
   } catch (err) {

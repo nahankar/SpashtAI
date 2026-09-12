@@ -222,7 +222,7 @@ model SystemMetrics {
 model Preparation {
   id          String            @id @default(cuid())
   userId      String
-  user        User              @relation(fields: [userId], references: [id])
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   type        PreparationType   @default(INTERVIEW)
   title       String
   status      PreparationStatus @default(ACTIVE)
@@ -344,7 +344,7 @@ model PreparationPractice {
 
 model Session {
   id          String   @id @default(cuid())
-  user        User     @relation(fields: [userId], references: [id])
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId      String
   module      String   // elevate | pitch | fluency
   sessionName String?
@@ -486,7 +486,7 @@ model SessionRecording {
 
 model ReplaySession {
   id          String   @id @default(cuid())
-  user        User     @relation(fields: [userId], references: [id])
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId      String
 
   sessionName      String?

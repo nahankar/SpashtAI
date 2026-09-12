@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
+import { safeAppPath } from '@/lib/safe-next-path'
 import { Card, CardContent, CardHeader, CardDescription } from '@/components/ui/card'
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
 import { LogoWithBeta } from '@/components/brand/LogoWithBeta'
@@ -10,6 +11,8 @@ export function Login() {
   const [signupsPaused, setSignupsPaused] = useState(false)
   const { loginWithGoogle } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const next = safeAppPath(searchParams.get('next'))
 
   useEffect(() => {
     const API = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
@@ -22,10 +25,10 @@ export function Login() {
   async function handleGoogleCredential(credential: string) {
     const user = await loginWithGoogle(credential)
     if (user.needsProfileCompletion) {
-      navigate('/auth/complete-profile')
+      navigate(next ? `/auth/complete-profile?next=${encodeURIComponent(next)}` : '/auth/complete-profile')
       return
     }
-    navigate(user.role === 'ADMIN' || user.role === 'SUPER_ADMIN' ? '/admin' : '/')
+    navigate(next || (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN' ? '/admin' : '/'))
   }
 
   return (
@@ -56,7 +59,10 @@ export function Login() {
             {!signupsPaused && (
               <>
                 Don&apos;t have an account?{' '}
-                <Link to="/auth/register" className="text-foreground font-medium hover:underline">
+                <Link
+                  to={next ? `/auth/register?next=${encodeURIComponent(next)}` : '/auth/register'}
+                  className="text-foreground font-medium hover:underline"
+                >
                   Signup
                 </Link>
               </>

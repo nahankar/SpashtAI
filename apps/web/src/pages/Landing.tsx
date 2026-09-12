@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
+import { safeAppPath } from '@/lib/safe-next-path'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -286,11 +287,17 @@ function FeatureSection({
 export function Landing() {
   const { loginWithGoogle } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const next = safeAppPath(searchParams.get('next'))
   const [error, setError] = useState('')
 
   async function handleGoogleCredential(credential: string) {
     const user = await loginWithGoogle(credential)
-    navigate(user.needsProfileCompletion ? '/auth/complete-profile' : '/')
+    if (user.needsProfileCompletion) {
+      navigate(next ? `/auth/complete-profile?next=${encodeURIComponent(next)}` : '/auth/complete-profile')
+      return
+    }
+    navigate(next || '/')
   }
 
   return (

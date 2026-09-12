@@ -54,7 +54,16 @@ export const FOCUS_AREAS: FocusArea[] = [
     description: 'Clearly assign tasks and close conversations decisively',
     keywords: ['action', 'closing', 'decision', 'assignment', 'next steps', 'follow up'],
   },
+  {
+    id: 'snapshot',
+    label: 'Quick Try',
+    description: '3-minute communication snapshot — three short questions',
+    keywords: ['snapshot', 'quick try', 'communication snapshot'],
+  },
 ]
+
+/** Skill drills only. Snapshot is an onboarding / booth entry, not a Pulse skill. */
+export const PRACTICE_FOCUS_AREAS = FOCUS_AREAS.filter((area) => area.id !== 'snapshot')
 
 /**
  * Infer the best matching focus area from an improvement point or context string.
@@ -64,7 +73,7 @@ export function inferFocusArea(text: string): string {
   let best = 'clarity'
   let bestCount = 0
 
-  for (const area of FOCUS_AREAS) {
+  for (const area of PRACTICE_FOCUS_AREAS) {
     const count = area.keywords.filter((kw) => lower.includes(kw)).length
     if (count > bestCount) {
       bestCount = count
@@ -146,6 +155,15 @@ export const EXERCISE_PREVIEWS: Record<string, ExercisePreview> = {
       'Answer a question completely in under 30 seconds',
       'Deliver the same answer in 15 seconds or less',
       'Summarize in one sentence',
+    ],
+  },
+  snapshot: {
+    name: 'Communication Snapshot',
+    duration: '3 min',
+    steps: [
+      'Tell me what you do in 30 seconds',
+      'Describe a challenge you recently solved',
+      'What is one idea you want people to remember about you?',
     ],
   },
   action_items: {

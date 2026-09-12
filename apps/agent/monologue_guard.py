@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 
 # Focus areas whose exercises include 60–90 second user monologues.
-MONOLOGUE_FOCUS_AREAS = frozenset({"structure", "clarity", "pacing"})
+MONOLOGUE_FOCUS_AREAS = frozenset({"structure", "clarity", "pacing", "snapshot"})
 
 _BACKCHANNEL_STARTERS = (
     "i see",

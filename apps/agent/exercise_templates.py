@@ -79,6 +79,32 @@ EXERCISE_TEMPLATES: dict[str, dict] = {
             "Make it sound like you fully own it."
         ),
     },
+    "snapshot": {
+        "name": "Communication Snapshot",
+        "warmup": (
+            "This is a short communication snapshot, not a skill drill. "
+            "Ask exactly three questions, one at a time. "
+            "Do not coach, correct, or quote metrics between questions."
+        ),
+        "rounds": [
+            {
+                "instruction": "Tell me what you do in thirty seconds.",
+                "coaching_focus": ["Did they finish a complete thought?"],
+            },
+            {
+                "instruction": "Describe a challenge you recently solved.",
+                "coaching_focus": ["Did they stay concrete?"],
+            },
+            {
+                "instruction": "What is one idea you want people to remember about you?",
+                "coaching_focus": ["Was there a single memorable point?"],
+            },
+        ],
+        "wrap_up": (
+            "Say only: Thanks. That is your communication snapshot. Then stop. "
+            "Do not summarise scores or list next exercises."
+        ),
+    },
     "filler_words": {
         "name": "Filler Word Elimination",
         "warmup": (
@@ -436,12 +462,31 @@ def get_prepare_journey_instructions(coaching_context: dict | None) -> str:
     return "\n".join(lines)
 
 
+SNAPSHOT_EXERCISE = """SESSION TYPE: Communication Snapshot. This is a short booth or first-try practice, not a skill drill.
+
+Ask exactly three questions, one at a time. Wait until they finish speaking before the next. Do not coach, correct, or quote metrics between questions. Do not introduce extra topics. Do not role-play an interviewer.
+
+QUESTION 1: Tell me what you do in thirty seconds.
+QUESTION 2: Describe a challenge you recently solved.
+QUESTION 3: What is one idea you want people to remember about you?
+
+After they finish question 3, say only: Thanks. That is your communication snapshot. Then stop talking. Do not summarise scores. Do not list fillers, WPM, or next exercises.
+
+If they go silent for more than a few seconds, repeat the current question once, briefly. If they ask what SpashtAI is, say: SpashtAI helps you hear how you come across, then get back to the current question.
+
+Do not call get_speech_metrics during this session. Do not invent filler counts.
+"""
+
+
 def get_exercise_instructions(
     focus_area: str,
     replay_context: str | None = None,
     coaching_context: dict | None = None,
 ) -> str:
     """Build structured exercise instructions for the AI coach."""
+    if focus_area == "snapshot":
+        return SNAPSHOT_EXERCISE
+
     template = EXERCISE_TEMPLATES.get(focus_area)
     if not template:
         return ""

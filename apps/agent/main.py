@@ -1632,7 +1632,7 @@ async def entrypoint(ctx: JobContext):
             '1',
             'true',
             'yes',
-        }
+        } or focus_area == 'snapshot'
 
         logger.info(
             f"👤 User name: {user_name or '(unknown)'}, focus: {focus_area or 'general'}, "

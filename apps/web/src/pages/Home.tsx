@@ -103,9 +103,14 @@ export function Home() {
                   ) : undefined
                 }
               >
-                <Link to="/elevate">
-                  <Button className="w-full" size="lg" variant="outline">Start Live Session</Button>
-                </Link>
+                <div className="grid gap-2">
+                  <Link to="/elevate?demo=1&newSession=true">
+                    <Button className="w-full" size="lg">Quick Try · 3 min</Button>
+                  </Link>
+                  <Link to="/elevate">
+                    <Button className="w-full" size="lg" variant="outline">Start Live Session</Button>
+                  </Link>
+                </div>
                 <ul className="mt-3 grid gap-1 text-xs text-muted-foreground">
                   <li>Real-time voice AI conversation</li>
                   <li>Live metrics &amp; analytics</li>

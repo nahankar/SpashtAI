@@ -1,5 +1,6 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
+import { safeAppPath } from '@/lib/safe-next-path'
 
 interface ProtectedRouteProps {
   requireAdmin?: boolean
@@ -18,12 +19,25 @@ export function ProtectedRoute({ requireAdmin = false, requireProfile = true }: 
     )
   }
 
+  const next = safeAppPath(`${location.pathname}${location.search}`)
+
   if (!user) {
-    return <Navigate to="/auth/login" state={{ from: location }} replace />
+    return (
+      <Navigate
+        to={next ? `/auth/login?next=${encodeURIComponent(next)}` : '/auth/login'}
+        state={{ from: location }}
+        replace
+      />
+    )
   }
 
   if (requireProfile && user.needsProfileCompletion) {
-    return <Navigate to="/auth/complete-profile" replace />
+    return (
+      <Navigate
+        to={next ? `/auth/complete-profile?next=${encodeURIComponent(next)}` : '/auth/complete-profile'}
+        replace
+      />
+    )
   }
 
   if (requireAdmin && !isAdmin) {
