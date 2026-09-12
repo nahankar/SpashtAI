@@ -94,15 +94,23 @@ export function Elevate() {
   const inboundNewSession = searchParams.get('newSession') === 'true'
   const inboundPreparationId = searchParams.get('preparationId')
   const inboundStageId = searchParams.get('stageId')
+  const inboundBoothDemo =
+    searchParams.get('demo') === '1' || searchParams.get('booth') === '1'
   
   const [identity] = useState(() => {
     const name = user?.firstName || user?.email?.split('@')[0] || 'user'
     return `${name}-${Math.floor(Math.random() * 9999)}`
   })
   const [elevateSessionName, setElevateSessionName] = useState(
-    inboundContext ? `Practice: ${inboundContext.slice(0, 60)}` : ''
+    inboundBoothDemo
+      ? 'Communication Snapshot'
+      : inboundContext
+        ? `Practice: ${inboundContext.slice(0, 60)}`
+        : ''
   )
-  const [focusArea, setFocusArea] = useState(inboundFocus || '')
+  const [focusArea, setFocusArea] = useState(
+    inboundFocus || (inboundBoothDemo ? 'filler_words' : '')
+  )
   const [roomName, setRoomName] = useState('') // Empty initially, generated per session
   const [token, setToken] = useState<string | null>(null)
   const [url, setUrl] = useState<string | null>(null)
@@ -873,6 +881,7 @@ export function Elevate() {
           if (session.focusArea) u.searchParams.set('focusArea', session.focusArea)
           if (session.focusContext) u.searchParams.set('focusContext', session.focusContext)
           if (session.sessionName) u.searchParams.set('sessionName', session.sessionName)
+          if (inboundBoothDemo) u.searchParams.set('boothDemo', '1')
 
           const res = await fetch(u.toString())
           if (!res.ok) throw new Error('Failed to get token')
@@ -923,6 +932,7 @@ export function Elevate() {
     u.searchParams.set('identity', identity)
     u.searchParams.set('room', newRoomName)
     u.searchParams.set('sessionId', resumeSessionId)
+    if (inboundBoothDemo) u.searchParams.set('boothDemo', '1')
     const res = await fetch(u.toString())
     if (!res.ok) throw new Error('Failed to get token')
     const json = await res.json()
@@ -932,7 +942,7 @@ export function Elevate() {
     setRoomName(newRoomName)
     setIsSessionPaused(false)
     resetMetrics()
-  }, [identity, resetMetrics])
+  }, [identity, inboundBoothDemo, resetMetrics])
 
   // ── Screen Wake Lock: prevent macOS from sleeping during active voice session ──
   useEffect(() => {
@@ -1117,6 +1127,7 @@ export function Elevate() {
       if (focusArea) u.searchParams.set('focusArea', focusArea)
       if (inboundContext) u.searchParams.set('focusContext', inboundContext)
       if (elevateSessionName.trim()) u.searchParams.set('sessionName', elevateSessionName.trim())
+      if (inboundBoothDemo) u.searchParams.set('boothDemo', '1')
       const res = await fetch(u.toString())
       if (!res.ok) throw new Error('Failed to get token')
       const json = await res.json()
@@ -1155,6 +1166,7 @@ export function Elevate() {
     elevateSessionName,
     focusArea,
     inboundContext,
+    inboundBoothDemo,
     inboundPreparationId,
     prepareLaunch,
     prepareLaunchError,

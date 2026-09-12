@@ -350,6 +350,7 @@ class CoachingAgent(Agent):
         focus_score: float | None = None,
         monologue_guard: "MonologueGuard | None" = None,
         is_resume: bool = False,
+        booth_demo: bool = False,
     ) -> None:
         super().__init__(instructions=instructions)
         self._pacing_tracker = pacing_tracker
@@ -363,6 +364,7 @@ class CoachingAgent(Agent):
         self._session_name = session_name
         self._voice_backend = voice_backend
         self._focus_score = focus_score
+        self._booth_demo = booth_demo
         self._greeting_sent = False
         self._assistant_speech_history: list[tuple[str, float]] = []
         self._monologue_guard = monologue_guard
@@ -464,6 +466,14 @@ class CoachingAgent(Agent):
 
     def opening_greeting_text(self) -> str:
         """Spoken greeting via TTS — no LLM round-trip (reliable on pipeline-bedrock)."""
+        # Booth snapshot: never use the signed-in account's Pulse history or
+        # session title. Ask the first prompt immediately — pipeline mode
+        # otherwise waits for the visitor to speak.
+        if self._booth_demo:
+            return (
+                "Hello, welcome to SpashtAI. This is a short communication snapshot. "
+                "Tell me what you do in thirty seconds."
+            )
         # On a resumed session (the user paused then came back) greet with
         # "welcome back" so it doesn't sound like a brand-new first meeting.
         welcome = "welcome back to SpashtAI!" if self._is_resume else "welcome to SpashtAI!"
@@ -471,12 +481,9 @@ class CoachingAgent(Agent):
             line = f"Hello {self._user_name}, {welcome}"
         else:
             line = f"Hello, {welcome}"
-        if self._focus_area and self._focus_score is not None:
-            line += (
-                f" Your {self._focus_area.replace('_', ' ')} score is "
-                f"{self._focus_score:.1f} out of 10 — let's work on improving that."
-            )
-        elif self._focus_area:
+        # Do not speak Pulse history. That number is from earlier sessions
+        # (and on a shared booth login, someone else's).
+        if self._focus_area:
             line += f" Today we'll work on your {self._focus_area.replace('_', ' ')}."
         if self._session_name:
             line += f" This session is {self._session_name}."
@@ -485,11 +492,18 @@ class CoachingAgent(Agent):
 
     def opening_greeting_instructions(self) -> str:
         """Prompt for the coach's first spoken turn."""
+        if self._booth_demo:
+            return (
+                "You are starting a short SpashtAI communication snapshot. "
+                "Greet them in one sentence without using an account name or any past score. "
+                "Then ask: Tell me what you do in thirty seconds."
+            )
         greeting_parts = [
             "You are starting a new SpashtAI coaching session.",
             "YOU must speak first — greet the user warmly in one or two short sentences.",
             "Briefly set expectations for what you'll practice today, then invite them to respond when ready.",
             "Keep it conversational and concise — no bullet lists or markdown.",
+            "Do not mention any past skill score.",
         ]
         if self._user_name:
             greeting_parts.append(f"Use their name: {self._user_name}.")
@@ -1614,8 +1628,16 @@ async def entrypoint(ctx: JobContext):
         focus_area = room_meta.get('focusArea', '').strip() or None
         focus_context = room_meta.get('focusContext', '').strip() or None
         session_name = room_meta.get('sessionName', '').strip() or None
+        booth_demo = str(room_meta.get('boothDemo', '')).strip().lower() in {
+            '1',
+            'true',
+            'yes',
+        }
 
-        logger.info(f"👤 User name: {user_name or '(unknown)'}, focus: {focus_area or 'general'}, context: {focus_context or '(none)'}")
+        logger.info(
+            f"👤 User name: {user_name or '(unknown)'}, focus: {focus_area or 'general'}, "
+            f"context: {focus_context or '(none)'}, booth_demo={booth_demo}"
+        )
 
         TOOL_GROUNDING = (
             "VOICE OUTPUT RULES:\n"
@@ -1657,8 +1679,9 @@ async def entrypoint(ctx: JobContext):
         custom_persona = await fetch_agent_prompt("elevate_coach_persona")
         base_instructions = f"{custom_persona or default_persona}\n\n{TOOL_GROUNDING}"
 
-        # Personalization: use the user's name naturally
-        if user_name:
+        # Personalization: use the user's name naturally (never on a booth
+        # snapshot — that name is the shared host account).
+        if user_name and not booth_demo:
             base_instructions += (
                 f"\n\nThe user's name is {user_name}. "
                 f"Greet them by name at the start (e.g. 'Hello {user_name}, welcome to SpashtAI!'). "
@@ -1673,7 +1696,10 @@ async def entrypoint(ctx: JobContext):
         _debug_log(f"ENTRYPOINT coaching context check: session_id={session_id}, focus_area={focus_area}, persistence={persistence_enabled}")
         _debug_log(f"Room metadata keys: {list(room_meta.keys())}, values: {room_meta}")
         logger.info(f"🔍 Coaching context check: session_id={session_id}, focus_area={focus_area}")
-        if focus_area and session_id and not session_id.startswith("ephemeral_"):
+        if booth_demo:
+            logger.info("🎪 Booth snapshot: skipping Pulse / journey coaching context")
+            _debug_log("SKIPPED coaching context: booth demo")
+        elif focus_area and session_id and not session_id.startswith("ephemeral_"):
             logger.info(f"📡 Fetching coaching context for session={session_id}, focus={focus_area}")
             _debug_log(f"CALLING fetch_coaching_context...")
             coaching_context = await fetch_coaching_context(session_id, focus_area)
@@ -1801,9 +1827,10 @@ async def entrypoint(ctx: JobContext):
             focus_area=focus_area,
             session_name=session_name,
             voice_backend=voice_cfg.backend,
-            focus_score=focus_score,
+            focus_score=None if booth_demo else focus_score,
             monologue_guard=monologue_guard,
             is_resume=bool(history_messages),
+            booth_demo=booth_demo,
         )
         logger.info("✅ CoachingAgent created (with get_live_pacing tool + live-sync push)")
         

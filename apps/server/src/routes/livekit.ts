@@ -65,6 +65,7 @@ export async function getLivekitToken(req: Request, res: Response) {
       focusContext,
       sessionName,
       turnDetection,
+      boothDemo,
     } = req.query as Record<string, string | undefined>
     if (!identity || !room) {
       return res.status(400).json({ error: 'identity and room are required' })
@@ -88,6 +89,8 @@ export async function getLivekitToken(req: Request, res: Response) {
       focusArea,
       focusContext,
       sessionName,
+      boothDemo:
+        boothDemo === '1' || boothDemo === 'true' || boothDemo === 'yes' ? '1' : undefined,
       // Voice backend selection (read by apps/agent/main.py via voice_backends.build_session)
       voiceBackend: voiceCfg.backend,
       voiceName: voiceCfg.voiceName ?? undefined,
