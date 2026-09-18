@@ -8,6 +8,7 @@ const FEATURE_LABELS: Record<PlatformFeature, string> = {
   elevate: 'Elevate',
   replay: 'Replay',
   prepare: 'Prepare',
+  quick_try: 'Quick Try',
 }
 
 export function FeatureGate({

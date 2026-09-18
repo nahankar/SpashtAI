@@ -36,6 +36,7 @@ import { logEvent } from '@/lib/remoteLogger'
 import { FOCUS_AREAS, PRACTICE_FOCUS_AREAS, getFocusAreaLabel, EXERCISE_PREVIEWS } from '@/lib/focus-areas'
 import { pulseSkillLabel } from '@/lib/pulse-skills'
 import { useAuth } from '@/hooks/useAuth'
+import { useFeatureFlags } from '@/contexts/FeatureFlagsContext'
 import { useUserExportFlags } from '@/hooks/useUserExportFlags'
 import { useConfirm } from '@/hooks/useConfirm'
 import { Trash2, CheckSquare, Square, Target, ArrowRight, Play, ChevronDown, ChevronUp, BarChart3, CheckCircle2, RefreshCw, Download, Loader2 } from 'lucide-react'
@@ -95,23 +96,26 @@ export function Elevate() {
   const inboundNewSession = searchParams.get('newSession') === 'true'
   const inboundPreparationId = searchParams.get('preparationId')
   const inboundStageId = searchParams.get('stageId')
-  const inboundBoothDemo =
-    searchParams.get('demo') === '1' || searchParams.get('booth') === '1'
+  const inboundSnapshotRequest =
+    searchParams.get('demo') === '1' ||
+    searchParams.get('booth') === '1' ||
+    inboundFocus === 'snapshot'
   const inboundFullReport = searchParams.get('full') === '1'
+  const { isAccessible } = useFeatureFlags()
+  const quickTryOn = isAccessible('quick_try')
+  const inboundBoothDemo = quickTryOn && inboundSnapshotRequest
   
   const [identity] = useState(() => {
     const name = user?.firstName || user?.email?.split('@')[0] || 'user'
     return `${name}-${Math.floor(Math.random() * 9999)}`
   })
   const [elevateSessionName, setElevateSessionName] = useState(
-    inboundBoothDemo
-      ? 'Communication Snapshot'
-      : inboundContext
-        ? `Practice: ${inboundContext.slice(0, 60)}`
-        : ''
+    inboundContext && inboundFocus !== 'snapshot'
+      ? `Practice: ${inboundContext.slice(0, 60)}`
+      : ''
   )
   const [focusArea, setFocusArea] = useState(
-    inboundFocus || (inboundBoothDemo ? 'snapshot' : '')
+    inboundFocus && inboundFocus !== 'snapshot' ? inboundFocus : ''
   )
   const [roomName, setRoomName] = useState('') // Empty initially, generated per session
   const [token, setToken] = useState<string | null>(null)
@@ -187,6 +191,19 @@ export function Elevate() {
       cancelled = true
     }
   }, [inboundPreparationId, inboundStageId])
+
+  useEffect(() => {
+    if (viewSessionId || sessionId) return
+    if (inboundSnapshotRequest && quickTryOn) {
+      setFocusArea('snapshot')
+      setElevateSessionName((current) => current || 'Communication Snapshot')
+    } else if (inboundSnapshotRequest && !quickTryOn) {
+      setFocusArea((current) => (current === 'snapshot' ? '' : current))
+      setElevateSessionName((current) =>
+        current === 'Communication Snapshot' ? '' : current,
+      )
+    }
+  }, [inboundSnapshotRequest, quickTryOn, viewSessionId, sessionId])
 
   interface ElevateSessionItem {
     id: string
@@ -1693,7 +1710,7 @@ export function Elevate() {
                     className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <option value="">General practice (no specific focus)</option>
-                    {FOCUS_AREAS.map((a) => (
+                    {(quickTryOn ? FOCUS_AREAS : PRACTICE_FOCUS_AREAS).map((a) => (
                       <option key={a.id} value={a.id}>{a.label} — {a.description}</option>
                     ))}
                   </select>

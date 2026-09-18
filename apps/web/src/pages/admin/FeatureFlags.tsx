@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { Loader2, Mic, Upload, AlertCircle, BriefcaseBusiness } from 'lucide-react'
+import { Loader2, Mic, Upload, AlertCircle, BriefcaseBusiness, Timer } from 'lucide-react'
 import { useFeatureFlags } from '@/contexts/FeatureFlagsContext'
 
 interface FeatureFlagRow {
@@ -24,6 +24,7 @@ const FEATURE_ICONS: Record<string, typeof Mic> = {
   elevate: Mic,
   replay: Upload,
   prepare: BriefcaseBusiness,
+  quick_try: Timer,
 }
 
 function FlagToggle({

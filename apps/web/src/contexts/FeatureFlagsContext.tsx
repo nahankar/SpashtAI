@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 
-export type PlatformFeature = 'elevate' | 'replay' | 'prepare'
+export type PlatformFeature = 'elevate' | 'replay' | 'prepare' | 'quick_try'
 
 export interface FeatureFlagState {
   hidden: boolean
@@ -22,6 +22,7 @@ const DEFAULT_FLAGS: FeatureFlags = {
   elevate: DEFAULT_FLAG,
   replay: DEFAULT_FLAG,
   prepare: { ...DEFAULT_FLAG, hidden: true },
+  quick_try: { ...DEFAULT_FLAG, hidden: true },
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
@@ -67,6 +68,7 @@ export function FeatureFlagsProvider({ children }: { children: ReactNode }) {
         elevate: normalizeFlag(data.features?.elevate),
         replay: normalizeFlag(data.features?.replay),
         prepare: normalizeFlag(data.features?.prepare ?? { hidden: true }),
+        quick_try: normalizeFlag(data.features?.quick_try ?? { hidden: true }),
       })
     } catch (err) {
       console.warn('Feature flags unavailable, defaulting to all enabled:', err)

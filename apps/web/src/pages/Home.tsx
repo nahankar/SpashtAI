@@ -7,6 +7,7 @@ import { FeatureModuleCard } from '@/components/auth/FeatureModuleCard';
 import { HomeTicker } from '@/components/layout/HomeTicker';
 import { useAuth } from '@/hooks/useAuth';
 import { BrandName } from '@/components/brand/BrandName';
+import { QUICK_TRY_PATH } from '@/lib/safe-next-path';
 
 export function Home() {
   const { isVisible, isAccessible, getFlag } = useFeatureFlags()
@@ -14,6 +15,7 @@ export function Home() {
   const showReplay = isVisible('replay')
   const showElevate = isVisible('elevate')
   const showPrepare = isVisible('prepare')
+  const showQuickTry = isAccessible('elevate') && isAccessible('quick_try')
   const moduleCount = [showReplay, showElevate, showPrepare].filter(Boolean).length
 
   return (
@@ -104,9 +106,11 @@ export function Home() {
                 }
               >
                 <div className="grid gap-2">
-                  <Link to="/elevate?demo=1&newSession=true">
-                    <Button className="w-full" size="lg">Quick Try · 3 min</Button>
-                  </Link>
+                  {showQuickTry && (
+                    <Link to={QUICK_TRY_PATH}>
+                      <Button className="w-full" size="lg">Quick Try · 3 min</Button>
+                    </Link>
+                  )}
                   <Link to="/elevate">
                     <Button className="w-full" size="lg" variant="outline">Start Live Session</Button>
                   </Link>

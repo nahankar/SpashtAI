@@ -1,9 +1,10 @@
 import type { Request, Response, NextFunction } from 'express'
 import { prisma } from './prisma'
 
-export type PlatformFeature = 'elevate' | 'replay' | 'prepare'
+export type PlatformFeature = 'elevate' | 'replay' | 'prepare' | 'quick_try'
 
-export const PLATFORM_FEATURES: PlatformFeature[] = ['elevate', 'replay', 'prepare']
+export const PLATFORM_FEATURES: PlatformFeature[] = ['elevate', 'replay', 'prepare', 'quick_try']
+const PULSE_FEATURES: PlatformFeature[] = ['elevate', 'replay', 'prepare']
 
 export interface FeatureFlagPublicState {
   hidden: boolean
@@ -37,6 +38,13 @@ const DEFAULT_FLAGS: Array<{
     feature: 'prepare',
     label: 'Prepare',
     description: 'Build and track preparation journeys for important conversations.',
+    hidden: true,
+    disabled: false,
+  },
+  {
+    feature: 'quick_try',
+    label: 'Quick Try',
+    description: '3-minute Communication Snapshot on Home and in Elevate. Hide after booth or campaigns.',
     hidden: true,
     disabled: false,
   },
@@ -109,6 +117,7 @@ export async function getFeatureFlagsMap(): Promise<Record<PlatformFeature, Feat
     elevate: { hidden: false, disabled: false, overlayComment: null, overlayPosition: 'center' },
     replay: { hidden: false, disabled: false, overlayComment: null, overlayPosition: 'center' },
     prepare: { hidden: true, disabled: false, overlayComment: null, overlayPosition: 'center' },
+    quick_try: { hidden: true, disabled: false, overlayComment: null, overlayPosition: 'center' },
   }
   for (const row of rows) {
     if (PLATFORM_FEATURES.includes(row.feature as PlatformFeature)) {
@@ -133,7 +142,7 @@ export async function isFeatureVisible(feature: PlatformFeature): Promise<boolea
 
 export async function getEnabledFeatures(): Promise<PlatformFeature[]> {
   const map = await getFeatureFlagsMap()
-  return PLATFORM_FEATURES.filter((f) => !map[f].hidden && !map[f].disabled)
+  return PULSE_FEATURES.filter((f) => !map[f].hidden && !map[f].disabled)
 }
 
 /** @deprecated use isFeatureAccessible */
