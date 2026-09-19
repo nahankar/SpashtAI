@@ -140,7 +140,7 @@ export function useSessionMetrics(sessionId: string | null): UseSessionMetricsRe
     }
   }, [sessionId, fetchConversationMessageCount]);
 
-  const downloadTranscript = async (format: 'json' | 'txt') => {
+  const downloadTranscript = useCallback(async (format: 'json' | 'txt') => {
     if (!sessionId) return;
 
     try {
@@ -173,7 +173,7 @@ export function useSessionMetrics(sessionId: string | null): UseSessionMetricsRe
       console.error('Error downloading transcript:', err);
       setError(err instanceof Error ? err.message : 'Failed to download transcript');
     }
-  };
+  }, [sessionId]);
 
   useEffect(() => {
     fetchMetrics();
@@ -269,7 +269,10 @@ export interface LiveMetricsUpdate {
 export function useRealTimeMetrics() {
   const [currentMetrics, setCurrentMetrics] = useState<LiveMetricsSnapshot | null>(null);
 
-  const updateMetrics = (metricsUpdate: LiveMetricsUpdate) => {
+  // Both callbacks are memoised because callers put them in effect dependency
+  // arrays. A fresh identity each render re-runs those effects, which re-render
+  // the caller, which rebuilds the callback — an unbreakable loop.
+  const updateMetrics = useCallback((metricsUpdate: LiveMetricsUpdate) => {
     const cm = metricsUpdate?.current_metrics;
     if (!cm) return;
     setCurrentMetrics({
@@ -286,11 +289,11 @@ export function useRealTimeMetrics() {
       coachingTip: cm.coaching_tip,
       publishedAt: metricsUpdate.timestamp,
     });
-  };
+  }, []);
 
-  const resetMetrics = () => {
+  const resetMetrics = useCallback(() => {
     setCurrentMetrics(null);
-  };
+  }, []);
 
   return {
     currentMetrics,
