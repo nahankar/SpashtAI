@@ -2,13 +2,12 @@ import { ConverseCommand } from '@aws-sdk/client-bedrock-runtime'
 import { getBedrockClient } from '../analytics/insightProviders/bedrockClient'
 
 /**
- * Coach runs two tiers. Conversational turns are latency-sensitive and happen on
- * every message, so they use the cheaper/faster model. Interpreting a finished
- * session happens once per session and is the output users judge Coach on, so it
- * uses the stronger model.
+ * Coach runs two tiers. Conversational turns happen on every message; they use
+ * Nova Pro so recommendations stay aligned with the user's latest intent.
+ * Interpreting a finished session also uses Nova Pro (or an explicit deep override).
  */
 export const COACH_FAST_MODEL_ID =
-  process.env.BEDROCK_COACH_FAST_MODEL_ID || 'amazon.nova-lite-v1:0'
+  process.env.BEDROCK_COACH_FAST_MODEL_ID || 'amazon.nova-pro-v1:0'
 
 export const COACH_DEEP_MODEL_ID =
   process.env.BEDROCK_COACH_DEEP_MODEL_ID ||
@@ -46,7 +45,7 @@ export interface CoachModelOptions {
   timeoutMs?: number
 }
 
-const DEFAULT_TIMEOUT_MS = 6_000
+const DEFAULT_TIMEOUT_MS = 10_000
 
 /**
  * Invokes a Bedrock text model through Converse, which normalizes request and
