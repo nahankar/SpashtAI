@@ -44,6 +44,26 @@ import { FileText } from 'lucide-react'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 
+type ReplayResult = ReplayResultData['result']
+type CoachingInsights = ReplayResultData['coachingInsights']
+type AnnotatedSegment = ReplayResult['annotatedTranscript'][number]
+type SkillKey = keyof NonNullable<ReplayResultData['skillScores']>['scores']
+
+const SKILL_ROWS: Array<{ key: SkillKey; label: string }> = [
+  { key: 'clarity', label: 'Clarity' },
+  { key: 'confidence', label: 'Confidence' },
+  { key: 'conciseness', label: 'Conciseness' },
+  { key: 'structure', label: 'Structure' },
+  { key: 'engagement', label: 'Engagement' },
+  { key: 'pacing', label: 'Pacing' },
+  { key: 'delivery', label: 'Delivery' },
+  { key: 'emotionalControl', label: 'Emotional Control' },
+]
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
 /** When user picks YYYY-MM-DD, anchor at local noon so calendar day is stable across time zones. */
 function recordedAtFromDateInput(isoDate: string): string {
   return new Date(`${isoDate}T12:00:00`).toISOString()
@@ -526,7 +546,7 @@ function DecisionClarityCard({
   )
 }
 
-function TopCoachingActions({ result, coachingInsights }: { result: any; coachingInsights: any }) {
+function TopCoachingActions({ result, coachingInsights }: { result: ReplayResult; coachingInsights: CoachingInsights }) {
   const actions: { text: string; detail: string; metric?: string }[] = []
 
   if (coachingInsights?.primaryImprovement) {
@@ -612,7 +632,7 @@ function TopCoachingActions({ result, coachingInsights }: { result: any; coachin
   )
 }
 
-function computeMeetingImpact(result: any, coachingInsights: any) {
+function computeMeetingImpact(result: ReplayResult, coachingInsights: CoachingInsights) {
   const dc = coachingInsights?.decisionClarity
   const decisionScore = dc
     ? Math.min(10, (dc.decisionsDetected ?? 0) * 2.5 + (dc.actionItemsDetected ?? 0) * 1.5)
@@ -645,14 +665,14 @@ function CommunicationTimeline({
   onSelect,
   activeIndex,
 }: {
-  segments: any[]
+  segments: AnnotatedSegment[]
   onSelect: (index: number) => void
   activeIndex: number | null
 }) {
   if (!segments?.length) return null
 
   const typeCounts: Record<string, number> = {}
-  segments.forEach((seg: any) => {
+  segments.forEach((seg) => {
     seg.annotations?.forEach((a: string) => {
       typeCounts[a] = (typeCounts[a] || 0) + 1
     })
@@ -665,7 +685,7 @@ function CommunicationTimeline({
         <p className="text-[10px] text-muted-foreground">{segments.length} segments</p>
       </div>
       <div className="flex h-8 w-full items-center gap-px rounded-md border bg-muted/30 px-1">
-        {segments.map((seg: any, i: number) => {
+        {segments.map((seg, i) => {
           const primary = seg.annotations?.[0] || 'update'
           const color = ANNOTATION_COLORS[primary] || ANNOTATION_COLORS.update
           const isActive = activeIndex === i
@@ -696,7 +716,7 @@ function CommunicationTimeline({
   )
 }
 
-function MeetingImpactCard({ result, coachingInsights }: { result: any; coachingInsights: any }) {
+function MeetingImpactCard({ result, coachingInsights }: { result: ReplayResult; coachingInsights: CoachingInsights }) {
   const mi = computeMeetingImpact(result, coachingInsights)
   const { score: impact, decisionScore, participationScore, engagementScore } = mi
   const impactColor = impact >= 7 ? 'text-green-600' : impact >= 4 ? 'text-amber-600' : 'text-red-500'
@@ -831,9 +851,9 @@ function useReanalyze(sessionId: string | undefined, onComplete: () => void) {
             // transient polling failure
           }
         }, 3000)
-      } catch (e: any) {
+      } catch (e: unknown) {
         setReanalyzing('failed')
-        setReanalyzeError(e.message)
+        setReanalyzeError(errorMessage(e))
       }
     },
     [sessionId, stopPolling, onComplete]
@@ -1009,8 +1029,21 @@ export function ReplayResults() {
   const exportFlags = useUserExportFlags()
   const [searchParams] = useSearchParams()
   const cameFromHistory = searchParams.get('from') === 'history'
-  const backTo = cameFromHistory ? '/history?tab=replay' : '/replay'
-  const backLabel = cameFromHistory ? 'Back to Sessions' : 'Back to Replay'
+  const cameFromCoach = searchParams.get('coach') === '1'
+  const coachBackParams = new URLSearchParams()
+  const coachThreadId = searchParams.get('thread')
+  if (coachThreadId) coachBackParams.set('thread', coachThreadId)
+  if (id) coachBackParams.set('replayResult', id)
+  const backTo = cameFromCoach
+    ? `/coach?${coachBackParams.toString()}`
+    : cameFromHistory
+      ? '/history?tab=replay'
+      : '/replay'
+  const backLabel = cameFromCoach
+    ? 'Back to Coach'
+    : cameFromHistory
+      ? 'Back to Sessions'
+      : 'Back to Replay'
   const [data, setData] = useState<ReplayResultData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -1147,8 +1180,8 @@ export function ReplayResults() {
       })
       setPulseStatus('tracked')
       toast.success('Session tracked in Progress Pulse')
-    } catch (e: any) {
-      toast.error(e?.message || 'Failed to track session')
+    } catch (e: unknown) {
+      toast.error(errorMessage(e) || 'Failed to track session')
     } finally {
       setPulseLoading(false)
     }
@@ -1197,9 +1230,10 @@ export function ReplayResults() {
   }
 
   const { session, result } = data
+  const hedgingPhrases = data.skillScores?.signals?.hedging?.phrases ?? []
 
   const detectedSpeakers: string[] = Array.isArray(result.structuredTranscript)
-    ? [...new Set((result.structuredTranscript as any[]).map((s: any) => s.speaker as string))]
+    ? [...new Set(result.structuredTranscript.map((s) => s.speaker))]
     : []
 
   const handleDownload = () => {
@@ -1566,22 +1600,13 @@ export function ReplayResults() {
                   <div className="flex-1 min-w-0">
                     {data.skillScores?.scores ? (
                       <Accordion type="single" collapsible className="space-y-0">
-                        {[
-                          { key: 'clarity', label: 'Clarity' },
-                          { key: 'confidence', label: 'Confidence' },
-                          { key: 'conciseness', label: 'Conciseness' },
-                          { key: 'structure', label: 'Structure' },
-                          { key: 'engagement', label: 'Engagement' },
-                          { key: 'pacing', label: 'Pacing' },
-                          { key: 'delivery', label: 'Delivery' },
-                          { key: 'emotionalControl', label: 'Emotional Control' },
-                        ]
+                        {SKILL_ROWS
                           .filter(({ key }) => {
-                            const v = (data.skillScores!.scores as any)[key]
+                            const v = data.skillScores!.scores[key]
                             return v !== null && v !== undefined
                           })
                           .map(({ key, label }) => {
-                            const val = (data.skillScores!.scores as any)[key] as number
+                            const val = data.skillScores!.scores[key] as number
                             const comp = data.skillScores!.components?.[key]
                             const barColor = val >= 8 ? 'bg-green-500' : val >= 6 ? 'bg-blue-500' : val >= 4 ? 'bg-amber-500' : 'bg-red-500'
                             const textColor = val >= 8 ? 'text-green-600' : val >= 6 ? 'text-blue-600' : val >= 4 ? 'text-amber-600' : 'text-red-500'
@@ -1655,7 +1680,7 @@ export function ReplayResults() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="grid gap-3">
-                  {(result.strengths as any[])?.map((s: any, i: number) => (
+                  {result.strengths?.map((s, i) => (
                     <div key={i} className="text-sm">
                       <p className="font-medium">{s.point}</p>
                       {s.example && (
@@ -1673,7 +1698,7 @@ export function ReplayResults() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="grid gap-3">
-                  {(result.improvements as any[])?.map((imp: any, i: number) => {
+                  {result.improvements?.map((imp, i) => {
                     const focus = inferFocusArea(imp.point + ' ' + (imp.suggestion || ''))
                     const ctx = encodeURIComponent(imp.point)
                     return (
@@ -1769,12 +1794,12 @@ export function ReplayResults() {
                   <MetricCard metricKey="fillerWordCount" label="Filler Words" value={result.fillerWordCount} optimal="< 10" rating={rateMetric('fillerWordCount', result.fillerWordCount)} />
                 </div>
                 <PacingInsight wpm={result.wordsPerMinute} />
-                {(result.hedgingRate ?? 0) > 1.5 && data.skillScores?.signals?.hedging?.phrases?.length > 0 && (
+                {(result.hedgingRate ?? 0) > 1.5 && hedgingPhrases.length > 0 && (
                   <div className="mt-3 rounded-md border border-orange-200 bg-orange-50 p-3 text-sm">
                     <p className="font-medium text-orange-900">Hedging phrases detected ({result.hedgingCount} total):</p>
                     <p className="mt-1 text-xs text-orange-700 italic">
-                      {data.skillScores.signals.hedging.phrases.slice(0, 8).map((p: string) => `"${p}"`).join(', ')}
-                      {data.skillScores.signals.hedging.phrases.length > 8 ? ', ...' : ''}
+                      {hedgingPhrases.slice(0, 8).map((p) => `"${p}"`).join(', ')}
+                      {hedgingPhrases.length > 8 ? ', ...' : ''}
                     </p>
                     <p className="mt-1.5 text-xs text-orange-700">Replace with direct statements when you are sure of your point.</p>
                   </div>
@@ -1821,7 +1846,7 @@ export function ReplayResults() {
                 <CardDescription>{session.meetingType} evaluation criteria</CardDescription>
               </CardHeader>
               <CardContent className="grid gap-3">
-                {(result.contextSpecificFeedback as any[])?.map((f: any, i: number) => {
+                {result.contextSpecificFeedback?.map((f, i) => {
                   const focus = inferFocusArea(f.label + ' ' + (f.detail || ''))
                   const ctx = encodeURIComponent(f.label)
                   return (
@@ -1853,7 +1878,7 @@ export function ReplayResults() {
                 <CardTitle className="text-base">Key Moments</CardTitle>
               </CardHeader>
               <CardContent className="grid gap-2">
-                {(result.keyMoments as any[])?.map((m: any, i: number) => (
+                {result.keyMoments?.map((m, i) => (
                   <div key={i} className="flex items-start gap-2 text-sm">
                     {m.type === 'strength' ? (
                       <TrendingUp className="mt-0.5 h-4 w-4 shrink-0 text-green-500" />
@@ -1894,10 +1919,10 @@ export function ReplayResults() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {(result.annotatedTranscript as any[])?.length > 0 ? (
+              {result.annotatedTranscript?.length > 0 ? (
                 <div className="grid gap-3">
                   <CommunicationTimeline
-                    segments={result.annotatedTranscript as any[]}
+                    segments={result.annotatedTranscript}
                     activeIndex={activeSegmentIndex}
                     onSelect={(i) => {
                       setActiveSegmentIndex(i)
@@ -1907,7 +1932,7 @@ export function ReplayResults() {
                   <p className="text-xs text-muted-foreground italic">
                     Showing the most notable segments from {session.participantName || 'the participant'}. The full conversation is analyzed for scores and insights above.
                   </p>
-                  {(result.annotatedTranscript as any[]).map((seg: any, i: number) => {
+                  {result.annotatedTranscript.map((seg, i) => {
                     const colorMap: Record<string, string> = {
                       strong_statement: 'bg-green-100 text-green-700',
                       filler_word: 'bg-yellow-100 text-yellow-700',

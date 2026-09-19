@@ -364,8 +364,8 @@ export function History() {
   return (
     <div>
       <div className="mb-6">
-        <Link to="/" className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="h-3.5 w-3.5" /> Home
+        <Link to="/coach" className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="h-3.5 w-3.5" /> Coach
         </Link>
         <h1 className="text-2xl font-bold">Sessions</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -432,7 +432,14 @@ export function History() {
               <CardContent className="py-10 text-center">
                 <AlertCircle className="mx-auto mb-3 h-10 w-10 text-destructive" />
                 <p className="text-sm text-destructive">{replayError}</p>
-                <Button variant="outline" size="sm" className="mt-4" onClick={fetchReplay}>Retry</Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-4"
+                  onClick={() => void fetchReplay()}
+                >
+                  Retry
+                </Button>
               </CardContent>
             </Card>
           )}
@@ -491,7 +498,8 @@ export function History() {
                         onClick={() =>
                           setSelectedReplay((prev) => {
                             const n = new Set(prev)
-                            n.has(s.id) ? n.delete(s.id) : n.add(s.id)
+                            if (n.has(s.id)) n.delete(s.id)
+                            else n.add(s.id)
                             return n
                           })
                         }
@@ -603,7 +611,14 @@ export function History() {
               <CardContent className="py-10 text-center">
                 <AlertCircle className="mx-auto mb-3 h-10 w-10 text-destructive" />
                 <p className="text-sm text-destructive">{elevateError}</p>
-                <Button variant="outline" size="sm" className="mt-4" onClick={fetchElevate}>Retry</Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-4"
+                  onClick={() => void fetchElevate()}
+                >
+                  Retry
+                </Button>
               </CardContent>
             </Card>
           )}
@@ -664,7 +679,8 @@ export function History() {
                         onClick={() =>
                           setSelectedElevate((prev) => {
                             const n = new Set(prev)
-                            n.has(session.id) ? n.delete(session.id) : n.add(session.id)
+                            if (n.has(session.id)) n.delete(session.id)
+                            else n.add(session.id)
                             return n
                           })
                         }

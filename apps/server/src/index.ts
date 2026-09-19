@@ -73,6 +73,7 @@ import adminFeatureFlagsRouter from './routes/admin/feature-flags'
 import adminAgentPromptsRouter, { ensurePrompts } from './routes/admin/agent-prompts'
 import internalAgentPromptsRouter from './routes/internal/agent-prompts'
 import feedbackRouter from './routes/feedback'
+import coachRouter from './routes/coach'
 import adminFeedbackRouter from './routes/admin/feedback'
 import adminTickersRouter from './routes/admin/tickers'
 import adminPricingRouter from './routes/admin/pricing'
@@ -91,8 +92,8 @@ import { requireAdmin } from './middleware/admin'
 import { trackFeatureUsage } from './middleware/tracking'
 import eventsRouter from './routes/events'
 import { requireFeature, ensureFeatureFlags } from './lib/featureFlags'
-import { ensurePlatformSettings } from './lib/platformSettings'
-import { apiLimiter } from './middleware/rate-limit'
+import { ensurePlatformSettings, getPlatformSettings } from './lib/platformSettings'
+import { apiLimiter, setAdminRateLimitBypassEnabled } from './middleware/rate-limit'
 import { ingestClientLogs, clientLogsLimiter } from './routes/clientLogs'
 import { logger } from './lib/logger'
 import pino from 'pino'
@@ -215,6 +216,7 @@ app.use('/api/events', requireAuth, eventsRouter)
 
 // Protected: user feedback
 app.use('/api/feedback', requireAuth, feedbackRouter)
+app.use('/api/coach', requireAuth, coachRouter)
 
 // Protected: Prepare interview journeys
 app.use('/api/preparations', requireAuth, requireFeature('prepare'), preparationsRouter)
@@ -413,6 +415,8 @@ async function startServer() {
   }
   try {
     await ensurePlatformSettings()
+    const platformSettings = await getPlatformSettings()
+    setAdminRateLimitBypassEnabled(platformSettings.adminRateLimitBypass)
   } catch (err) {
     console.warn('⚠️  Platform settings seeding failed:', err)
   }

@@ -140,6 +140,7 @@ model User {
   featureUsage   FeatureUsage[]
   progressPulse  ProgressPulse[]
   feedback         UserFeedback[]
+  coachThreads     CoachThread[]
 
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -233,6 +234,7 @@ model Preparation {
   questions  InterviewQuestion[]
   reflections StageReflection[]
   practices  PreparationPractice[]
+  coachThreads CoachThread[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -759,6 +761,7 @@ model PlatformSettings {
   id                   String   @id @default("default")
   signupsPaused        Boolean  @default(false)
   signupsPausedMessage String?  @db.Text
+  adminRateLimitBypass Boolean  @default(false)
   updatedBy            String?
   updatedAt            DateTime @updatedAt
 }
@@ -797,4 +800,48 @@ model LegalDocument {
   content   String   @db.Text
   updatedAt DateTime @updatedAt
   updatedBy String?
+}
+
+model CoachThread {
+  id             String   @id @default(cuid())
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId         String
+  title          String?
+  status         String   @default("active") // active | archived
+  preparationId  String?
+  preparation    Preparation? @relation(fields: [preparationId], references: [id], onDelete: SetNull)
+  turns          CoachTurn[]
+  actions        CoachAction[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([userId, updatedAt])
+  @@index([userId, status])
+  @@index([preparationId])
+}
+
+model CoachTurn {
+  id        String      @id @default(cuid())
+  thread    CoachThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  threadId  String
+  role      String      // user | coach
+  kind      String?     // validated by the Coach route's TURN_KINDS allowlist
+  text      String?     @db.Text
+  payload   Json?
+  createdAt DateTime    @default(now())
+
+  @@index([threadId, createdAt])
+}
+
+model CoachAction {
+  id        String      @id @default(cuid())
+  thread    CoachThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  threadId  String
+  module    String      // elevate | replay | prepare | progress
+  action    String      // launch | complete
+  targetId  String?
+  createdAt DateTime    @default(now())
+
+  @@index([threadId, createdAt])
+  @@index([targetId])
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { apiClient } from '@/lib/api-client'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -93,7 +93,7 @@ export function VoiceBackend() {
   const [editLlm, setEditLlm] = useState('amazon.nova-lite-v1:0')
   const [editSttModel, setEditSttModel] = useState('deepdml/faster-whisper-large-v3-turbo-ct2')
 
-  function syncEditFromConfig(cfg: VoiceConfigRow) {
+  const syncEditFromConfig = useCallback((cfg: VoiceConfigRow) => {
     setEditStt((cfg.sttProvider as SttProvider) || 'whisper')
     setEditTts((cfg.ttsProvider as TtsProvider) || 'kokoro')
     setEditSttUrl(cfg.sttBaseUrl || 'http://localhost:8001/v1')
@@ -101,9 +101,9 @@ export function VoiceBackend() {
     setEditVoice(cfg.voiceName || (cfg.ttsProvider === 'polly' ? 'Ruth' : 'af_bella'))
     setEditLlm(cfg.pipelineLlm || 'amazon.nova-lite-v1:0')
     setEditSttModel(cfg.pipelineStt || 'deepdml/faster-whisper-large-v3-turbo-ct2')
-  }
+  }, [])
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true)
     try {
       const res = await apiClient<VoiceConfigResponse>('/api/admin/voice-config')
@@ -116,11 +116,11 @@ export function VoiceBackend() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [syncEditFromConfig])
 
   useEffect(() => {
     load()
-  }, [])
+  }, [load])
 
   async function setActive(backend: string) {
     setSwitchingTo(backend)

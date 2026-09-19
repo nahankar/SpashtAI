@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Progress } from '../ui/progress';
@@ -228,6 +228,8 @@ function Verdict({ verdict }: { verdict: MetricVerdict | null }) {
   )
 }
 
+// Shared with report rendering; colocated with the component to keep verdict copy consistent.
+// eslint-disable-next-line react-refresh/only-export-components
 export const DELIVERY_VERDICTS: Record<string, (v: number) => MetricVerdict> = {
   speechRate: (wpm) =>
     wpm >= 120 && wpm <= 180
@@ -261,6 +263,8 @@ export const DELIVERY_VERDICTS: Record<string, (v: number) => MetricVerdict> = {
         : { tone: 'bad', tip: 'Strained voice — warm up, hydrate, and slow down.' },
 }
 
+// Shared with report rendering; colocated with the component to keep verdict copy consistent.
+// eslint-disable-next-line react-refresh/only-export-components
 export const CONTENT_VERDICTS: Record<string, (v: number) => MetricVerdict> = {
   diversity: (pct) =>
     pct > 30
@@ -293,13 +297,7 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (isSessionEnded && sessionId) {
-      fetchAdvancedMetrics();
-    }
-  }, [sessionId, isSessionEnded]);
-
-  const fetchAdvancedMetrics = async () => {
+  const fetchAdvancedMetrics = useCallback(async () => {
     setLoading(true);
     setError(null);
 
@@ -327,7 +325,13 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
     } finally {
       setLoading(false);
     }
-  };
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (isSessionEnded && sessionId) {
+      fetchAdvancedMetrics();
+    }
+  }, [sessionId, isSessionEnded, fetchAdvancedMetrics]);
 
   if (!isSessionEnded) {
     return (

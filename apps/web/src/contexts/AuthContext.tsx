@@ -49,6 +49,8 @@ export interface AuthContextType {
   fetchCurrentUser: () => Promise<void>
 }
 
+// Provider and context are colocated so their public contract cannot drift.
+// eslint-disable-next-line react-refresh/only-export-components
 export const AuthContext = createContext<AuthContextType | null>(null)
 
 const TOKEN_KEY = 'spashtai_token'

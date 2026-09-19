@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 interface UsageChartProps {
   title: string
-  data: Array<{ name: string; elevate?: number; replay?: number; [key: string]: any }>
+  data: Array<{ name: string; elevate?: number; replay?: number; [key: string]: string | number | undefined }>
 }
 
 export function UsageChart({ title, data }: UsageChartProps) {

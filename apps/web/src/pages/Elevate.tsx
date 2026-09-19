@@ -7,16 +7,15 @@ import {
   StartAudio,
   useConnectionState,
   useRoomContext,
-  useVoiceAssistant,
-  BarVisualizer
+  useVoiceAssistant
 } from '@livekit/components-react'
 import '@livekit/components-styles'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { RoomEvent, Track } from 'livekit-client'
+import { RoomEvent, Track, type RemoteParticipant } from 'livekit-client'
 import { RealTimeMetrics } from '@/components/analytics/RealTimeMetrics'
 import { SessionMetrics } from '@/components/analytics/SessionMetrics'
 import { SessionMetricsSummary } from '@/components/analytics/SessionMetricsSummary'
@@ -26,7 +25,7 @@ import { CoachingInsightsCard } from '@/components/analytics/CoachingInsightsCar
 import { SnapshotReveal } from '@/components/elevate/SnapshotReveal'
 import { PaceTrendCard, type PacePoint } from '@/components/analytics/PaceTrend'
 import { SessionReplay } from '@/pages/SessionReplay'
-import { useRealTimeMetrics, useSessionMetrics, useSessionTurns } from '@/hooks/useSessionMetrics'
+import { useRealTimeMetrics, useSessionMetrics, useSessionTurns, type LiveMetricsUpdate } from '@/hooks/useSessionMetrics'
 import { useAudioRecording } from '@/hooks/useAudioRecording'
 import { useConversationPersistence } from '@/hooks/useConversationPersistence'
 import { AgentVisualizer, SessionStatusBar } from '@/components/layout/AgentVisualizer'
@@ -51,11 +50,26 @@ import {
 } from '@/components/session/UserTurnMetrics'
 import type { SessionTurnRecord } from '@/hooks/useSessionMetrics'
 import { getPreparation, linkPreparationPractice } from '@/lib/prepare-api'
+import { COACH_BUBBLE, USER_BUBBLE } from '@/lib/conversation'
+import { recordCoachAction } from '@/lib/coach-api'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
+const IDLE_TIMEOUT_MS = 15 * 60 * 1000
+const IDLE_WARNING_MS = 14 * 60 * 1000
+
+interface PaceTurn {
+  role?: string
+  metrics?: { wpm?: number | null }
+}
+
+interface ProgressPulseItem {
+  skill: string
+  currentScore: number
+  delta?: number | null
+}
 
 // Helper function to save session data to backend
-async function saveSessionData(sessionId: string, metrics: any, transcript: any) {
+async function saveSessionData(sessionId: string, metrics: unknown, transcript: unknown) {
   try {
     const metricsResponse = await fetch(`${API_BASE_URL}/sessions/${sessionId}/metrics`, {
       method: 'POST',
@@ -94,6 +108,8 @@ export function Elevate() {
   const inboundFocus = searchParams.get('focus') || ''
   const inboundContext = searchParams.get('context') ? decodeURIComponent(searchParams.get('context')!) : ''
   const inboundNewSession = searchParams.get('newSession') === 'true'
+  const launchedFromCoach = searchParams.get('coach') === '1'
+  const originCoachThreadId = searchParams.get('thread')
   const inboundPreparationId = searchParams.get('preparationId')
   const inboundStageId = searchParams.get('stageId')
   const inboundSnapshotRequest =
@@ -104,6 +120,7 @@ export function Elevate() {
   const { isAccessible } = useFeatureFlags()
   const quickTryOn = isAccessible('quick_try')
   const inboundBoothDemo = quickTryOn && inboundSnapshotRequest
+  const coachLaunchRecorded = useRef(false)
   
   const [identity] = useState(() => {
     const name = user?.firstName || user?.email?.split('@')[0] || 'user'
@@ -143,6 +160,16 @@ export function Elevate() {
   } | null>(null)
   const [prepareLaunchLoading, setPrepareLaunchLoading] = useState(Boolean(inboundPreparationId))
   const [prepareLaunchError, setPrepareLaunchError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!launchedFromCoach || !originCoachThreadId || coachLaunchRecorded.current) return
+    coachLaunchRecorded.current = true
+    void recordCoachAction(originCoachThreadId, {
+      module: 'elevate',
+      action: 'launch',
+      targetId: viewSessionId,
+    }).catch(() => undefined)
+  }, [launchedFromCoach, originCoachThreadId, viewSessionId])
 
   useEffect(() => {
     if (!inboundPreparationId) {
@@ -328,7 +355,7 @@ export function Elevate() {
     }
   }, [selectedElevate, confirmDialog])
 
-  const [reprocessingElevate, setReprocessingElevate] = useState<Set<string>>(new Set())
+  const [, setReprocessingElevate] = useState<Set<string>>(new Set())
 
   const handleReprocessElevate = useCallback(async (id: string) => {
     setReprocessingElevate((prev) => new Set(prev).add(id))
@@ -439,10 +466,10 @@ export function Elevate() {
   const completedPacePoints = useMemo<PacePoint[]>(() => {
     let n = 0
     return completedTurns
-      .filter((t) => t.role === 'user' && t.metrics?.wpm != null && t.metrics.wpm > 0)
+      .filter((t) => t.role === 'user' && Number(t.metrics?.wpm) > 0)
       .map((t) => {
         n += 1
-        return { label: n, wpm: Math.round(Number(t.metrics.wpm)) }
+        return { label: n, wpm: Math.round(Number(t.metrics?.wpm)) }
       })
   }, [completedTurns])
   
@@ -451,7 +478,7 @@ export function Elevate() {
   // Playback tab to the moment behind a skill score ("Hear it").
   const [resultsTab, setResultsTab] = useState('playback')
   const [playbackAutoPlayNonce, setPlaybackAutoPlayNonce] = useState<number | null>(null)
-  const hearSkillMoment = (_skill: string) => {
+  const hearSkillMoment = () => {
     setResultsTab('playback')
     setPlaybackAutoPlayNonce(Date.now())
   }
@@ -601,14 +628,13 @@ export function Elevate() {
 
       // Pace variation chart points — one WPM per user turn, in order.
       let paceN = 0
-      const pacePoints = Array.isArray(turnsData?.turns)
-        ? turnsData.turns
-            .filter((t: any) => t.role === 'user' && t.metrics?.wpm != null && t.metrics.wpm > 0)
-            .map((t: any) => {
+      const paceTurns: PaceTurn[] = Array.isArray(turnsData?.turns) ? turnsData.turns : []
+      const pacePoints = paceTurns
+            .filter((t) => t.role === 'user' && t.metrics?.wpm != null && t.metrics.wpm > 0)
+            .map((t) => {
               paceN += 1
-              return { label: paceN, wpm: Math.round(Number(t.metrics.wpm)) }
+              return { label: paceN, wpm: Math.round(Number(t.metrics?.wpm)) }
             })
-        : []
 
       // Progress Pulse (cross-session trends), without the "Practice in Elevate" CTA.
       let progressPulse: SessionReport['progressPulse'] = null
@@ -616,9 +642,9 @@ export function Elevate() {
         const pulseRes = await fetch(`${API_BASE_URL}/api/progress-pulse/summary`, { headers })
         if (pulseRes.ok) {
           const pulseData = await pulseRes.json()
-          const items = Array.isArray(pulseData?.summary) ? pulseData.summary : []
+          const items: ProgressPulseItem[] = Array.isArray(pulseData?.summary) ? pulseData.summary : []
           if (items.length) {
-            progressPulse = items.map((it: any) => ({
+            progressPulse = items.map((it) => ({
               skill: it.skill,
               label: pulseSkillLabel(it.skill),
               currentScore: Number(it.currentScore) || 0,
@@ -750,13 +776,10 @@ export function Elevate() {
   // Persistent conversation system
   const {
     messages,
-    isLoading: conversationLoading,
-    error: conversationError,
     loadConversation,
     addMessage,
     upsertStreamingMessage,
-    clearMessages,
-    subscribeToUpdates
+    clearMessages
   } = useConversationPersistence()
 
   const messagesRef = useRef(messages)
@@ -920,7 +943,16 @@ export function Elevate() {
         console.error('Error checking/resuming session:', error)
       }
     })()
-  }, [viewSessionId])
+  }, [
+    viewSessionId,
+    identity,
+    inboundBoothDemo,
+    inboundPreparationId,
+    loadConversation,
+    resetMetrics,
+    user?.email,
+    user?.firstName,
+  ])
 
   // Initialize conversation when session ID is available
   useEffect(() => {
@@ -1003,8 +1035,6 @@ export function Elevate() {
   }, [joined])
 
   // ── Idle detection: auto-pause after 15 min of inactivity ──
-  const IDLE_TIMEOUT_MS = 15 * 60 * 1000
-  const IDLE_WARNING_MS = 14 * 60 * 1000 // warn 1 min before
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const warningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [idleWarning, setIdleWarning] = useState(false)
@@ -1303,7 +1333,20 @@ export function Elevate() {
     // mount, so the optimistic map above can't add it — refetch to surface it.
     loadPastSessions({ silent: true })
 
-    if (currentSessionId) {
+    if (currentSessionId && launchedFromCoach) {
+      const params = new URLSearchParams({
+        elevateResult: currentSessionId,
+      })
+      if (originCoachThreadId) params.set('thread', originCoachThreadId)
+      if (originCoachThreadId) {
+        void recordCoachAction(originCoachThreadId, {
+          module: 'elevate',
+          action: 'complete',
+          targetId: currentSessionId,
+        }).catch(() => undefined)
+      }
+      navigate(`/coach?${params.toString()}`)
+    } else if (currentSessionId) {
       setShowHistory(false)
       setResultsTab('playback')
       setPlaybackAutoPlayNonce(null)
@@ -1320,7 +1363,7 @@ export function Elevate() {
       navigate(cameFromHistory ? '/history?tab=elevate' : '/elevate')
     }
     setIsLeaving(false)
-  }, [sessionId, clearMessages, resetMetrics, navigate, cameFromHistory, confirmDialog, updateUser, loadPastSessions, prepareLaunch, isLeaving, inboundBoothDemo, focusArea])
+  }, [sessionId, clearMessages, resetMetrics, navigate, cameFromHistory, confirmDialog, updateUser, loadPastSessions, prepareLaunch, isLeaving, inboundBoothDemo, focusArea, launchedFromCoach, originCoachThreadId])
 
   const handleDiscard = useCallback(async () => {
     const yes = await confirmDialog({
@@ -1376,12 +1419,6 @@ export function Elevate() {
     resetMetrics()
     navigate('/elevate')
   }, [clearMessages, resetMetrics, navigate])
-
-  const breadcrumbLabel = viewSessionId
-    ? 'Session Analytics'
-    : joined
-      ? 'Live Session'
-      : 'New Session'
 
   // ── Session history view ──
   if (showHistory && !joined && !viewSessionId && !sessionId) {
@@ -1518,7 +1555,8 @@ export function Elevate() {
                         onClick={() =>
                           setSelectedElevate((prev) => {
                             const n = new Set(prev)
-                            n.has(s.id) ? n.delete(s.id) : n.add(s.id)
+                            if (n.has(s.id)) n.delete(s.id)
+                            else n.add(s.id)
                             return n
                           })
                         }
@@ -2146,7 +2184,7 @@ function LiveKitConversation({
   onNewMessage: (message: ChatMessage & { partial?: boolean }) => void
   onStateChange: (state: 'restarting' | 'ready' | 'recovering' | 'unknown') => void
   onRestart: () => void
-  onMetricsUpdate: (metrics: any) => void
+  onMetricsUpdate: (metrics: LiveMetricsUpdate) => void
   onTurnMetrics?: (text: string, metrics: TurnMetrics, turnIndex?: number) => void
 }) {
   const connectionState = useConnectionState()
@@ -2255,7 +2293,7 @@ function LiveKitConversation({
   // Detect agent participant joining as a secondary "ready" signal
   useEffect(() => {
     if (!room) return
-    const check = (p: any) => {
+    const check = (p: RemoteParticipant) => {
       const name = (p.name || '').toLowerCase()
       const identity = (p.identity || '').toLowerCase()
       if (name.includes('assistant') || identity.startsWith('agent')) {
@@ -2274,7 +2312,7 @@ function LiveKitConversation({
   useEffect(() => {
     if (!room) return
 
-    const handleData = (payload: Uint8Array, participant: any, _kind: any, topic?: string) => {
+    const handleData = (payload: Uint8Array, participant?: RemoteParticipant, _kind?: unknown, topic?: string) => {
       if (!topic) return
 
       if (isSessionPaused) {
@@ -2483,7 +2521,7 @@ function InRoomControls({
 
     const publications = Array.from(room.localParticipant.trackPublications.values())
     const micPublication = publications.find((publication) => publication.source === Track.Source.Microphone)
-    const mediaStreamTrack = (micPublication?.track as any)?.mediaStreamTrack as MediaStreamTrack | undefined
+    const mediaStreamTrack = micPublication?.track?.mediaStreamTrack
 
     if (!mediaStreamTrack) {
       toast.error('Microphone track not ready yet. Please try again in a second.')
@@ -2832,8 +2870,8 @@ function ChatPanel({
                   <div 
                     className={`rounded-2xl px-4 py-2.5 shadow-sm ${
                       g.role === 'user' 
-                        ? 'bg-blue-500 text-white rounded-tr-sm' 
-                        : 'bg-gray-100 text-gray-900 rounded-tl-sm border border-gray-200'
+                        ? `${USER_BUBBLE} rounded-tr-sm`
+                        : `${COACH_BUBBLE} rounded-tl-sm`
                     }`}
                   >
                     {g.role === 'user' ? (

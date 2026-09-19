@@ -47,7 +47,7 @@ interface RequestOptions extends RequestInit {
   skipAuth?: boolean
 }
 
-export async function apiClient<T = any>(
+export async function apiClient<T = unknown>(
   path: string,
   options: RequestOptions = {}
 ): Promise<T> {
@@ -80,9 +80,15 @@ export async function apiClient<T = any>(
   }
 
   if (!response.ok) {
-    const body = await response.json().catch(() => ({}))
+    const body = (await response.json().catch(() => ({}))) as {
+      message?: string
+      error?: string
+    }
     throw new Error(body.message || body.error || `Request failed: ${response.status}`)
   }
+
+  // 204 carries no body; calling .json() on it throws.
+  if (response.status === 204) return null as T
 
   return response.json()
 }

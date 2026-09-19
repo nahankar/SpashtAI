@@ -28,6 +28,19 @@ export function ProcessingStatus({
   onSelectSpeaker,
   loading,
 }: ProcessingStatusProps) {
+  const currentStep = STEPS.find((s) => s.key === status)
+  const pct = status === 'failed' ? 0 : (currentStep?.pct ?? 10)
+  const isFailed = status === 'failed'
+  const isComplete = status === 'completed'
+  const redirectedRef = useRef(false)
+
+  useEffect(() => {
+    if (!isComplete || !onViewResults) return
+    if (redirectedRef.current) return
+    redirectedRef.current = true
+    onViewResults()
+  }, [isComplete, onViewResults])
+
   // Speaker mismatch takes priority over generic failure display
   if (participantMismatch && onSelectSpeaker) {
     return (
@@ -69,20 +82,6 @@ export function ProcessingStatus({
       </Card>
     )
   }
-
-  const currentStep = STEPS.find((s) => s.key === status)
-  const pct = status === 'failed' ? 0 : (currentStep?.pct ?? 10)
-  const isFailed = status === 'failed'
-  const isComplete = status === 'completed'
-
-  const redirectedRef = useRef(false)
-
-  useEffect(() => {
-    if (!isComplete || !onViewResults) return
-    if (redirectedRef.current) return
-    redirectedRef.current = true
-    onViewResults()
-  }, [isComplete, onViewResults])
 
   return (
     <Card>

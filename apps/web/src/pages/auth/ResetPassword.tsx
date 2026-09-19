@@ -41,8 +41,8 @@ export function ResetPassword() {
       })
       setSuccess(true)
       setTimeout(() => navigate('/auth/login'), 2000)
-    } catch (err: any) {
-      setError(err.message || 'Failed to reset password')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to reset password')
     } finally {
       setSubmitting(false)
     }

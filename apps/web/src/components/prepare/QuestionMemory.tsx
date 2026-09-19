@@ -39,7 +39,7 @@ export function QuestionMemory({
   const [draft, setDraft] = useState('')
   const [stageId, setStageId] = useState(journey.nextStage?.id || journey.stages[0]?.id || '')
   const [saving, setSaving] = useState(false)
-  const questions = journey.questions ?? []
+  const questions = useMemo(() => journey.questions ?? [], [journey.questions])
   const visible = useMemo(
     () => questions.filter((question) => matchesFilter(question, filter)),
     [questions, filter],

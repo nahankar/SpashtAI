@@ -15,13 +15,21 @@ interface HistoricalLike {
   userFillerCount?: number | null
 }
 
+interface TurnSummary {
+  role: string
+  metrics?: {
+    wpm?: number | null
+    hedging_count?: number | null
+  }
+}
+
 interface Props {
   sessionId: string
   metrics: HistoricalLike | null
   /** 'card' = standalone strip; 'inline' = compact row for the tab header. */
   variant?: 'card' | 'inline'
   /** Pre-fetched per-turn records (avoids a duplicate /turns fetch). */
-  turns?: { role: string; metrics?: any }[]
+  turns?: TurnSummary[]
 }
 
 function scoreTone(v: number): string {
@@ -82,7 +90,7 @@ function MiniSparkline({ values, width = 104, height = 30 }: { values: number[];
  */
 export function SessionMetricsSummary({ sessionId, metrics, variant = 'card', turns }: Props) {
   const [score, setScore] = useState<number | null>(null)
-  const [fetchedTurns, setFetchedTurns] = useState<{ role: string; metrics?: any }[] | null>(null)
+  const [fetchedTurns, setFetchedTurns] = useState<TurnSummary[] | null>(null)
 
   useEffect(() => {
     if (!sessionId) return
@@ -118,13 +126,12 @@ export function SessionMetricsSummary({ sessionId, metrics, variant = 'card', tu
     }
   }, [sessionId, turns])
 
-  const effectiveTurns = turns ?? fetchedTurns ?? []
-
   const { pacePoints, hedging } = useMemo(() => {
+    const effectiveTurns = turns ?? fetchedTurns ?? []
     const userTurns = effectiveTurns.filter((t) => t.role === 'user')
     const pts = userTurns
-      .filter((t) => t.metrics?.wpm != null && t.metrics.wpm > 0)
-      .map((t) => Math.round(Number(t.metrics.wpm)))
+      .filter((t) => Number(t.metrics?.wpm) > 0)
+      .map((t) => Math.round(Number(t.metrics?.wpm)))
     let hedge = 0
     let hasHedge = false
     for (const t of userTurns) {
@@ -134,7 +141,7 @@ export function SessionMetricsSummary({ sessionId, metrics, variant = 'card', tu
       }
     }
     return { pacePoints: pts, hedging: hasHedge ? hedge : null }
-  }, [effectiveTurns])
+  }, [turns, fetchedTurns])
 
   const wpm = metrics?.userWpm && metrics.userWpm > 0 ? Math.round(metrics.userWpm) : null
   const fillerRate = metrics?.userFillerRate != null ? metrics.userFillerRate : null

@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useNavigate, Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useConfirm } from '@/hooks/useConfirm'
 import { useUserExportFlags } from '@/hooks/useUserExportFlags'
@@ -141,8 +141,8 @@ function EditSessionDialog({
       onSaved(updated)
       onOpenChange(false)
       toast.success('Session updated')
-    } catch (e: any) {
-      toast.error(e.message || 'Failed to update session')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to update session')
     } finally {
       setSaving(false)
     }
@@ -189,12 +189,25 @@ function EditSessionDialog({
 
 export function Replay() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const confirm = useConfirm()
   const exportFlags = useUserExportFlags()
   const [step, setStep] = useState<Step>('history')
   const [sessions, setSessions] = useState<ReplaySessionSummary[]>([])
   const [sessionsLoading, setSessionsLoading] = useState(true)
   const [sessionsError, setSessionsError] = useState<string | null>(null)
+  const handledCoachRequestRef = useRef<string | null>(null)
+  const resultPath = useCallback(
+    (id: string) => {
+      const params = new URLSearchParams()
+      if (searchParams.get('coach') === '1') params.set('coach', '1')
+      const threadId = searchParams.get('thread')
+      if (threadId) params.set('thread', threadId)
+      const query = params.toString()
+      return `/replay/${encodeURIComponent(id)}${query ? `?${query}` : ''}`
+    },
+    [searchParams],
+  )
 
   const [selectedReplay, setSelectedReplay] = useState<Set<string>>(new Set())
   const [search, setSearch] = useState('')
@@ -229,8 +242,8 @@ export function Replay() {
       const data = await res.json()
       setSessions(data.sessions || [])
       setSessionsError(null)
-    } catch (e: any) {
-      if (!background) setSessionsError(e.message)
+    } catch (e: unknown) {
+      if (!background) setSessionsError(e instanceof Error ? e.message : 'Failed to load sessions')
     } finally {
       if (!background) setSessionsLoading(false)
     }
@@ -322,8 +335,8 @@ export function Replay() {
       toast.success('Reprocessing started', {
         description: session.sessionName || session.meetingType,
       })
-    } catch (e: any) {
-      toast.error(e.message || 'Failed to reprocess session')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to reprocess session')
     } finally {
       setReprocessing((prev) => { const n = new Set(prev); n.delete(id); return n })
     }
@@ -374,15 +387,50 @@ export function Replay() {
     }
   }
 
-  const handleContinue = (s: ReplaySessionSummary) => {
+  const handleContinue = useCallback((s: ReplaySessionSummary) => {
     setSessionId(s.id)
     if (s.meetingDate) {
       setFlowMeetingDate(new Date(s.meetingDate).toISOString().slice(0, 10))
     } else {
       setFlowMeetingDate('')
     }
-    setStep('meetingDate')
-  }
+    setStep(s.uploadedFiles.length > 0 ? 'meetingDate' : 'upload')
+  }, [setSessionId])
+
+  useEffect(() => {
+    if (sessionsLoading || sessionsError) return
+    const requestedSession = searchParams.get('session')
+    const requestKey = requestedSession
+      ? `session:${requestedSession}`
+      : searchParams.get('new') === 'true'
+        ? 'new'
+        : null
+    if (!requestKey || handledCoachRequestRef.current === requestKey) return
+    handledCoachRequestRef.current = requestKey
+
+    if (requestKey === 'new') {
+      setStep('context')
+      return
+    }
+
+    const requested = sessions.find((session) => session.id === requestedSession)
+    if (!requested) return
+    if (requested.status === 'completed' || requested.status === 'failed') {
+      navigate(resultPath(requested.id), { replace: true })
+      return
+    }
+    if (requested.status === 'pending') {
+      handleContinue(requested)
+    }
+  }, [
+    handleContinue,
+    navigate,
+    resultPath,
+    searchParams,
+    sessions,
+    sessionsError,
+    sessionsLoading,
+  ])
 
   const handleEditSaved = (updated: Partial<ReplaySessionSummary>) => {
     setSessions((prev) =>
@@ -420,7 +468,13 @@ export function Replay() {
     sessionName?: string
     participantName: string
   }) => {
-    await createSession(data)
+    const coachContext = searchParams.get('context')?.trim()
+    const coachFocus = searchParams.get('focus')?.trim()
+    await createSession({
+      ...data,
+      meetingGoal: coachContext || undefined,
+      focusAreas: coachFocus ? [coachFocus] : undefined,
+    })
     setStep('upload')
   }
 
@@ -570,7 +624,17 @@ export function Replay() {
         )}
 
         {step === 'context' && (
-          <ContextForm onSubmit={handleContextSubmit} loading={loading} />
+          <div className="space-y-3">
+            {searchParams.get('context') && (
+              <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+                Coach brief:{' '}
+                <span className="font-medium text-foreground">
+                  {searchParams.get('context')}
+                </span>
+              </p>
+            )}
+            <ContextForm onSubmit={handleContextSubmit} loading={loading} />
+          </div>
         )}
 
         {step === 'upload' && (
@@ -626,7 +690,7 @@ export function Replay() {
             }
             onViewResults={
               status?.status === 'completed' && sessionId
-                ? () => navigate(`/replay/${sessionId}`)
+                ? () => navigate(resultPath(sessionId))
                 : undefined
             }
           />
@@ -749,7 +813,8 @@ export function Replay() {
                     onClick={() =>
                       setSelectedReplay((prev) => {
                         const n = new Set(prev)
-                        n.has(s.id) ? n.delete(s.id) : n.add(s.id)
+                        if (n.has(s.id)) n.delete(s.id)
+                        else n.add(s.id)
                         return n
                       })
                     }

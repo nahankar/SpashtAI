@@ -245,7 +245,7 @@ export function useConversationPersistence(): ConversationState & ConversationAP
       console.error('Failed to create WebSocket connection:', error);
       return () => {}; // No-op cleanup
     }
-  }, [ws, WS_BASE_URL]);
+  }, [ws]);
 
   // Cleanup WebSocket on unmount
   useEffect(() => {

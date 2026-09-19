@@ -37,6 +37,8 @@ function vocabDiversityOf(text: string): number {
 }
 
 /** Normalize persisted /turns metrics into the live-session TurnMetrics shape. */
+// Shared normalization stays beside its display components to keep the API shape aligned.
+// eslint-disable-next-line react-refresh/only-export-components
 export function normalizeTurnMetricsFromApi(
   raw: Record<string, unknown> | null | undefined,
   text?: string,

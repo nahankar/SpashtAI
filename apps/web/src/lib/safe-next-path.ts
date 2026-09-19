@@ -1,5 +1,6 @@
 const ALLOWED_PREFIXES = [
   '/',
+  '/coach',
   '/elevate',
   '/prepare',
   '/replay',
@@ -25,5 +26,3 @@ export function safeAppPath(value: string | null | undefined): string | null {
   )
   return allowed ? path : null
 }
-
-export const QUICK_TRY_PATH = '/elevate?focus=snapshot&newSession=true'

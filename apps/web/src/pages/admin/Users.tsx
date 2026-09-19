@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, UserPlus, UserX } from 'lucide-react'
+import { Gauge, Loader2, UserPlus, UserX } from 'lucide-react'
 
 interface UserRow {
   id: string
@@ -29,6 +29,7 @@ interface UsersResponse {
 interface PlatformSettings {
   signupsPaused: boolean
   signupsPausedMessage: string | null
+  adminRateLimitBypass: boolean
 }
 
 export function Users() {
@@ -43,6 +44,8 @@ export function Users() {
   const [signupsMessage, setSignupsMessage] = useState('')
   const [settingsLoading, setSettingsLoading] = useState(true)
   const [togglingSignups, setTogglingSignups] = useState(false)
+  const [adminRateLimitBypass, setAdminRateLimitBypass] = useState(false)
+  const [togglingRateLimit, setTogglingRateLimit] = useState(false)
 
   const fetchUsers = useCallback(async () => {
     setLoading(true)
@@ -70,6 +73,7 @@ export function Users() {
       .then((res) => {
         setSignupsPaused(res.settings.signupsPaused)
         setSignupsMessage(res.settings.signupsPausedMessage ?? '')
+        setAdminRateLimitBypass(res.settings.adminRateLimitBypass)
       })
       .catch(console.error)
       .finally(() => setSettingsLoading(false))
@@ -114,6 +118,36 @@ export function Users() {
     } catch (err) {
       console.error('Delete failed:', err)
       toast.error('Failed to delete user.')
+    }
+  }
+
+  async function toggleAdminRateLimitBypass() {
+    const nextEnabled = !adminRateLimitBypass
+    const ok = nextEnabled
+      ? await confirm({
+          title: 'Bypass API rate limits for admins?',
+          description:
+            'Authenticated admin requests will bypass the general API limit. Login, public, and normal-user traffic will remain protected.',
+          confirmLabel: 'Enable admin bypass',
+        })
+      : true
+    if (!ok) return
+
+    setTogglingRateLimit(true)
+    try {
+      const res = await apiClient<{ settings: PlatformSettings }>(
+        '/api/admin/platform/rate-limit',
+        {
+          method: 'PUT',
+          body: JSON.stringify({ adminRateLimitBypass: nextEnabled }),
+        },
+      )
+      setAdminRateLimitBypass(res.settings.adminRateLimitBypass)
+      toast.success(nextEnabled ? 'Admin API bypass enabled' : 'Admin API bypass disabled')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update API bypass')
+    } finally {
+      setTogglingRateLimit(false)
     }
   }
 
@@ -164,6 +198,43 @@ export function Users() {
           {signupsPaused && signupsMessage && (
             <p className="text-sm text-muted-foreground">{signupsMessage}</p>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Gauge className="h-5 w-5 text-primary" />
+                API testing
+              </CardTitle>
+              <CardDescription>
+                Localhost bypasses the general API limit automatically. In production,
+                this control exempts authenticated admins only; login, public, and
+                normal-user requests stay protected.
+              </CardDescription>
+            </div>
+            <Badge variant={import.meta.env.DEV || adminRateLimitBypass ? 'default' : 'outline'}>
+              {settingsLoading
+                ? '…'
+                : import.meta.env.DEV
+                  ? 'Local bypass active'
+                  : adminRateLimitBypass
+                    ? 'Admin bypass active'
+                    : 'Rate limits active'}
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Button
+            variant={adminRateLimitBypass ? 'outline' : 'default'}
+            disabled={settingsLoading || togglingRateLimit}
+            onClick={toggleAdminRateLimitBypass}
+          >
+            {togglingRateLimit && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {adminRateLimitBypass ? 'Disable production admin bypass' : 'Enable production admin bypass'}
+          </Button>
         </CardContent>
       </Card>
 

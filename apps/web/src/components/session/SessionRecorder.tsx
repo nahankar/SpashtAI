@@ -74,7 +74,7 @@ export function SessionRecorder({ sessionId, disabled = false }: SessionRecorder
       if (cancelled) return
       const pubs = Array.from(room.localParticipant.trackPublications.values())
       const mic = pubs.find((p) => p.source === Track.Source.Microphone)
-      const track = (mic?.track as any)?.mediaStreamTrack as MediaStreamTrack | undefined
+      const track = mic?.track?.mediaStreamTrack
       if (track) {
         startedAtRef.current = new Date().toISOString()
         startMsRef.current = Date.now()
@@ -108,10 +108,11 @@ export function SessionRecorder({ sessionId, disabled = false }: SessionRecorder
 
   // Final safety net: flush on unmount if we're still recording.
   useEffect(() => {
+    const uploadRecording = upload.current
     return () => {
       if (isRecordingRef.current) {
         void stopRef.current().then((blob) => {
-          if (blob) void upload.current(blob)
+          if (blob) void uploadRecording(blob)
         })
       }
     }

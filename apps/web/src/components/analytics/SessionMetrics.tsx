@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Progress } from '../ui/progress';
 import { MessageSquare, Download, RefreshCw, FileText, Loader2, Mic } from 'lucide-react';
 import { Button } from '../ui/button';
@@ -8,6 +8,11 @@ import { useUserExportFlags } from '@/hooks/useUserExportFlags';
 import { toast } from 'sonner';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
+
+interface AudioFile {
+  filename?: string | null;
+  url?: string | null;
+}
 
 interface SessionMetricsProps {
   sessionId: string;
@@ -61,9 +66,9 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExp
       }
 
       const listJson = await listResponse.json();
-      const allFiles = Array.isArray(listJson?.audioFiles) ? listJson.audioFiles : [];
+      const allFiles: AudioFile[] = Array.isArray(listJson?.audioFiles) ? listJson.audioFiles : [];
       const selectedFiles = onlyUser
-        ? allFiles.filter((f: any) => String(f?.filename || '').toLowerCase().includes('user'))
+        ? allFiles.filter((f) => String(f.filename || '').toLowerCase().includes('user'))
         : allFiles;
 
       if (selectedFiles.length === 0) {
@@ -115,7 +120,7 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExp
         throw new Error(error.error || 'Reprocessing failed');
       }
 
-      const result = await response.json();
+      await response.json();
       setReprocessStatus('✅ Reprocessing complete! Refreshing metrics...');
       
       // Reload the page after 2 seconds to show updated metrics

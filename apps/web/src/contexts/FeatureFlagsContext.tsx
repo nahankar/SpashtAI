@@ -99,6 +99,8 @@ export function FeatureFlagsProvider({ children }: { children: ReactNode }) {
   )
 }
 
+// This hook is the context's public consumer API and intentionally stays with its provider.
+// eslint-disable-next-line react-refresh/only-export-components
 export function useFeatureFlags() {
   const ctx = useContext(FeatureFlagsContext)
   if (!ctx) {

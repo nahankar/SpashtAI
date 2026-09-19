@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
 import { BrowserRouter, Link, Navigate, Route, Routes, useLocation, useSearchParams } from 'react-router-dom'
-import { Menu, X } from 'lucide-react'
+import { Menu, RotateCcw, X } from 'lucide-react'
 import { AuthProvider } from '@/contexts/AuthContext'
 import { useAuth } from '@/hooks/useAuth'
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
-import { Home } from '@/pages/Home'
+import { Coach } from '@/pages/Coach'
 import { Elevate } from '@/pages/Elevate'
 import { Replay } from '@/pages/Replay'
 import { ReplayResults } from '@/pages/ReplayResults'
@@ -52,9 +52,11 @@ import { safeAppPath } from '@/lib/safe-next-path'
 function AppBreadcrumbs() {
   const location = useLocation()
   const path = location.pathname
+  const fromCoach = new URLSearchParams(location.search).get('coach') === '1'
 
   if (path.startsWith('/admin')) return null
   if (path.startsWith('/auth')) return null
+  if (path === '/coach') return null
 
   const routeLabelMap: Record<string, string> = {
     '/': 'Home',
@@ -94,45 +96,54 @@ function AppBreadcrumbs() {
       .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
       .join(' / ')
 
+  if (fromCoach) {
+    const sourceParams = new URLSearchParams(location.search)
+    const coachParams = new URLSearchParams()
+    const threadId = sourceParams.get('thread')
+    if (threadId) coachParams.set('thread', threadId)
+    if (isReplayResults) {
+      const replayId = path.split('/').filter(Boolean)[1]
+      if (replayId) coachParams.set('replayResult', replayId)
+    }
+    const coachPath = coachParams.size > 0 ? `/coach?${coachParams.toString()}` : '/coach'
+    return (
+      <nav className="mb-6 flex items-center gap-1.5 text-sm text-muted-foreground">
+        <Link
+          to={coachPath}
+          className="inline-flex items-center gap-1.5 font-medium text-primary transition-colors hover:text-primary/80"
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+          Back to Coach
+        </Link>
+        <span>/</span>
+        <span className="text-foreground font-medium">{currentLabel}</span>
+      </nav>
+    )
+  }
+
+  // Modules are peers of Coach, not children of it, so only genuinely nested
+  // pages get a trail — rooted at their own module.
+  const parent = isReplayResults
+    ? { to: '/replay', label: 'Replay' }
+    : isFeedbackDetail || path === '/feedback/new'
+      ? { to: '/feedback', label: 'Feedback' }
+      : isElevatePlayback
+        ? { to: '/history?tab=elevate', label: 'Sessions' }
+        : isElevateResults
+          ? { to: '/elevate', label: 'Elevate' }
+          : isInterviewJourney || path === '/prepare/interviews'
+            ? { to: '/prepare', label: 'Prepare' }
+            : null
+
+  if (!parent) return null
+
   return (
     <nav className="mb-6 flex items-center gap-1.5 text-sm text-muted-foreground">
-      <Link to="/" className="hover:text-foreground transition-colors">Home</Link>
-      {isReplayResults && (
-        <>
-          <span>/</span>
-          <Link to="/replay" className="hover:text-foreground transition-colors">Replay</Link>
-        </>
-      )}
-      {(isFeedbackDetail || path === '/feedback/new') && (
-        <>
-          <span>/</span>
-          <Link to="/feedback" className="hover:text-foreground transition-colors">Feedback</Link>
-        </>
-      )}
-      {isElevatePlayback && (
-        <>
-          <span>/</span>
-          <Link to="/history?tab=elevate" className="hover:text-foreground transition-colors">Sessions</Link>
-        </>
-      )}
-      {isElevateResults && (
-        <>
-          <span>/</span>
-          <Link to="/elevate" className="hover:text-foreground transition-colors">Elevate</Link>
-        </>
-      )}
-      {(isInterviewJourney || path === '/prepare/interviews') && (
-        <>
-          <span>/</span>
-          <Link to="/prepare" className="hover:text-foreground transition-colors">Prepare</Link>
-        </>
-      )}
-      {path !== '/' && (
-        <>
-          <span>/</span>
-          <span className="text-foreground font-medium">{currentLabel}</span>
-        </>
-      )}
+      <Link to={parent.to} className="hover:text-foreground transition-colors">
+        {parent.label}
+      </Link>
+      <span>/</span>
+      <span className="text-foreground font-medium">{currentLabel}</span>
     </nav>
   )
 }
@@ -190,10 +201,24 @@ function Navbar() {
   const [signupsPaused, setSignupsPaused] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const location = useLocation()
+  const headerRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
     setMobileOpen(false)
   }, [location.pathname])
+
+  // Full-height pages (Coach) need the real navbar height; it changes with the
+  // logo, points badge, and mobile menu, so it can't be a hardcoded constant.
+  useEffect(() => {
+    const el = headerRef.current
+    if (!el) return
+    const publish = () =>
+      document.documentElement.style.setProperty('--app-nav-h', `${el.offsetHeight}px`)
+    publish()
+    const observer = new ResizeObserver(publish)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
 
   useEffect(() => {
     const API = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
@@ -240,25 +265,51 @@ function Navbar() {
   }
 
   const navLinkClass = 'block py-2 text-sm hover:text-foreground text-muted-foreground'
+  const coachActive = location.pathname === '/coach'
 
   return (
-    <header className="border-b bg-card/50 backdrop-blur supports-[backdrop-filter]:bg-card/50 sticky top-0 z-40">
+    <header
+      ref={headerRef}
+      className="border-b bg-card/50 backdrop-blur supports-[backdrop-filter]:bg-card/50 sticky top-0 z-40"
+    >
       <div className="mx-auto max-w-6xl px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-3">
-        <Link to="/" className="shrink-0">
+        <Link to={user ? '/coach' : '/'} className="shrink-0">
           <LogoWithBeta />
         </Link>
 
-        <nav className="hidden lg:flex items-center gap-4 text-sm">
+        <nav className="hidden lg:flex items-center gap-3 text-sm">
           {user ? (
             <>
+              <Link
+                to="/coach"
+                aria-current={coachActive ? 'page' : undefined}
+                className={cn(
+                  'rounded-sm underline-offset-[6px] hover:underline',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+                  coachActive
+                    ? 'font-medium text-foreground underline decoration-2'
+                    : 'text-muted-foreground',
+                )}
+              >
+                Coach
+              </Link>
+              <span className="h-4 w-px bg-border" aria-hidden="true" />
               <NavFeatureLink feature="replay" to="/replay" label="Replay" />
+              <span className="text-muted-foreground/40 select-none" aria-hidden="true">·</span>
               <NavFeatureLink feature="elevate" to="/elevate" label="Elevate" />
+              <span className="text-muted-foreground/40 select-none" aria-hidden="true">·</span>
               <NavFeatureLink feature="prepare" to="/prepare" label="Prepare" />
+              <span className="text-muted-foreground/40 select-none" aria-hidden="true">·</span>
               <Link className="hover:underline" to="/progress">Progress Pulse</Link>
+              <span className="text-muted-foreground/40 select-none" aria-hidden="true">·</span>
               <Link className="hover:underline" to="/history">Sessions</Link>
-              <Link className="hover:underline" to="/feedback">Feedback (earn points)</Link>
+              <span className="text-muted-foreground/40 select-none" aria-hidden="true">·</span>
+              <Link className="hover:underline" to="/feedback">Feedback</Link>
               {pricingEnabled && (
-                <Link className="hover:underline" to="/pricing">Pricing</Link>
+                <>
+                  <span className="text-muted-foreground/40 select-none" aria-hidden="true">·</span>
+                  <Link className="hover:underline" to="/pricing">Pricing</Link>
+                </>
               )}
               {user.rewardPoints != null && (
                 <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary whitespace-nowrap">
@@ -297,12 +348,13 @@ function Navbar() {
         <div className="lg:hidden border-t bg-card px-4 py-3 space-y-1">
           {user ? (
             <>
+              <Link className={cn(navLinkClass, coachActive && 'font-medium text-foreground')} to="/coach" onClick={() => setMobileOpen(false)}>Coach</Link>
               <NavFeatureLink feature="replay" to="/replay" label="Replay" className={navLinkClass} onClick={() => setMobileOpen(false)} />
               <NavFeatureLink feature="elevate" to="/elevate" label="Elevate" className={navLinkClass} onClick={() => setMobileOpen(false)} />
               <NavFeatureLink feature="prepare" to="/prepare" label="Prepare" className={navLinkClass} onClick={() => setMobileOpen(false)} />
               <Link className={navLinkClass} to="/progress" onClick={() => setMobileOpen(false)}>Progress Pulse</Link>
               <Link className={navLinkClass} to="/history" onClick={() => setMobileOpen(false)}>Sessions</Link>
-              <Link className={navLinkClass} to="/feedback" onClick={() => setMobileOpen(false)}>Feedback (earn points)</Link>
+              <Link className={navLinkClass} to="/feedback" onClick={() => setMobileOpen(false)}>Feedback</Link>
               {pricingEnabled && (
                 <Link className={navLinkClass} to="/pricing" onClick={() => setMobileOpen(false)}>Pricing</Link>
               )}
@@ -352,10 +404,49 @@ function HomeRoute() {
       />
     )
   }
+  return <Navigate to="/coach" replace />
+}
+
+function ElevateRoute() {
+  const [params] = useSearchParams()
+  const fromCoach = params.get('coach') === '1'
+  const originThread = params.get('thread')
+  const content = (
+    <FeatureGate feature="elevate">
+      <Elevate />
+    </FeatureGate>
+  )
+  const returnTo = originThread
+    ? `/coach?thread=${encodeURIComponent(originThread)}`
+    : '/coach'
+
+  if (fromCoach) {
+    return (
+      <main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8">
+        <section className="min-w-0 overflow-hidden rounded-xl border bg-card">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-[0.16em] text-primary">
+                Focused practice
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Your Coach thread is paused while Elevate owns this workspace.
+              </p>
+            </div>
+            <Button asChild variant="outline" size="sm">
+              <Link to={returnTo}>Return to Coach thread</Link>
+            </Button>
+          </div>
+          <div className="p-5 sm:p-6">{content}</div>
+        </section>
+      </main>
+    )
+  }
+
   return (
     <main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8">
       <AppBreadcrumbs />
-      <Home />
+      {content}
     </main>
   )
 }
@@ -398,6 +489,7 @@ function AppRoutes() {
 
         {/* Protected user routes */}
         <Route element={<ProtectedRoute />}>
+          <Route path="/coach" element={<Coach />} />
           <Route path="/replay" element={
             <main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8">
               <AppBreadcrumbs />
@@ -414,14 +506,7 @@ function AppRoutes() {
               </FeatureGate>
             </main>
           } />
-          <Route path="/elevate" element={
-            <main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8">
-              <AppBreadcrumbs />
-              <FeatureGate feature="elevate">
-                <Elevate />
-              </FeatureGate>
-            </main>
-          } />
+          <Route path="/elevate" element={<ElevateRoute />} />
           <Route path="/elevate/playback/:sessionId" element={
             <main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8">
               <AppBreadcrumbs />

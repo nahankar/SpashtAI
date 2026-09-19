@@ -25,6 +25,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { getAuthHeaders, getAuthenticatedMediaUrl } from '@/lib/api-client'
+import { COACH_BUBBLE, USER_BUBBLE } from '@/lib/conversation'
 import { useIsPro } from '@/hooks/useIsPro'
 import { UserTurnBubble, normalizeTurnMetricsFromApi } from '@/components/session/UserTurnMetrics'
 
@@ -271,7 +272,7 @@ function normalizeTurnPresentations(turns: ReplayTurn[]): Map<number, TurnPresen
       continue
     }
 
-    let clusters = clusterTurnWords(turn.words)
+    const clusters = clusterTurnWords(turn.words)
 
     while (
       clusters.length > 1 &&
@@ -315,7 +316,6 @@ function normalizeTurnPresentations(turns: ReplayTurn[]): Map<number, TurnPresen
 
 function buildSkipIntervalsFromTurnWords(
   turns: ReplayTurn[],
-  gapSec = WORD_CLUSTER_GAP_SEC,
 ): { start: number; end: number }[] {
   const presentations = normalizeTurnPresentations(turns)
   const out: { start: number; end: number }[] = []
@@ -705,7 +705,8 @@ export function SessionReplay({
   const toggleChip = (c: QualityChip) =>
     setChips((prev) => {
       const n = new Set(prev)
-      n.has(c) ? n.delete(c) : n.add(c)
+      if (n.has(c)) n.delete(c)
+      else n.add(c)
       return n
     })
 
@@ -1631,8 +1632,8 @@ function TurnBubble({
         <div
           className={`rounded-2xl px-4 py-2.5 shadow-sm transition-shadow ${
             isUser
-              ? `rounded-tr-sm bg-blue-500 text-white ${isActive ? 'ring-2 ring-blue-300 ring-offset-2' : ''}`
-              : `rounded-tl-sm border border-gray-200 bg-gray-100 text-gray-900 dark:border-gray-700 dark:bg-muted dark:text-foreground ${
+              ? `rounded-tr-sm ${USER_BUBBLE} ${isActive ? 'ring-2 ring-blue-300 ring-offset-2' : ''}`
+              : `rounded-tl-sm ${COACH_BUBBLE} ${
                   isActive ? 'ring-2 ring-primary/40 ring-offset-2' : ''
                 }`
           }`}

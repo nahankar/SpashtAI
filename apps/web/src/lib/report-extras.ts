@@ -30,6 +30,12 @@ export interface ReportExtras {
   nextSteps: NonNullable<SessionReport['nextSteps']>
 }
 
+interface ProgressPulseResponseItem {
+  skill: string
+  currentScore: number
+  delta?: number | null
+}
+
 /**
  * Builds the standardized "extras" shared by every SpashtAI PDF report:
  * a report summary, the cross-session Progress Pulse standing, and recommended
@@ -45,8 +51,8 @@ export async function buildReportExtras(input: ReportExtrasInput): Promise<Repor
     const pulseRes = await fetch(`${apiBase}/api/progress-pulse/summary`, { headers })
     if (pulseRes.ok) {
       const pulseData = await pulseRes.json()
-      const items = Array.isArray(pulseData?.summary) ? pulseData.summary : []
-      progressPulse = items.map((it: any) => ({
+      const items: ProgressPulseResponseItem[] = Array.isArray(pulseData?.summary) ? pulseData.summary : []
+      progressPulse = items.map((it) => ({
         skill: it.skill,
         label: pulseSkillLabel(it.skill),
         currentScore: Number(it.currentScore) || 0,

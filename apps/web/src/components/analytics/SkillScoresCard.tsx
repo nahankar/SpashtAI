@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card'
 import { Progress } from '../ui/progress'
 import {
@@ -138,13 +138,7 @@ export function SkillScoresCard({
     if (initialSkillData) setSkillData(initialSkillData)
   }, [initialSkillData])
 
-  useEffect(() => {
-    if (isSessionEnded && sessionId && !initialSkillData) {
-      fetchData()
-    }
-  }, [sessionId, isSessionEnded, initialSkillData])
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
@@ -164,7 +158,13 @@ export function SkillScoresCard({
     } finally {
       setLoading(false)
     }
-  }
+  }, [sessionId])
+
+  useEffect(() => {
+    if (isSessionEnded && sessionId && !initialSkillData) {
+      fetchData()
+    }
+  }, [sessionId, isSessionEnded, initialSkillData, fetchData])
 
   if (!isSessionEnded) return null
 

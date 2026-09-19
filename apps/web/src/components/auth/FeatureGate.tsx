@@ -29,7 +29,7 @@ export function FeatureGate({
   }
 
   if (!isVisible(feature)) {
-    return <Navigate to="/" replace />
+    return <Navigate to="/coach" replace />
   }
 
   if (!isAccessible(feature)) {
@@ -45,9 +45,9 @@ export function FeatureGate({
             <CardDescription>{message}</CardDescription>
           </CardHeader>
           <CardContent>
-            <Link to="/">
+            <Link to="/coach">
               <Button variant="outline" className="w-full">
-                Back to Home
+                Back to Coach
               </Button>
             </Link>
           </CardContent>

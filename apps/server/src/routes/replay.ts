@@ -14,6 +14,15 @@ import {
   stripReplayTranscriptFields,
 } from '../lib/userExportFlags'
 import { trackFeatureUsage } from '../middleware/tracking'
+import { replaySessionAccessWhere } from '../lib/replay-access'
+
+function ownedReplayWhere(req: Request, id: string) {
+  return replaySessionAccessWhere(
+    id,
+    req.user!.userId,
+    isPrivilegedRole(req.user?.role),
+  )
+}
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -260,7 +269,9 @@ router.post(
   async (req: Request, res: Response) => {
     try {
       const { id } = req.params
-      const session = await prisma.replaySession.findUnique({ where: { id } })
+      const session = await prisma.replaySession.findFirst({
+        where: ownedReplayWhere(req, id),
+      })
       if (!session) return res.status(404).json({ error: 'Replay session not found' })
 
       const files = req.files as Record<string, Express.Multer.File[]> | undefined
@@ -404,8 +415,8 @@ router.post(
 router.post('/sessions/:id/process', trackFeatureUsage('replay', 'analyze'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params
-    const session = await prisma.replaySession.findUnique({
-      where: { id },
+    const session = await prisma.replaySession.findFirst({
+      where: ownedReplayWhere(req, id),
       include: { uploadedFiles: true },
     })
     if (!session) return res.status(404).json({ error: 'Replay session not found' })
@@ -757,7 +768,9 @@ router.patch('/sessions/:id', async (req: Request, res: Response) => {
     const { id } = req.params
     const { participantName, meetingDate, sessionName } = req.body
 
-    const session = await prisma.replaySession.findUnique({ where: { id } })
+    const session = await prisma.replaySession.findFirst({
+      where: ownedReplayWhere(req, id),
+    })
     if (!session) return res.status(404).json({ error: 'Replay session not found' })
 
     const data: { participantName?: string | null; meetingDate?: Date | null; sessionName?: string | null } = {}
@@ -801,8 +814,8 @@ router.patch('/sessions/:id', async (req: Request, res: Response) => {
 router.get('/sessions/:id/status', async (req: Request, res: Response) => {
   try {
     const { id } = req.params
-    const session = await prisma.replaySession.findUnique({
-      where: { id },
+    const session = await prisma.replaySession.findFirst({
+      where: ownedReplayWhere(req, id),
       select: { id: true, status: true, errorMessage: true, updatedAt: true },
     })
     if (!session) return res.status(404).json({ error: 'Replay session not found' })
@@ -824,8 +837,8 @@ router.get('/sessions/:id/results', async (req: Request, res: Response) => {
       return exportDenied(res, 'Access denied')
     }
 
-    const session = await prisma.replaySession.findUnique({
-      where: { id },
+    const session = await prisma.replaySession.findFirst({
+      where: ownedReplayWhere(req, id),
       include: {
         result: true,
         uploadedFiles: {
@@ -852,6 +865,14 @@ router.get('/sessions/:id/results', async (req: Request, res: Response) => {
         ? stripReplayTranscriptFields(session.result as Record<string, unknown>)
         : session.result
       : null
+    const rawSkillScores = session.result.skillScores
+    const skillScoresPayload =
+      rawSkillScores && typeof rawSkillScores === 'object' && !Array.isArray(rawSkillScores)
+        ? {
+            ...(rawSkillScores as Record<string, unknown>),
+            signals: session.result.communicationSignals ?? undefined,
+          }
+        : rawSkillScores
 
     res.json({
       session: {
@@ -872,7 +893,7 @@ router.get('/sessions/:id/results', async (req: Request, res: Response) => {
       transcriptHidden: flags.hideTranscriptText,
       transcriptJsonExportDisabled: flags.hideTranscriptJsonExport,
       audioDownloadDisabled: flags.hideAudioDownload,
-      skillScores: session.result?.skillScores ?? null,
+      skillScores: skillScoresPayload ?? null,
       coachingInsights: session.result?.coachingInsights ?? null,
     })
   } catch (error) {
@@ -952,8 +973,8 @@ router.get('/sessions/:id/download/:fileId', async (req: Request, res: Response)
 router.delete('/sessions/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params
-    const session = await prisma.replaySession.findUnique({
-      where: { id },
+    const session = await prisma.replaySession.findFirst({
+      where: ownedReplayWhere(req, id),
       include: { uploadedFiles: true },
     })
     if (!session) return res.status(404).json({ error: 'Replay session not found' })

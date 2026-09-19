@@ -11,6 +11,11 @@ export interface PacePoint {
   wpm: number
 }
 
+interface TurnWithPace {
+  role?: string
+  metrics?: { wpm?: number | null }
+}
+
 const IDEAL_MIN = 120
 const IDEAL_MAX = 160
 
@@ -157,13 +162,13 @@ export function PaceTrendCard({
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (cancelled || !data) return
-        const turns = Array.isArray(data.turns) ? data.turns : []
+        const turns: TurnWithPace[] = Array.isArray(data.turns) ? data.turns : []
         let n = 0
         const pts: PacePoint[] = turns
-          .filter((t: any) => t.role === 'user' && t.metrics?.wpm != null && t.metrics.wpm > 0)
-          .map((t: any) => {
+          .filter((t) => t.role === 'user' && t.metrics?.wpm != null && t.metrics.wpm > 0)
+          .map((t) => {
             n += 1
-            return { label: n, wpm: Math.round(Number(t.metrics.wpm)) }
+            return { label: n, wpm: Math.round(Number(t.metrics?.wpm)) }
           })
         setFetchedPoints(pts)
       })

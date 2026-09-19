@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { getAuthHeaders } from '@/lib/api-client';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
@@ -35,6 +35,10 @@ interface SessionMetrics {
   totalTurns: number;
 }
 
+type MetricsResponse = SessionMetrics & {
+  session?: { endedAt?: string | null };
+};
+
 interface UseSessionMetricsReturn {
   metrics: SessionMetrics | null;
   loading: boolean;
@@ -43,21 +47,41 @@ interface UseSessionMetricsReturn {
   downloadTranscript: (format: 'json' | 'txt') => Promise<void>;
 }
 
+function isAllZeros(data: MetricsResponse): boolean {
+  return (
+    data.userWpm === 0 &&
+    data.userFillerCount === 0 &&
+    data.totalTurns === 0 &&
+    data.totalLlmTokens === 0
+  );
+}
+
+function hasAgentGroundedMetrics(data: MetricsResponse): boolean {
+  return (
+    Number(data.userWpm || 0) > 0 &&
+    Number(data.userSpeakingTime || 0) > 0 &&
+    Number(data.totalTurns || 0) > 0
+  );
+}
+
+function shouldRecomputeFromTranscript(data: MetricsResponse, messageCount: number): boolean {
+  // Agent saves VAD-measured WPM at session end — do not overwrite with
+  // text-only estimates (they use wall-clock and fragment-inflated turn counts).
+  if (hasAgentGroundedMetrics(data)) return false;
+
+  const expectedTurns = Math.floor(messageCount / 2);
+  const currentTurns = Number(data.totalTurns || 0);
+  const endedAt = data.session?.endedAt;
+
+  return isAllZeros(data) || Boolean(endedAt && expectedTurns > currentTurns);
+}
+
 export function useSessionMetrics(sessionId: string | null): UseSessionMetricsReturn {
   const [metrics, setMetrics] = useState<SessionMetrics | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isAllZeros = (data: any): boolean => {
-    return (
-      data.userWpm === 0 &&
-      data.userFillerCount === 0 &&
-      data.totalTurns === 0 &&
-      data.totalLlmTokens === 0
-    );
-  };
-
-  const fetchConversationMessageCount = async (id: string): Promise<number> => {
+  const fetchConversationMessageCount = useCallback(async (id: string): Promise<number> => {
     try {
       const response = await fetch(`${API_BASE_URL}/sessions/${id}/conversation`, {
         headers: getAuthHeaders(),
@@ -68,30 +92,9 @@ export function useSessionMetrics(sessionId: string | null): UseSessionMetricsRe
     } catch {
       return 0;
     }
-  };
+  }, []);
 
-  const hasAgentGroundedMetrics = (data: any): boolean =>
-    Number(data?.userWpm || 0) > 0 &&
-    Number(data?.userSpeakingTime || 0) > 0 &&
-    Number(data?.totalTurns || 0) > 0;
-
-  const shouldRecomputeFromTranscript = (data: any, messageCount: number): boolean => {
-    // Agent saves VAD-measured WPM at session end — do not overwrite with
-    // text-only estimates (they use wall-clock and fragment-inflated turn counts).
-    if (hasAgentGroundedMetrics(data)) return false;
-
-    const expectedTurns = Math.floor(messageCount / 2);
-    const currentTurns = Number(data?.totalTurns || 0);
-    const endedAt = data?.session?.endedAt;
-
-    if (isAllZeros(data)) return true;
-
-    if (endedAt && expectedTurns > currentTurns) return true;
-
-    return false;
-  };
-
-  const fetchMetrics = async () => {
+  const fetchMetrics = useCallback(async () => {
     if (!sessionId) return;
 
     setLoading(true);
@@ -106,7 +109,7 @@ export function useSessionMetrics(sessionId: string | null): UseSessionMetricsRe
         throw new Error(`Failed to fetch metrics: ${response.statusText}`);
       }
 
-      let data = await response.json();
+      let data = (await response.json()) as MetricsResponse;
       const messageCount = await fetchConversationMessageCount(sessionId);
 
       if (shouldRecomputeFromTranscript(data, messageCount)) {
@@ -120,7 +123,7 @@ export function useSessionMetrics(sessionId: string | null): UseSessionMetricsRe
               headers: getAuthHeaders(),
             });
             if (refreshed.ok) {
-              data = await refreshed.json();
+              data = (await refreshed.json()) as MetricsResponse;
             }
           }
         } catch {
@@ -135,7 +138,7 @@ export function useSessionMetrics(sessionId: string | null): UseSessionMetricsRe
     } finally {
       setLoading(false);
     }
-  };
+  }, [sessionId, fetchConversationMessageCount]);
 
   const downloadTranscript = async (format: 'json' | 'txt') => {
     if (!sessionId) return;
@@ -174,7 +177,7 @@ export function useSessionMetrics(sessionId: string | null): UseSessionMetricsRe
 
   useEffect(() => {
     fetchMetrics();
-  }, [sessionId]);
+  }, [fetchMetrics]);
 
   return {
     metrics,
@@ -193,8 +196,8 @@ export interface SessionTurnRecord {
   text?: string
   audioStart?: number | null
   audioEnd?: number | null
-  metrics?: any
-  score?: any
+  metrics?: Record<string, unknown>
+  score?: unknown
 }
 
 export function useSessionTurns(
@@ -246,10 +249,27 @@ export interface LiveMetricsSnapshot {
   publishedAt?: number;
 }
 
+export interface LiveMetricsUpdate {
+  current_metrics?: {
+    total_turns?: unknown;
+    user_wpm?: unknown;
+    user_filler_rate?: unknown;
+    response_time_avg?: unknown;
+    conversation_latency?: unknown;
+    user_total_words?: number;
+    user_speaking_seconds?: number;
+    user_filler_count?: number;
+    user_vocab_diversity?: number;
+    pacing_qualitative?: LiveMetricsSnapshot['pacingQualitative'];
+    coaching_tip?: string;
+  };
+  timestamp?: number;
+}
+
 export function useRealTimeMetrics() {
   const [currentMetrics, setCurrentMetrics] = useState<LiveMetricsSnapshot | null>(null);
 
-  const updateMetrics = (metricsUpdate: any) => {
+  const updateMetrics = (metricsUpdate: LiveMetricsUpdate) => {
     const cm = metricsUpdate?.current_metrics;
     if (!cm) return;
     setCurrentMetrics({

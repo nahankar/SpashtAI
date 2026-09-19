@@ -8,6 +8,8 @@ export interface ReplayContext {
   /** Optional here if we infer from VTT/filename on upload; required before analysis runs. */
   meetingDate?: string
   participantName: string
+  meetingGoal?: string
+  focusAreas?: string[]
 }
 
 export interface ReplayUploadResponse {
@@ -36,6 +38,17 @@ export interface ReplayUploadRecord {
   duration?: number | null
 }
 
+export interface StructuredTranscriptSegment {
+  speaker: string
+  text?: string
+  start?: number
+  end?: number
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
 export interface ReplayResultData {
   session: {
     id: string
@@ -53,7 +66,7 @@ export interface ReplayResultData {
   uploads: ReplayUploadRecord[]
   result: {
     transcriptText: string
-    structuredTranscript: any
+    structuredTranscript: StructuredTranscriptSegment[]
     speakerCount: number
     transcriptionSource: string
     wordsPerMinute: number
@@ -97,17 +110,34 @@ export interface ReplayResultData {
       emotionalControl: number | null
     }
     components: Record<string, Record<string, number>>
+    signals?: {
+      hedging?: {
+        phrases?: string[]
+      }
+    }
   } | null
   coachingInsights?: {
     topStrength: string
     primaryImprovement: string
     actionableAdvice: string
     practiceExercise: string
+    practicePlan?: Array<{
+      title: string
+      description: string
+      focusSkill: string
+    }>
     decisionClarity?: {
       decisionsDetected: number
       actionItemsDetected: number
+      decisions?: string[]
+      actionItems?: string[]
       summary: string
     }
+    meetingSummary?: {
+      topicsDiscussed: string[]
+      keyOutcomes: string[]
+      openQuestions: string[]
+    } | null
     topicFlow?: string
     overallNarrative: string
     error?: string
@@ -145,8 +175,8 @@ export function useReplaySession() {
       const data = await res.json()
       setSessionId(data.sessionId)
       return data.sessionId
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      setError(errorMessage(e))
       throw e
     } finally {
       setLoading(false)
@@ -171,8 +201,8 @@ export function useReplaySession() {
         })
         if (!res.ok) throw new Error((await res.json()).error || 'Upload failed')
         return (await res.json()) as ReplayUploadResponse
-      } catch (e: any) {
-        setError(e.message)
+      } catch (e: unknown) {
+        setError(errorMessage(e))
         throw e
       } finally {
         setLoading(false)
@@ -193,8 +223,8 @@ export function useReplaySession() {
         })
         if (!res.ok) throw new Error((await res.json()).error || 'Failed to update session')
         return await res.json()
-      } catch (e: any) {
-        setError(e.message)
+      } catch (e: unknown) {
+        setError(errorMessage(e))
         throw e
       } finally {
         setLoading(false)
@@ -262,8 +292,8 @@ export function useReplaySession() {
             // polling failure is transient
           }
         }, 3000)
-      } catch (e: any) {
-        setError(e.message)
+      } catch (e: unknown) {
+        setError(errorMessage(e))
         throw e
       }
     },
@@ -282,8 +312,8 @@ export function useReplaySession() {
         })
         if (!res.ok) throw new Error((await res.json()).error || 'Failed to update participant')
         return await res.json()
-      } catch (e: any) {
-        setError(e.message)
+      } catch (e: unknown) {
+        setError(errorMessage(e))
         throw e
       } finally {
         setLoading(false)
@@ -315,8 +345,8 @@ export function useReplaySession() {
       setResults(data)
       setSessionId(sid)
       return data
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      setError(errorMessage(e))
       throw e
     } finally {
       setLoading(false)
