@@ -38,9 +38,14 @@ const serviceMock = vi.hoisted(() => ({
   generateCoachResponse: vi.fn(),
   interpretCoachResult: vi.fn(),
 }))
+const homeMock = vi.hoisted(() => ({
+  loadCoachHome: vi.fn(),
+  markCoachHomeResultSeen: vi.fn(),
+}))
 
 vi.mock('../src/lib/prisma', () => ({ prisma: prismaMock }))
 vi.mock('../src/coach/service', () => serviceMock)
+vi.mock('../src/coach/home', () => homeMock)
 
 import coachRouter from '../src/routes/coach'
 
@@ -167,6 +172,35 @@ describe('Coach turn synchronization', () => {
 })
 
 describe('Coach route ownership', () => {
+  it('loads Home for the authenticated user without selecting a thread', async () => {
+    homeMock.loadCoachHome.mockResolvedValue({
+      recommendation: {
+        kind: 'onboarding',
+        title: 'What are you preparing for?',
+        reason: 'Tell Coach the outcome and timing.',
+      },
+    })
+    const response = await request(appFor('user-a')).get('/api/coach/home')
+
+    expect(response.status).toBe(200)
+    expect(homeMock.loadCoachHome).toHaveBeenCalledWith('user-a')
+    expect(prismaMock.coachThread.findFirst).not.toHaveBeenCalled()
+  })
+
+  it('scopes result visibility updates to the authenticated user', async () => {
+    homeMock.markCoachHomeResultSeen.mockResolvedValue(false)
+    const response = await request(appFor('user-b')).post(
+      '/api/coach/home/results/replay/replay-1/seen',
+    )
+
+    expect(response.status).toBe(404)
+    expect(homeMock.markCoachHomeResultSeen).toHaveBeenCalledWith(
+      'user-b',
+      'replay',
+      'replay-1',
+    )
+  })
+
   it('does not expose another user thread', async () => {
     const response = await request(appFor('user-b')).get('/api/coach/threads/thread-a')
     expect(response.status).toBe(404)

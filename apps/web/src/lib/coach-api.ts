@@ -7,6 +7,7 @@ export type CoachThreadSummary = {
   title: string | null
   status: CoachThreadStatus
   preparationId: string | null
+  focusArea: string | null
   createdAt: string
   updatedAt: string
 }
@@ -29,12 +30,15 @@ export function listCoachThreads() {
   return apiClient<{ threads: CoachThreadSummary[] }>('/api/coach/threads')
 }
 
-export function createCoachThread(title?: string) {
+export function createCoachThread(title?: string, focusArea?: string | null) {
   return apiClient<{ thread: CoachThreadSummary; turns: CoachTurnRecord[] }>(
     '/api/coach/threads',
     {
       method: 'POST',
-      body: JSON.stringify(title ? { title } : {}),
+      body: JSON.stringify({
+        ...(title ? { title } : {}),
+        ...(focusArea ? { focusArea } : {}),
+      }),
     },
   )
 }
@@ -59,6 +63,7 @@ export function patchCoachThread(
     title?: string | null
     status?: CoachThreadStatus
     preparationId?: string | null
+    focusArea?: string | null
   },
 ) {
   return apiClient<{ thread: CoachThreadSummary }>(
@@ -83,6 +88,76 @@ export function saveCoachTurns(id: string, turns: CoachTurnRecord[]) {
       method: 'PUT',
       body: JSON.stringify({ turns }),
     },
+  )
+}
+
+export type CoachHomeRecommendation =
+  | {
+      kind: 'result'
+      module: 'elevate' | 'replay'
+      targetId: string
+      threadId: string | null
+      title: string
+      reason: string
+      insight: string | null
+      completedAt: string
+    }
+  | {
+      kind: 'live-resume'
+      module: 'elevate'
+      targetId: string
+      threadId: string | null
+      title: string
+      reason: string
+      startedAt: string
+    }
+  | {
+      kind: 'resume'
+      threadId: string
+      title: string
+      question: string
+      updatedAt: string
+    }
+  | {
+      kind: 'prepare'
+      threadId: string | null
+      preparationId: string
+      stageId: string
+      stageName: string
+      goalTitle: string
+      title: string
+      reason: string
+      scenario: string
+      scheduledAt: string
+    }
+  | {
+      kind: 'pulse'
+      threadId: string | null
+      skill: string
+      score: number
+      sessions: number
+      practiceAvailable: boolean
+      goalTitle: string
+      title: string
+      reason: string
+    }
+  | {
+      kind: 'onboarding'
+      title: string
+      reason: string
+    }
+
+export function getCoachHome() {
+  return apiClient<{ recommendation: CoachHomeRecommendation }>('/api/coach/home')
+}
+
+export function markCoachHomeResultSeen(
+  module: 'elevate' | 'replay',
+  targetId: string,
+) {
+  return apiClient<{ seen: true }>(
+    `/api/coach/home/results/${module}/${encodeURIComponent(targetId)}/seen`,
+    { method: 'POST' },
   )
 }
 
@@ -136,12 +211,28 @@ export type CoachClarification = {
   options: string[]
 }
 
+export type CoachPulseEvidence = {
+  mode: 'scores' | 'relevant'
+  windowDays: number
+  measurementCount: number
+  skills: Array<{
+    skill: string
+    score: number
+    delta: number | null
+    measurements: number
+    trend: 'up' | 'down' | 'steady' | 'latest'
+  }>
+  highlight: { kind: 'strongest' | 'highest'; skill: string }
+  opportunity: { skill: string } | null
+}
+
 export type CoachResponse = {
   reply: string
   /** Suggested name for an unnamed thread. Null once the goal is set. */
   goalTitle: string | null
   clarify: CoachClarification | null
   recommend: CoachRecommendation | null
+  evidence: CoachPulseEvidence | null
 }
 
 export type CoachHistoryTurn = { role: 'user' | 'coach'; text: string }

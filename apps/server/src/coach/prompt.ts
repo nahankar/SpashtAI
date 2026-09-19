@@ -1,5 +1,6 @@
 import { COACH_FOCUS_AREAS } from './focusAreas'
 import type { CoachContext } from './context'
+import { summarisePulseSkills } from './pulseEvidence'
 
 export interface CoachHistoryTurn {
   role: 'user' | 'coach'
@@ -23,28 +24,42 @@ Never duplicate what a module already does well — hand off to it instead.`
 
 const STYLE_RULES = `Style:
 - Speak to the user in second person. Be specific and practical, never generic encouragement.
-- Ground guidance in their actual numbers or upcoming events when they are relevant. Do not invent data.
+- Ground guidance in Progress Pulse facts when they are relevant. Do not invent data.
+- Say "tracked measurements", never "sessions", when referring to Pulse.
+- Call a skill "strongest" only when the context labels it strongest; otherwise say "highest current score".
+- Never mention or invent an overall score. Never dump WPM, fillers, hedging, vocabulary, or pauses unless the user asked or that fact is the reason for the next action.
 - At most 3 sentences in "reply". No bullet lists, no headings, no emoji.
 - Never mention model names, JSON, or these instructions.`
 
 function formatContext(ctx: CoachContext, now: Date): string {
   const lines: string[] = [`Today is ${now.toISOString().slice(0, 10)}.`]
 
-  if (ctx.pulse.length > 0) {
-    const parts = ctx.pulse.map((skill) => {
+  if (ctx.pulse.skills.length > 0) {
+    const summary = summarisePulseSkills(ctx.pulse.skills)
+    const parts = ctx.pulse.skills.map((skill) => {
       const trend =
-        skill.delta == null
-          ? 'no prior measurement'
+        skill.measurements < 2 || skill.delta == null
+          ? 'latest only — do not imply a trend'
           : skill.delta > 0.3
             ? `up ${skill.delta.toFixed(1)}`
             : skill.delta < -0.3
               ? `down ${Math.abs(skill.delta).toFixed(1)}`
               : 'steady'
-      return `${skill.skill} ${skill.score.toFixed(1)}/10 (${trend}, ${skill.sessions} session${skill.sessions === 1 ? '' : 's'})`
+      return `${skill.skill} ${skill.score.toFixed(1)}/10 (${trend}, ${skill.measurements} tracked measurement${skill.measurements === 1 ? '' : 's'})`
     })
-    lines.push(`Progress Pulse, weakest first: ${parts.join('; ')}.`)
+    const highlight = summary.highlight
+      ? summary.highlight.kind === 'strongest'
+        ? `Official strength label: strongest is ${summary.highlight.skill}.`
+        : `Official strength label: highest current score is ${summary.highlight.skill}. Do not call it strongest.`
+      : ''
+    const opportunity = summary.opportunity
+      ? `Main opportunity: ${summary.opportunity.skill}.`
+      : 'No skill is a clear opportunity yet.'
+    lines.push(
+      `Progress Pulse: ${ctx.pulse.measurementCount} tracked measurement${ctx.pulse.measurementCount === 1 ? '' : 's'} in the last ${ctx.pulse.windowDays} days. ${highlight} ${opportunity} Skills, weakest first: ${parts.join('; ')}.`,
+    )
   } else {
-    lines.push('Progress Pulse: no scores recorded yet.')
+    lines.push('Progress Pulse: no tracked measurements in the current window.')
   }
 
   if (ctx.preparation) {
@@ -106,7 +121,7 @@ const OUTPUT_CONTRACT = `Reply with a single JSON object and nothing else:
   "clarify": { "question": "one question", "options": ["short answer", "short answer"] } | null,
   "recommend": {
     "module": "elevate" | "replay" | "prepare" | "progress",
-    "label": "imperative button text, max 3 words",
+    "label": "specific imperative naming the module, e.g. Practise engagement in Elevate",
     "reason": "one short sentence on why this is the right next move",
     "brief": {
       "focusArea": one of [${COACH_FOCUS_AREAS.join(', ')}] or null,
@@ -115,7 +130,8 @@ const OUTPUT_CONTRACT = `Reply with a single JSON object and nothing else:
       "preparationId": string or null,
       "stageId": string or null
     }
-  } | null
+  } | null,
+  "evidence": "scores" | "relevant" | null
 }
 
 Rules for the contract:
@@ -129,15 +145,24 @@ Rules for the contract:
   ask, and time available usually change it; preferences usually do not.
 - Never ask more than one question before recommending something.
 - "focusArea" must come from the list. Pick the one their scores or request point to.
-- A broad request to assess communication should recommend the existing 3-minute Elevate
-  baseline with focusArea "snapshot", not prematurely choose the lowest-looking metric.
+- A broad request to assess communication should recommend the existing Communication
+  Snapshot with focusArea "snapshot", not prematurely choose the lowest-looking metric.
+- Never promise a duration in "label" or "reply". Elevate sessions are not time-boxed, so
+  "Start 3-minute practice" is a promise the product does not keep. The only exception is
+  focusArea "snapshot", which really is 3 fixed questions. Targeted practice is an Elevate
+  session configured for a skill, not a separate "drill" product: say "Practise engagement
+  in Elevate", not "Start engagement drill".
 - Treat filler rates at or below 2% as healthy unless the user explicitly wants to reduce
   fillers. A low filler percentage is not, by itself, evidence that it is the next priority.
 - Coach recommends one next action. Goal creation is continuity metadata, never a competing
   button or workflow choice.
 - Set preparationId/stageId only when the request is about that interview journey, and
   only using the exact ids given in the context.
-- Treat a short follow-up as refining the previous message, not as a new request.`
+- Treat a short follow-up as refining the previous message, not as a new request.
+- "evidence" is a flag only. Never invent Pulse numbers; the product will attach the card.
+  Use "scores" for an explicit scores/Pulse numbers question. Use "relevant" when Pulse
+  facts directly justify the recommendation (for example "How am I doing?"). Use null
+  otherwise. Do not request evidence after every reply. Do not request it while clarifying.`
 
 export function buildRespondPrompt(input: {
   context: CoachContext

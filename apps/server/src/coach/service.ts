@@ -14,6 +14,12 @@ import {
   type CoachHistoryTurn,
   type CompletedSessionSummary,
 } from './prompt'
+import {
+  buildPulseEvidence,
+  parseEvidenceMode,
+  resolvePulseEvidenceMode,
+  type PulseEvidence,
+} from './pulseEvidence'
 
 export interface CoachBrief {
   focusArea: CoachFocusArea | null
@@ -41,12 +47,13 @@ export interface CoachResponse {
   goalTitle: string | null
   clarify: CoachClarification | null
   recommend: CoachRecommendation | null
+  evidence: PulseEvidence | null
 }
 
 const MAX_REPLY = 400
 const MAX_REASON = 160
 const MAX_SCENARIO = 140
-const MAX_LABEL = 24
+const MAX_LABEL = 40
 const MAX_QUESTION = 160
 /** Matches the 60-char cap the thread title UI enforces. */
 const MAX_GOAL_TITLE = 60
@@ -95,12 +102,14 @@ function parseRecommendation(raw: unknown, ctx: CoachContext): CoachRecommendati
   const preparationId = knownId(briefRaw.preparationId, [ctx.preparation?.id])
   const stageId = knownId(briefRaw.stageId, [ctx.preparation?.nextStage?.id])
 
+  const focusArea = isCoachFocusArea(briefRaw.focusArea) ? briefRaw.focusArea : null
+
   return {
     module,
-    label: text(value.label, MAX_LABEL) ?? defaultLabel(module),
+    label: usableLabel(text(value.label, MAX_LABEL), module, focusArea),
     reason,
     brief: {
-      focusArea: isCoachFocusArea(briefRaw.focusArea) ? briefRaw.focusArea : null,
+      focusArea,
       scenario: text(briefRaw.scenario, MAX_SCENARIO),
       durationSec: clampDuration(briefRaw.durationSec),
       preparationId,
@@ -110,10 +119,13 @@ function parseRecommendation(raw: unknown, ctx: CoachContext): CoachRecommendati
   }
 }
 
-function defaultLabel(module: CoachModule): string {
+function defaultLabel(module: CoachModule, focusArea: CoachFocusArea | null): string {
   switch (module) {
     case 'elevate':
-      return 'Start practice'
+      if (focusArea === 'snapshot') return 'Start Communication Snapshot'
+      return focusArea
+        ? `Practise ${focusArea.replace(/_/g, ' ')} in Elevate`
+        : 'Practise in Elevate'
     case 'replay':
       return 'Analyse recording'
     case 'prepare':
@@ -121,6 +133,24 @@ function defaultLabel(module: CoachModule): string {
     case 'progress':
       return 'View progress'
   }
+}
+
+/**
+ * Elevate sessions run until the user ends them, so a duration in the button is a
+ * promise the product does not keep. Snapshot is the one bounded format.
+ */
+const DURATION_CLAIM = /\b\d+\s*[-\u2013]?\s*(?:min|mins|minute|minutes|sec|second|seconds)\b/i
+
+function usableLabel(
+  label: string | null,
+  module: CoachModule,
+  focusArea: CoachFocusArea | null,
+): string {
+  if (!label) return defaultLabel(module, focusArea)
+  if (focusArea !== 'snapshot' && DURATION_CLAIM.test(label)) {
+    return defaultLabel(module, focusArea)
+  }
+  return label
 }
 
 function parseClarification(raw: unknown): CoachClarification | null {
@@ -137,7 +167,11 @@ function parseClarification(raw: unknown): CoachClarification | null {
   return { question, options }
 }
 
-export function parseCoachResponse(raw: string, ctx: CoachContext): CoachResponse | null {
+export function parseCoachResponse(
+  raw: string,
+  ctx: CoachContext,
+  message = '',
+): CoachResponse | null {
   const parsed = extractJsonObject(raw)
   if (!parsed) return null
 
@@ -148,8 +182,24 @@ export function parseCoachResponse(raw: string, ctx: CoachContext): CoachRespons
   // The contract says ask or act, never both. Asking wins: acting on an
   // unanswered question is the failure mode users notice.
   const recommend = clarify ? null : parseRecommendation(parsed.recommend, ctx)
+  const mode = resolvePulseEvidenceMode({
+    message,
+    llmMode: parseEvidenceMode(parsed.evidence),
+    hasClarification: Boolean(clarify),
+  })
+  const evidence = mode
+    ? buildPulseEvidence(
+        ctx.pulse.skills,
+        {
+          windowDays: ctx.pulse.windowDays,
+          measurementCount: ctx.pulse.measurementCount,
+        },
+        mode,
+        recommend?.brief.focusArea,
+      )
+    : null
 
-  return { reply, goalTitle: text(parsed.goalTitle, MAX_GOAL_TITLE), clarify, recommend }
+  return { reply, goalTitle: text(parsed.goalTitle, MAX_GOAL_TITLE), clarify, recommend, evidence }
 }
 
 export interface GenerateResponseInput {
@@ -184,7 +234,7 @@ export async function generateCoachResponse(
 
   try {
     const raw = await invokeCoachModel(prompt, { modelId: COACH_FAST_MODEL_ID })
-    const response = parseCoachResponse(raw, context)
+    const response = parseCoachResponse(raw, context, input.message)
     if (!response) markCoachLlmFailure()
     return response ? { response, context } : null
   } catch (error) {

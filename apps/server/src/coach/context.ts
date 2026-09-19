@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma'
+import { PULSE_EVIDENCE_WINDOW_DAYS } from './pulseEvidence'
 
 /**
  * The cross-module picture Coach reasons over. Deliberately small and already
@@ -6,10 +7,17 @@ import { prisma } from '../lib/prisma'
  * and full metric blobs stay out of it.
  */
 export interface CoachContext {
-  pulse: PulseSkill[]
+  pulse: CoachPulseSnapshot
   preparation: PreparationContext | null
   lastElevate: ElevateContext | null
   lastReplay: ReplayContext | null
+}
+
+export interface CoachPulseSnapshot {
+  windowDays: number
+  /** Distinct Pulse-tracked recordings, not Elevate/Replay session count. */
+  measurementCount: number
+  skills: PulseSkill[]
 }
 
 export interface PulseSkill {
@@ -17,7 +25,7 @@ export interface PulseSkill {
   score: number
   /** Change against the preceding measurement, null when there is only one. */
   delta: number | null
-  sessions: number
+  measurements: number
 }
 
 export interface PreparationContext {
@@ -48,8 +56,6 @@ export interface ReplayContext {
   longestMonologueSec: number | null
 }
 
-/** Pulse rows older than this are not useful for "what are you working on now". */
-const PULSE_WINDOW_DAYS = 90
 const PULSE_MAX_ROWS = 400
 
 function round(value: number | null | undefined, digits = 1): number | null {
@@ -58,30 +64,38 @@ function round(value: number | null | undefined, digits = 1): number | null {
   return Math.round(value * factor) / factor
 }
 
-async function loadPulse(userId: string): Promise<PulseSkill[]> {
-  const since = new Date(Date.now() - PULSE_WINDOW_DAYS * 24 * 60 * 60 * 1000)
+async function loadPulse(userId: string): Promise<CoachPulseSnapshot> {
+  const windowDays = PULSE_EVIDENCE_WINDOW_DAYS
+  const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000)
   const rows = await prisma.progressPulse.findMany({
-    where: { userId, recordedAt: { gte: since } },
+    where: { userId, recordedAt: { gte: since }, sessionId: { not: null } },
     orderBy: { recordedAt: 'desc' },
-    select: { skill: true, score: true },
+    select: { skill: true, score: true, sessionId: true },
     take: PULSE_MAX_ROWS,
   })
 
+  const tracked = new Set<string>()
   const bySkill = new Map<string, number[]>()
   for (const row of rows) {
+    if (!row.sessionId) continue
+    tracked.add(row.sessionId)
     const scores = bySkill.get(row.skill)
     if (scores) scores.push(row.score)
     else bySkill.set(row.skill, [row.score])
   }
 
-  return [...bySkill.entries()]
-    .map(([skill, scores]) => ({
-      skill,
-      score: round(scores[0])!,
-      delta: scores.length > 1 ? round(scores[0] - scores[1]) : null,
-      sessions: scores.length,
-    }))
-    .sort((a, b) => a.score - b.score)
+  return {
+    windowDays,
+    measurementCount: tracked.size,
+    skills: [...bySkill.entries()]
+      .map(([skill, scores]) => ({
+        skill,
+        score: round(scores[0])!,
+        delta: scores.length > 1 ? round(scores[0] - scores[1]) : null,
+        measurements: scores.length,
+      }))
+      .sort((a, b) => a.score - b.score),
+  }
 }
 
 async function loadPreparation(
@@ -167,7 +181,13 @@ export async function buildCoachContext(
   preparationId?: string | null,
 ): Promise<CoachContext> {
   const [pulse, preparation, lastElevate, lastReplay] = await Promise.all([
-    loadPulse(userId).catch(() => [] as PulseSkill[]),
+    loadPulse(userId).catch(
+      (): CoachPulseSnapshot => ({
+        windowDays: PULSE_EVIDENCE_WINDOW_DAYS,
+        measurementCount: 0,
+        skills: [],
+      }),
+    ),
     loadPreparation(userId, preparationId).catch(() => null),
     loadLastElevate(userId).catch(() => null),
     loadLastReplay(userId).catch(() => null),

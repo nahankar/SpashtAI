@@ -40,6 +40,7 @@ import type { ReplayResultData } from '@/hooks/useReplaySession'
 import { inferFocusArea, EXERCISE_PREVIEWS, getFocusAreaLabel } from '@/lib/focus-areas'
 import { generateSessionPdf, type SessionReport } from '@/lib/generate-session-pdf'
 import { buildReportExtras } from '@/lib/report-extras'
+import { markCoachHomeResultSeen } from '@/lib/coach-api'
 import { FileText } from 'lucide-react'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
@@ -1033,9 +1034,11 @@ export function ReplayResults() {
   const coachBackParams = new URLSearchParams()
   const coachThreadId = searchParams.get('thread')
   if (coachThreadId) coachBackParams.set('thread', coachThreadId)
-  if (id) coachBackParams.set('replayResult', id)
+  if (id && coachThreadId) coachBackParams.set('replayResult', id)
   const backTo = cameFromCoach
-    ? `/coach?${coachBackParams.toString()}`
+    ? coachBackParams.size > 0
+      ? `/coach?${coachBackParams.toString()}`
+      : '/coach'
     : cameFromHistory
       ? '/history?tab=replay'
       : '/replay'
@@ -1047,6 +1050,7 @@ export function ReplayResults() {
   const [data, setData] = useState<ReplayResultData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const seenResultRef = useRef<string | null>(null)
 
   const loadResults = useCallback(() => {
     if (!id) return
@@ -1064,6 +1068,14 @@ export function ReplayResults() {
   }, [id])
 
   useEffect(() => { loadResults() }, [loadResults])
+
+  useEffect(() => {
+    if (!data || !id || seenResultRef.current === id) return
+    seenResultRef.current = id
+    void markCoachHomeResultSeen('replay', id).catch((error) =>
+      console.warn('mark Coach Home Replay result seen', error),
+    )
+  }, [data, id])
 
   const { dialogOpen, setDialogOpen, reanalyzing, reanalyzeError, startReanalyze } =
     useReanalyze(id, loadResults)

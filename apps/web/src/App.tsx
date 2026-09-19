@@ -101,9 +101,13 @@ function AppBreadcrumbs() {
     const coachParams = new URLSearchParams()
     const threadId = sourceParams.get('thread')
     if (threadId) coachParams.set('thread', threadId)
-    if (isReplayResults) {
+    if (isReplayResults && threadId) {
       const replayId = path.split('/').filter(Boolean)[1]
       if (replayId) coachParams.set('replayResult', replayId)
+    }
+    if (isElevateResults && threadId) {
+      const elevateId = sourceParams.get('session')
+      if (elevateId) coachParams.set('elevateResult', elevateId)
     }
     const coachPath = coachParams.size > 0 ? `/coach?${coachParams.toString()}` : '/coach'
     return (

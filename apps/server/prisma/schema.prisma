@@ -141,6 +141,7 @@ model User {
   progressPulse  ProgressPulse[]
   feedback         UserFeedback[]
   coachThreads     CoachThread[]
+  coachHomeResultReceipts CoachHomeResultReceipt[]
 
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -375,6 +376,7 @@ model Session {
   preparationPractice PreparationPractice?
 
   @@index([userId, startedAt])
+  @@index([userId, module, endedAt])
 }
 
 // Per-turn record powering the "conversation as replay" UX (per-message audio
@@ -515,6 +517,7 @@ model ReplaySession {
   updatedAt DateTime @updatedAt
 
   @@index([userId, createdAt])
+  @@index([userId, status, createdAt])
 }
 
 model ReplayUpload {
@@ -810,6 +813,7 @@ model CoachThread {
   status         String   @default("active") // active | archived
   preparationId  String?
   preparation    Preparation? @relation(fields: [preparationId], references: [id], onDelete: SetNull)
+  focusArea       String?
   turns          CoachTurn[]
   actions        CoachAction[]
   createdAt      DateTime @default(now())
@@ -817,7 +821,9 @@ model CoachThread {
 
   @@index([userId, updatedAt])
   @@index([userId, status])
+  @@index([userId, status, updatedAt])
   @@index([preparationId])
+  @@index([userId, focusArea])
 }
 
 model CoachTurn {
@@ -844,4 +850,16 @@ model CoachAction {
 
   @@index([threadId, createdAt])
   @@index([targetId])
+}
+
+model CoachHomeResultReceipt {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  module    String   // elevate | replay
+  targetId  String
+  seenAt    DateTime @default(now())
+
+  @@unique([userId, module, targetId])
+  @@index([userId, seenAt])
 }

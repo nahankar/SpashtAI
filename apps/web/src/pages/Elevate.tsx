@@ -51,7 +51,7 @@ import {
 import type { SessionTurnRecord } from '@/hooks/useSessionMetrics'
 import { getPreparation, linkPreparationPractice } from '@/lib/prepare-api'
 import { COACH_BUBBLE, USER_BUBBLE } from '@/lib/conversation'
-import { recordCoachAction } from '@/lib/coach-api'
+import { markCoachHomeResultSeen, recordCoachAction } from '@/lib/coach-api'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 const IDLE_TIMEOUT_MS = 15 * 60 * 1000
@@ -162,14 +162,22 @@ export function Elevate() {
   const [prepareLaunchError, setPrepareLaunchError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!launchedFromCoach || !originCoachThreadId || coachLaunchRecorded.current) return
+    const targetId = viewSessionId || sessionId
+    if (
+      !launchedFromCoach ||
+      !originCoachThreadId ||
+      !targetId ||
+      coachLaunchRecorded.current
+    ) {
+      return
+    }
     coachLaunchRecorded.current = true
     void recordCoachAction(originCoachThreadId, {
       module: 'elevate',
       action: 'launch',
-      targetId: viewSessionId,
+      targetId,
     }).catch(() => undefined)
-  }, [launchedFromCoach, originCoachThreadId, viewSessionId])
+  }, [launchedFromCoach, originCoachThreadId, sessionId, viewSessionId])
 
   useEffect(() => {
     if (!inboundPreparationId) {
@@ -873,12 +881,16 @@ export function Elevate() {
   // Check if URL parameter session is completed (for "View Details & Metrics" button)
   useEffect(() => {
     if (!viewSessionId) return
+    let cancelled = false
+    const controller = new AbortController()
     setIsCompletedSessionView(false)
     ;(async () => {
       try {
         const response = await fetch(`${API_BASE_URL}/sessions/${viewSessionId}`, {
           headers: getAuthHeaders(),
+          signal: controller.signal,
         })
+        if (cancelled) return
         if (!response.ok) {
           // Stale/foreign session pointer (deleted, or not owned): clear it so
           // we don't keep trying to resume a session we can't access.
@@ -891,6 +903,7 @@ export function Elevate() {
           return
         }
         const data = await response.json()
+        if (cancelled) return
         const session = data.session || data
         setViewSessionName(session.sessionName || null)
         setViewSessionPulse(session.progressPulseStatus || null)
@@ -906,9 +919,13 @@ export function Elevate() {
 
         if (session.endedAt) {
           console.log('📊 Viewing completed session:', viewSessionId)
+          void markCoachHomeResultSeen('elevate', viewSessionId).catch((error) =>
+            console.warn('mark Coach Home Elevate result seen', error),
+          )
           setIsCompletedSessionView(true)
           setSessionId(viewSessionId)
           await loadConversation(viewSessionId)
+          if (cancelled) return
         } else {
           // In-progress session — resume directly by connecting to LiveKit
           console.log('📖 Resuming in-progress session:', viewSessionId)
@@ -927,9 +944,10 @@ export function Elevate() {
           if (session.sessionName) u.searchParams.set('sessionName', session.sessionName)
           if (inboundBoothDemo || session.focusArea === 'snapshot') u.searchParams.set('boothDemo', '1')
 
-          const res = await fetch(u.toString())
+          const res = await fetch(u.toString(), { signal: controller.signal })
           if (!res.ok) throw new Error('Failed to get token')
           const json = await res.json()
+          if (cancelled) return
 
           setToken(json.token)
           setUrl(json.url)
@@ -940,9 +958,14 @@ export function Elevate() {
           localStorage.setItem('spashtai_session_timestamp', Date.now().toString())
         }
       } catch (error) {
+        if (cancelled || (error instanceof DOMException && error.name === 'AbortError')) return
         console.error('Error checking/resuming session:', error)
       }
     })()
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
   }, [
     viewSessionId,
     identity,

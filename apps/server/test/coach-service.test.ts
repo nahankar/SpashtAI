@@ -4,7 +4,11 @@ import { extractJsonObject } from '../src/coach/bedrock'
 import { parseCoachResponse } from '../src/coach/service'
 
 const context: CoachContext = {
-  pulse: [{ skill: 'pacing', score: 5.4, delta: -0.4, sessions: 2 }],
+  pulse: {
+    windowDays: 30,
+    measurementCount: 2,
+    skills: [{ skill: 'pacing', score: 5.4, delta: -0.4, measurements: 2 }],
+  },
   preparation: {
     id: 'prep-known',
     title: 'Google interview',
@@ -97,5 +101,85 @@ describe('Coach model response validation', () => {
 
     expect(response?.clarify?.question).toBe('Who is the audience?')
     expect(response?.recommend).toBeNull()
+    expect(response?.evidence).toBeNull()
+  })
+
+  it('attaches a server-owned Pulse scorecard for an explicit scores question', () => {
+    const response = parseCoachResponse(
+      JSON.stringify({
+        reply: 'Here is your current Pulse.',
+        goalTitle: null,
+        clarify: null,
+        recommend: {
+          module: 'elevate',
+          label: 'Practise pacing in Elevate',
+          reason: 'Pacing is the most useful focus.',
+          brief: { focusArea: 'pacing' },
+        },
+        evidence: 'scores',
+      }),
+      {
+        ...context,
+        pulse: {
+          windowDays: 30,
+          measurementCount: 4,
+          skills: [
+            { skill: 'clarity', score: 8.1, delta: 0.4, measurements: 3 },
+            { skill: 'pacing', score: 5.4, delta: -0.4, measurements: 2 },
+          ],
+        },
+      },
+      'What are my scores?',
+    )
+
+    expect(response?.evidence).toMatchObject({
+      mode: 'scores',
+      measurementCount: 4,
+      windowDays: 30,
+      highlight: { kind: 'strongest', skill: 'clarity' },
+      opportunity: { skill: 'pacing' },
+    })
+    expect(response?.evidence?.skills.map((skill) => skill.skill)).toEqual([
+      'clarity',
+      'pacing',
+    ])
+  })
+
+  it('drops a duration promise from a practice label, since Elevate is not time-boxed', () => {
+    const response = parseCoachResponse(
+      JSON.stringify({
+        reply: 'Pacing is the most useful focus.',
+        goalTitle: null,
+        clarify: null,
+        recommend: {
+          module: 'elevate',
+          label: 'Start 3-minute pacing drill',
+          reason: 'Pacing is your weakest tracked skill.',
+          brief: { focusArea: 'pacing' },
+        },
+      }),
+      context,
+    )
+
+    expect(response?.recommend?.label).toBe('Practise pacing in Elevate')
+  })
+
+  it('keeps a duration on the snapshot, which really is three fixed questions', () => {
+    const response = parseCoachResponse(
+      JSON.stringify({
+        reply: 'Let’s measure the broader picture first.',
+        goalTitle: null,
+        clarify: null,
+        recommend: {
+          module: 'elevate',
+          label: 'Start 3-minute snapshot',
+          reason: 'A baseline covers every skill at once.',
+          brief: { focusArea: 'snapshot', durationSec: 180 },
+        },
+      }),
+      context,
+    )
+
+    expect(response?.recommend?.label).toBe('Start 3-minute snapshot')
   })
 })

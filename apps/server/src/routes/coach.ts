@@ -4,6 +4,8 @@ import { prisma } from '../lib/prisma'
 import { generateCoachResponse, interpretCoachResult } from '../coach/service'
 import type { CoachHistoryTurn, CompletedSessionSummary } from '../coach/prompt'
 import { mergeCoachTurnPayload } from '../coach/turn-sync'
+import { loadCoachHome, markCoachHomeResultSeen } from '../coach/home'
+import { isCoachFocusArea } from '../coach/focusAreas'
 
 const router = Router()
 const MAX_TURNS = 40
@@ -19,6 +21,7 @@ const TURN_KINDS = new Set([
   'clarify',
   'recommend',
   'result-insight',
+  'pulse-evidence',
 ])
 
 /** How much of the thread Coach sees. Enough to resolve "pitch for vc" against an
@@ -31,11 +34,41 @@ function userId(req: Request): string {
   return (req as Request & { user?: { userId: string } }).user!.userId
 }
 
+router.get('/home', async (req: Request, res: Response) => {
+  try {
+    res.json(await loadCoachHome(userId(req)))
+  } catch (error) {
+    console.error('load coach home', error)
+    res.status(500).json({ error: 'Failed to load Coach Home' })
+  }
+})
+
+router.post('/home/results/:module/:id/seen', async (req: Request, res: Response) => {
+  try {
+    if (req.params.module !== 'elevate' && req.params.module !== 'replay') {
+      return res.status(400).json({ error: 'Unknown result module' })
+    }
+    const targetId = req.params.id.trim().slice(0, 80)
+    if (!targetId) return res.status(400).json({ error: 'Result id is required' })
+    const seen = await markCoachHomeResultSeen(
+      userId(req),
+      req.params.module,
+      targetId,
+    )
+    if (!seen) return res.status(404).json({ error: 'Result not found' })
+    res.json({ seen: true })
+  } catch (error) {
+    console.error('mark coach home result seen', error)
+    res.status(500).json({ error: 'Failed to update Coach Home' })
+  }
+})
+
 function serializeThread(thread: {
   id: string
   title: string | null
   status: string
   preparationId: string | null
+  focusArea: string | null
   createdAt: Date
   updatedAt: Date
 }) {
@@ -44,6 +77,7 @@ function serializeThread(thread: {
     title: thread.title,
     status: thread.status,
     preparationId: thread.preparationId,
+    focusArea: thread.focusArea,
     createdAt: thread.createdAt.toISOString(),
     updatedAt: thread.updatedAt.toISOString(),
   }
@@ -95,10 +129,12 @@ router.post('/threads', async (req: Request, res: Response) => {
   try {
     const title =
       typeof req.body?.title === 'string' ? req.body.title.trim().slice(0, 80) : ''
+    const focusArea = isCoachFocusArea(req.body?.focusArea) ? req.body.focusArea : null
     const thread = await prisma.coachThread.create({
       data: {
         userId: userId(req),
         title: title || null,
+        focusArea,
         status: 'active',
       },
     })
@@ -145,7 +181,12 @@ router.patch('/threads/:id', async (req: Request, res: Response) => {
   try {
     const thread = await ownedThread(req, res)
     if (!thread) return
-    const data: { title?: string | null; status?: string; preparationId?: string | null } = {}
+    const data: {
+      title?: string | null
+      status?: string
+      preparationId?: string | null
+      focusArea?: string | null
+    } = {}
     if (typeof req.body?.title === 'string') {
       const title = req.body.title.trim().slice(0, 80)
       data.title = title || null
@@ -165,6 +206,11 @@ router.patch('/threads/:id', async (req: Request, res: Response) => {
         return res.status(400).json({ error: 'Preparation not found' })
       }
       data.preparationId = preparation.id
+    }
+    if (req.body?.focusArea === null) {
+      data.focusArea = null
+    } else if (isCoachFocusArea(req.body?.focusArea)) {
+      data.focusArea = req.body.focusArea
     }
     if (Object.keys(data).length === 0) {
       return res.status(400).json({ error: 'No valid fields to update' })

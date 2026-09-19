@@ -438,7 +438,12 @@ router.post('/sessions/:id/process', trackFeatureUsage('replay', 'analyze'), asy
 
     // Clean up previous result before re-processing
     if (session.status === 'failed' || session.status === 'completed') {
-      await prisma.replayResult.deleteMany({ where: { replaySessionId: id } })
+      await Promise.all([
+        prisma.replayResult.deleteMany({ where: { replaySessionId: id } }),
+        prisma.coachHomeResultReceipt.deleteMany({
+          where: { userId: session.userId, module: 'replay', targetId: id },
+        }),
+      ])
     }
 
     // Reset Progress Pulse for this session so user gets prompted again with new scores
@@ -449,7 +454,11 @@ router.post('/sessions/:id/process', trackFeatureUsage('replay', 'analyze'), asy
     // Mark as processing (clear any previous error, reset pulse status)
     await prisma.replaySession.update({
       where: { id },
-      data: { status: 'transcribing', errorMessage: null, progressPulseStatus: null },
+      data: {
+        status: 'transcribing',
+        errorMessage: null,
+        progressPulseStatus: null,
+      },
     })
 
     // Fire-and-forget processing — respond immediately

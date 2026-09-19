@@ -46,6 +46,7 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import { getAuthHeaders } from '@/lib/api-client'
+import { recordCoachAction } from '@/lib/coach-api'
 import { SessionFilters, type SortField, type SortDir } from '@/components/SessionFilters'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
@@ -470,11 +471,19 @@ export function Replay() {
   }) => {
     const coachContext = searchParams.get('context')?.trim()
     const coachFocus = searchParams.get('focus')?.trim()
-    await createSession({
+    const createdSessionId = await createSession({
       ...data,
       meetingGoal: coachContext || undefined,
       focusAreas: coachFocus ? [coachFocus] : undefined,
     })
+    const coachThreadId = searchParams.get('thread')
+    if (searchParams.get('coach') === '1' && coachThreadId) {
+      void recordCoachAction(coachThreadId, {
+        module: 'replay',
+        action: 'launch',
+        targetId: createdSessionId,
+      }).catch(() => undefined)
+    }
     setStep('upload')
   }
 

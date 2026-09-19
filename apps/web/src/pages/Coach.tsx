@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   BarChart3,
   BriefcaseBusiness,
@@ -24,6 +24,8 @@ import { CoachPrepareCard } from '@/components/coach/CoachPrepareCard'
 import { CoachPulseCard } from '@/components/coach/CoachPulseCard'
 import { CoachElevateCard } from '@/components/coach/CoachElevateCard'
 import { CoachReplayCard } from '@/components/coach/CoachReplayCard'
+import { CoachHome } from '@/components/coach/CoachHome'
+import { CoachPulseEvidenceCard } from '@/components/coach/CoachPulseEvidenceCard'
 import {
   coachElevatePath,
   createCoachThread,
@@ -31,6 +33,7 @@ import {
   recordCoachAction,
   displayCoachTitle,
   getCoachThread,
+  markCoachHomeResultSeen,
   listCoachThreads,
   patchCoachThread,
   saveCoachTurns,
@@ -41,10 +44,12 @@ import {
   type CoachTurnRecord,
   type CoachResponse,
   type CoachHistoryTurn,
+  type CoachHomeRecommendation,
   type CoachBrief,
   type CoachModule,
+  type CoachPulseEvidence,
 } from '@/lib/coach-api'
-import { detectCoachIntent, proposeCoachGoalTitle, type CoachIntent } from '@/lib/coach-intent'
+import { detectCoachIntent, type CoachIntent } from '@/lib/coach-intent'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -87,13 +92,6 @@ const INTENT_CONFIRM_ACTION: Record<CoachIntent, string> = {
   elevate: 'Start practice',
   replay: 'Analyse recording',
   prepare: 'Open Prepare',
-}
-
-const INTENT_GOAL_TITLE: Record<CoachIntent, string> = {
-  progress: 'Track Communication Progress',
-  elevate: 'Elevate Practice',
-  replay: 'Replay Analysis',
-  prepare: 'Interview Preparation',
 }
 
 type ThreadTurn =
@@ -147,7 +145,15 @@ type ThreadTurn =
       label: string
       reason: string
       brief: CoachBrief
+      evidence?: CoachPulseEvidence | null
       superseded?: boolean
+      createdAt: string
+    }
+  | {
+      id: string
+      role: 'coach'
+      kind: 'pulse-evidence'
+      evidence: CoachPulseEvidence
       createdAt: string
     }
   | {
@@ -272,7 +278,19 @@ function fromRecord(record: CoachTurnRecord): ThreadTurn | null {
       label: typeof payload.label === 'string' ? payload.label : 'Continue',
       reason: typeof payload.reason === 'string' ? payload.reason : '',
       brief: toBrief(payload.brief),
+      evidence: toPulseEvidence(payload.evidence),
       superseded: payload.superseded === true,
+      createdAt: record.createdAt,
+    }
+  }
+  if (record.kind === 'pulse-evidence') {
+    const evidence = toPulseEvidence(payload.evidence ?? payload)
+    if (!evidence) return null
+    return {
+      id: record.id,
+      role: 'coach',
+      kind: 'pulse-evidence',
+      evidence,
       createdAt: record.createdAt,
     }
   }
@@ -319,6 +337,65 @@ function recommendationPath(
 
 function isCoachModule(value: unknown): value is CoachModule {
   return value === 'elevate' || value === 'replay' || value === 'prepare' || value === 'progress'
+}
+
+function asPulseTrend(
+  value: unknown,
+): CoachPulseEvidence['skills'][number]['trend'] | null {
+  return value === 'up' || value === 'down' || value === 'steady' || value === 'latest'
+    ? value
+    : null
+}
+
+function toPulseEvidence(value: unknown): CoachPulseEvidence | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const raw = value as Record<string, unknown>
+  if (raw.mode !== 'scores' && raw.mode !== 'relevant') return null
+  if (typeof raw.windowDays !== 'number' || typeof raw.measurementCount !== 'number') return null
+  if (!Array.isArray(raw.skills)) return null
+  const skills = raw.skills.flatMap((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return []
+    const skill = item as Record<string, unknown>
+    if (typeof skill.skill !== 'string' || typeof skill.score !== 'number') return []
+    const trend = asPulseTrend(skill.trend)
+    if (!trend) return []
+    return [
+      {
+        skill: skill.skill,
+        score: skill.score,
+        delta: typeof skill.delta === 'number' ? skill.delta : null,
+        measurements: typeof skill.measurements === 'number' ? skill.measurements : 0,
+        trend,
+      },
+    ]
+  })
+  if (skills.length === 0) return null
+  const highlightRaw =
+    raw.highlight && typeof raw.highlight === 'object' && !Array.isArray(raw.highlight)
+      ? (raw.highlight as Record<string, unknown>)
+      : null
+  if (
+    !highlightRaw ||
+    (highlightRaw.kind !== 'strongest' && highlightRaw.kind !== 'highest') ||
+    typeof highlightRaw.skill !== 'string'
+  ) {
+    return null
+  }
+  const opportunityRaw =
+    raw.opportunity && typeof raw.opportunity === 'object' && !Array.isArray(raw.opportunity)
+      ? (raw.opportunity as Record<string, unknown>)
+      : null
+  return {
+    mode: raw.mode,
+    windowDays: raw.windowDays,
+    measurementCount: raw.measurementCount,
+    skills,
+    highlight: { kind: highlightRaw.kind, skill: highlightRaw.skill },
+    opportunity:
+      opportunityRaw && typeof opportunityRaw.skill === 'string'
+        ? { skill: opportunityRaw.skill }
+        : null,
+  }
 }
 
 function toBrief(value: unknown): CoachBrief {
@@ -429,8 +506,19 @@ function toRecord(turn: ThreadTurn): CoachTurnRecord {
         label: turn.label,
         reason: turn.reason,
         brief: turn.brief as unknown as Record<string, unknown>,
+        evidence: turn.evidence ?? null,
         superseded: turn.superseded === true,
       },
+      createdAt: turn.createdAt,
+    }
+  }
+  if (turn.kind === 'pulse-evidence') {
+    return {
+      id: turn.id,
+      role: 'coach',
+      kind: 'pulse-evidence',
+      text: null,
+      payload: { evidence: turn.evidence as unknown as Record<string, unknown> },
       createdAt: turn.createdAt,
     }
   }
@@ -470,6 +558,12 @@ function mergeSavedTurns(local: ThreadTurn[], saved: CoachTurnRecord[]): ThreadT
 
 export function Coach() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
+  const requestedThreadId = searchParams.get('thread')
+  const elevateResultParam = searchParams.get('elevateResult')
+  const replayResultParam = searchParams.get('replayResult')
+  const isHome =
+    !requestedThreadId && !elevateResultParam && !replayResultParam
   const { user } = useAuth()
   const confirm = useConfirm()
   const { isAccessible } = useFeatureFlags()
@@ -494,9 +588,12 @@ export function Coach() {
   const threadEndRef = useRef<HTMLDivElement>(null)
   const resultTasksRef = useRef(new Map<string, Promise<ThreadTurn[]>>())
   const resultAttemptsRef = useRef(new Map<string, number>())
+  // Set while Home authors a new thread so the URL-driven reload cannot replace
+  // the in-memory first exchange with an empty server snapshot.
+  const locallyAuthoredThreadIdRef = useRef<string | null>(null)
 
   useEffect(() => {
-    if (!isAccessible('prepare')) {
+    if (isHome || !isAccessible('prepare')) {
       setJourneyHint(null)
       setNextIntent('progress')
       return
@@ -531,32 +628,64 @@ export function Coach() {
     return () => {
       cancelled = true
     }
-  }, [isAccessible, thread?.preparationId])
+  }, [isAccessible, isHome, thread?.preparationId])
 
   useEffect(() => {
     let cancelled = false
+    if (
+      requestedThreadId &&
+      locallyAuthoredThreadIdRef.current &&
+      requestedThreadId !== locallyAuthoredThreadIdRef.current
+    ) {
+      locallyAuthoredThreadIdRef.current = null
+    }
     async function load() {
+      if (requestedThreadId && locallyAuthoredThreadIdRef.current === requestedThreadId) {
+        setLoadingThread(false)
+        try {
+          const { threads: listed } = await listCoachThreads()
+          if (!cancelled) setThreads(listed)
+        } catch {
+          // The transcript is already on screen; a list refresh can wait.
+        }
+        return
+      }
       setLoadingThread(true)
       try {
         const { threads: listed } = await listCoachThreads()
         if (cancelled) return
         setThreads(listed)
-        const requested = searchParams.get('thread')
-        let selected =
-          listed.find((item) => item.id === requested) ||
-          listed.find((item) => item.status === 'active') ||
-          listed[0]
-        if (!selected) {
-          const listedAgain = await listCoachThreads()
-          if (listedAgain.threads.length > 0) {
-            setThreads(listedAgain.threads)
-            selected = listedAgain.threads[0]
-          }
+        const requested = requestedThreadId
+        const returningWithResult = Boolean(elevateResultParam) || Boolean(replayResultParam)
+        if (!requested && !returningWithResult) {
+          setThread(null)
+          setTurns([])
+          return
+        }
+        if (!requested && returningWithResult) {
+          setThread(null)
+          setTurns([])
+          const nextParams = new URLSearchParams(searchParams)
+          nextParams.delete('elevateResult')
+          nextParams.delete('replayResult')
+          setSearchParams(nextParams, { replace: true })
+          return
+        }
+        let selected = requested
+          ? listed.find((item) => item.id === requested)
+          : undefined
+        if (requested && !selected) {
+          setThread(null)
+          setTurns([])
+          const nextParams = new URLSearchParams(searchParams)
+          nextParams.delete('thread')
+          setSearchParams(nextParams, { replace: true })
+          return
         }
         if (!selected) {
           const created = await createCoachThread()
           selected = created.thread
-          setThreads([created.thread])
+          setThreads([created.thread, ...listed])
           setThread(created.thread)
           setTurns([])
         } else {
@@ -565,32 +694,10 @@ export function Coach() {
           const loadedTurns = detail.turns
             .map(fromRecord)
             .filter((turn): turn is ThreadTurn => Boolean(turn))
-          if (
-            !detail.thread.title &&
-            !loadedTurns.some(
-              (turn) => turn.role === 'coach' && turn.kind === 'goal-propose',
-            )
-          ) {
-            const firstMessage = loadedTurns.find((turn) => turn.role === 'user')
-            const suggestion =
-              firstMessage?.role === 'user'
-                ? proposeCoachGoalTitle(firstMessage.text)
-                : null
-            if (suggestion) {
-              loadedTurns.push({
-                id: newTurnId(),
-                role: 'coach',
-                kind: 'goal-propose',
-                suggestedTitle: suggestion,
-                createdAt: nowIso(),
-              })
-              await saveCoachTurns(selected.id, loadedTurns.slice(-40).map(toRecord))
-            }
-          }
           setThread(detail.thread)
           setTurns(loadedTurns.slice(-40))
         }
-        if (searchParams.get('thread') !== selected.id) {
+        if (!requested) {
           const nextParams = new URLSearchParams(searchParams)
           nextParams.set('thread', selected.id)
           setSearchParams(nextParams, { replace: true })
@@ -608,12 +715,13 @@ export function Coach() {
     return () => {
       cancelled = true
     }
-    // thread query is the ownership key; other params (elevateResult) must not reload.
+    // Search keys determine whether Coach is Home or an explicit conversation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams.get('thread')])
-
-  const elevateResultParam = searchParams.get('elevateResult')
-  const replayResultParam = searchParams.get('replayResult')
+  }, [
+    requestedThreadId,
+    elevateResultParam,
+    replayResultParam,
+  ])
 
   useEffect(() => {
     const elevateResult = elevateResultParam
@@ -746,6 +854,9 @@ export function Coach() {
         resultTasksRef.current.delete(taskKey)
         resultAttemptsRef.current.delete(taskKey)
         setTurns((current) => mergeSavedTurns(current, nextTurns.map(toRecord)))
+        void markCoachHomeResultSeen(resultModule, sessionId).catch((error) =>
+          console.warn('mark attached Coach result seen', error),
+        )
         const nextParams = new URLSearchParams(searchParams)
         nextParams.delete(resultParam)
         setSearchParams(nextParams, { replace: true })
@@ -840,36 +951,6 @@ export function Coach() {
     threadEndRef.current?.scrollIntoView({ block: 'end' })
   }, [turns])
 
-  function chooseIntent(intent: CoachIntent) {
-    if (!thread) return
-    const label = INTENTS.find((item) => item.id === intent)?.label ?? intent
-    const needsGoalProposal =
-      !namedGoal &&
-      !turns.some(
-        (turn) =>
-          turn.role === 'coach' &&
-          turn.kind === 'goal-propose' &&
-          !turn.confirmed,
-      )
-    const next: ThreadTurn[] = [
-      ...turns,
-      { id: newTurnId(), role: 'user', text: label, createdAt: nowIso() },
-      ...(needsGoalProposal
-        ? [
-            {
-              id: newTurnId(),
-              role: 'coach' as const,
-              kind: 'goal-propose' as const,
-              suggestedTitle: INTENT_GOAL_TITLE[intent],
-              createdAt: nowIso(),
-            },
-          ]
-        : []),
-      { id: newTurnId(), role: 'coach', kind: 'intent', intent, createdAt: nowIso() },
-    ]
-    void persistTurns(thread.id, next.slice(-40))
-  }
-
   function confirmIntent(turnId: string, intent: CoachIntent) {
     if (!thread) return
     const target = turns.find((turn) => turn.id === turnId)
@@ -890,7 +971,10 @@ export function Coach() {
   }
 
   /** Rule-based routing. Used when the model is unavailable or returns nothing usable. */
-  function fallbackTurns(request: string): ThreadTurn[] {
+  function fallbackTurns(
+    request: string,
+    currentThread: CoachThreadSummary | null = thread,
+  ): ThreadTurn[] {
     const detected = isNextActionRequest(request) ? nextIntent : detectCoachIntent(request)
     const module = availableIntents.some((item) => item.id === detected) ? detected : null
     if (!module) {
@@ -913,13 +997,13 @@ export function Coach() {
       elevate: isBaseline
         ? {
             text:
-              'A short baseline is the best next step. It will assess clarity, pace, confidence, and filler words together, then I can choose the strongest practice focus.',
-            label: 'Start 3-minute assessment',
+              'A Communication Snapshot is the best next step. Three short questions will cover clarity, pace, confidence, and filler words together, then I can choose the strongest practice focus.',
+            label: 'Start Communication Snapshot',
           }
         : {
             text:
-              'A focused live drill is the most useful next step. I’ll carry this context into the practice so you can work on the task, not configure a workflow.',
-            label: 'Start practice',
+              'Live practice is the most useful next step. I’ll carry this context into Elevate so you can work on the task, not configure a workflow.',
+            label: 'Practise in Elevate',
           },
       replay: {
         text:
@@ -946,12 +1030,13 @@ export function Coach() {
         text: selected.text,
         module,
         label: selected.label,
-        reason: '',
+        // Snapshot is the one bounded format, so it is the only place we quote a length.
+        reason: isBaseline ? '3 questions · about 3 minutes' : '',
         brief: {
           focusArea: isBaseline ? 'snapshot' : null,
           scenario: module === 'elevate' ? request : null,
           durationSec: isBaseline ? 180 : null,
-          preparationId: module === 'prepare' ? thread?.preparationId ?? null : null,
+          preparationId: module === 'prepare' ? currentThread?.preparationId ?? null : null,
           stageId: null,
         },
         createdAt: nowIso(),
@@ -985,6 +1070,25 @@ export function Coach() {
           label: rec.label,
           reason: rec.reason,
           brief: rec.brief,
+          evidence: response.evidence,
+          createdAt: nowIso(),
+        },
+      ]
+    }
+    if (response.evidence) {
+      return [
+        {
+          id: newTurnId(),
+          role: 'coach',
+          kind: 'reply',
+          text: response.reply,
+          createdAt: nowIso(),
+        },
+        {
+          id: newTurnId(),
+          role: 'coach',
+          kind: 'pulse-evidence',
+          evidence: response.evidence,
           createdAt: nowIso(),
         },
       ]
@@ -1012,6 +1116,8 @@ export function Coach() {
 
   async function recordRecommendation(module: CoachModule) {
     if (!thread) return
+    // Session workspaces record the launch once they own a real target id.
+    if (module === 'elevate' || module === 'replay') return
     try {
       await recordCoachAction(thread.id, { module, action: 'launch' })
     } catch (error) {
@@ -1035,9 +1141,12 @@ export function Coach() {
     void persistTurns(thread.id, next.slice(-40))
   }
 
-  async function commitRequest(explicitMessage?: string) {
-    if (!thread) return
-    const request = (explicitMessage ?? draft).trim()
+  async function commitRequestForThread(
+    currentThread: CoachThreadSummary,
+    currentTurns: ThreadTurn[],
+    explicitMessage: string,
+  ) {
+    const request = explicitMessage.trim()
     if (!request || thinking) return
 
     const userTurn: ThreadTurn = {
@@ -1046,11 +1155,11 @@ export function Coach() {
       text: request,
       createdAt: nowIso(),
     }
-    const answeringClarification = turns.some(
+    const answeringClarification = currentTurns.some(
       (turn) => turn.role === 'coach' && turn.kind === 'clarify' && !turn.answered,
     )
     // Show the user's message immediately; Coach's reply lands when the model returns.
-    const withUser = [...turns, userTurn].map<ThreadTurn>((turn) =>
+    const withUser = [...currentTurns, userTurn].map<ThreadTurn>((turn) =>
       turn.role === 'coach' && turn.kind === 'clarify' && !turn.answered
         ? { ...turn, answered: true }
         : turn,
@@ -1061,29 +1170,34 @@ export function Coach() {
 
     let coachTurns: ThreadTurn[]
     try {
-      const response = await respondCoach(thread.id, {
+      const response = await respondCoach(currentThread.id, {
         message: request,
-        history: historyFor(turns),
+        history: historyFor(currentTurns),
         answeringClarification,
       })
       const recommendedPreparationId = response?.recommend?.brief.preparationId
-      if (recommendedPreparationId && recommendedPreparationId !== thread.preparationId) {
+      if (
+        recommendedPreparationId &&
+        recommendedPreparationId !== currentThread.preparationId
+      ) {
         setThread((current) =>
-          current?.id === thread.id
+          current?.id === currentThread.id
             ? { ...current, preparationId: recommendedPreparationId }
             : current,
         )
         setThreads((current) =>
           current.map((item) =>
-            item.id === thread.id
+            item.id === currentThread.id
               ? { ...item, preparationId: recommendedPreparationId }
               : item,
           ),
         )
       }
-      if (response?.goalTitle && !namedGoal) {
+      if (response?.goalTitle && !currentThread.title?.trim()) {
         try {
-          const updated = await patchCoachThread(thread.id, { title: response.goalTitle })
+          const updated = await patchCoachThread(currentThread.id, {
+            title: response.goalTitle,
+          })
           setThread(updated.thread)
           setThreads((current) =>
             current.map((item) => (item.id === updated.thread.id ? updated.thread : item)),
@@ -1094,15 +1208,24 @@ export function Coach() {
           console.error('save coach goal title', error)
         }
       }
-      coachTurns = response ? coachTurnsFrom(response) : fallbackTurns(request)
+      coachTurns = response
+        ? coachTurnsFrom(response)
+        : fallbackTurns(request, currentThread)
     } catch (error) {
       console.error('coach respond', error)
-      coachTurns = fallbackTurns(request)
+      coachTurns = fallbackTurns(request, currentThread)
     } finally {
       setThinking(false)
     }
 
-    void persistTurns(thread.id, [...withUser, ...coachTurns].slice(-40))
+    await persistTurns(currentThread.id, [...withUser, ...coachTurns].slice(-40))
+  }
+
+  async function commitRequest(explicitMessage?: string) {
+    if (!thread) return
+    const request = (explicitMessage ?? draft).trim()
+    if (!request) return
+    await commitRequestForThread(thread, turns, request)
   }
 
   function submitRequest(event: FormEvent) {
@@ -1187,12 +1310,124 @@ export function Coach() {
     setSearchParams(nextParams)
   }
 
+  async function startHomeConversation(message: string) {
+    const created = await createCoachThread()
+    setThreads((current) => [created.thread, ...current])
+    setThread(created.thread)
+    locallyAuthoredThreadIdRef.current = created.thread.id
+    // Persist the first exchange before leaving Home. Changing ?thread= first
+    // would reload this thread while it is still empty and wipe the message.
+    await commitRequestForThread(created.thread, [], message)
+    const nextParams = new URLSearchParams()
+    nextParams.set('thread', created.thread.id)
+    setSearchParams(nextParams)
+  }
+
+  async function ensureHomeRecommendationThread(
+    recommendation: Extract<
+      CoachHomeRecommendation,
+      { kind: 'prepare' | 'pulse' }
+    >,
+  ): Promise<string> {
+    if (recommendation.threadId) return recommendation.threadId
+    const created = await createCoachThread(
+      recommendation.goalTitle,
+      recommendation.kind === 'pulse' ? recommendation.skill : null,
+    )
+    let createdThread = created.thread
+    if (recommendation.kind === 'prepare') {
+      const linked = await patchCoachThread(created.thread.id, {
+        preparationId: recommendation.preparationId,
+      })
+      createdThread = linked.thread
+    }
+    setThreads((current) => [createdThread, ...current])
+    return createdThread.id
+  }
+
+  async function openHomePrimary(recommendation: CoachHomeRecommendation) {
+    if (recommendation.kind === 'resume') {
+      openThread(recommendation.threadId)
+      return
+    }
+    if (recommendation.kind === 'live-resume') {
+      if (!isAccessible('elevate')) throw new Error('Elevate is not currently available.')
+      const search = new URLSearchParams({
+        session: recommendation.targetId,
+        coach: '1',
+      })
+      if (recommendation.threadId) search.set('thread', recommendation.threadId)
+      navigate(`/elevate?${search.toString()}`)
+      return
+    }
+    if (recommendation.kind === 'result') {
+      if (!isAccessible(recommendation.module)) {
+        throw new Error(
+          `${recommendation.module === 'replay' ? 'Replay' : 'Elevate'} is not currently available.`,
+        )
+      }
+      const search = new URLSearchParams({ coach: '1' })
+      if (recommendation.threadId) search.set('thread', recommendation.threadId)
+      navigate(
+        recommendation.module === 'replay'
+          ? `/replay/${encodeURIComponent(recommendation.targetId)}?${search.toString()}`
+          : `/elevate?session=${encodeURIComponent(recommendation.targetId)}&${search.toString()}`,
+      )
+      return
+    }
+    if (recommendation.kind === 'onboarding') return
+    if (recommendation.kind === 'pulse' && !recommendation.practiceAvailable) {
+      navigate('/progress')
+      return
+    }
+    if (!isAccessible('elevate')) throw new Error('Elevate is not currently available.')
+
+    const threadId = await ensureHomeRecommendationThread(recommendation)
+    // Elevate is not time-boxed, so no duration is briefed here. The focus area
+    // already selects the designed exercise on the Elevate side.
+    const brief: CoachBrief =
+      recommendation.kind === 'prepare'
+        ? {
+            focusArea: null,
+            scenario: recommendation.scenario,
+            durationSec: null,
+            preparationId: recommendation.preparationId,
+            stageId: recommendation.stageId,
+          }
+        : {
+            focusArea: recommendation.skill,
+            scenario: `Focused practice for ${recommendation.skill.replace(/_/g, ' ')}.`,
+            durationSec: null,
+            preparationId: null,
+            stageId: null,
+          }
+    navigate(coachElevatePath(briefToElevateParams(brief), threadId))
+  }
+
+  async function openHomeSecondary(recommendation: CoachHomeRecommendation) {
+    if (recommendation.kind !== 'prepare' && recommendation.kind !== 'pulse') return
+    if (recommendation.kind === 'prepare' && !isAccessible('prepare')) {
+      throw new Error('Prepare is not currently available.')
+    }
+    const search = new URLSearchParams({ coach: '1' })
+    if (recommendation.threadId) search.set('thread', recommendation.threadId)
+    navigate(
+      recommendation.kind === 'prepare'
+        ? `/prepare/interviews/${recommendation.preparationId}?${search.toString()}`
+        : `/progress?${search.toString()}`,
+    )
+  }
+
   async function archiveThread(id: string) {
     const updated = await patchCoachThread(id, { status: 'archived' })
     setThreads((current) =>
       current.map((item) => (item.id === updated.thread.id ? updated.thread : item)),
     )
-    if (thread?.id === id) setThread(updated.thread)
+    if (thread?.id === id) {
+      setThread(null)
+      setTurns([])
+      setSearchParams(new URLSearchParams())
+    }
   }
 
   function beginHistoryRename(item: CoachThreadSummary) {
@@ -1230,22 +1465,9 @@ export function Coach() {
     }
     if (thread?.id !== item.id) return
 
-    const fallback =
-      remaining.find((candidate) => candidate.status === 'active') || remaining[0]
-    if (fallback) {
-      const nextParams = new URLSearchParams()
-      nextParams.set('thread', fallback.id)
-      setSearchParams(nextParams)
-      return
-    }
-
-    const created = await createCoachThread()
-    setThreads([created.thread])
-    setThread(created.thread)
+    setThread(null)
     setTurns([])
-    const nextParams = new URLSearchParams()
-    nextParams.set('thread', created.thread.id)
-    setSearchParams(nextParams)
+    setSearchParams(new URLSearchParams())
   }
 
   return (
@@ -1257,9 +1479,13 @@ export function Coach() {
               Coach
             </p>
             <h1 className="mt-0.5 truncate text-lg font-semibold tracking-tight sm:text-xl">
-              {namedGoal ? displayCoachTitle(thread?.title) : `What shall we do today, ${firstName}?`}
+              {isHome
+                ? 'Your next move'
+                : namedGoal
+                  ? displayCoachTitle(thread?.title)
+                  : `What shall we do today, ${firstName}?`}
             </h1>
-            {journeyHint && (
+            {!isHome && journeyHint && (
               <p className="mt-0.5 truncate text-sm text-muted-foreground">{journeyHint}</p>
             )}
           </div>
@@ -1277,26 +1503,18 @@ export function Coach() {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]">
-        <div className={cn(THREAD_LANE, 'space-y-5 py-6')}>
+        {isHome ? (
+          <CoachHome
+            onPrimary={openHomePrimary}
+            onSecondary={openHomeSecondary}
+            onAsk={startHomeConversation}
+          />
+        ) : (
+          <div className={cn(THREAD_LANE, 'space-y-5 py-6')}>
           {turns.length === 0 && (
-            <div className="flex flex-wrap gap-2">
-              {availableIntents.map((intent) => {
-                const Icon = intent.icon
-                return (
-                  <Button
-                    key={intent.id}
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="gap-2 rounded-full"
-                    onClick={() => chooseIntent(intent.id)}
-                  >
-                    <Icon className="h-3.5 w-3.5" />
-                    {intent.label}
-                  </Button>
-                )
-              })}
-            </div>
+            <p className="max-w-[80%] text-sm leading-relaxed">
+              What are you preparing for, and when do you need it?
+            </p>
           )}
 
           {loadingThread && (
@@ -1415,44 +1633,70 @@ export function Coach() {
               return (
                 <div key={turn.id} className="space-y-2.5">
                   <p className="max-w-[80%] text-sm leading-relaxed">{turn.text}</p>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <Button asChild size="sm">
-                      <Link
-                        to={recommendationPath(turn.module, turn.brief, thread?.id)}
-                        onClick={() => void recordRecommendation(turn.module)}
-                      >
-                        {turn.label}
-                      </Link>
-                    </Button>
-                    <button
-                      type="button"
-                      className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-                      onClick={() => setExpandedConfirmId(expandedConfirmId === turn.id ? null : turn.id)}
-                    >
-                      Change workspace
-                    </button>
-                  </div>
-                  {turn.reason && (
-                    <p className="max-w-[80%] text-xs text-muted-foreground">{turn.reason}</p>
-                  )}
-                  {expandedConfirmId === turn.id && (
-                    <div className="flex flex-wrap gap-2 pt-0.5">
-                      {availableIntents
-                        .filter((intent) => intent.id !== turn.module)
-                        .map((intent) => (
-                          <Button
-                            key={intent.id}
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => chooseAlternative(intent.id)}
+                  {turn.evidence ? (
+                    <CoachPulseEvidenceCard
+                      evidence={turn.evidence}
+                      threadId={thread?.id}
+                      showPulseLink={turn.module !== 'progress'}
+                      primary={{
+                        label: turn.label,
+                        to: recommendationPath(turn.module, turn.brief, thread?.id),
+                        onClick: () => void recordRecommendation(turn.module),
+                      }}
+                    />
+                  ) : (
+                    <>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <Button asChild size="sm">
+                          <Link
+                            to={recommendationPath(turn.module, turn.brief, thread?.id)}
+                            onClick={() => void recordRecommendation(turn.module)}
                           >
-                            {intent.label}
-                          </Button>
-                        ))}
-                    </div>
+                            {turn.label}
+                          </Link>
+                        </Button>
+                        <button
+                          type="button"
+                          className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                          onClick={() =>
+                            setExpandedConfirmId(expandedConfirmId === turn.id ? null : turn.id)
+                          }
+                        >
+                          Change workspace
+                        </button>
+                      </div>
+                      {turn.reason && (
+                        <p className="max-w-[80%] text-xs text-muted-foreground">{turn.reason}</p>
+                      )}
+                      {expandedConfirmId === turn.id && (
+                        <div className="flex flex-wrap gap-2 pt-0.5">
+                          {availableIntents
+                            .filter((intent) => intent.id !== turn.module)
+                            .map((intent) => (
+                              <Button
+                                key={intent.id}
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => chooseAlternative(intent.id)}
+                              >
+                                {intent.label}
+                              </Button>
+                            ))}
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
+              )
+            }
+            if (turn.kind === 'pulse-evidence') {
+              return (
+                <CoachPulseEvidenceCard
+                  key={turn.id}
+                  evidence={turn.evidence}
+                  threadId={thread?.id}
+                />
               )
             }
             if (turn.kind === 'confirm' || turn.kind === 'route-confirm') {
@@ -1642,13 +1886,14 @@ export function Coach() {
 
           {!loadingThread && turns.length === 0 && (
             <p className="pt-2 text-sm text-muted-foreground">
-              Pick a starting point above, or tell your coach what you’d like to work on.
+              Tell Coach the outcome you want. It will choose the most useful next step.
             </p>
           )}
-        </div>
+          </div>
+        )}
       </div>
 
-      <div className="shrink-0 pb-5">
+      {!isHome && <div className="shrink-0 pb-5">
         <form onSubmit={submitRequest} className={THREAD_LANE}>
           <div className="relative rounded-2xl border bg-background shadow-lg shadow-black/5">
             <Textarea
@@ -1677,7 +1922,7 @@ export function Coach() {
             </Button>
           </div>
         </form>
-      </div>
+      </div>}
 
       {historyOpen && (
         <div className="fixed inset-0 z-50 flex justify-end">
