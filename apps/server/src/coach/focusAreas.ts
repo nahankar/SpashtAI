@@ -93,3 +93,18 @@ const MODULE_SET = new Set<string>(COACH_MODULES)
 export function isCoachModule(value: unknown): value is CoachModule {
   return typeof value === 'string' && MODULE_SET.has(value)
 }
+
+const MODULE_SIGNAL_PATTERNS: Array<[CoachModule, RegExp]> = [
+  ['replay', /\b(?:recording|recorded|upload(?:ed)?|transcript|audio file|video file)\b/i],
+  ['prepare', /\b(?:interview|hr round|recruiter|hiring|onsite|journey)\b/i],
+  ['progress', /\b(?:score|scores|progress|pulse|trend|how am i doing)\b/i],
+]
+
+/**
+ * Workspace the message itself points at. Used to decide whether a skill the
+ * user named should become Elevate practice or should only re-focus the
+ * workspace they already asked for.
+ */
+export function detectModuleSignal(message: string): CoachModule | null {
+  return MODULE_SIGNAL_PATTERNS.find(([, pattern]) => pattern.test(message))?.[0] ?? null
+}

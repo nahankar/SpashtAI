@@ -274,6 +274,77 @@ describe('Coach model response validation', () => {
     expect(response?.evidence).toBeNull()
   })
 
+  it('overrides a non-Elevate recommendation when the user named a skill', () => {
+    const response = parseCoachResponse(
+      JSON.stringify({
+        reply: 'You have no tracked measurements in the current window.',
+        goalTitle: 'Reduce Filler Words',
+        clarify: null,
+        recommend: {
+          module: 'progress',
+          label: 'Take Communication Snapshot in Progress Pulse',
+          reason: 'To establish a baseline for your current communication skills.',
+          brief: { focusArea: 'snapshot' },
+        },
+      }),
+      { ...context, pulse: { windowDays: 30, measurementCount: 0, skills: [] } },
+      'want to reduce filler words',
+    )
+
+    expect(response?.recommend).toMatchObject({
+      module: 'elevate',
+      label: 'Practise filler words in Elevate',
+      brief: { focusArea: 'filler_words' },
+    })
+  })
+
+  it('keeps Snapshot inside Elevate, which is the only module that can run it', () => {
+    const response = parseCoachResponse(
+      JSON.stringify({
+        reply: 'Let’s establish a baseline first.',
+        goalTitle: null,
+        clarify: null,
+        recommend: {
+          module: 'progress',
+          label: 'Take Communication Snapshot in Progress Pulse',
+          reason: 'A baseline covers every skill at once.',
+          brief: { focusArea: 'snapshot' },
+        },
+      }),
+      context,
+      'help me get started',
+    )
+
+    expect(response?.recommend).toMatchObject({
+      module: 'elevate',
+      label: 'Start Communication Snapshot',
+      brief: { focusArea: 'snapshot' },
+    })
+  })
+
+  it('keeps the workspace the user asked for and re-focuses its brief', () => {
+    const response = parseCoachResponse(
+      JSON.stringify({
+        reply: 'Let’s analyse that recording.',
+        goalTitle: null,
+        clarify: null,
+        recommend: {
+          module: 'replay',
+          label: 'Analyse recording',
+          reason: 'The recording is real evidence.',
+          brief: { focusArea: 'clarity' },
+        },
+      }),
+      context,
+      'I have a recording, help me with filler words',
+    )
+
+    expect(response?.recommend).toMatchObject({
+      module: 'replay',
+      brief: { focusArea: 'filler_words' },
+    })
+  })
+
   it('does not treat an options question as goal affirmation', () => {
     const response = parseCoachResponse(
       JSON.stringify({

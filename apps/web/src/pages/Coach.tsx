@@ -55,7 +55,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { USER_BUBBLE } from '@/lib/conversation'
-import { explicitFocusAreas, getFocusAreaLabel } from '@/lib/focus-areas'
+import { detectModuleSignal, explicitFocusAreas, getFocusAreaLabel } from '@/lib/focus-areas'
 
 const INTENTS: Array<{
   id: CoachIntent
@@ -985,6 +985,9 @@ export function Coach() {
       )
     const isExploratory =
       /\b(?:what|which|any)\b.{0,24}\b(?:options?|areas?|choices?)\b/i.test(request)
+    // A named skill only becomes Elevate practice when the message is not
+    // already pointing at a recording, an interview journey, or their scores.
+    const moduleSignal = detectModuleSignal(request)
 
     if (isWhy) {
       const previous = [...currentTurns]
@@ -1054,7 +1057,7 @@ export function Coach() {
       ]
     }
 
-    if (explicitFocuses.length === 1) {
+    if (explicitFocuses.length === 1 && !moduleSignal) {
       const focus = explicitFocuses[0]
       const label = getFocusAreaLabel(focus).replace(' & Speed', '').toLowerCase()
       return [
@@ -1136,7 +1139,8 @@ export function Coach() {
         // Snapshot is the one bounded format, so it is the only place we quote a length.
         reason: isBaseline ? '3 questions · about 3 minutes' : '',
         brief: {
-          focusArea: isBaseline ? 'snapshot' : null,
+          // Carry a skill the user named into whichever workspace they asked for.
+          focusArea: explicitFocuses[0] ?? (isBaseline ? 'snapshot' : null),
           scenario: module === 'elevate' ? request : null,
           durationSec: isBaseline ? 180 : null,
           preparationId: module === 'prepare' ? currentThread?.preparationId ?? null : null,

@@ -80,6 +80,17 @@ export function explicitFocusAreas(text: string): string[] {
   return EXPLICIT_FOCUS_PATTERNS.filter(([, pattern]) => pattern.test(text)).map(([id]) => id)
 }
 
+const MODULE_SIGNAL_PATTERNS: Array<[string, RegExp]> = [
+  ['replay', /\b(?:recording|recorded|upload(?:ed)?|transcript|audio file|video file)\b/i],
+  ['prepare', /\b(?:interview|hr round|recruiter|hiring|onsite|journey)\b/i],
+  ['progress', /\b(?:score|scores|progress|pulse|trend|how am i doing)\b/i],
+]
+
+/** Mirrors detectModuleSignal in apps/server/src/coach/focusAreas.ts. */
+export function detectModuleSignal(text: string): string | null {
+  return MODULE_SIGNAL_PATTERNS.find(([, pattern]) => pattern.test(text))?.[0] ?? null
+}
+
 /**
  * Infer the best matching focus area from an improvement point or context string.
  */

@@ -9,6 +9,7 @@ import {
 import { buildCoachContext, type CoachContext } from './context'
 import {
   coachFocusLabel,
+  detectModuleSignal,
   explicitCoachFocuses,
   isAffirmedFocusIntent,
   isCoachFocusArea,
@@ -114,6 +115,23 @@ function parseRecommendation(raw: unknown, ctx: CoachContext): CoachRecommendati
   const stageId = knownId(briefRaw.stageId, [ctx.preparation?.nextStage?.id])
 
   const focusArea = isCoachFocusArea(briefRaw.focusArea) ? briefRaw.focusArea : null
+
+  // Snapshot is an Elevate format. Offering it inside Progress Pulse sends the
+  // user to a dashboard that cannot run the three questions.
+  if (focusArea === 'snapshot' && module !== 'elevate') {
+    return {
+      module: 'elevate',
+      label: defaultLabel('elevate', 'snapshot'),
+      reason,
+      brief: {
+        focusArea,
+        scenario: text(briefRaw.scenario, MAX_SCENARIO),
+        durationSec: clampDuration(briefRaw.durationSec),
+        preparationId: null,
+        stageId: null,
+      },
+    }
+  }
 
   return {
     module,
@@ -223,29 +241,42 @@ export function parseCoachResponse(
       'You can work on clarity, confidence, filler words, pacing, conciseness, structure, or engagement. Tell me which outcome matters most and I’ll recommend the right practice.'
     recommend = null
     goalTitle = null
-  } else if (
-    focuses.length === 1 &&
-    recommend?.module === 'elevate' &&
-    recommend.brief.focusArea !== focuses[0]
-  ) {
+  } else if (focuses.length === 1 && !clarify) {
     const focus = focuses[0]
     const label = coachFocusLabel(focus)
-    const subject =
-      focus === 'filler_words' || focus === 'action_items'
-        ? `${label[0].toUpperCase() + label.slice(1)} are`
-        : `${label[0].toUpperCase() + label.slice(1)} is`
-    reply = `${subject} the focus you named. Elevate will practise that skill directly rather than substitute a related one.`
-    recommend = {
-      ...recommend,
-      label: defaultLabel('elevate', focus),
-      reason: `This practice directly targets ${label}.`,
-      brief: { ...recommend.brief, focusArea: focus },
+    const moduleSignal = detectModuleSignal(message)
+
+    if (!moduleSignal) {
+      // The user named a skill and nothing in the message points at another
+      // workspace, so practising it in Elevate is the only matching action.
+      // This must not be scoped to recommendations that already chose Elevate:
+      // the model otherwise escapes the check by picking a different module.
+      if (recommend?.module !== 'elevate' || recommend.brief.focusArea !== focus) {
+        const subject =
+          focus === 'filler_words' || focus === 'action_items'
+            ? `${label[0].toUpperCase() + label.slice(1)} are`
+            : `${label[0].toUpperCase() + label.slice(1)} is`
+        reply = `${subject} the focus you named. Elevate will practise that skill directly rather than substitute a related one.`
+        recommend = {
+          module: 'elevate',
+          label: defaultLabel('elevate', focus),
+          reason: `This practice directly targets ${label}.`,
+          brief: {
+            focusArea: focus,
+            scenario: recommend?.brief.scenario ?? null,
+            durationSec: null,
+            preparationId: null,
+            stageId: null,
+          },
+        }
+      } else {
+        recommend = { ...recommend, label: defaultLabel('elevate', focus) }
+      }
+    } else if (recommend && recommend.brief.focusArea !== focus) {
+      // The message asked for a specific workspace. Keep it, but carry the
+      // skill they named into the brief.
+      recommend = { ...recommend, brief: { ...recommend.brief, focusArea: focus } }
     }
-  }
-  if (focuses.length === 1 && recommend?.module === 'elevate') {
-    // Labels are user-facing promises. Keep them aligned even when the model's
-    // free-text label names a different valid skill.
-    recommend = { ...recommend, label: defaultLabel('elevate', focuses[0]) }
   }
 
   if (!isAffirmedFocusIntent(message, policy.answeringClarification === true)) {
