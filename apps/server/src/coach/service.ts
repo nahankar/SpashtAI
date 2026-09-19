@@ -7,7 +7,18 @@ import {
   markCoachLlmFailure,
 } from './bedrock'
 import { buildCoachContext, type CoachContext } from './context'
-import { isCoachFocusArea, isCoachModule, type CoachFocusArea, type CoachModule } from './focusAreas'
+import {
+  coachFocusLabel,
+  explicitCoachFocuses,
+  isAffirmedFocusIntent,
+  isCoachFocusArea,
+  isCoachModule,
+  isExplanationRequest,
+  isExploratoryMessage,
+  isUncertainMessage,
+  type CoachFocusArea,
+  type CoachModule,
+} from './focusAreas'
 import {
   buildInterpretPrompt,
   buildRespondPrompt,
@@ -171,22 +182,84 @@ export function parseCoachResponse(
   raw: string,
   ctx: CoachContext,
   message = '',
+  policy: { answeringClarification?: boolean } = {},
 ): CoachResponse | null {
   const parsed = extractJsonObject(raw)
   if (!parsed) return null
 
-  const reply = text(parsed.reply, MAX_REPLY)
+  let reply = text(parsed.reply, MAX_REPLY)
   if (!reply) return null
 
-  const clarify = parseClarification(parsed.clarify)
+  let clarify = parseClarification(parsed.clarify)
   // The contract says ask or act, never both. Asking wins: acting on an
   // unanswered question is the failure mode users notice.
-  const recommend = clarify ? null : parseRecommendation(parsed.recommend, ctx)
-  const mode = resolvePulseEvidenceMode({
-    message,
-    llmMode: parseEvidenceMode(parsed.evidence),
-    hasClarification: Boolean(clarify),
-  })
+  let recommend = clarify ? null : parseRecommendation(parsed.recommend, ctx)
+  let goalTitle = text(parsed.goalTitle, MAX_GOAL_TITLE)
+  const focuses = explicitCoachFocuses(message)
+
+  if (isExplanationRequest(message)) {
+    // A why-question is about the recommendation already on screen. Rendering
+    // the same action again makes Coach look as though it ignored the question.
+    if (focuses.length > 1) {
+      const labels = focuses.map(coachFocusLabel)
+      reply = `${labels[0][0].toUpperCase() + labels[0].slice(1)} and ${labels[1]} are separate skills. One should not be substituted for the other without evidence.`
+    }
+    clarify = null
+    recommend = null
+    goalTitle = null
+  } else if (focuses.length > 1) {
+    const labels = focuses.map(coachFocusLabel)
+    reply = `${labels.map((label) => label[0].toUpperCase() + label.slice(1)).join(' and ')} are separate practice focuses. Choose the one that matters most right now.`
+    clarify = {
+      question: 'Which would you like to focus on first?',
+      options: labels.map((label) => label[0].toUpperCase() + label.slice(1)),
+    }
+    recommend = null
+    goalTitle = null
+  } else if (isExploratoryMessage(message)) {
+    // Mentioning a skill while asking about available options is exploration,
+    // not permission to create a goal or launch a workspace.
+    reply =
+      'You can work on clarity, confidence, filler words, pacing, conciseness, structure, or engagement. Tell me which outcome matters most and I’ll recommend the right practice.'
+    recommend = null
+    goalTitle = null
+  } else if (
+    focuses.length === 1 &&
+    recommend?.module === 'elevate' &&
+    recommend.brief.focusArea !== focuses[0]
+  ) {
+    const focus = focuses[0]
+    const label = coachFocusLabel(focus)
+    const subject =
+      focus === 'filler_words' || focus === 'action_items'
+        ? `${label[0].toUpperCase() + label.slice(1)} are`
+        : `${label[0].toUpperCase() + label.slice(1)} is`
+    reply = `${subject} the focus you named. Elevate will practise that skill directly rather than substitute a related one.`
+    recommend = {
+      ...recommend,
+      label: defaultLabel('elevate', focus),
+      reason: `This practice directly targets ${label}.`,
+      brief: { ...recommend.brief, focusArea: focus },
+    }
+  }
+  if (focuses.length === 1 && recommend?.module === 'elevate') {
+    // Labels are user-facing promises. Keep them aligned even when the model's
+    // free-text label names a different valid skill.
+    recommend = { ...recommend, label: defaultLabel('elevate', focuses[0]) }
+  }
+
+  if (!isAffirmedFocusIntent(message, policy.answeringClarification === true)) {
+    goalTitle = null
+  }
+
+  const mode =
+    isExplanationRequest(message) || isExploratoryMessage(message)
+      ? null
+      : resolvePulseEvidenceMode({
+          message,
+          llmMode: parseEvidenceMode(parsed.evidence),
+          hasClarification: Boolean(clarify),
+        })
   const evidence = mode
     ? buildPulseEvidence(
         ctx.pulse.skills,
@@ -199,7 +272,7 @@ export function parseCoachResponse(
       )
     : null
 
-  return { reply, goalTitle: text(parsed.goalTitle, MAX_GOAL_TITLE), clarify, recommend, evidence }
+  return { reply, goalTitle, clarify, recommend, evidence }
 }
 
 export interface GenerateResponseInput {
@@ -210,6 +283,33 @@ export interface GenerateResponseInput {
   mustRecommend: boolean
   goalTitle: string | null
   preparationId: string | null
+}
+
+export function initialUncertainResponse(
+  input: Pick<GenerateResponseInput, 'history' | 'message' | 'goalTitle'>,
+): CoachResponse | null {
+  if (input.history.length > 0 || input.goalTitle || !isUncertainMessage(input.message)) {
+    return null
+  }
+  return {
+    reply:
+      'No problem. Start with a Communication Snapshot: answer three short questions and I’ll identify the most useful area to practise.',
+    goalTitle: null,
+    clarify: null,
+    recommend: {
+      module: 'elevate',
+      label: 'Start Communication Snapshot',
+      reason: '3 questions · about 3 minutes',
+      brief: {
+        focusArea: 'snapshot',
+        scenario: 'Establish a broad communication baseline.',
+        durationSec: 180,
+        preparationId: null,
+        stageId: null,
+      },
+    },
+    evidence: null,
+  }
 }
 
 /**
@@ -223,6 +323,8 @@ export async function generateCoachResponse(
   if (!isCoachLlmEnabled()) return null
 
   const context = await buildCoachContext(input.userId, input.preparationId)
+  const uncertainResponse = initialUncertainResponse(input)
+  if (uncertainResponse) return { context, response: uncertainResponse }
   const prompt = buildRespondPrompt({
     context,
     history: input.history,
@@ -234,7 +336,9 @@ export async function generateCoachResponse(
 
   try {
     const raw = await invokeCoachModel(prompt, { modelId: COACH_FAST_MODEL_ID })
-    const response = parseCoachResponse(raw, context, input.message)
+    const response = parseCoachResponse(raw, context, input.message, {
+      answeringClarification: input.mustRecommend,
+    })
     if (!response) markCoachLlmFailure()
     return response ? { response, context } : null
   } catch (error) {

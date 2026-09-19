@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { CoachContext } from '../src/coach/context'
 import { extractJsonObject } from '../src/coach/bedrock'
-import { parseCoachResponse } from '../src/coach/service'
+import { initialUncertainResponse, parseCoachResponse } from '../src/coach/service'
 
 const context: CoachContext = {
   pulse: {
@@ -181,5 +181,117 @@ describe('Coach model response validation', () => {
     )
 
     expect(response?.recommend?.label).toBe('Start 3-minute snapshot')
+  })
+
+  it('uses Snapshot without creating a goal when a new user does not know where to start', () => {
+    const response = initialUncertainResponse({
+      history: [],
+      message: "I don't know",
+      goalTitle: null,
+    })
+
+    expect(response).toMatchObject({
+      goalTitle: null,
+      clarify: null,
+      recommend: {
+        module: 'elevate',
+        label: 'Start Communication Snapshot',
+        brief: { focusArea: 'snapshot', durationSec: 180 },
+      },
+    })
+  })
+
+  it('makes the latest explicit skill override an unrelated model recommendation', () => {
+    const response = parseCoachResponse(
+      JSON.stringify({
+        reply: 'Engagement will help with filler words.',
+        goalTitle: 'Reduce Filler Words',
+        clarify: null,
+        recommend: {
+          module: 'elevate',
+          label: 'Practise engagement in Elevate',
+          reason: 'Engagement helps you stay focused.',
+          brief: { focusArea: 'engagement' },
+        },
+      }),
+      context,
+      'I want to reduce filler words',
+    )
+
+    expect(response?.reply).toContain('Filler words are the focus you named')
+    expect(response?.recommend).toMatchObject({
+      label: 'Practise filler words in Elevate',
+      brief: { focusArea: 'filler_words' },
+    })
+    expect(response?.goalTitle).toBe('Reduce Filler Words')
+  })
+
+  it('asks the user to choose when they name two practice focuses', () => {
+    const response = parseCoachResponse(
+      JSON.stringify({
+        reply: 'Let’s practise engagement.',
+        goalTitle: 'Improve Engagement',
+        clarify: null,
+        recommend: {
+          module: 'elevate',
+          label: 'Practise engagement in Elevate',
+          reason: 'Engagement will help.',
+          brief: { focusArea: 'engagement' },
+        },
+      }),
+      context,
+      'What about my pace and conciseness?',
+    )
+
+    expect(response?.goalTitle).toBeNull()
+    expect(response?.recommend).toBeNull()
+    expect(response?.clarify).toEqual({
+      question: 'Which would you like to focus on first?',
+      options: ['Pacing', 'Conciseness'],
+    })
+  })
+
+  it('explains a why follow-up without rendering another action', () => {
+    const response = parseCoachResponse(
+      JSON.stringify({
+        reply: 'Engagement was intended to keep the audience attentive.',
+        goalTitle: 'Improve Engagement',
+        clarify: null,
+        recommend: {
+          module: 'elevate',
+          label: 'Practise engagement in Elevate',
+          reason: 'Continue the same practice.',
+          brief: { focusArea: 'engagement' },
+        },
+        evidence: 'relevant',
+      }),
+      context,
+      'Why engagement again?',
+    )
+
+    expect(response?.recommend).toBeNull()
+    expect(response?.goalTitle).toBeNull()
+    expect(response?.evidence).toBeNull()
+  })
+
+  it('does not treat an options question as goal affirmation', () => {
+    const response = parseCoachResponse(
+      JSON.stringify({
+        reply: 'Filler words are one option.',
+        goalTitle: 'Reduce Filler Words',
+        clarify: null,
+        recommend: {
+          module: 'elevate',
+          label: 'Practise filler words in Elevate',
+          reason: 'This targets fillers.',
+          brief: { focusArea: 'filler_words' },
+        },
+      }),
+      context,
+      'Any other options like reduce filler words?',
+    )
+
+    expect(response?.goalTitle).toBeNull()
+    expect(response?.recommend).toBeNull()
   })
 })

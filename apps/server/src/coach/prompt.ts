@@ -121,7 +121,7 @@ const OUTPUT_CONTRACT = `Reply with a single JSON object and nothing else:
   "clarify": { "question": "one question", "options": ["short answer", "short answer"] } | null,
   "recommend": {
     "module": "elevate" | "replay" | "prepare" | "progress",
-    "label": "specific imperative naming the module, e.g. Practise engagement in Elevate",
+    "label": "specific imperative naming the module and the user's requested focus",
     "reason": "one short sentence on why this is the right next move",
     "brief": {
       "focusArea": one of [${COACH_FOCUS_AREAS.join(', ')}] or null,
@@ -145,13 +145,22 @@ Rules for the contract:
   ask, and time available usually change it; preferences usually do not.
 - Never ask more than one question before recommending something.
 - "focusArea" must come from the list. Pick the one their scores or request point to.
+- The latest explicit user intent wins over the thread title and every earlier suggestion.
+  Map filler words to filler_words, pace/pacing to pacing, conciseness to conciseness,
+  clarity to clarity, confidence to confidence, and engagement to engagement. Never
+  substitute an adjacent skill merely because it may have an indirect relationship.
+- A "why?" follow-up asks for an honest explanation of the previous suggestion. Explain
+  without returning another recommendation. If the earlier suggestion did not directly
+  match the user's stated focus, acknowledge and correct the mismatch.
+- Exploratory wording such as "what options are there?" does not affirm a focus and must
+  not create a goal.
 - A broad request to assess communication should recommend the existing Communication
   Snapshot with focusArea "snapshot", not prematurely choose the lowest-looking metric.
 - Never promise a duration in "label" or "reply". Elevate sessions are not time-boxed, so
   "Start 3-minute practice" is a promise the product does not keep. The only exception is
   focusArea "snapshot", which really is 3 fixed questions. Targeted practice is an Elevate
-  session configured for a skill, not a separate "drill" product: say "Practise engagement
-  in Elevate", not "Start engagement drill".
+  session configured for a skill, not a separate "drill" product: say "Practise [requested
+  skill] in Elevate", not "Start [skill] drill".
 - Treat filler rates at or below 2% as healthy unless the user explicitly wants to reduce
   fillers. A low filler percentage is not, by itself, evidence that it is the next priority.
 - Coach recommends one next action. Goal creation is continuity metadata, never a competing
@@ -190,7 +199,7 @@ export function buildRespondPrompt(input: {
       ? 'They have already answered a question in this exchange. Do not ask another; recommend the next action now with "clarify" set to null.'
       : '',
     goalTitle
-      ? `This thread already continues the goal "${goalTitle}". Mention that continuity when relevant and set "goalTitle" to null.`
+      ? `This thread currently continues the goal "${goalTitle}". Preserve it only if it still matches the user's latest intent. If the user explicitly changes focus, the latest intent wins and "goalTitle" should name the new recurring focus. Otherwise set "goalTitle" to null.`
       : 'This thread has no durable goal yet. Create one only for a recurring improvement area; keep it null for a one-off task or baseline assessment.',
     STYLE_RULES,
     '',

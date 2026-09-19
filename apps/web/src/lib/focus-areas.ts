@@ -65,6 +65,21 @@ export const FOCUS_AREAS: FocusArea[] = [
 /** Skill drills only. Snapshot is an onboarding / booth entry, not a Pulse skill. */
 export const PRACTICE_FOCUS_AREAS = FOCUS_AREAS.filter((area) => area.id !== 'snapshot')
 
+const EXPLICIT_FOCUS_PATTERNS: Array<[string, RegExp]> = [
+  ['filler_words', /\b(?:filler(?:\s+words?)?|ums?|uhs?)\b/i],
+  ['pacing', /\b(?:pace|pacing|speaking\s+speed|too\s+(?:fast|slow)|rushing)\b/i],
+  ['conciseness', /\b(?:concise|conciseness|rambling|wordy|verbose)\b/i],
+  ['clarity', /\b(?:clarity|clearer|clearly|unclear)\b/i],
+  ['confidence', /\b(?:confidence|confident|nervous|assertive)\b/i],
+  ['engagement', /\b(?:engagement|engaging|engage|audience\s+attention)\b/i],
+  ['structure', /\b(?:structure|structured|organise|organize|framework)\b/i],
+  ['action_items', /\b(?:action\s+items?|next\s+steps?|closing)\b/i],
+]
+
+export function explicitFocusAreas(text: string): string[] {
+  return EXPLICIT_FOCUS_PATTERNS.filter(([, pattern]) => pattern.test(text)).map(([id]) => id)
+}
+
 /**
  * Infer the best matching focus area from an improvement point or context string.
  */

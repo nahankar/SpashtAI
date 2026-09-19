@@ -55,6 +55,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { USER_BUBBLE } from '@/lib/conversation'
+import { explicitFocusAreas, getFocusAreaLabel } from '@/lib/focus-areas'
 
 const INTENTS: Array<{
   id: CoachIntent
@@ -974,7 +975,109 @@ export function Coach() {
   function fallbackTurns(
     request: string,
     currentThread: CoachThreadSummary | null = thread,
+    currentTurns: ThreadTurn[] = turns,
   ): ThreadTurn[] {
+    const explicitFocuses = explicitFocusAreas(request)
+    const isWhy = /^(?:why|how (?:does|will|would|is|are|can))\b/i.test(request)
+    const isUncertain =
+      /^(?:i\s+(?:do not|don't|dont)\s+know|not\s+sure|no\s+idea|unsure)[.!?]*$/i.test(
+        request,
+      )
+    const isExploratory =
+      /\b(?:what|which|any)\b.{0,24}\b(?:options?|areas?|choices?)\b/i.test(request)
+
+    if (isWhy) {
+      const previous = [...currentTurns]
+        .reverse()
+        .find(
+          (turn): turn is Extract<ThreadTurn, { kind: 'recommend' }> =>
+            turn.role === 'coach' && turn.kind === 'recommend' && !turn.superseded,
+        )
+      const requested = explicitFocuses.find((focus) => focus !== previous?.brief.focusArea)
+      const text =
+        previous && requested
+          ? `${getFocusAreaLabel(previous.brief.focusArea ?? '').replace(' & Speed', '')} was not the most direct match for ${getFocusAreaLabel(requested).toLowerCase()}. ${getFocusAreaLabel(requested)} should be practised directly.`
+          : previous
+            ? `That suggestion was intended to practise ${getFocusAreaLabel(previous.brief.focusArea ?? '').toLowerCase()}. If that is not the outcome you want, tell me the skill that matters more and I’ll change the focus.`
+            : 'Tell me which suggestion you want explained and I’ll give you the reasoning.'
+      return [{ id: newTurnId(), role: 'coach', kind: 'reply', text, createdAt: nowIso() }]
+    }
+
+    if (isExploratory) {
+      return [
+        {
+          id: newTurnId(),
+          role: 'coach',
+          kind: 'reply',
+          text:
+            'You can work on clarity, confidence, filler words, pacing, conciseness, structure, or engagement. Tell me which outcome matters most and I’ll recommend the right practice.',
+          createdAt: nowIso(),
+        },
+      ]
+    }
+
+    if (explicitFocuses.length > 1) {
+      const options = explicitFocuses.map(getFocusAreaLabel)
+      return [
+        {
+          id: newTurnId(),
+          role: 'coach',
+          kind: 'clarify',
+          text: `${options.join(' and ')} are separate practice focuses.`,
+          question: 'Which would you like to focus on first?',
+          options,
+          createdAt: nowIso(),
+        },
+      ]
+    }
+
+    if (isUncertain && currentTurns.length === 0) {
+      return [
+        {
+          id: newTurnId(),
+          role: 'coach',
+          kind: 'recommend',
+          text:
+            'No problem. Start with a Communication Snapshot: answer three short questions and I’ll identify the most useful area to practise.',
+          module: 'elevate',
+          label: 'Start Communication Snapshot',
+          reason: '3 questions · about 3 minutes',
+          brief: {
+            focusArea: 'snapshot',
+            scenario: 'Establish a broad communication baseline.',
+            durationSec: 180,
+            preparationId: null,
+            stageId: null,
+          },
+          createdAt: nowIso(),
+        },
+      ]
+    }
+
+    if (explicitFocuses.length === 1) {
+      const focus = explicitFocuses[0]
+      const label = getFocusAreaLabel(focus).replace(' & Speed', '').toLowerCase()
+      return [
+        {
+          id: newTurnId(),
+          role: 'coach',
+          kind: 'recommend',
+          text: `${getFocusAreaLabel(focus)} is the focus you named. Elevate will practise it directly.`,
+          module: 'elevate',
+          label: `Practise ${label} in Elevate`,
+          reason: `This practice directly targets ${label}.`,
+          brief: {
+            focusArea: focus,
+            scenario: request,
+            durationSec: null,
+            preparationId: null,
+            stageId: null,
+          },
+          createdAt: nowIso(),
+        },
+      ]
+    }
+
     const detected = isNextActionRequest(request) ? nextIntent : detectCoachIntent(request)
     const module = availableIntents.some((item) => item.id === detected) ? detected : null
     if (!module) {
@@ -1102,10 +1205,17 @@ export function Coach() {
   function historyFor(current: ThreadTurn[]): CoachHistoryTurn[] {
     return current.flatMap<CoachHistoryTurn>((turn) => {
       if (turn.role === 'user') return [{ role: 'user', text: turn.text }]
+      if (turn.kind === 'recommend') {
+        return [
+          {
+            role: 'coach',
+            text: `${turn.text} Recommendation shown: ${turn.label}. Reason shown: ${turn.reason || 'none'}.`,
+          },
+        ]
+      }
       if (
         turn.kind === 'reply' ||
         turn.kind === 'clarify' ||
-        turn.kind === 'recommend' ||
         turn.kind === 'result-insight'
       ) {
         return [{ role: 'coach', text: turn.text }]
@@ -1193,10 +1303,17 @@ export function Coach() {
           ),
         )
       }
-      if (response?.goalTitle && !currentThread.title?.trim()) {
+      if (
+        response?.goalTitle &&
+        response.goalTitle.trim() !== currentThread.title?.trim()
+      ) {
         try {
           const updated = await patchCoachThread(currentThread.id, {
             title: response.goalTitle,
+            focusArea:
+              response.recommend?.brief.focusArea === 'snapshot'
+                ? null
+                : response.recommend?.brief.focusArea ?? currentThread.focusArea,
           })
           setThread(updated.thread)
           setThreads((current) =>
@@ -1210,10 +1327,10 @@ export function Coach() {
       }
       coachTurns = response
         ? coachTurnsFrom(response)
-        : fallbackTurns(request, currentThread)
+        : fallbackTurns(request, currentThread, currentTurns)
     } catch (error) {
       console.error('coach respond', error)
-      coachTurns = fallbackTurns(request, currentThread)
+      coachTurns = fallbackTurns(request, currentThread, currentTurns)
     } finally {
       setThinking(false)
     }
@@ -1480,7 +1597,7 @@ export function Coach() {
             </p>
             <h1 className="mt-0.5 truncate text-lg font-semibold tracking-tight sm:text-xl">
               {isHome
-                ? 'Your next move'
+                ? 'Start with Coach'
                 : namedGoal
                   ? displayCoachTitle(thread?.title)
                   : `What shall we do today, ${firstName}?`}
@@ -1489,16 +1606,34 @@ export function Coach() {
               <p className="mt-0.5 truncate text-sm text-muted-foreground">{journeyHint}</p>
             )}
           </div>
-          <div className="flex shrink-0 gap-1">
-            <Button type="button" variant="ghost" size="sm" className="gap-1.5" onClick={() => void startNewThread()}>
-              <Plus className="h-3.5 w-3.5" />
-              New goal
-            </Button>
-            <Button type="button" variant="ghost" size="sm" className="gap-1.5" onClick={() => setHistoryOpen(true)}>
-              <History className="h-3.5 w-3.5" />
-              Goals
-            </Button>
-          </div>
+          {(!isHome || threads.length > 0) && (
+            <div className="flex shrink-0 gap-1">
+              {!isHome && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => void startNewThread()}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  New topic
+                </Button>
+              )}
+              {threads.length > 0 && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => setHistoryOpen(true)}
+                >
+                  <History className="h-3.5 w-3.5" />
+                  Goals
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       </header>
 
@@ -1513,7 +1648,7 @@ export function Coach() {
           <div className={cn(THREAD_LANE, 'space-y-5 py-6')}>
           {turns.length === 0 && (
             <p className="max-w-[80%] text-sm leading-relaxed">
-              What are you preparing for, and when do you need it?
+              What would you like to get better at—or prepare for?
             </p>
           )}
 

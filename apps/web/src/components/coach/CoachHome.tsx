@@ -279,6 +279,12 @@ export function CoachHome({
               {starting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             </Button>
           </form>
+          {recommendation?.kind === 'onboarding' && (
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Try: “I have an interview next week” · “Help me pitch an idea” · “I want to
+              reduce filler words”
+            </p>
+          )}
         </section>
       )}
     </div>

@@ -133,7 +133,11 @@ describe('Coach Home recommendation selection', () => {
   })
 
   it('falls back to conversational onboarding without state', () => {
-    expect(selectCoachHomeRecommendation(emptyCandidates()).kind).toBe('onboarding')
+    expect(selectCoachHomeRecommendation(emptyCandidates())).toEqual({
+      kind: 'onboarding',
+      title: 'What would you like to get better at—or prepare for?',
+      reason: 'Tell Coach what matters right now. It will recommend the best next step.',
+    })
   })
 
   it('requires two distinct tracked sessions before using Pulse', () => {

@@ -110,8 +110,8 @@ export function selectCoachHomeRecommendation(
 
   return {
     kind: 'onboarding',
-    title: 'What are you preparing for?',
-    reason: 'Tell Coach the outcome and timing. It will choose the most useful next step.',
+    title: 'What would you like to get better at—or prepare for?',
+    reason: 'Tell Coach what matters right now. It will recommend the best next step.',
   }
 }
 
