@@ -1087,7 +1087,7 @@ export function Coach() {
           role: 'coach',
           kind: 'clarify',
           text: 'I’ll choose the most useful next step once I understand the outcome.',
-          question: 'What are you preparing for, and when do you need it?',
+          question: 'What would you like to get better at—or prepare for?',
           options: [],
           createdAt: nowIso(),
         },
