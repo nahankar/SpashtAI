@@ -84,6 +84,9 @@ export function CoachPulseCard({ threadId }: { threadId?: string }) {
     coach: '1',
   })
   if (threadId) practiceSearch.set('thread', threadId)
+  const progressSearch = new URLSearchParams({ coach: '1' })
+  if (threadId) progressSearch.set('thread', threadId)
+  const progressHref = `/progress?${progressSearch.toString()}`
 
   return (
     <Card className="shadow-none">
@@ -139,7 +142,7 @@ export function CoachPulseCard({ threadId }: { threadId?: string }) {
                 </Link>
               </Button>
               <Link
-                to="/progress"
+                to={progressHref}
                 className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
               >
                 Open Progress Pulse
@@ -147,7 +150,7 @@ export function CoachPulseCard({ threadId }: { threadId?: string }) {
             </>
           ) : (
             <Button asChild size="sm" className="gap-2">
-              <Link to="/progress">
+              <Link to={progressHref}>
                 Open Progress Pulse
                 <ArrowRight className="h-4 w-4" />
               </Link>

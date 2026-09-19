@@ -4,6 +4,7 @@ import {
   extractJsonObject,
   invokeCoachModel,
   isCoachLlmEnabled,
+  markCoachLlmFailure,
 } from './bedrock'
 import { buildCoachContext, type CoachContext } from './context'
 import { isCoachFocusArea, isCoachModule, type CoachFocusArea, type CoachModule } from './focusAreas'
@@ -184,6 +185,7 @@ export async function generateCoachResponse(
   try {
     const raw = await invokeCoachModel(prompt, { modelId: COACH_FAST_MODEL_ID })
     const response = parseCoachResponse(raw, context)
+    if (!response) markCoachLlmFailure()
     return response ? { response, context } : null
   } catch (error) {
     console.error('coach respond', error)
@@ -216,7 +218,9 @@ export async function interpretCoachResult(input: {
       maxTokens: 900,
       timeoutMs: 20_000,
     })
-    return parseCoachResponse(raw, context)
+    const response = parseCoachResponse(raw, context)
+    if (!response) markCoachLlmFailure()
+    return response
   } catch (error) {
     console.error('coach interpret', error)
     return null

@@ -52,7 +52,13 @@ function journeyHref(preparationId: string, threadId?: string) {
   return `/prepare/interviews/${preparationId}?${params.toString()}`
 }
 
-export function CoachPrepareCard({ threadId }: { threadId?: string }) {
+export function CoachPrepareCard({
+  threadId,
+  preparationId,
+}: {
+  threadId?: string
+  preparationId?: string | null
+}) {
   const [journey, setJourney] = useState<Preparation | null>(null)
   const [count, setCount] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -66,7 +72,9 @@ export function CoachPrepareCard({ threadId }: { threadId?: string }) {
       .then(async (journeys) => {
         if (cancelled) return
         setCount(journeys.length)
-        const selected = pickActiveJourney(journeys)
+        const selected = preparationId
+          ? journeys.find((candidate) => candidate.id === preparationId) ?? null
+          : pickActiveJourney(journeys)
         if (!selected) {
           setJourney(null)
           return
@@ -85,7 +93,7 @@ export function CoachPrepareCard({ threadId }: { threadId?: string }) {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [preparationId])
 
   const questionCount = journey?.questions?.length
     ?? journey?.stages.reduce((sum, stage) => sum + (stage.questionCount ?? 0), 0)

@@ -15,10 +15,28 @@ export const COACH_DEEP_MODEL_ID =
   process.env.BEDROCK_REPLAY_MODEL_ID ||
   'amazon.nova-pro-v1:0'
 
+const FAILURE_THRESHOLD = Math.max(
+  1,
+  Number.parseInt(process.env.BEDROCK_COACH_FAILURE_THRESHOLD || '1', 10) || 1,
+)
+const CIRCUIT_COOLDOWN_MS = Math.max(
+  10_000,
+  Number.parseInt(process.env.BEDROCK_COACH_CIRCUIT_COOLDOWN_MS || '60000', 10) || 60_000,
+)
+let consecutiveFailures = 0
+let circuitOpenUntil = 0
+
 /** Coach is optional. Credential resolution is delegated to the AWS SDK's full
  * default chain (env, profile/SSO, web identity, ECS and EC2 instance roles). */
 export function isCoachLlmEnabled(): boolean {
-  return process.env.COACH_LLM_DISABLED !== '1'
+  return process.env.COACH_LLM_DISABLED !== '1' && Date.now() >= circuitOpenUntil
+}
+
+export function markCoachLlmFailure(): void {
+  consecutiveFailures += 1
+  if (consecutiveFailures >= FAILURE_THRESHOLD) {
+    circuitOpenUntil = Date.now() + CIRCUIT_COOLDOWN_MS
+  }
 }
 
 export interface CoachModelOptions {
@@ -28,7 +46,7 @@ export interface CoachModelOptions {
   timeoutMs?: number
 }
 
-const DEFAULT_TIMEOUT_MS = 12_000
+const DEFAULT_TIMEOUT_MS = 6_000
 
 /**
  * Invokes a Bedrock text model through Converse, which normalizes request and
@@ -38,6 +56,9 @@ export async function invokeCoachModel(
   prompt: string,
   { modelId, maxTokens = 700, temperature = 0.3, timeoutMs = DEFAULT_TIMEOUT_MS }: CoachModelOptions,
 ): Promise<string> {
+  if (!isCoachLlmEnabled()) {
+    throw new Error('Coach model circuit is open')
+  }
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
@@ -49,7 +70,13 @@ export async function invokeCoachModel(
       }),
       { abortSignal: controller.signal },
     )
-    return response.output?.message?.content?.find((block) => 'text' in block)?.text ?? ''
+    const text = response.output?.message?.content?.find((block) => 'text' in block)?.text ?? ''
+    consecutiveFailures = 0
+    circuitOpenUntil = 0
+    return text
+  } catch (error) {
+    markCoachLlmFailure()
+    throw error
   } finally {
     clearTimeout(timer)
   }

@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/prisma'
 import { generateCoachResponse, interpretCoachResult } from '../coach/service'
 import type { CoachHistoryTurn, CompletedSessionSummary } from '../coach/prompt'
+import { mergeCoachTurnPayload } from '../coach/turn-sync'
 
 const router = Router()
 const MAX_TURNS = 40
@@ -115,7 +116,8 @@ router.get('/threads/:id', async (req: Request, res: Response) => {
     const [turns, actions] = await Promise.all([
       prisma.coachTurn.findMany({
         where: { threadId: thread.id },
-        orderBy: { createdAt: 'asc' },
+        orderBy: { createdAt: 'desc' },
+        take: MAX_TURNS,
       }),
       prisma.coachAction.findMany({
         where: { threadId: thread.id },
@@ -124,7 +126,7 @@ router.get('/threads/:id', async (req: Request, res: Response) => {
     ])
     res.json({
       thread: serializeThread(thread),
-      turns: turns.map(serializeTurn),
+      turns: turns.reverse().map(serializeTurn),
       actions: actions.map((action) => ({
         id: action.id,
         module: action.module,
@@ -199,14 +201,17 @@ router.put('/threads/:id/turns', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'turns array is required' })
     }
     type SavedTurn = {
-      id?: string
+      id: string
       role: string
       kind: string | null
       text: string | null
       payload: Prisma.InputJsonValue | typeof Prisma.JsonNull
       createdAt?: Date
+      position: number
     }
-    const turns: SavedTurn[] = incoming.slice(-MAX_TURNS).flatMap((item: Record<string, unknown>) => {
+    const turns: SavedTurn[] = incoming.slice(-MAX_TURNS).flatMap((item: Record<string, unknown>, position: number) => {
+      const id = typeof item.id === 'string' && item.id.length < 80 ? item.id : null
+      if (!id) return []
       const role = item.role === 'user' ? 'user' : item.role === 'coach' ? 'coach' : null
       if (!role) return []
       const kind =
@@ -224,40 +229,71 @@ router.put('/threads/:id/turns', async (req: Request, res: Response) => {
           : undefined
       return [
         {
-          id: typeof item.id === 'string' && item.id.length < 80 ? item.id : undefined,
+          id,
           role,
           kind,
           text,
           payload,
           createdAt,
+          position,
         },
       ]
     })
 
-    await prisma.$transaction(async (tx) => {
-      await tx.coachTurn.deleteMany({ where: { threadId: thread.id } })
-      if (turns.length > 0) {
+    const saved = await prisma.$transaction(async (tx) => {
+      // Updating the parent first serializes saves for this thread in Postgres.
+      // Each request then merges against the latest committed payload instead
+      // of replacing the whole transcript with its browser snapshot.
+      await tx.coachThread.update({
+        where: { id: thread.id },
+        data: { updatedAt: new Date() },
+      })
+
+      const existing = await tx.coachTurn.findMany({
+        where: { threadId: thread.id, id: { in: turns.map((turn) => turn.id) } },
+      })
+      const byId = new Map(existing.map((turn) => [turn.id, turn]))
+      const missing = turns.filter((turn) => !byId.has(turn.id))
+
+      if (missing.length > 0) {
         await tx.coachTurn.createMany({
-          data: turns.map((turn, index) => ({
-            ...(turn.id ? { id: turn.id } : {}),
+          data: missing.map((turn, index) => ({
+            id: turn.id,
             threadId: thread.id,
             role: turn.role,
             kind: turn.kind,
             text: turn.text,
             payload: turn.payload,
-            createdAt: turn.createdAt ?? new Date(Date.now() - (turns.length - index) * 10),
+            createdAt: turn.createdAt
+              ? new Date(turn.createdAt.getTime() + turn.position)
+              : new Date(Date.now() - (missing.length - index) * 10),
           })),
+          skipDuplicates: true,
         })
       }
-      await tx.coachThread.update({
-        where: { id: thread.id },
-        data: { updatedAt: new Date() },
-      })
-    })
 
-    const saved = await prisma.coachTurn.findMany({
-      where: { threadId: thread.id },
-      orderBy: { createdAt: 'asc' },
+      await Promise.all(
+        turns.flatMap((turn) => {
+          const previous = byId.get(turn.id)
+          if (!previous) return []
+          return [
+            tx.coachTurn.update({
+              where: { id: previous.id },
+              data: {
+                text: turn.text,
+                payload: mergeCoachTurnPayload(previous.payload, turn.payload),
+              },
+            }),
+          ]
+        }),
+      )
+
+      const latest = await tx.coachTurn.findMany({
+        where: { threadId: thread.id },
+        orderBy: { createdAt: 'desc' },
+        take: MAX_TURNS,
+      })
+      return latest.reverse()
     })
     res.json({ turns: saved.map(serializeTurn) })
   } catch (error) {

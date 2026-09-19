@@ -458,6 +458,16 @@ function toRecord(turn: ThreadTurn): CoachTurnRecord {
   }
 }
 
+function mergeSavedTurns(local: ThreadTurn[], saved: CoachTurnRecord[]): ThreadTurn[] {
+  const remote = saved
+    .map(fromRecord)
+    .filter((turn): turn is ThreadTurn => Boolean(turn))
+  const remoteIds = new Set(remote.map((turn) => turn.id))
+  return [...remote, ...local.filter((turn) => !remoteIds.has(turn.id))]
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+    .slice(-40)
+}
+
 export function Coach() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { user } = useAuth()
@@ -480,6 +490,7 @@ export function Coach() {
   const [journeyHint, setJourneyHint] = useState<string | null>(null)
   const [nextIntent, setNextIntent] = useState<CoachIntent>('progress')
   const persistSeq = useRef(0)
+  const persistQueuesRef = useRef(new Map<string, Promise<CoachTurnRecord[]>>())
   const threadEndRef = useRef<HTMLDivElement>(null)
   const resultTasksRef = useRef(new Map<string, Promise<ThreadTurn[]>>())
   const resultAttemptsRef = useRef(new Map<string, number>())
@@ -494,16 +505,21 @@ export function Coach() {
     listPreparations()
       .then((journeys) => {
         if (cancelled) return
-        const active = journeys
-          .filter((journey) => !JOURNEY_FINISHED_STATUSES.includes(journey.status))
-          .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0]
-        if (!active) {
+        const linked = thread?.preparationId
+          ? journeys.find((journey) => journey.id === thread.preparationId)
+          : null
+        const selected =
+          linked ??
+          journeys
+            .filter((journey) => !JOURNEY_FINISHED_STATUSES.includes(journey.status))
+            .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0]
+        if (!selected) {
           setJourneyHint(null)
           setNextIntent('progress')
           return
         }
-        const next = active.nextStage ? ` Next round is ${active.nextStage.name}.` : ''
-        setJourneyHint(`You have a ${active.interview.companyName} journey.${next}`)
+        const next = selected.nextStage ? ` Next round is ${selected.nextStage.name}.` : ''
+        setJourneyHint(`You have a ${selected.interview.companyName} journey.${next}`)
         setNextIntent(isAccessible('prepare') ? 'prepare' : 'progress')
       })
       .catch(() => {
@@ -515,7 +531,7 @@ export function Coach() {
     return () => {
       cancelled = true
     }
-  }, [isAccessible])
+  }, [isAccessible, thread?.preparationId])
 
   useEffect(() => {
     let cancelled = false
@@ -717,8 +733,8 @@ export function Coach() {
     if (!task) {
       resultAttemptsRef.current.set(taskKey, (resultAttemptsRef.current.get(taskKey) ?? 0) + 1)
       task = buildResultTurns().then(async (nextTurns) => {
-        await saveCoachTurns(currentThread.id, nextTurns.map(toRecord))
-        return nextTurns
+        const saved = await queueTurnSave(currentThread.id, nextTurns)
+        return mergeSavedTurns(nextTurns, saved)
       })
       resultTasksRef.current.set(taskKey, task)
     }
@@ -729,7 +745,7 @@ export function Coach() {
         if (!active) return
         resultTasksRef.current.delete(taskKey)
         resultAttemptsRef.current.delete(taskKey)
-        setTurns(nextTurns)
+        setTurns((current) => mergeSavedTurns(current, nextTurns.map(toRecord)))
         const nextParams = new URLSearchParams(searchParams)
         nextParams.delete(resultParam)
         setSearchParams(nextParams, { replace: true })
@@ -756,11 +772,27 @@ export function Coach() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [elevateResultParam, loadingThread, replayResultParam, resultRetryNonce, thread?.id])
 
+  async function queueTurnSave(threadId: string, next: ThreadTurn[]) {
+    const previous = persistQueuesRef.current.get(threadId)
+    const request = (previous ?? Promise.resolve([]))
+      .catch(() => [])
+      .then(async () => (await saveCoachTurns(threadId, next.map(toRecord))).turns)
+    persistQueuesRef.current.set(threadId, request)
+    try {
+      return await request
+    } finally {
+      if (persistQueuesRef.current.get(threadId) === request) {
+        persistQueuesRef.current.delete(threadId)
+      }
+    }
+  }
+
   async function persistTurns(threadId: string, next: ThreadTurn[]) {
     const seq = ++persistSeq.current
     setTurns(next)
-    await saveCoachTurns(threadId, next.map(toRecord))
+    const saved = await queueTurnSave(threadId, next)
     if (seq === persistSeq.current) {
+      setTurns((current) => mergeSavedTurns(current, saved))
       setThreads((current) =>
         current
           .map((item) =>
@@ -859,41 +891,72 @@ export function Coach() {
 
   /** Rule-based routing. Used when the model is unavailable or returns nothing usable. */
   function fallbackTurns(request: string): ThreadTurn[] {
-    const nextTurns: ThreadTurn[] = []
-    const pendingPropose = turns.some(
-      (turn) => turn.role === 'coach' && turn.kind === 'goal-propose' && !turn.confirmed,
-    )
-    const suggestedTitle = !namedGoal && !pendingPropose ? proposeCoachGoalTitle(request) : null
-    if (suggestedTitle) {
-      nextTurns.push({
+    const detected = isNextActionRequest(request) ? nextIntent : detectCoachIntent(request)
+    const module = availableIntents.some((item) => item.id === detected) ? detected : null
+    if (!module) {
+      return [
+        {
+          id: newTurnId(),
+          role: 'coach',
+          kind: 'clarify',
+          text: 'I’ll choose the most useful next step once I understand the outcome.',
+          question: 'What are you preparing for, and when do you need it?',
+          options: [],
+          createdAt: nowIso(),
+        },
+      ]
+    }
+
+    const isBaseline =
+      module === 'elevate' && /\b(assess|assessment|baseline|overall|communication)\b/i.test(request)
+    const content: Record<CoachModule, { text: string; label: string }> = {
+      elevate: isBaseline
+        ? {
+            text:
+              'A short baseline is the best next step. It will assess clarity, pace, confidence, and filler words together, then I can choose the strongest practice focus.',
+            label: 'Start 3-minute assessment',
+          }
+        : {
+            text:
+              'A focused live drill is the most useful next step. I’ll carry this context into the practice so you can work on the task, not configure a workflow.',
+            label: 'Start practice',
+          },
+      replay: {
+        text:
+          'The recording gives us real evidence, so I recommend analysing it before choosing what to practise next.',
+        label: 'Analyse recording',
+      },
+      prepare: {
+        text:
+          'Your interview journey is the right continuity point. I recommend opening it and working from the next round.',
+        label: 'Open journey',
+      },
+      progress: {
+        text:
+          'Your tracked outcomes will show whether to continue the current focus or change it. I recommend reviewing that evidence first.',
+        label: 'Review progress',
+      },
+    }
+    const selected = content[module]
+    return [
+      {
         id: newTurnId(),
         role: 'coach',
-        kind: 'goal-propose',
-        suggestedTitle,
-        routeAfterConfirm: true,
+        kind: 'recommend',
+        text: selected.text,
+        module,
+        label: selected.label,
+        reason: '',
+        brief: {
+          focusArea: isBaseline ? 'snapshot' : null,
+          scenario: module === 'elevate' ? request : null,
+          durationSec: isBaseline ? 180 : null,
+          preparationId: module === 'prepare' ? thread?.preparationId ?? null : null,
+          stageId: null,
+        },
         createdAt: nowIso(),
-      })
-    } else if (isNextActionRequest(request)) {
-      const intent = availableIntents.some((item) => item.id === nextIntent)
-        ? nextIntent
-        : 'progress'
-      nextTurns.push({ id: newTurnId(), role: 'coach', kind: 'intent', intent, createdAt: nowIso() })
-    } else {
-      const routedIntent = detectCoachIntent(request)
-      const routeIsAvailable = availableIntents.some((item) => item.id === routedIntent)
-      nextTurns.push(
-        routedIntent && routeIsAvailable
-          ? {
-              id: newTurnId(),
-              role: 'coach',
-              kind: 'route-confirm',
-              intent: routedIntent,
-              createdAt: nowIso(),
-            }
-          : { id: newTurnId(), role: 'coach', kind: 'confirm', createdAt: nowIso() },
-      )
-    }
-    return nextTurns
+      },
+    ]
   }
 
   function coachTurnsFrom(response: CoachResponse): ThreadTurn[] {
@@ -1003,6 +1066,21 @@ export function Coach() {
         history: historyFor(turns),
         answeringClarification,
       })
+      const recommendedPreparationId = response?.recommend?.brief.preparationId
+      if (recommendedPreparationId && recommendedPreparationId !== thread.preparationId) {
+        setThread((current) =>
+          current?.id === thread.id
+            ? { ...current, preparationId: recommendedPreparationId }
+            : current,
+        )
+        setThreads((current) =>
+          current.map((item) =>
+            item.id === thread.id
+              ? { ...item, preparationId: recommendedPreparationId }
+              : item,
+          ),
+        )
+      }
       if (response?.goalTitle && !namedGoal) {
         try {
           const updated = await patchCoachThread(thread.id, { title: response.goalTitle })
@@ -1521,7 +1599,13 @@ export function Coach() {
               return <CoachPulseCard key={turn.id} threadId={thread?.id} />
             }
             if (turn.intent === 'prepare') {
-              return <CoachPrepareCard key={turn.id} threadId={thread?.id} />
+              return (
+                <CoachPrepareCard
+                  key={turn.id}
+                  threadId={thread?.id}
+                  preparationId={thread?.preparationId}
+                />
+              )
             }
             if (turn.intent === 'elevate') {
               return <CoachElevateCard key={turn.id} userId={user?.id} threadId={thread?.id} />
