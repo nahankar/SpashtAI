@@ -539,10 +539,10 @@ class AudioProcessor:
         filler_count = speech.filler_count
         filler_rate = speech.filler_rate
         
-        # Prosodic features (with fallbacks)
+        # Prosodic features — never invent mid-scale defaults without a waveform
         pitch_variation = prosody.pitch_variation if prosody else 0.0
-        energy_stability = prosody.intensity_stability if prosody else 5.0
-        voice_quality = self._calculate_voice_quality_score(prosody) if prosody else 5.0
+        energy_stability = prosody.intensity_stability if prosody else 0.0
+        voice_quality = self._calculate_voice_quality_score(prosody) if prosody else 0.0
         
         confidence_indicators = {
             'pitch_range_semitones': self._hz_to_semitones(pitch_variation) if prosody else 0.0,
@@ -595,8 +595,8 @@ class AudioProcessor:
             filler_word_count=speech.filler_count,
             filler_word_rate=speech.filler_rate,
             pitch_variation=prosody.pitch_variation if prosody else 0.0,
-            energy_stability=prosody.intensity_stability if prosody else 5.0,
-            voice_quality_score=self._calculate_voice_quality_score(prosody) if prosody else 5.0,
+            energy_stability=prosody.intensity_stability if prosody else 0.0,
+            voice_quality_score=self._calculate_voice_quality_score(prosody) if prosody else 0.0,
             confidence_indicators={}
         )
     

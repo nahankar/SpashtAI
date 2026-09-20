@@ -18,6 +18,14 @@ import {
 import { saveSkillScoresToPulse } from '../analytics/progressPulse'
 import { generateTurnSuggestions } from '../analytics/turnSuggestions'
 import { getElevateSessionOwnerId, resolveRequestExportFlags } from '../lib/userExportFlags'
+import { fetchProsodyForPath } from '../analytics/audioEnrichment'
+import {
+  hasRealProsody,
+  mergeCommunicationSignals,
+  mergeProcessingStatus,
+  resolveAudioStatus,
+  shouldWritePulse,
+} from '../analytics/audioStatus'
 
 const SIGNAL_API_URL = process.env.SIGNAL_API_URL || 'http://localhost:4001'
 const INTERNAL_AGENT_TOKEN =
@@ -34,7 +42,7 @@ const INTERNAL_AGENT_TOKEN =
  */
 export async function analyzeSession(req: Request, res: Response) {
   const { sessionId } = req.params
-  const { autoTrackPulse = false, source = 'elevate' } = req.body || {}
+  const { autoTrackPulse = false, source = 'elevate', audioCapture = null } = req.body || {}
 
   try {
     // 1. Load session + transcript
@@ -113,43 +121,53 @@ export async function analyzeSession(req: Request, res: Response) {
     // 3. Calculate skill scores
     const { scores, components } = calculateSkillScores(signals, messages.length)
 
-    // 4. Generate coaching insights (provider: local-audio | bedrock-audio | bedrock-text)
-    const audioResolved = await resolveElevateSessionAudio(sessionId)
+    const existingMetrics = await prisma.sessionMetrics.findUnique({
+      where: { sessionId },
+      select: {
+        communicationSignals: true,
+        coachingInsights: true,
+        processingStatus: true,
+        skillScores: true,
+      },
+    })
 
-    // 4b. Acoustic prosody (pitch/energy/voice-quality/pauses) from the user's
-    // recording via the Python signal service (Praat + ffmpeg). Best-effort: the
-    // text signals + scores still stand if the recording or DSP is unavailable.
-    if (audioResolved?.audioPath) {
-      try {
-        const prosodyRes = await fetch(`${SIGNAL_API_URL}/analyze-prosody`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-internal-agent-token': INTERNAL_AGENT_TOKEN,
-          },
-          body: JSON.stringify({ sessionId, audioPath: audioResolved.audioPath }),
-          // Best-effort: skip prosody rather than block scores/insights persistence.
-          signal: AbortSignal.timeout(25000),
-        })
-        if (prosodyRes.ok) {
-          const data = await prosodyRes.json()
-          if (data?.prosody) {
-            ;(signals as any).prosody = data.prosody
-            console.log(`[analytics] ${sessionId} prosody:`, data.prosody)
-          }
-        } else {
-          console.warn(`[analytics] prosody API ${prosodyRes.status}`)
-        }
-      } catch (prosodyErr: any) {
-        console.warn('[analytics] prosody analysis skipped:', prosodyErr.message)
+    // 4. Acoustic prosody only from a readable recording. A short wait covers
+    // an in-flight browser upload; timeout stays pending, never unavailable.
+    let audioResolved = await resolveElevateSessionAudio(sessionId)
+    if (!audioResolved) {
+      for (let i = 0; i < 3 && !audioResolved; i += 1) {
+        await new Promise((r) => setTimeout(r, 1000))
+        audioResolved = await resolveElevateSessionAudio(sessionId)
       }
     }
+
+    if (audioResolved?.audioPath) {
+      try {
+        const prosody = await fetchProsodyForPath(sessionId, audioResolved.audioPath)
+        if (hasRealProsody({ prosody })) {
+          ;(signals as { prosody?: unknown }).prosody = prosody
+        }
+      } catch (prosodyErr: unknown) {
+        const message = prosodyErr instanceof Error ? prosodyErr.message : String(prosodyErr)
+        console.warn('[analytics] prosody analysis skipped:', message)
+      }
+    }
+
+    const mergedSignals = mergeCommunicationSignals(
+      existingMetrics?.communicationSignals,
+      signals as unknown as Record<string, unknown>,
+    )
+    const audioStatus = resolveAudioStatus({
+      hasReadableRecording: Boolean(audioResolved?.audioPath),
+      capture: typeof audioCapture === 'string' ? audioCapture : null,
+    })
+    const audioProcessed = hasRealProsody(mergedSignals)
 
     let insights
     try {
       insights = await generateCoachingInsights({
         skillScores: scores,
-        signals,
+        signals: mergedSignals as unknown as TextSignals,
         sessionName: session.sessionName || undefined,
         focusArea: session.focusArea || undefined,
         totalMessages: messages.length,
@@ -159,13 +177,16 @@ export async function analyzeSession(req: Request, res: Response) {
       })
     } catch (insightErr: any) {
       console.error('Coaching insight generation failed:', insightErr.message)
-      insights = { error: insightErr.message }
+      insights = existingMetrics?.coachingInsights ?? { error: insightErr.message }
     }
 
-    // 5. Persist results (cast to plain JSON for Prisma)
     const skillScoresJson = JSON.parse(JSON.stringify({ scores, components }))
-    const signalsJson = JSON.parse(JSON.stringify(signals))
+    const signalsJson = JSON.parse(JSON.stringify(mergedSignals))
     const insightsJson = JSON.parse(JSON.stringify(insights))
+    const processingStatusJson = mergeProcessingStatus(existingMetrics?.processingStatus, {
+      audioStatus,
+      audioProcessed,
+    })
 
     await prisma.sessionMetrics.upsert({
       where: { sessionId },
@@ -174,17 +195,28 @@ export async function analyzeSession(req: Request, res: Response) {
         skillScores: skillScoresJson,
         communicationSignals: signalsJson,
         coachingInsights: insightsJson,
+        processingStatus: processingStatusJson,
       },
       update: {
         skillScores: skillScoresJson,
         communicationSignals: signalsJson,
         coachingInsights: insightsJson,
+        processingStatus: processingStatusJson,
       },
     })
 
-    // 6. Auto-track Progress Pulse if requested
     let pulseCount = 0
-    if (autoTrackPulse && session.userId) {
+    const existingPulseRows = sessionId
+      ? await prisma.progressPulse.count({ where: { sessionId } })
+      : 0
+    if (
+      session.userId &&
+      shouldWritePulse({
+        autoTrackPulse: Boolean(autoTrackPulse),
+        progressPulseStatus: session.progressPulseStatus,
+        existingPulseRows,
+      })
+    ) {
       try {
         pulseCount = await saveSkillScoresToPulse(
           session.userId,

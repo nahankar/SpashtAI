@@ -85,6 +85,9 @@ export async function saveSkillScoresToPulse(
   scores: SkillScores,
   components?: Record<string, Record<string, number>>,
 ): Promise<number> {
+  const already = await prisma.progressPulse.count({ where: { sessionId } })
+  if (already > 0) return 0
+
   const entries = skillScoresToPulseEntries(scores, components)
   if (entries.length === 0) return 0
 

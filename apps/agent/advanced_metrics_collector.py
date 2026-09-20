@@ -5,6 +5,7 @@ Integrates audio processing, content analysis, and intelligent scoring
 import asyncio
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
@@ -191,7 +192,9 @@ class AdvancedMetricsCollector:
                 delivery_metrics = await self.audio_processor.analyze_delivery(user_text, user_audio_file_path)
                 if delivery_metrics:
                     self.session_metrics.delivery_metrics = delivery_metrics
-                    self.session_metrics.audio_processed = True
+                    self.session_metrics.audio_processed = bool(
+                        user_audio_file_path and os.path.exists(user_audio_file_path)
+                    )
                     logger.info("✅ Audio delivery analysis completed")
                 else:
                     logger.warning("⚠️ Audio delivery analysis returned no results")

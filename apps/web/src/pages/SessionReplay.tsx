@@ -441,6 +441,8 @@ export function SessionReplay({
   // Stream via authenticated URL so the browser can range-seek (blob WebM skips fail).
   useEffect(() => {
     if (!sessionId) return
+    let cancelled = false
+    let found = false
     setAudioLoading(true)
     const url = getAuthenticatedMediaUrl(`/sessions/${sessionId}/recording/stream`)
     if (!url) {
@@ -449,8 +451,48 @@ export function SessionReplay({
       setAudioLoading(false)
       return
     }
-    setAudioUrl(url)
-    setAudioAvailable(true)
+
+    const probe = (silent: boolean) =>
+      fetch(url, { headers: { Range: 'bytes=0-0' } })
+        .then((res) => {
+          if (cancelled) return
+          if (res.ok || res.status === 206) {
+            found = true
+            setAudioUrl(url)
+            setAudioAvailable(true)
+          } else if (!silent) {
+            setAudioUrl(null)
+            setAudioAvailable(false)
+          }
+        })
+        .catch(() => {
+          if (cancelled || silent) return
+          setAudioUrl(null)
+          setAudioAvailable(false)
+        })
+        .finally(() => {
+          if (!cancelled && !silent) setAudioLoading(false)
+        })
+
+    void probe(false)
+    const started = Date.now()
+    const poll = window.setInterval(() => {
+      if (cancelled || found || document.visibilityState === 'hidden') return
+      if (Date.now() - started > 60_000) {
+        window.clearInterval(poll)
+        return
+      }
+      void probe(true)
+    }, 4000)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && !found) void probe(true)
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      cancelled = true
+      window.clearInterval(poll)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [sessionId])
 
   // Keep playback rate in sync.

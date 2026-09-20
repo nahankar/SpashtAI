@@ -2625,26 +2625,36 @@ async def entrypoint(ctx: JobContext):
             except Exception as turns_error:
                 logger.error(f"❌ Error persisting session turns: {turns_error}")
 
-        # ── Auto-trigger v2 analytics so insights are never empty ──────────
-        # Runs server-side (signal API + skill scores + Bedrock) even if the user
-        # closes the tab before the frontend can call /analyze.
+        # ── Text-only v2 backstop if the browser never called /analyze ──────
+        # Never tracks Pulse. Skip when the Leave path already persisted scores.
         if persistence_enabled:
             try:
                 import aiohttp
+                await asyncio.sleep(3)
                 async with aiohttp.ClientSession() as _as:
-                    analyze_url = f"{SERVER_URL}/sessions/{session_id}/analyze"
-                    async with _as.post(
-                        analyze_url,
-                        json={"autoTrackPulse": True, "source": "elevate"},
-                        headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
-                        timeout=aiohttp.ClientTimeout(total=60.0),
-                    ) as resp:
-                        if resp.status == 200:
-                            logger.info("✅ v2 analytics pipeline triggered at session end")
+                    headers = {"x-internal-agent-token": INTERNAL_AGENT_TOKEN}
+                    scores_url = f"{SERVER_URL}/sessions/{session_id}/skill-scores"
+                    async with _as.get(
+                        scores_url,
+                        headers=headers,
+                        timeout=aiohttp.ClientTimeout(total=8.0),
+                    ) as probe:
+                        if probe.status == 200:
+                            logger.info("ℹ️ Browser analytics already present — skipping agent /analyze")
                         else:
-                            logger.warning(f"⚠️ /analyze returned {resp.status}")
+                            analyze_url = f"{SERVER_URL}/sessions/{session_id}/analyze"
+                            async with _as.post(
+                                analyze_url,
+                                json={"autoTrackPulse": False, "source": "elevate"},
+                                headers=headers,
+                                timeout=aiohttp.ClientTimeout(total=60.0),
+                            ) as resp:
+                                if resp.status == 200:
+                                    logger.info("✅ v2 analytics backstop completed (non-Pulse)")
+                                else:
+                                    logger.warning(f"⚠️ /analyze backstop returned {resp.status}")
             except Exception as analyze_error:
-                logger.error(f"❌ Error triggering v2 analytics: {analyze_error}")
+                logger.error(f"❌ Error triggering v2 analytics backstop: {analyze_error}")
 
         if conversation_logger:
             await conversation_logger.close()

@@ -297,7 +297,7 @@ app.get('/sessions/:sessionId/advanced-metrics', requireAuth, getAdvancedMetrics
 // Accepts the agent's internal token so analytics run at session end even if
 // the user closes the tab before the frontend can trigger /analyze.
 app.post('/sessions/:sessionId/analyze', requireAuthOrAgent, analyzeSession)
-app.get('/sessions/:sessionId/skill-scores', requireAuth, getSkillScores)
+app.get('/sessions/:sessionId/skill-scores', requireAuthOrAgent, getSkillScores)
 app.get('/sessions/:sessionId/coaching-insights', requireAuth, getCoachingInsights)
 app.get('/sessions/:sessionId/communication-signals', requireAuth, getCommunicationSignals)
 app.get('/sessions/:sessionId/turn-suggestions', requireAuth, getTurnSuggestions)

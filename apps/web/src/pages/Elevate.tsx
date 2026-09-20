@@ -41,7 +41,7 @@ import { useConfirm } from '@/hooks/useConfirm'
 import { Trash2, CheckSquare, Square, Target, ArrowRight, Play, ChevronDown, ChevronUp, BarChart3, CheckCircle2, RefreshCw, Download, Loader2 } from 'lucide-react'
 import { generateSessionPdf, type SessionReport } from '@/lib/generate-session-pdf'
 import { CoachAudioBootstrap } from '@/components/session/CoachAudioBootstrap'
-import { SessionRecorder } from '@/components/session/SessionRecorder'
+import { SessionRecorder, type SessionRecorderHandle } from '@/components/session/SessionRecorder'
 import { stripThinkingBlocks } from '@/lib/stripThinking'
 import {
   UserTurnBubble,
@@ -51,6 +51,7 @@ import {
 import type { SessionTurnRecord } from '@/hooks/useSessionMetrics'
 import { getPreparation, linkPreparationPractice } from '@/lib/prepare-api'
 import { COACH_BUBBLE, USER_BUBBLE } from '@/lib/conversation'
+import { isUsableProsody } from '@/lib/prosody'
 import { markCoachHomeResultSeen, recordCoachAction } from '@/lib/coach-api'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
@@ -139,6 +140,7 @@ export function Elevate() {
   const [url, setUrl] = useState<string | null>(null)
   const [isJoining, setIsJoining] = useState(false)
   const joiningRef = useRef(false)
+  const recorderRef = useRef<SessionRecorderHandle>(null)
   const [isLeaving, setIsLeaving] = useState(false)
   const [assistantState, setAssistantState] = useState<'restarting' | 'ready' | 'recovering' | 'unknown'>('unknown')
   const [isSessionPaused, setIsSessionPaused] = useState(false)
@@ -596,7 +598,7 @@ export function Elevate() {
         })
       }
 
-      if (prosody && (prosody.voiceQuality || prosody.pitchVariation || prosody.energyStability)) {
+      if (isUsableProsody(prosody)) {
         const vq = prosody.voiceQuality ?? 0
         const pv = prosody.pitchVariation ?? 0
         const es = prosody.energyStability ?? 0
@@ -1264,6 +1266,16 @@ export function Elevate() {
     const currentSessionId = sessionId
     if (currentSessionId) logEvent('event', 'elevate.session_leave', { sessionId: currentSessionId })
 
+    let capture: { ok: boolean; audioCapture: 'uploaded' | 'pending' | 'failed' | 'unavailable' } = {
+      ok: false,
+      audioCapture: 'pending',
+    }
+    try {
+      capture = (await recorderRef.current?.finalize()) ?? capture
+    } catch {
+      capture = { ok: false, audioCapture: 'failed' }
+    }
+
     setToken(null)
     setUrl(null)
     setSessionId(null)
@@ -1315,7 +1327,11 @@ export function Elevate() {
         const analyzeRes = await fetch(`${API_BASE_URL}/sessions/${currentSessionId}/analyze`, {
           method: 'POST',
           headers: getAuthHeaders(),
-          body: JSON.stringify({ autoTrackPulse: trackIt, source: 'elevate' }),
+          body: JSON.stringify({
+            autoTrackPulse: trackIt,
+            source: 'elevate',
+            audioCapture: capture.audioCapture,
+          }),
         })
         if (analyzeRes.ok) {
           const result = await analyzeRes.json()
@@ -2037,7 +2053,7 @@ export function Elevate() {
                 >
                   <RoomAudioRenderer />
                   <CoachAudioBootstrap />
-                  <SessionRecorder sessionId={sessionId} />
+                  <SessionRecorder ref={recorderRef} sessionId={sessionId} />
                   <StartAudio label="Click to enable coach audio" />
                   <div className="flex justify-center w-full mb-2">
                     <AgentVisualizer className="bg-muted/20 rounded-lg w-full" isPaused={isSessionPaused} compact />

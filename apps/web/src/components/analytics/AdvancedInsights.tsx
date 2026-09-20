@@ -13,6 +13,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '..
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
 import { getAuthHeaders } from '@/lib/api-client';
+import { hasRealProsody, isUsableProsody } from '@/lib/prosody';
 
 /**
  * V2 analytics shapes (from /communication-signals, /skill-scores,
@@ -49,7 +50,7 @@ interface V2Coaching {
 /** Map the deterministic v2 signals + LLM coaching into this card's shape. */
 function buildFromV2(
   signals: V2Signals | null,
-  skill: V2SkillScores | null,
+  _skill: V2SkillScores | null,
   coaching: V2Coaching | null,
 ): AdvancedMetrics {
   const s = signals ?? {}
@@ -57,7 +58,6 @@ function buildFromV2(
   const sc = s.sentenceComplexity ?? {}
   const sr = s.speechRate ?? {}
   const fl = s.fillers ?? {}
-  const scores = skill?.scores ?? {}
 
   // Derive sentence/complexity counts from the v2 signals instead of hardcoding
   // zeros: the engine reports avg sentence length + subordinate-clause ratio, so
@@ -93,19 +93,19 @@ function buildFromV2(
       }
     : undefined
 
-  const deliveryScore = (scores.delivery ?? null) as number | null
   const prosody = s.prosody ?? null
+  const hasAcousticProsody = isUsableProsody(prosody)
   const delivery_metrics: AdvancedMetrics['delivery_metrics'] = signals
     ? {
         speech_rate: sr.wpm ?? 0,
         articulation_rate: sr.wpm ?? 0,
-        pause_count: prosody?.pauseCount ?? 0,
-        mean_pause_duration: prosody?.meanPauseDuration ?? 0,
+        pause_count: hasAcousticProsody ? (prosody?.pauseCount ?? 0) : 0,
+        mean_pause_duration: hasAcousticProsody ? (prosody?.meanPauseDuration ?? 0) : 0,
         filler_word_count: fl.count ?? 0,
         filler_word_rate: (fl.rate ?? 0) * 100,
-        pitch_variation: prosody?.pitchVariation ?? 0,
-        energy_stability: prosody?.energyStability ?? 0,
-        voice_quality_score: prosody?.voiceQuality ?? deliveryScore ?? 0,
+        pitch_variation: hasAcousticProsody ? (prosody?.pitchVariation ?? 0) : 0,
+        energy_stability: hasAcousticProsody ? (prosody?.energyStability ?? 0) : 0,
+        voice_quality_score: hasAcousticProsody ? (prosody?.voiceQuality ?? 0) : 0,
       }
     : undefined
 
@@ -126,7 +126,7 @@ function buildFromV2(
 
   return {
     content_processed: Boolean(signals),
-    audio_processed: deliveryScore != null,
+    audio_processed: hasAcousticProsody,
     insights_generated: Boolean(coaching),
     content_metrics,
     delivery_metrics,
@@ -297,9 +297,11 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchAdvancedMetrics = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const fetchAdvancedMetrics = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) {
+      setLoading(true);
+      setError(null);
+    }
 
     try {
       const [signalsRes, scoresRes, coachingRes] = await Promise.all([
@@ -313,25 +315,56 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
       const coaching = coachingRes.ok ? ((await coachingRes.json()) as V2Coaching) : null;
 
       if (!signals && !skill && !coaching) {
-        setError('Advanced analysis not available yet');
-        setMetrics(null);
-        return;
+        if (!opts?.silent) {
+          setError('Advanced analysis not available yet');
+          setMetrics(null);
+        }
+        return false;
       }
 
       setMetrics(buildFromV2(signals, skill, coaching));
+      return hasRealProsody(signals);
     } catch (err) {
       console.error('Error fetching advanced metrics:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load advanced insights');
+      if (!opts?.silent) {
+        setError(err instanceof Error ? err.message : 'Failed to load advanced insights');
+      }
+      return false;
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
   }, [sessionId]);
 
   useEffect(() => {
-    if (isSessionEnded && sessionId) {
-      fetchAdvancedMetrics();
+    if (!isSessionEnded || !sessionId) return
+    let cancelled = false
+    let hasProsody = false
+    void fetchAdvancedMetrics().then((found) => {
+      if (!cancelled) hasProsody = Boolean(found)
+    })
+    const started = Date.now()
+    const poll = window.setInterval(() => {
+      if (cancelled || hasProsody || document.visibilityState === 'hidden') return
+      if (Date.now() - started > 60_000) {
+        window.clearInterval(poll)
+        return
+      }
+      void fetchAdvancedMetrics({ silent: true }).then((found) => {
+        if (found) hasProsody = true
+      })
+    }, 4000)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && !hasProsody) {
+        void fetchAdvancedMetrics({ silent: true })
+      }
     }
-  }, [sessionId, isSessionEnded, fetchAdvancedMetrics]);
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      cancelled = true
+      window.clearInterval(poll)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [sessionId, isSessionEnded, fetchAdvancedMetrics])
 
   if (!isSessionEnded) {
     return (
@@ -393,7 +426,7 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
         </CardHeader>
         <CardContent>
           <button 
-            onClick={fetchAdvancedMetrics}
+            onClick={() => void fetchAdvancedMetrics()}
             className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
           >
             Retry Loading
@@ -405,8 +438,7 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
 
   const c = metrics.content_metrics
   const d = metrics.delivery_metrics
-  const hasProsody =
-    !!d && (d.voice_quality_score > 0 || d.pitch_variation > 0 || d.energy_stability > 0)
+  const hasProsody = Boolean(metrics.audio_processed)
   const diversityPct = c ? c.vocabulary.diversity_ratio * 100 : 0
 
   return (

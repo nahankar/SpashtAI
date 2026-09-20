@@ -11,6 +11,7 @@ import {
   resolveRequestExportFlags,
 } from '../lib/userExportFlags'
 import { resolveElevateSessionAudio } from '../analytics/insightProviders/resolveSessionAudio'
+import { enrichElevateSessionAudio } from '../analytics/audioEnrichment'
 
 // Absolute base dir for client-uploaded recordings. Stored as an absolute
 // filePath so resolveElevateSessionAudio's absolute-path branch finds it.
@@ -107,6 +108,7 @@ export async function uploadSessionRecording(req: Request, res: Response) {
     }
 
     res.status(201).json({ success: true, recording })
+    void enrichElevateSessionAudio(sessionId)
   } catch (error) {
     console.error('Error uploading session recording:', error)
     res.status(500).json({ error: 'Failed to upload recording' })
