@@ -186,7 +186,9 @@ sudo cp infra/ec2/nginx/cloudflare-real-ip.conf /etc/nginx/snippets/cloudflare-r
 sudo cp infra/ec2/nginx/spasht.ai.conf infra/ec2/nginx/api.spasht.ai.conf /etc/nginx/sites-available/
 sudo ln -sf /etc/nginx/sites-available/spasht.ai.conf /etc/nginx/sites-enabled/spasht.ai.conf
 sudo ln -sf /etc/nginx/sites-available/api.spasht.ai.conf /etc/nginx/sites-enabled/api.spasht.ai.conf
-if [[ -f /etc/letsencrypt/live/livekit.spasht.ai/fullchain.pem ]]; then
+# Needs sudo: /etc/letsencrypt/live is 0700 root, so an unprivileged test
+# reports the cert missing and silently skips the vhost update.
+if sudo test -f /etc/letsencrypt/live/livekit.spasht.ai/fullchain.pem; then
   sudo cp infra/ec2/nginx/livekit.spasht.ai.conf /etc/nginx/sites-available/livekit.spasht.ai.conf
   sudo ln -sf /etc/nginx/sites-available/livekit.spasht.ai.conf /etc/nginx/sites-enabled/livekit.spasht.ai.conf
 else
