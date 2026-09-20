@@ -161,7 +161,15 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
           startedRef.current = true
           startOutcomeRef.current = 'started'
           startRecording(new MediaStream([track]))
-          console.log('🎙️ Auto session recording started')
+          const settings = track.getSettings() as MediaTrackSettings & {
+            voiceIsolation?: boolean
+          }
+          console.log('🎙️ Auto session recording started', {
+            echoCancellation: settings.echoCancellation,
+            noiseSuppression: settings.noiseSuppression,
+            autoGainControl: settings.autoGainControl,
+            voiceIsolation: settings.voiceIsolation,
+          })
           return
         }
         attempts += 1

@@ -15,7 +15,13 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { RoomEvent, Track, type RemoteParticipant } from 'livekit-client'
+import {
+  ParticipantEvent,
+  RoomEvent,
+  Track,
+  type AudioCaptureOptions,
+  type RemoteParticipant,
+} from 'livekit-client'
 import { RealTimeMetrics } from '@/components/analytics/RealTimeMetrics'
 import { SessionMetrics } from '@/components/analytics/SessionMetrics'
 import { SessionMetricsSummary } from '@/components/analytics/SessionMetricsSummary'
@@ -38,7 +44,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useFeatureFlags } from '@/contexts/FeatureFlagsContext'
 import { useUserExportFlags } from '@/hooks/useUserExportFlags'
 import { useConfirm } from '@/hooks/useConfirm'
-import { Trash2, CheckSquare, Square, Target, ArrowRight, Play, ChevronDown, ChevronUp, BarChart3, CheckCircle2, RefreshCw, Download, Loader2 } from 'lucide-react'
+import { Trash2, CheckSquare, Square, Target, ArrowRight, Play, ChevronDown, ChevronUp, BarChart3, CheckCircle2, RefreshCw, Download, Loader2, Mic, MicOff } from 'lucide-react'
 import { generateSessionPdf, type SessionReport } from '@/lib/generate-session-pdf'
 import { CoachAudioBootstrap } from '@/components/session/CoachAudioBootstrap'
 import { SessionRecorder, type SessionRecorderHandle } from '@/components/session/SessionRecorder'
@@ -57,6 +63,21 @@ import { markCoachHomeResultSeen, recordCoachAction } from '@/lib/coach-api'
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 const IDLE_TIMEOUT_MS = 15 * 60 * 1000
 const IDLE_WARNING_MS = 14 * 60 * 1000
+
+function audioFlag(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined || value === '') return fallback
+  return value !== 'false' && value !== '0'
+}
+
+// The mic track published here is the same track SessionRecorder captures, so these
+// constraints also decide what the prosody analysis sees. Auto gain control flattens
+// loudness, which is what energy stability measures — override to compare locally.
+const AUDIO_CAPTURE: AudioCaptureOptions = {
+  echoCancellation: audioFlag(import.meta.env.VITE_AUDIO_ECHO_CANCELLATION, true),
+  noiseSuppression: audioFlag(import.meta.env.VITE_AUDIO_NOISE_SUPPRESSION, true),
+  autoGainControl: audioFlag(import.meta.env.VITE_AUDIO_AUTO_GAIN_CONTROL, true),
+  voiceIsolation: audioFlag(import.meta.env.VITE_AUDIO_VOICE_ISOLATION, true),
+}
 
 interface PaceTurn {
   role?: string
@@ -142,6 +163,8 @@ export function Elevate() {
   const joiningRef = useRef(false)
   const recorderRef = useRef<SessionRecorderHandle>(null)
   const [isLeaving, setIsLeaving] = useState(false)
+  const [isResuming, setIsResuming] = useState(false)
+  const resumingRef = useRef(false)
   const [assistantState, setAssistantState] = useState<'restarting' | 'ready' | 'recovering' | 'unknown'>('unknown')
   const [isSessionPaused, setIsSessionPaused] = useState(false)
   const [isCompletedSessionView, setIsCompletedSessionView] = useState(false)
@@ -1005,22 +1028,43 @@ export function Elevate() {
   }, [])
 
   const resumeLiveSession = useCallback(async (resumeSessionId: string) => {
-    const newRoomName = `room_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
-    const u = new URL(`${API_BASE_URL}/livekit/token`)
-    u.searchParams.set('identity', identity)
-    u.searchParams.set('room', newRoomName)
-    u.searchParams.set('sessionId', resumeSessionId)
-    if (inboundBoothDemo || focusArea === 'snapshot') u.searchParams.set('boothDemo', '1')
-    const res = await fetch(u.toString())
-    if (!res.ok) throw new Error('Failed to get token')
-    const json = await res.json()
-    setSessionId(resumeSessionId)
-    setToken(json.token)
-    setUrl(json.url)
-    setRoomName(newRoomName)
-    setIsSessionPaused(false)
-    resetMetrics()
-  }, [focusArea, identity, inboundBoothDemo, resetMetrics])
+    if (resumingRef.current) return
+    resumingRef.current = true
+    setIsResuming(true)
+    try {
+      const newRoomName = `room_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
+      const u = new URL(`${API_BASE_URL}/livekit/token`)
+      u.searchParams.set('identity', identity)
+      u.searchParams.set('room', newRoomName)
+      u.searchParams.set('sessionId', resumeSessionId)
+      u.searchParams.set('userName', user?.firstName || user?.email?.split('@')[0] || '')
+      if (focusArea) u.searchParams.set('focusArea', focusArea)
+      if (inboundContext) u.searchParams.set('focusContext', inboundContext)
+      if (elevateSessionName.trim()) u.searchParams.set('sessionName', elevateSessionName.trim())
+      if (inboundBoothDemo || focusArea === 'snapshot') u.searchParams.set('boothDemo', '1')
+      const res = await fetch(u.toString())
+      if (!res.ok) throw new Error('Failed to get token')
+      const json = await res.json()
+      setSessionId(resumeSessionId)
+      setToken(json.token)
+      setUrl(json.url)
+      setRoomName(newRoomName)
+      setIsSessionPaused(false)
+      resetMetrics()
+    } finally {
+      resumingRef.current = false
+      setIsResuming(false)
+    }
+  }, [
+    elevateSessionName,
+    focusArea,
+    identity,
+    inboundBoothDemo,
+    inboundContext,
+    resetMetrics,
+    user?.email,
+    user?.firstName,
+  ])
 
   // ── Screen Wake Lock: prevent macOS from sleeping during active voice session ──
   useEffect(() => {
@@ -1075,18 +1119,11 @@ export function Elevate() {
     }, IDLE_WARNING_MS)
 
     idleTimerRef.current = setTimeout(() => {
-      console.log('💤 Idle timeout — auto-pausing session')
-      setIdleWarning(false)
-      // Save session data before disconnecting
-      if (sessionId) {
-        fetch(`${API_BASE_URL}/sessions/${sessionId}/calculate-text-metrics`, {
-          method: 'POST', headers: getAuthHeaders()
-        }).catch(() => {})
-      }
-      // Disconnect LiveKit but keep session resumable
-      pauseLiveSession()
+      // Do not auto-pause: disconnecting LiveKit splits recordings and can
+      // overwrite persisted turns. Warn only until pause is segmented.
+      console.log('💤 Idle timeout — staying connected (pause is disabled)')
     }, IDLE_TIMEOUT_MS)
-  }, [joined, sessionId, pauseLiveSession])
+  }, [joined, sessionId])
 
   useEffect(() => {
     if (!joined) return
@@ -1978,23 +2015,22 @@ export function Elevate() {
             <div className="space-y-4">
               {idleWarning && (
                 <div className="rounded-md border border-yellow-400 bg-yellow-50 px-4 py-3 text-sm text-yellow-800 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <span>Session will auto-pause in 1 minute due to inactivity. Move your mouse or press a key to stay connected.</span>
-                  <Button size="sm" variant="outline" onClick={resetIdleTimer}>Stay Connected</Button>
+                  <span>No mouse or keyboard activity for a while. The session stays connected — mute if there is background noise, or Leave when you are done.</span>
+                  <Button size="sm" variant="outline" onClick={resetIdleTimer}>Dismiss</Button>
                 </div>
               )}
               {!token && !url && sessionId && !isSessionPaused && (
                 <div className="rounded-md border border-blue-400 bg-blue-50 px-4 py-3 text-sm text-blue-800 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <span>
-                    {isSessionPaused
-                      ? 'Session paused. User and assistant are both paused.'
-                      : 'Session disconnected. Your conversation is saved.'}
-                  </span>
-                  <Button size="sm" onClick={() => {
+                  <span>Session disconnected. Your conversation is saved.</span>
+                  <Button
+                    size="sm"
+                    disabled={isResuming}
+                    onClick={() => {
                     if (!sessionId) return
                     resumeLiveSession(sessionId).catch((err) => {
                       console.error('Failed to resume session:', err)
                     })
-                  }}>Resume Session</Button>
+                  }}>{isResuming ? 'Reconnecting…' : 'Resume Session'}</Button>
                 </div>
               )}
               {!joined && isSessionPaused && (
@@ -2002,7 +2038,7 @@ export function Elevate() {
                   <div className="flex justify-center w-full mb-2">
                     <SessionStatusBar
                       isPaused
-                      label="Paused"
+                      label="Disconnected"
                       hint="Click Resume to continue"
                       className="bg-muted/20 rounded-lg w-full"
                     />
@@ -2022,6 +2058,7 @@ export function Elevate() {
                     </Button>
                     <Button
                       variant="secondary"
+                      disabled={isResuming}
                       onClick={() => {
                         if (!sessionId) return
                         resumeLiveSession(sessionId).catch((err) => {
@@ -2029,7 +2066,7 @@ export function Elevate() {
                         })
                       }}
                     >
-                      Resume
+                      {isResuming ? 'Reconnecting…' : 'Resume'}
                     </Button>
                     {exportFlags.enableAudioExport && (
                       <Button variant="outline" disabled title="Resume session to record audio">
@@ -2048,7 +2085,7 @@ export function Elevate() {
                   serverUrl={url}
                   connectOptions={{ autoSubscribe: true }}
                   video={false}
-                  audio={true}
+                  audio={AUDIO_CAPTURE}
                   onDisconnected={handleDisconnected}
                 >
                   <RoomAudioRenderer />
@@ -2095,7 +2132,6 @@ export function Elevate() {
                     </Button>
                     <InRoomControls
                       sessionId={sessionId}
-                      onPauseSession={pauseLiveSession}
                       enableAudioRecord={exportFlags.enableAudioExport}
                     />
                     <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={handleDiscard}>
@@ -2514,26 +2550,52 @@ function LiveKitConversation({
 
 function InRoomControls({
   sessionId,
-  onPauseSession,
   enableAudioRecord = false,
 }: {
   sessionId: string | null
-  onPauseSession: () => void
   /** Admin-enabled: live “Record My Audio” download during the session. */
   enableAudioRecord?: boolean
 }) {
   const room = useRoomContext()
   const { isRecording, startRecording, stopRecording } = useAudioRecording()
+  const [micEnabled, setMicEnabled] = useState(
+    () => room.localParticipant.isMicrophoneEnabled,
+  )
+  const [isTogglingMic, setIsTogglingMic] = useState(false)
 
-  const toggle = useCallback(async () => {
-    try {
-      await room.localParticipant.setMicrophoneEnabled(false)
-    } catch (error) {
-      console.warn('Failed to mute microphone before pause:', error)
-      toast.error('Mic mute failed, but session is paused')
+  useEffect(() => {
+    const syncMicState = () => {
+      setMicEnabled(room.localParticipant.isMicrophoneEnabled)
     }
-    onPauseSession()
-  }, [room, onPauseSession])
+
+    syncMicState()
+    room.localParticipant.on(ParticipantEvent.TrackMuted, syncMicState)
+    room.localParticipant.on(ParticipantEvent.TrackUnmuted, syncMicState)
+    room.localParticipant.on(ParticipantEvent.LocalTrackPublished, syncMicState)
+    room.localParticipant.on(ParticipantEvent.LocalTrackUnpublished, syncMicState)
+
+    return () => {
+      room.localParticipant.off(ParticipantEvent.TrackMuted, syncMicState)
+      room.localParticipant.off(ParticipantEvent.TrackUnmuted, syncMicState)
+      room.localParticipant.off(ParticipantEvent.LocalTrackPublished, syncMicState)
+      room.localParticipant.off(ParticipantEvent.LocalTrackUnpublished, syncMicState)
+    }
+  }, [room])
+
+  const toggleMicrophone = useCallback(async () => {
+    if (isTogglingMic) return
+    setIsTogglingMic(true)
+    try {
+      await room.localParticipant.setMicrophoneEnabled(!micEnabled)
+      setMicEnabled(room.localParticipant.isMicrophoneEnabled)
+      toast.success(micEnabled ? 'Microphone muted' : 'Microphone unmuted')
+    } catch (error) {
+      console.warn('Failed to change microphone state:', error)
+      toast.error(micEnabled ? 'Could not mute microphone' : 'Could not unmute microphone')
+    } finally {
+      setIsTogglingMic(false)
+    }
+  }, [isTogglingMic, micEnabled, room])
 
   const handleToggleRecording = useCallback(async () => {
     if (isRecording) {
@@ -2573,8 +2635,25 @@ function InRoomControls({
 
   return (
     <>
-      <Button variant="secondary" onClick={toggle}>
-        Pause
+      <Button
+        variant="outline"
+        onClick={toggleMicrophone}
+        disabled={isTogglingMic}
+        aria-pressed={!micEnabled}
+        title={
+          micEnabled
+            ? 'Mute your microphone while keeping the coach active'
+            : 'Unmute your microphone'
+        }
+      >
+        {isTogglingMic ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : micEnabled ? (
+          <MicOff className="h-4 w-4" />
+        ) : (
+          <Mic className="h-4 w-4" />
+        )}
+        {micEnabled ? 'Mute' : 'Unmute'}
       </Button>
       {enableAudioRecord && (
         <Button variant={isRecording ? 'destructive' : 'outline'} onClick={handleToggleRecording}>
