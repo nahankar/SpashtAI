@@ -50,3 +50,9 @@ client_secret_*.json
 
 # Local test assets
 Session Testing/
+
+# AWS billing exports
+costs.csv
+
+# Security review register (kept local; documents unpatched exploits)
+docs/SECURITY-ISSUES.md

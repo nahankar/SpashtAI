@@ -10,6 +10,7 @@ import atexit
 import json
 import logging
 import os
+import re
 import signal
 import time
 import aiohttp
@@ -29,6 +30,7 @@ from livekit.agents import (
 from livekit.agents import AgentSession, Agent, function_tool, RunContext, llm, stt
 from livekit.agents.llm import StopResponse
 from livekit.agents.voice.agent import ModelSettings
+from session_memory import build_resume_memory_messages
 from livekit.plugins import aws
 from exercise_templates import get_exercise_instructions, get_prepare_journey_instructions
 from monologue_guard import MONOLOGUE_FOCUS_AREAS, MonologueGuard
@@ -130,7 +132,7 @@ def _recording_bucket() -> str:
     return os.getenv("S3_RECORDING_BUCKET", "spashtai-s3-prod")
 
 
-async def fetch_session_history(session_id: str, max_messages: int = 12) -> list[dict]:
+async def fetch_session_history(session_id: str, max_messages: int = 60) -> list[dict]:
     """
     Fetch prior conversation messages for a session from server.
     Returns the most recent messages in chronological order.
@@ -243,67 +245,59 @@ async def fetch_coaching_context(session_id: str, focus_area: str, max_retries: 
     return None
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Resume continuity. Ranked session memory lives in session_memory.py.
+# ─────────────────────────────────────────────────────────────────────────────
+_RECALL_QUESTION_PATTERNS = (
+    re.compile(r"\b(did|have)\s+i\b", re.IGNORECASE),
+    re.compile(r"\bwhat\s+(did|was|were)\s+(i|my)\b", re.IGNORECASE),
+    re.compile(r"\b(do|can)\s+you\s+(remember|recall)\b", re.IGNORECASE),
+    re.compile(r"\b(remind|tell)\s+me\s+what\s+i\b", re.IGNORECASE),
+    # Asserting prior content ("I thought I told you…") is the same request:
+    # the user is challenging whether the coach still has the transcript.
+    re.compile(r"\bi\s+(just\s+|already\s+)?(told|said|mentioned|gave)\b", re.IGNORECASE),
+    re.compile(r"\bi\s+thought\s+i\b", re.IGNORECASE),
+)
+
+
+def is_recall_question(text: str) -> bool:
+    """True when the user is asking, or asserting, what they already said here.
+
+    Only meaningful for short turns — see the caller. A long practice answer
+    can contain "I told my team…" without being a question about the session.
+    """
+    return any(pattern.search(text or "") for pattern in _RECALL_QUESTION_PATTERNS)
+
+
 def build_resume_context(history_messages: list[dict]) -> str:
-    """Build a compact resume context string from prior messages."""
+    """Continuity directive for the system prompt on a resumed session.
+
+    Ranked session memory plus recent verbatim turns are replayed into the chat
+    context by `build_resume_chat_ctx`. This string must not restate the
+    transcript.
+    """
     if not history_messages:
         return ""
-
-    def clip(text: str, limit: int = 220) -> str:
-        text = (text or "").strip().replace("\n", " ")
-        if len(text) <= limit:
-            return text
-        return text[: limit - 3].rstrip() + "..."
-
-    # Normalize and clean messages first.
-    normalized = []
-    for msg in history_messages:
-        role = msg.get("role", "assistant")
-        content = (msg.get("content") or "").strip()
-        if not content:
-            continue
-        normalized.append({"role": role, "content": content})
-
-    if not normalized:
-        return ""
-
-    user_msgs = [m["content"] for m in normalized if m["role"] == "user"]
-    assistant_msgs = [m["content"] for m in normalized if m["role"] == "assistant"]
-
-    # Build compact memory summary.
-    summary_lines = [
-        f"- Conversation so far has {len(normalized)} messages.",
-    ]
-
-    if user_msgs:
-        summary_lines.append(f"- User recent focus: {clip(user_msgs[-1], 180)}")
-        if len(user_msgs) > 1:
-            summary_lines.append(f"- Earlier user context: {clip(user_msgs[-2], 180)}")
-
-    # Capture last assistant question, if any.
-    last_assistant_question = ""
-    for text in reversed(assistant_msgs):
-        if "?" in text:
-            last_assistant_question = text
-            break
-    if last_assistant_question:
-        summary_lines.append(
-            f"- Last assistant question/prompt: {clip(last_assistant_question, 180)}"
-        )
-
-    # Keep only recent dialogue snippets to preserve continuity.
-    recent_messages = normalized[-6:]
-    recent_lines = []
-    for msg in recent_messages:
-        speaker = "User" if msg["role"] == "user" else "Assistant"
-        recent_lines.append(f"{speaker}: {clip(msg['content'], 180)}")
-
     return (
-        "SESSION MEMORY SUMMARY:\n"
-        + "\n".join(summary_lines)
-        + "\n\nRECENT DIALOGUE SNIPPETS:\n"
-        + "\n".join(recent_lines)
-        + "\n\nContinue naturally from this context. Do not restart from introductions unless the user asks."
+        "RESUMED SESSION:\n"
+        "The user paused this session and came back. Session memory and the recent "
+        "dialogue in your conversation history are the real record of this session. "
+        "Continue from there: do not restart from introductions, do not re-ask what "
+        "they have already told you, and never say they have not covered something "
+        "that appears in it. If a detail is not in session memory or recent dialogue, "
+        "say you no longer have that detail rather than guessing."
     )
+
+
+def build_resume_chat_ctx(history_messages: list[dict]) -> llm.ChatContext | None:
+    """Replay ranked session memory plus the recent verbatim window."""
+    payloads = build_resume_memory_messages(history_messages)
+    if not payloads:
+        return None
+    ctx = llm.ChatContext.empty()
+    for item in payloads:
+        ctx.add_message(role=item["role"], content=item["content"])
+    return ctx
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -351,8 +345,9 @@ class CoachingAgent(Agent):
         monologue_guard: "MonologueGuard | None" = None,
         is_resume: bool = False,
         booth_demo: bool = False,
+        chat_ctx: llm.ChatContext | None = None,
     ) -> None:
-        super().__init__(instructions=instructions)
+        super().__init__(instructions=instructions, chat_ctx=chat_ctx)
         self._pacing_tracker = pacing_tracker
         # Optional handles used to push a fresh snapshot to the frontend at
         # the exact moment the LLM cites a number — keeps the spoken number
@@ -474,9 +469,17 @@ class CoachingAgent(Agent):
                 "Hello, welcome to SpashtAI. This is a short communication snapshot. "
                 "Tell me what you do in thirty seconds."
             )
-        # On a resumed session (the user paused then came back) greet with
-        # "welcome back" so it doesn't sound like a brand-new first meeting.
-        welcome = "welcome back to SpashtAI!" if self._is_resume else "welcome to SpashtAI!"
+        # On a resumed session (the user paused then came back) this is a
+        # continuation, not a first meeting — skip the focus-area and session
+        # brief, which would otherwise read as a restart of the same session.
+        if self._is_resume:
+            if self._user_name:
+                return (
+                    f"Welcome back, {self._user_name}. We're picking up where we left off — "
+                    "carry on whenever you're ready."
+                )
+            return "Welcome back. We're picking up where we left off — carry on whenever you're ready."
+        welcome = "welcome to SpashtAI!"
         if self._user_name:
             line = f"Hello {self._user_name}, {welcome}"
         else:
@@ -498,6 +501,18 @@ class CoachingAgent(Agent):
                 "Greet them in one sentence without using an account name or any past score. "
                 "Then ask: Tell me what you do in thirty seconds."
             )
+        if self._is_resume:
+            resume_parts = [
+                "The user paused this SpashtAI coaching session and has just resumed it.",
+                "YOU must speak first — welcome them back in one short sentence and invite them "
+                "to carry on.",
+                "This is the same session continuing: do not re-introduce yourself, restate the "
+                "session brief, or ask them to start over.",
+                "Keep it conversational and concise — no bullet lists or markdown.",
+            ]
+            if self._user_name:
+                resume_parts.append(f"Use their name: {self._user_name}.")
+            return " ".join(resume_parts)
         greeting_parts = [
             "You are starting a new SpashtAI coaching session.",
             "YOU must speak first — greet the user warmly in one or two short sentences.",
@@ -680,16 +695,27 @@ class CoachingAgent(Agent):
         # answers (25+ words), so the bar is higher there; conversational sessions
         # only need to catch non-answers and acknowledgments.
         short_turn_limit = 25 if self._focus_area in MONOLOGUE_FOCUS_AREAS else 12
-        if cumulative_words < short_turn_limit:
+        is_short_turn = cumulative_words < short_turn_limit
+        if is_short_turn and is_recall_question(user_text):
+            # A recall question is not a short answer to be scored. Reading the
+            # transcript back is the correct response, not a fabrication.
             guard_parts.append(
-                f"The user's last turn was only {cumulative_words} words — a short turn, "
-                "not a full spoken answer. Do NOT claim they delivered an introduction, "
-                "pitch, or answer, or that they completed an exercise (PREP, signposting, etc.). "
-                "Do NOT quote, paraphrase, or invent what they said, and do NOT cite a WPM, "
-                "filler count, or any metric for a turn this short. "
-                "Respond only to what they actually said; if they have not given a real answer "
-                "yet, invite them to begin. If they ask you to recall or quote earlier words you "
-                "do not have on record, say so honestly instead of guessing."
+                "The user is asking what they already said in this session. Answer from your "
+                "conversation history, including anything said before a pause — quoting it back "
+                "is correct here, not a fabrication. Say you have no record only if the history "
+                "genuinely lacks it. Do not ask them to repeat something already there, and do "
+                "not treat this question itself as a spoken answer to score."
+            )
+        elif is_short_turn:
+            guard_parts.append(
+                f"The user's CURRENT turn was only {cumulative_words} words — a short turn, not a "
+                "full spoken answer. Do not treat THIS turn as an introduction, pitch, answer, or "
+                "completed exercise (PREP, signposting, etc.), and do not cite a WPM, filler "
+                "count, or any metric for it. Do not invent or paraphrase content they did not "
+                "actually say. This applies to the current turn alone: earlier turns in your "
+                "conversation history still count as said, so never tell the user they have not "
+                "covered something that appears there. Respond to what they actually said; if "
+                "they have not given a real answer yet, invite them to begin."
             )
 
         parts: list[str] = []
@@ -1475,6 +1501,7 @@ async def entrypoint(ctx: JobContext):
     # 2) Dispatch/job metadata (backup)
     # 3) Fallback generated ID
     session_id = None
+    segment_id = None
 
     # 1) Try room metadata first (most reliable for resume flows)
     room_meta: dict = {}
@@ -1482,6 +1509,7 @@ async def entrypoint(ctx: JobContext):
         if hasattr(ctx, 'room') and getattr(ctx.room, 'metadata', None):
             room_meta = json.loads(ctx.room.metadata)
             session_id = room_meta.get('sessionId')
+            segment_id = room_meta.get('segmentId')
             if session_id:
                 logger.info(f"📦 Session ID loaded from room metadata: {session_id}")
     except Exception as e:
@@ -1531,8 +1559,13 @@ async def entrypoint(ctx: JobContext):
 
     history_messages = await fetch_session_history(session_id) if persistence_enabled else []
     resume_context = build_resume_context(history_messages)
+    resume_chat_ctx = build_resume_chat_ctx(history_messages)
     if history_messages:
-        logger.info("📚 Loaded %d prior messages for resumed context", len(history_messages))
+        logger.info(
+            "📚 Loaded %d prior messages for resumed context (%d replayed into chat history)",
+            len(history_messages),
+            len(resume_chat_ctx.items) if resume_chat_ctx else 0,
+        )
     else:
         logger.info("📚 No prior messages found for session context")
     conversation_logger = ConversationLogger(session_id) if persistence_enabled else None
@@ -1662,6 +1695,10 @@ async def entrypoint(ctx: JobContext):
             "reference prior sessions if real data is explicitly provided in your context "
             "(USER DATA / LAST PRACTICE SESSION). If no such data is provided, you have NO "
             "record of past sessions — say so honestly and do not invent recaps or quotes.\n"
+            "• Your own conversation history IS the record of THIS session, including anything "
+            "said before a pause. Never tell the user they have not said something that appears "
+            "there — if they ask whether they already introduced themselves or covered a topic, "
+            "check that history and answer from it.\n"
             "• If the user asks you to quote their earlier words and you have no provided "
             "transcript of them, say you don't have that on record rather than guessing.\n"
             "• NEVER give PREP or signposting feedback unless the user's last turn was a "
@@ -1831,6 +1868,7 @@ async def entrypoint(ctx: JobContext):
             monologue_guard=monologue_guard,
             is_resume=bool(history_messages),
             booth_demo=booth_demo,
+            chat_ctx=resume_chat_ctx,
         )
         logger.info("✅ CoachingAgent created (with get_live_pacing tool + live-sync push)")
         
@@ -2530,14 +2568,19 @@ async def entrypoint(ctx: JobContext):
                 
                 # Save advanced metrics to database
                 logger.info("💾 Saving advanced metrics to database...")
-                if persistence_enabled:
+                if persistence_enabled and not segment_id:
                     await advanced_metrics.save_to_database()
                     logger.info("✅ Metrics saved to database!")
+                elif segment_id:
+                    logger.info(
+                        "⏸️ Segment metrics kept live-only; final session analytics run on Leave"
+                    )
                 else:
                     logger.warning("⚠️ Skipping metrics DB save (ephemeral mode)")
                 
-                # 6. Mark session as ended in the database
-                if persistence_enabled:
+                # A segment ending is not the same as the user ending the session.
+                # Segment-aware browser sessions are finalized only by explicit Leave.
+                if persistence_enabled and not segment_id:
                     try:
                         import aiohttp
                         async with aiohttp.ClientSession() as session:
@@ -2558,8 +2601,10 @@ async def entrypoint(ctx: JobContext):
                                     logger.warning(f"⚠️ Failed to mark session as ended: {response.status}")
                     except Exception as end_error:
                         logger.error(f"❌ Error marking session as ended: {end_error}")
-                else:
+                elif not persistence_enabled:
                     logger.warning("⚠️ Skipping session end DB mark (ephemeral mode)")
+                else:
+                    logger.info("⏸️ Segment closed; session remains resumable until explicit Leave")
 
             except Exception as analytics_error:
                 logger.error(f"❌ Error processing advanced analytics: {analytics_error}", exc_info=True)
@@ -2603,6 +2648,8 @@ async def entrypoint(ctx: JobContext):
                     async with aiohttp.ClientSession() as _ts:
                         turns_url = f"{SERVER_URL}/internal/sessions/{session_id}/turns"
                         post_body: dict = {"turns": turns_payload}
+                        if segment_id:
+                            post_body["segmentId"] = segment_id
                         # STT timeline t0 (epoch ms). The server shifts all
                         # offsets onto the recording timeline using this anchor
                         # vs Session.recordingStartedAt, cancelling the variable
@@ -2627,7 +2674,11 @@ async def entrypoint(ctx: JobContext):
 
         # ── Text-only v2 backstop if the browser never called /analyze ──────
         # Never tracks Pulse. Skip when the Leave path already persisted scores.
-        if persistence_enabled:
+        should_run_final_backstop = (
+            persistence_enabled
+            and (not segment_id or await fetch_session_ended(session_id))
+        )
+        if should_run_final_backstop:
             try:
                 import aiohttp
                 await asyncio.sleep(3)
@@ -2655,6 +2706,8 @@ async def entrypoint(ctx: JobContext):
                                     logger.warning(f"⚠️ /analyze backstop returned {resp.status}")
             except Exception as analyze_error:
                 logger.error(f"❌ Error triggering v2 analytics backstop: {analyze_error}")
+        elif segment_id:
+            logger.info("⏸️ Skipping final analytics backstop for segment closure")
 
         if conversation_logger:
             await conversation_logger.close()

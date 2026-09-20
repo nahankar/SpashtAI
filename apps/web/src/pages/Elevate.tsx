@@ -19,9 +19,9 @@ import {
   ParticipantEvent,
   RoomEvent,
   Track,
-  type AudioCaptureOptions,
   type RemoteParticipant,
 } from 'livekit-client'
+import { AUDIO_CAPTURE } from '@/lib/audioCapture'
 import { RealTimeMetrics } from '@/components/analytics/RealTimeMetrics'
 import { SessionMetrics } from '@/components/analytics/SessionMetrics'
 import { SessionMetricsSummary } from '@/components/analytics/SessionMetricsSummary'
@@ -48,6 +48,7 @@ import { Trash2, CheckSquare, Square, Target, ArrowRight, Play, ChevronDown, Che
 import { generateSessionPdf, type SessionReport } from '@/lib/generate-session-pdf'
 import { CoachAudioBootstrap } from '@/components/session/CoachAudioBootstrap'
 import { SessionRecorder, type SessionRecorderHandle } from '@/components/session/SessionRecorder'
+import { settleRecordingBeforePause } from '@/lib/pauseCapture'
 import { stripThinkingBlocks } from '@/lib/stripThinking'
 import {
   UserTurnBubble,
@@ -64,19 +65,36 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000
 const IDLE_TIMEOUT_MS = 15 * 60 * 1000
 const IDLE_WARNING_MS = 14 * 60 * 1000
 
-function audioFlag(value: string | undefined, fallback: boolean): boolean {
-  if (value === undefined || value === '') return fallback
-  return value !== 'false' && value !== '0'
+async function createSessionSegment(sessionId: string, roomName: string): Promise<string> {
+  const segmentId = crypto.randomUUID()
+  const response = await fetch(`${API_BASE_URL}/sessions/${sessionId}/segments`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({
+      segmentId,
+      roomName,
+      startedAt: new Date().toISOString(),
+    }),
+  })
+  if (!response.ok) throw new Error('Failed to start session segment')
+  return segmentId
 }
 
-// The mic track published here is the same track SessionRecorder captures, so these
-// constraints also decide what the prosody analysis sees. Auto gain control flattens
-// loudness, which is what energy stability measures — override to compare locally.
-const AUDIO_CAPTURE: AudioCaptureOptions = {
-  echoCancellation: audioFlag(import.meta.env.VITE_AUDIO_ECHO_CANCELLATION, true),
-  noiseSuppression: audioFlag(import.meta.env.VITE_AUDIO_NOISE_SUPPRESSION, true),
-  autoGainControl: audioFlag(import.meta.env.VITE_AUDIO_AUTO_GAIN_CONTROL, true),
-  voiceIsolation: audioFlag(import.meta.env.VITE_AUDIO_VOICE_ISOLATION, true),
+async function closeSessionSegment(
+  sessionId: string,
+  segmentId: string,
+  audioStatus: 'available' | 'pending' | 'failed' | 'unavailable',
+  endedAt: Date = new Date(),
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}/sessions/${sessionId}/segments/${segmentId}`,
+    {
+      method: 'PATCH',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ endedAt: endedAt.toISOString(), audioStatus }),
+    },
+  )
+  if (!response.ok) throw new Error('Failed to close session segment')
 }
 
 interface PaceTurn {
@@ -162,15 +180,25 @@ export function Elevate() {
   const [isJoining, setIsJoining] = useState(false)
   const joiningRef = useRef(false)
   const recorderRef = useRef<SessionRecorderHandle>(null)
+  const intentionalDisconnectSegmentsRef = useRef(new Set<string>())
+  const handledDisconnectSegmentsRef = useRef(new Set<string>())
+  const pauseRequestedAtRef = useRef<Date | null>(null)
   const [isLeaving, setIsLeaving] = useState(false)
+  const [segmentId, setSegmentId] = useState<string | null>(null)
+  const [isPausing, setIsPausing] = useState(false)
+  const [pauseAudioFailure, setPauseAudioFailure] = useState<
+    'failed' | 'unavailable' | null
+  >(null)
   const [isResuming, setIsResuming] = useState(false)
   const resumingRef = useRef(false)
   const [assistantState, setAssistantState] = useState<'restarting' | 'ready' | 'recovering' | 'unknown'>('unknown')
   const [isSessionPaused, setIsSessionPaused] = useState(false)
+  const [pauseReason, setPauseReason] = useState<'intentional' | 'disconnected' | null>(null)
   const [isCompletedSessionView, setIsCompletedSessionView] = useState(false)
   const [viewSessionName, setViewSessionName] = useState<string | null>(null)
   const [viewSessionPulse, setViewSessionPulse] = useState<string | null>(null)
   const [viewFocusArea, setViewFocusArea] = useState<string | null>(null)
+  const [viewFocusContext, setViewFocusContext] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<string | null>(viewSessionId) // Initialize with URL param if present
   const [showMetrics, setShowMetrics] = useState(false)
   const [turnMetricsByIndex, setTurnMetricsByIndex] = useState<Record<number, TurnMetrics>>({})
@@ -910,6 +938,7 @@ export function Elevate() {
     const controller = new AbortController()
     setIsCompletedSessionView(false)
     ;(async () => {
+      let createdSegmentId: string | null = null
       try {
         const response = await fetch(`${API_BASE_URL}/sessions/${viewSessionId}`, {
           headers: getAuthHeaders(),
@@ -933,6 +962,9 @@ export function Elevate() {
         setViewSessionName(session.sessionName || null)
         setViewSessionPulse(session.progressPulseStatus || null)
         setViewFocusArea(session.focusArea || null)
+        setViewFocusContext(session.focusContext || null)
+        if (session.focusArea) setFocusArea(session.focusArea)
+        if (session.sessionName) setElevateSessionName(session.sessionName)
         if (!inboundPreparationId && session.preparationPractice) {
           setPrepareLaunch({
             preparationId: session.preparationPractice.preparationId,
@@ -959,10 +991,13 @@ export function Elevate() {
           await loadConversation(viewSessionId)
 
           const newRoomName = `room_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
+          const newSegmentId = await createSessionSegment(viewSessionId, newRoomName)
+          createdSegmentId = newSegmentId
           const u = new URL(`${API_BASE_URL}/livekit/token`)
           u.searchParams.set('identity', identity)
           u.searchParams.set('room', newRoomName)
           u.searchParams.set('sessionId', viewSessionId)
+          u.searchParams.set('segmentId', newSegmentId)
           u.searchParams.set('userName', user?.firstName || user?.email?.split('@')[0] || '')
           if (session.focusArea) u.searchParams.set('focusArea', session.focusArea)
           if (session.focusContext) u.searchParams.set('focusContext', session.focusContext)
@@ -972,17 +1007,34 @@ export function Elevate() {
           const res = await fetch(u.toString(), { signal: controller.signal })
           if (!res.ok) throw new Error('Failed to get token')
           const json = await res.json()
-          if (cancelled) return
+          if (cancelled) {
+            await closeSessionSegment(
+              viewSessionId,
+              newSegmentId,
+              'unavailable',
+            ).catch(() => undefined)
+            createdSegmentId = null
+            return
+          }
 
           setToken(json.token)
           setUrl(json.url)
           setRoomName(newRoomName)
+          setSegmentId(newSegmentId)
+          createdSegmentId = null
           setIsSessionPaused(false)
           resetMetrics()
           localStorage.setItem('spashtai_active_session', viewSessionId)
           localStorage.setItem('spashtai_session_timestamp', Date.now().toString())
         }
       } catch (error) {
+        if (createdSegmentId) {
+          await closeSessionSegment(
+            viewSessionId,
+            createdSegmentId,
+            'unavailable',
+          ).catch(() => undefined)
+        }
         if (cancelled || (error instanceof DOMException && error.name === 'AbortError')) return
         console.error('Error checking/resuming session:', error)
       }
@@ -1018,12 +1070,14 @@ export function Elevate() {
   const fallbackDispatchAttemptedRef = useRef<string | null>(null)
   const wakeLockRef = useRef<WakeLockSentinel | null>(null)
 
-  const pauseLiveSession = useCallback(() => {
+  const pauseLiveSession = useCallback((reason: 'intentional' | 'disconnected') => {
     setShowHistory(false)
     setIsSessionPaused(true)
+    setPauseReason(reason)
     setToken(null)
     setUrl(null)
     setRoomName('')
+    setSegmentId(null)
     setAssistantState('unknown')
   }, [])
 
@@ -1031,15 +1085,21 @@ export function Elevate() {
     if (resumingRef.current) return
     resumingRef.current = true
     setIsResuming(true)
+    let createdSegmentId: string | null = null
     try {
       const newRoomName = `room_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
+      const newSegmentId = await createSessionSegment(resumeSessionId, newRoomName)
+      createdSegmentId = newSegmentId
       const u = new URL(`${API_BASE_URL}/livekit/token`)
       u.searchParams.set('identity', identity)
       u.searchParams.set('room', newRoomName)
       u.searchParams.set('sessionId', resumeSessionId)
+      u.searchParams.set('segmentId', newSegmentId)
       u.searchParams.set('userName', user?.firstName || user?.email?.split('@')[0] || '')
       if (focusArea) u.searchParams.set('focusArea', focusArea)
-      if (inboundContext) u.searchParams.set('focusContext', inboundContext)
+      if (inboundContext || viewFocusContext) {
+        u.searchParams.set('focusContext', inboundContext || viewFocusContext || '')
+      }
       if (elevateSessionName.trim()) u.searchParams.set('sessionName', elevateSessionName.trim())
       if (inboundBoothDemo || focusArea === 'snapshot') u.searchParams.set('boothDemo', '1')
       const res = await fetch(u.toString())
@@ -1049,8 +1109,20 @@ export function Elevate() {
       setToken(json.token)
       setUrl(json.url)
       setRoomName(newRoomName)
+      setSegmentId(newSegmentId)
       setIsSessionPaused(false)
+      setPauseReason(null)
+      setPauseAudioFailure(null)
       resetMetrics()
+    } catch (error) {
+      if (createdSegmentId) {
+        await closeSessionSegment(
+          resumeSessionId,
+          createdSegmentId,
+          'unavailable',
+        ).catch(() => undefined)
+      }
+      throw error
     } finally {
       resumingRef.current = false
       setIsResuming(false)
@@ -1064,7 +1136,93 @@ export function Elevate() {
     resetMetrics,
     user?.email,
     user?.firstName,
+    viewFocusContext,
   ])
+
+  const finishPause = useCallback(
+    async (audioStatus: 'available' | 'failed' | 'unavailable') => {
+      if (!sessionId || !segmentId) return
+      await closeSessionSegment(
+        sessionId,
+        segmentId,
+        audioStatus,
+        pauseRequestedAtRef.current ?? new Date(),
+      )
+      setPauseAudioFailure(null)
+      pauseRequestedAtRef.current = null
+      intentionalDisconnectSegmentsRef.current.add(segmentId)
+      pauseLiveSession('intentional')
+    },
+    [pauseLiveSession, segmentId, sessionId],
+  )
+
+  const handlePause = useCallback(async () => {
+    if (isPausing || !sessionId || !segmentId) return
+    pauseRequestedAtRef.current = new Date()
+    setIsPausing(true)
+    try {
+      const recorder = recorderRef.current
+      if (!recorder) {
+        setPauseAudioFailure('unavailable')
+        return
+      }
+      const audioCapture = await settleRecordingBeforePause(recorder, () => {
+        toast.info('Saving this part before pausing…')
+      })
+      if (audioCapture === 'uploaded') {
+        await finishPause('available')
+        return
+      }
+      setPauseAudioFailure(audioCapture === 'unavailable' ? 'unavailable' : 'failed')
+    } catch (error) {
+      console.error('Failed to pause session:', error)
+      setPauseAudioFailure('failed')
+    } finally {
+      setIsPausing(false)
+    }
+  }, [finishPause, isPausing, segmentId, sessionId])
+
+  const retryPauseUpload = useCallback(async () => {
+    if (isPausing) return
+    setIsPausing(true)
+    try {
+      const capture = await recorderRef.current?.retryUpload()
+      if (capture?.audioCapture === 'uploaded') {
+        await finishPause('available')
+      } else if (capture?.audioCapture === 'pending') {
+        toast.info('Audio is still uploading. Please wait a moment.')
+      } else {
+        setPauseAudioFailure(capture?.audioCapture === 'unavailable' ? 'unavailable' : 'failed')
+      }
+    } finally {
+      setIsPausing(false)
+    }
+  }, [finishPause, isPausing])
+
+  const pauseWithoutReplayAudio = useCallback(async () => {
+    if (!pauseAudioFailure) return
+    setIsPausing(true)
+    try {
+      await finishPause(pauseAudioFailure)
+    } finally {
+      setIsPausing(false)
+    }
+  }, [finishPause, pauseAudioFailure])
+
+  const continueInNewSegmentAfterPauseFailure = useCallback(async () => {
+    if (!pauseAudioFailure || !sessionId) return
+    const continuingSessionId = sessionId
+    setIsPausing(true)
+    try {
+      await finishPause(pauseAudioFailure)
+      await resumeLiveSession(continuingSessionId)
+    } catch (error) {
+      console.error('Failed to continue after audio save failure:', error)
+      toast.error('Could not reconnect. Your conversation is saved.')
+    } finally {
+      setIsPausing(false)
+    }
+  }, [finishPause, pauseAudioFailure, resumeLiveSession, sessionId])
 
   // ── Screen Wake Lock: prevent macOS from sleeping during active voice session ──
   useEffect(() => {
@@ -1186,6 +1344,8 @@ export function Elevate() {
       setIsJoining(true)
     }
     let createdLinkedSessionId: string | null = null
+    let createdSessionId: string | null = null
+    let createdSegmentId: string | null = null
     try {
       if (inboundPreparationId && !prepareLaunch) {
         throw new Error(prepareLaunchError || 'Interview journey is still loading')
@@ -1196,6 +1356,7 @@ export function Elevate() {
 
       // 1. Create session ID and room name
       const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      createdSessionId = newSessionId
       const uniqueRoomName = roomName || `room_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
 
       // 2. Create session in database FIRST (agent needs this for coaching context lookup)
@@ -1232,10 +1393,13 @@ export function Elevate() {
       }
 
       // 3. Get LiveKit token (creates room — agent will start after this)
+      const newSegmentId = await createSessionSegment(newSessionId, uniqueRoomName)
+      createdSegmentId = newSegmentId
       const u = new URL(`${API_BASE_URL}/livekit/token`)
       u.searchParams.set('identity', identity)
       u.searchParams.set('room', uniqueRoomName)
       u.searchParams.set('sessionId', newSessionId)
+      u.searchParams.set('segmentId', newSegmentId)
       u.searchParams.set('userName', user?.firstName || user?.email?.split('@')[0] || '')
       if (focusArea) u.searchParams.set('focusArea', focusArea)
       if (inboundContext) u.searchParams.set('focusContext', inboundContext)
@@ -1250,10 +1414,19 @@ export function Elevate() {
       setUrl(json.url)
       setSessionId(newSessionId)
       setRoomName(uniqueRoomName)
+      setSegmentId(newSegmentId)
       setIsSessionPaused(false)
+      setPauseReason(null)
       resetMetrics()
       logEvent('event', 'elevate.session_join', { sessionId: newSessionId, focusArea: focusArea || null })
     } catch (error) {
+      if (createdSessionId && createdSegmentId) {
+        await closeSessionSegment(
+          createdSessionId,
+          createdSegmentId,
+          'unavailable',
+        ).catch(() => undefined)
+      }
       if (createdLinkedSessionId) {
         await fetch(`${API_BASE_URL}/sessions/${createdLinkedSessionId}`, {
           method: 'DELETE',
@@ -1289,17 +1462,47 @@ export function Elevate() {
 
   // Called when LiveKit disconnects unexpectedly (refresh, network drop, etc.)
   // Does NOT end the session — leaves it resumable.
-  const handleDisconnected = useCallback(() => {
+  const handleDisconnected = useCallback(async () => {
+    if (segmentId && handledDisconnectSegmentsRef.current.has(segmentId)) return
+    if (segmentId) handledDisconnectSegmentsRef.current.add(segmentId)
+    if (
+      segmentId &&
+      intentionalDisconnectSegmentsRef.current.delete(segmentId)
+    ) {
+      return
+    }
     console.log('🔌 LiveKit disconnected — session remains resumable')
-    pauseLiveSession()
+    const disconnectedSessionId = sessionId
+    const disconnectedSegmentId = segmentId
+    const disconnectedAt = new Date()
+    const finalizePromise = recorderRef.current?.finalize().catch(() => null)
+    pauseLiveSession('disconnected')
+    if (disconnectedSessionId && disconnectedSegmentId) {
+      const capture = await finalizePromise
+      const audioStatus =
+        capture?.audioCapture === 'uploaded'
+          ? 'available'
+          : capture?.audioCapture === 'unavailable'
+            ? 'unavailable'
+            : capture?.audioCapture === 'failed'
+              ? 'failed'
+              : 'pending'
+      await closeSessionSegment(
+        disconnectedSessionId,
+        disconnectedSegmentId,
+        audioStatus,
+        disconnectedAt,
+      ).catch((error) => console.warn('Failed to close disconnected segment:', error))
+    }
     // Keep sessionId, localStorage, and messages intact so resume works
-  }, [pauseLiveSession])
+  }, [pauseLiveSession, segmentId, sessionId])
 
   // Called only when user explicitly clicks "Leave".
   // Ends the session permanently.
   const handleLeave = useCallback(async () => {
     if (isLeaving) return
     setIsLeaving(true)
+    const leaveRequestedAt = new Date()
     const currentSessionId = sessionId
     if (currentSessionId) logEvent('event', 'elevate.session_leave', { sessionId: currentSessionId })
 
@@ -1312,11 +1515,21 @@ export function Elevate() {
     } catch {
       capture = { ok: false, audioCapture: 'failed' }
     }
+    if (currentSessionId && segmentId) {
+      await closeSessionSegment(
+        currentSessionId,
+        segmentId,
+        capture.audioCapture === 'uploaded' ? 'available' : capture.audioCapture,
+        pauseRequestedAtRef.current ?? leaveRequestedAt,
+      ).catch((error) => console.warn('Failed to close final segment:', error))
+    }
 
+    if (segmentId) intentionalDisconnectSegmentsRef.current.add(segmentId)
     setToken(null)
     setUrl(null)
     setSessionId(null)
     setRoomName('')
+    setSegmentId(null)
     setIsSessionPaused(false)
     setAssistantState('unknown')
     clearMessages()
@@ -1439,7 +1652,7 @@ export function Elevate() {
       navigate(cameFromHistory ? '/history?tab=elevate' : '/elevate')
     }
     setIsLeaving(false)
-  }, [sessionId, clearMessages, resetMetrics, navigate, cameFromHistory, confirmDialog, updateUser, loadPastSessions, prepareLaunch, isLeaving, inboundBoothDemo, focusArea, launchedFromCoach, originCoachThreadId])
+  }, [sessionId, segmentId, clearMessages, resetMetrics, navigate, cameFromHistory, confirmDialog, updateUser, loadPastSessions, prepareLaunch, isLeaving, inboundBoothDemo, focusArea, launchedFromCoach, originCoachThreadId])
 
   const handleDiscard = useCallback(async () => {
     const yes = await confirmDialog({
@@ -1451,10 +1664,12 @@ export function Elevate() {
     if (!yes) return
 
     const currentSessionId = sessionId
+    if (segmentId) intentionalDisconnectSegmentsRef.current.add(segmentId)
     setToken(null)
     setUrl(null)
     setSessionId(null)
     setRoomName('')
+    setSegmentId(null)
     setIsSessionPaused(false)
     setAssistantState('unknown')
     clearMessages()
@@ -1482,7 +1697,7 @@ export function Elevate() {
       setShowHistory(true)
       navigate('/elevate')
     }
-  }, [sessionId, clearMessages, resetMetrics, navigate, confirmDialog, prepareLaunch])
+  }, [sessionId, segmentId, clearMessages, resetMetrics, navigate, confirmDialog, prepareLaunch])
 
   // Return from a viewed session's results back to the Elevate session list.
   const handleBackToElevate = useCallback(() => {
@@ -2015,7 +2230,7 @@ export function Elevate() {
             <div className="space-y-4">
               {idleWarning && (
                 <div className="rounded-md border border-yellow-400 bg-yellow-50 px-4 py-3 text-sm text-yellow-800 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <span>No mouse or keyboard activity for a while. The session stays connected — mute if there is background noise, or Leave when you are done.</span>
+                  <span>No mouse or keyboard activity for a while. The session stays connected — Mute for background noise, Pause if you are stepping away, or Leave when done.</span>
                   <Button size="sm" variant="outline" onClick={resetIdleTimer}>Dismiss</Button>
                 </div>
               )}
@@ -2038,7 +2253,7 @@ export function Elevate() {
                   <div className="flex justify-center w-full mb-2">
                     <SessionStatusBar
                       isPaused
-                      label="Disconnected"
+                      label={pauseReason === 'intentional' ? 'Paused' : 'Disconnected'}
                       hint="Click Resume to continue"
                       className="bg-muted/20 rounded-lg w-full"
                     />
@@ -2088,9 +2303,14 @@ export function Elevate() {
                   audio={AUDIO_CAPTURE}
                   onDisconnected={handleDisconnected}
                 >
-                  <RoomAudioRenderer />
+                  <RoomAudioRenderer muted={isPausing || pauseAudioFailure != null} />
                   <CoachAudioBootstrap />
-                  <SessionRecorder ref={recorderRef} sessionId={sessionId} />
+                  <SessionRecorder
+                    key={segmentId}
+                    ref={recorderRef}
+                    sessionId={sessionId}
+                    segmentId={segmentId}
+                  />
                   <StartAudio label="Click to enable coach audio" />
                   <div className="flex justify-center w-full mb-2">
                     <AgentVisualizer className="bg-muted/20 rounded-lg w-full" isPaused={isSessionPaused} compact />
@@ -2132,12 +2352,57 @@ export function Elevate() {
                     </Button>
                     <InRoomControls
                       sessionId={sessionId}
+                      onPauseSession={handlePause}
+                      isPausing={isPausing}
+                      inputBlocked={isPausing || pauseAudioFailure != null}
                       enableAudioRecord={exportFlags.enableAudioExport}
                     />
                     <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={handleDiscard}>
                       Discard Session
                     </Button>
                   </div>
+                  {pauseAudioFailure && (
+                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
+                      <p className="text-sm font-medium">Replay audio could not be saved</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Retry saving, pause without this part of the replay, or continue in a new
+                        recording segment.
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button size="sm" onClick={retryPauseUpload} disabled={isPausing}>
+                          {isPausing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                          Retry saving audio
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={pauseWithoutReplayAudio}
+                          disabled={isPausing}
+                        >
+                          Pause without replay audio
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={continueInNewSegmentAfterPauseFailure}
+                          disabled={isPausing}
+                        >
+                          Continue in a new recording segment
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                  {isPausing && !pauseAudioFailure && (
+                    <div
+                      className="rounded-lg border border-border bg-muted/40 p-3 text-sm"
+                      role="status"
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Saving this recording segment before pausing. Your microphone is muted.
+                      </span>
+                    </div>
+                  )}
                 </LiveKitRoom>
               )}
               <ChatPanel
@@ -2550,9 +2815,15 @@ function LiveKitConversation({
 
 function InRoomControls({
   sessionId,
+  onPauseSession,
+  isPausing,
+  inputBlocked,
   enableAudioRecord = false,
 }: {
   sessionId: string | null
+  onPauseSession: () => Promise<void>
+  isPausing: boolean
+  inputBlocked: boolean
   /** Admin-enabled: live “Record My Audio” download during the session. */
   enableAudioRecord?: boolean
 }) {
@@ -2597,6 +2868,18 @@ function InRoomControls({
     }
   }, [isTogglingMic, micEnabled, room])
 
+  const requestPause = useCallback(async () => {
+    try {
+      await room.localParticipant.setMicrophoneEnabled(false)
+      setMicEnabled(false)
+    } catch (error) {
+      console.warn('Failed to mute microphone before pause:', error)
+      toast.error('Could not mute the microphone. Pause was cancelled.')
+      return
+    }
+    await onPauseSession()
+  }, [onPauseSession, room])
+
   const handleToggleRecording = useCallback(async () => {
     if (isRecording) {
       const blob = await stopRecording()
@@ -2638,7 +2921,7 @@ function InRoomControls({
       <Button
         variant="outline"
         onClick={toggleMicrophone}
-        disabled={isTogglingMic}
+        disabled={isTogglingMic || inputBlocked}
         aria-pressed={!micEnabled}
         title={
           micEnabled
@@ -2655,8 +2938,16 @@ function InRoomControls({
         )}
         {micEnabled ? 'Mute' : 'Unmute'}
       </Button>
+      <Button variant="secondary" onClick={requestPause} disabled={inputBlocked}>
+        {isPausing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+        Pause
+      </Button>
       {enableAudioRecord && (
-        <Button variant={isRecording ? 'destructive' : 'outline'} onClick={handleToggleRecording}>
+        <Button
+          variant={isRecording ? 'destructive' : 'outline'}
+          onClick={handleToggleRecording}
+          disabled={inputBlocked}
+        >
           {isRecording ? 'Stop & Download Audio' : 'Record My Audio'}
         </Button>
       )}

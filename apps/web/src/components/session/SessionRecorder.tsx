@@ -2,23 +2,29 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 
 import { useRoomContext } from '@livekit/components-react'
 import { ConnectionState, RoomEvent, Track } from 'livekit-client'
 import { useAudioRecording } from '@/hooks/useAudioRecording'
+import { describeAudioCapture } from '@/lib/audioCapture'
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:4000'
 
 const UPLOAD_ATTEMPTS = 3
 const UPLOAD_ATTEMPT_MS = 12_000
-const FINALIZE_MS = 20_000
+// Three 12s upload attempts plus bounded backoff. A terminal Pause/Leave result
+// must not be reported while the final retry can still succeed.
+const FINALIZE_MS = 42_000
 const MIC_ATTEMPTS = 20
 
 export type AudioCaptureReport = 'uploaded' | 'pending' | 'failed' | 'unavailable'
 
 export type SessionRecorderHandle = {
   finalize: () => Promise<{ ok: boolean; audioCapture: AudioCaptureReport }>
+  waitForFinalization: () => Promise<{ ok: boolean; audioCapture: AudioCaptureReport }>
+  retryUpload: () => Promise<{ ok: boolean; audioCapture: AudioCaptureReport }>
 }
 
 interface SessionRecorderProps {
   sessionId: string | null
+  segmentId: string | null
   /** Skip capture entirely. This is not hideAudioDownload (export/playback). */
   disabled?: boolean
 }
@@ -50,13 +56,19 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: () => T): Pro
  * the file. Disconnect/unmount remain a safety net only.
  */
 export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorderProps>(
-  function SessionRecorder({ sessionId, disabled = false }, ref) {
+  function SessionRecorder({ sessionId, segmentId, disabled = false }, ref) {
     const room = useRoomContext()
     const { isRecording, startRecording, stopRecording } = useAudioRecording()
 
     const startedAtRef = useRef<string | null>(null)
     const startMsRef = useRef<number>(0)
+    const durationSecRef = useRef<number>(0)
     const uploadedRef = useRef(false)
+    const capturedBlobRef = useRef<Blob | null>(null)
+    const finalizePromiseRef = useRef<Promise<{
+      ok: boolean
+      audioCapture: AudioCaptureReport
+    }> | null>(null)
     const startedRef = useRef(false)
     const startOutcomeRef = useRef<'starting' | 'started' | 'unavailable'>('starting')
     const sessionIdRef = useRef(sessionId)
@@ -72,10 +84,14 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
       return mic?.track?.mediaStreamTrack
     }, [room])
 
-    const uploadBlob = async (blob: Blob): Promise<boolean> => {
+    const uploadBlob = useCallback(async (blob: Blob): Promise<boolean> => {
       const id = sessionIdRef.current
-      if (!id || uploadedRef.current || !blob || blob.size === 0) return uploadedRef.current
-      const durationSec = startMsRef.current ? (Date.now() - startMsRef.current) / 1000 : 0
+      if (!id || !segmentId || uploadedRef.current || !blob || blob.size === 0) {
+        return uploadedRef.current
+      }
+      const durationSec =
+        durationSecRef.current ||
+        (startMsRef.current ? (Date.now() - startMsRef.current) / 1000 : 0)
       const token = localStorage.getItem('spashtai_token')
 
       for (let attempt = 1; attempt <= UPLOAD_ATTEMPTS; attempt += 1) {
@@ -83,7 +99,8 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
           const form = new FormData()
           form.append('audio', blob, `elevate-${id}.webm`)
           form.append('recordingType', 'user')
-          form.append('durationSec', String(Math.round(durationSec)))
+          form.append('segmentId', segmentId)
+          form.append('durationSec', String(durationSec))
           if (startedAtRef.current) form.append('recordingStartedAt', startedAtRef.current)
 
           const headers: Record<string, string> = {}
@@ -113,7 +130,7 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
         }
       }
       return false
-    }
+    }, [segmentId])
 
     const finalizeOnce = async (): Promise<{ ok: boolean; audioCapture: AudioCaptureReport }> => {
       if (disabled) return { ok: false, audioCapture: 'unavailable' }
@@ -126,26 +143,58 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
           return { ok: false, audioCapture: 'unavailable' }
         }
       }
-      const blob = isRecordingRef.current ? await stopRef.current() : null
+      const blob = capturedBlobRef.current ??
+        (isRecordingRef.current ? await stopRef.current() : null)
       if (!blob) return { ok: false, audioCapture: 'failed' }
+      if (!capturedBlobRef.current && startMsRef.current) {
+        durationSecRef.current = (Date.now() - startMsRef.current) / 1000
+      }
+      capturedBlobRef.current = blob
       const ok = await uploadBlob(blob)
       return { ok, audioCapture: ok ? 'uploaded' : 'failed' }
     }
 
     useImperativeHandle(ref, () => ({
-      finalize: () =>
-        withTimeout(finalizeOnce(), FINALIZE_MS, () => ({
+      finalize: () => {
+        if (!finalizePromiseRef.current) {
+          finalizePromiseRef.current = finalizeOnce()
+        }
+        return withTimeout(finalizePromiseRef.current, FINALIZE_MS, () => ({
           ok: false,
           audioCapture:
             startOutcomeRef.current === 'unavailable' ||
             (!startedRef.current && !isRecordingRef.current)
               ? 'unavailable'
-              : 'failed',
-        })),
+              : 'pending',
+        }))
+      },
+      waitForFinalization: async () => {
+        if (!finalizePromiseRef.current) {
+          finalizePromiseRef.current = finalizeOnce()
+        }
+        try {
+          return await finalizePromiseRef.current
+        } catch (error) {
+          console.warn('Session recording finalization failed:', error)
+          return { ok: false, audioCapture: 'failed' }
+        }
+      },
+      retryUpload: async () => {
+        const blob = capturedBlobRef.current
+        if (!blob) return { ok: false, audioCapture: 'unavailable' }
+        // Each fetch attempt already has a bounded timeout. Keep the caller in
+        // the saving state until the retry is terminal so practice cannot
+        // resume while MediaRecorder is stopped.
+        const ok = await uploadBlob(blob)
+        return {
+          ok,
+          audioCapture: ok ? 'uploaded' : 'failed',
+        }
+      },
     }))
 
     useEffect(() => {
-      if (disabled || !sessionId) return
+      if (disabled || !sessionId || !segmentId) return
       if (room.state !== ConnectionState.Connected) return
       if (isRecordingRef.current || startedAtRef.current) return
 
@@ -161,15 +210,7 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
           startedRef.current = true
           startOutcomeRef.current = 'started'
           startRecording(new MediaStream([track]))
-          const settings = track.getSettings() as MediaTrackSettings & {
-            voiceIsolation?: boolean
-          }
-          console.log('🎙️ Auto session recording started', {
-            echoCancellation: settings.echoCancellation,
-            noiseSuppression: settings.noiseSuppression,
-            autoGainControl: settings.autoGainControl,
-            voiceIsolation: settings.voiceIsolation,
-          })
+          console.log('🎙️ Auto session recording started', describeAudioCapture(track))
           return
         }
         attempts += 1
@@ -184,7 +225,7 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
       return () => {
         cancelled = true
       }
-    }, [room, room.state, sessionId, disabled, startRecording, micTrack])
+    }, [room, room.state, sessionId, segmentId, disabled, startRecording, micTrack])
 
     useEffect(() => {
       if (disabled) return
@@ -192,22 +233,34 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
         if (uploadedRef.current) return
         if (!isRecordingRef.current) return
         const blob = await stopRef.current()
-        if (blob) await uploadBlob(blob)
+        if (blob) {
+          if (startMsRef.current) {
+            durationSecRef.current = (Date.now() - startMsRef.current) / 1000
+          }
+          capturedBlobRef.current = blob
+          await uploadBlob(blob)
+        }
       }
       room.on(RoomEvent.Disconnected, onDisconnected)
       return () => {
         room.off(RoomEvent.Disconnected, onDisconnected)
       }
-    }, [room, disabled])
+    }, [room, disabled, uploadBlob])
 
     useEffect(() => {
       return () => {
         if (uploadedRef.current || !isRecordingRef.current) return
         void stopRef.current().then((blob) => {
-          if (blob) void uploadBlob(blob)
+          if (blob) {
+            if (startMsRef.current) {
+              durationSecRef.current = (Date.now() - startMsRef.current) / 1000
+            }
+            capturedBlobRef.current = blob
+            void uploadBlob(blob)
+          }
         })
       }
-    }, [])
+    }, [uploadBlob])
 
     return null
   },

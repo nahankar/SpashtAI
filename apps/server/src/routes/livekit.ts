@@ -60,6 +60,7 @@ export async function getLivekitToken(req: Request, res: Response) {
       identity,
       room,
       sessionId,
+      segmentId,
       userName,
       focusArea,
       focusContext,
@@ -85,6 +86,7 @@ export async function getLivekitToken(req: Request, res: Response) {
     const roomService = new RoomServiceClient(httpUrl, apiKey, apiSecret)
     const roomMeta: Record<string, string | undefined | null> = {
       sessionId,
+      segmentId,
       userName,
       focusArea,
       focusContext,

@@ -24,10 +24,21 @@ export async function fetchProsodyForPath(sessionId: string, audioPath: string) 
     body: JSON.stringify({ sessionId, audioPath }),
     signal: AbortSignal.timeout(25000),
   })
-  if (!prosodyRes.ok) return null
+  if (!prosodyRes.ok) {
+    console.warn(
+      `[analytics] prosody request failed for ${sessionId} (${prosodyRes.status}) on ${audioPath}`,
+    )
+    return null
+  }
   const data = await prosodyRes.json()
   const prosody = data?.prosody ?? null
-  return isUsableProsody(prosody) ? prosody : null
+  if (!isUsableProsody(prosody)) {
+    // The signal API answers 200 with a null payload when it cannot read the
+    // file, so an unusable result usually means the path is wrong for it.
+    console.warn(`[analytics] no usable prosody for ${sessionId} from ${audioPath}`)
+    return null
+  }
+  return prosody
 }
 
 /**

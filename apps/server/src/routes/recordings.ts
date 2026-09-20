@@ -1,8 +1,10 @@
 import type { Request, Response } from 'express'
 import multer from 'multer'
+import { createHash, randomUUID } from 'crypto'
 import { createReadStream, existsSync, mkdirSync, statSync } from 'fs'
-import { writeFile } from 'fs/promises'
+import { link, unlink, writeFile } from 'fs/promises'
 import path from 'path'
+import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/prisma'
 import {
   exportDenied,
@@ -11,7 +13,11 @@ import {
   resolveRequestExportFlags,
 } from '../lib/userExportFlags'
 import { resolveElevateSessionAudio } from '../analytics/insightProviders/resolveSessionAudio'
-import { enrichElevateSessionAudio } from '../analytics/audioEnrichment'
+import {
+  activeSegmentDurationSec,
+  recordingPayloadMatches,
+  segmentRecordingFilename,
+} from '../analytics/sessionSegments'
 
 // Absolute base dir for client-uploaded recordings. Stored as an absolute
 // filePath so resolveElevateSessionAudio's absolute-path branch finds it.
@@ -23,16 +29,6 @@ export const recordingUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 150 * 1024 * 1024 }, // 150MB cap
 })
-
-function extFromMime(mime?: string): string {
-  if (!mime) return 'webm'
-  if (mime.includes('webm')) return 'webm'
-  if (mime.includes('ogg')) return 'ogg'
-  if (mime.includes('wav')) return 'wav'
-  if (mime.includes('mp4') || mime.includes('m4a')) return 'm4a'
-  if (mime.includes('mpeg') || mime.includes('mp3')) return 'mp3'
-  return 'webm'
-}
 
 function mimeFromPath(filePath: string): string {
   const ext = filePath.split('.').pop()?.toLowerCase()
@@ -47,6 +43,21 @@ function mimeFromPath(filePath: string): string {
   return (ext && map[ext]) || 'application/octet-stream'
 }
 
+function sha256(data: Buffer): string {
+  return createHash('sha256').update(data).digest('hex')
+}
+
+async function fingerprintFile(filePath: string): Promise<{ hash: string; size: number }> {
+  const hash = createHash('sha256')
+  await new Promise<void>((resolve, reject) => {
+    const stream = createReadStream(filePath)
+    stream.on('data', (chunk) => hash.update(chunk))
+    stream.on('end', resolve)
+    stream.on('error', reject)
+  })
+  return { hash: hash.digest('hex'), size: statSync(filePath).size }
+}
+
 /**
  * Dev/client capture: upload the in-browser MediaRecorder blob and register it
  * as a SessionRecording so it is streamable + usable for delivery analysis.
@@ -58,7 +69,7 @@ export async function uploadSessionRecording(req: Request, res: Response) {
 
     const session = await prisma.session.findUnique({
       where: { id: sessionId },
-      select: { id: true, userId: true },
+      select: { id: true, userId: true, recordingStartedAt: true },
     })
     if (!session) {
       return res.status(404).json({ error: 'Session not found' })
@@ -77,38 +88,146 @@ export async function uploadSessionRecording(req: Request, res: Response) {
     }
 
     const recordingType = (req.body.recordingType as string) || 'user'
+    const segmentId = String(req.body.segmentId || '').trim()
+    if (!segmentId) {
+      return res.status(400).json({ error: 'segmentId is required' })
+    }
+    const segment = await prisma.sessionSegment.findUnique({
+      where: { id: segmentId },
+      include: { recording: true },
+    })
+    if (!segment || segment.sessionId !== sessionId) {
+      return res.status(404).json({ error: 'Session segment not found' })
+    }
+
     const durationSec = req.body.durationSec ? Number(req.body.durationSec) : 0
     const recordingStartedAt = req.body.recordingStartedAt
       ? new Date(req.body.recordingStartedAt)
       : null
 
-    mkdirSync(AUDIO_ROOT, { recursive: true })
-    const ext = extFromMime(file.mimetype)
-    const filename = `elevate-${sessionId}-${recordingType}-${Date.now()}.${ext}`
-    const absPath = path.join(AUDIO_ROOT, filename)
-    await writeFile(absPath, file.buffer)
+    const contentHash = sha256(file.buffer)
+    const mimeType = file.mimetype || 'application/octet-stream'
 
-    const recording = await prisma.sessionRecording.create({
-      data: {
-        sessionId,
-        egressId: `client-${sessionId}-${Date.now()}`,
-        filePath: absPath,
-        duration: Number.isFinite(durationSec) ? Math.round(durationSec) : 0,
+    if (segment.recording) {
+      const samePayload = recordingPayloadMatches(segment.recording, {
+        contentHash,
         fileSize: file.size,
-        status: 'completed',
-        recordingType,
-      },
-    })
+        mimeType,
+      })
+      if (!samePayload) {
+        return res.status(409).json({ error: 'segmentId already has a different recording' })
+      }
+      if (segment.audioStatus !== 'available') {
+        await prisma.sessionSegment.update({
+          where: { id: segmentId },
+          data: { audioStatus: 'available' },
+        })
+      }
+      return res.status(200).json({
+        success: true,
+        recording: segment.recording,
+        idempotent: true,
+      })
+    }
 
-    if (recordingStartedAt && !Number.isNaN(recordingStartedAt.getTime())) {
+    mkdirSync(AUDIO_ROOT, { recursive: true })
+    const filename = segmentRecordingFilename(segmentId)
+    const absPath = path.join(AUDIO_ROOT, filename)
+    const tempPath = `${absPath}.${randomUUID()}.tmp`
+    await writeFile(tempPath, file.buffer, { flag: 'wx' })
+    try {
+      try {
+        // Hard-link promotion is atomic and never replaces an existing canonical file.
+        await link(tempPath, absPath)
+      } catch (error: any) {
+        if (error?.code !== 'EEXIST') throw error
+        const existingFile = await fingerprintFile(absPath)
+        if (existingFile.hash !== contentHash || existingFile.size !== file.size) {
+          return res.status(409).json({ error: 'segmentId storage payload conflict' })
+        }
+      }
+    } finally {
+      await unlink(tempPath).catch(() => undefined)
+    }
+
+    let recording
+    try {
+      recording = await prisma.$transaction(async (tx) => {
+        const created = await tx.sessionRecording.create({
+          data: {
+            sessionId,
+            segmentId,
+            egressId: `client-segment-${segmentId}`,
+            filePath: absPath,
+            duration: Number.isFinite(durationSec) ? Math.round(durationSec) : 0,
+            fileSize: file.size,
+            status: 'completed',
+            recordingType,
+            contentHash,
+            mimeType,
+          },
+        })
+        await tx.sessionSegment.update({
+          where: { id: segmentId },
+          data: {
+            audioStatus: 'available',
+            recordingDurationSec: Number.isFinite(durationSec) ? durationSec : undefined,
+            recordingStartedAt:
+              recordingStartedAt && !Number.isNaN(recordingStartedAt.getTime())
+                ? recordingStartedAt
+                : undefined,
+            activeDurationSec:
+              segment.endedAt
+                ? activeSegmentDurationSec(segment.startedAt, segment.endedAt)
+                : undefined,
+          },
+        })
+        if (segment.endedAt) {
+          const aggregate = await tx.sessionSegment.aggregate({
+            where: { sessionId, endedAt: { not: null } },
+            _sum: { activeDurationSec: true },
+          })
+          await tx.session.update({
+            where: { id: sessionId },
+            data: { durationSec: aggregate._sum.activeDurationSec ?? 0 },
+          })
+        }
+        return created
+      })
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const raced = await prisma.sessionRecording.findUnique({ where: { segmentId } })
+        if (
+          raced &&
+          recordingPayloadMatches(raced, {
+            contentHash,
+            fileSize: file.size,
+            mimeType,
+          })
+        ) {
+          await prisma.sessionSegment.update({
+            where: { id: segmentId },
+            data: { audioStatus: 'available' },
+          })
+          return res.status(200).json({ success: true, recording: raced, idempotent: true })
+        }
+        return res.status(409).json({ error: 'segmentId already has a different recording' })
+      }
+      throw error
+    }
+
+    if (
+      segment.segmentIndex === 0 &&
+      recordingStartedAt &&
+      !Number.isNaN(recordingStartedAt.getTime())
+    ) {
       await prisma.session.update({
         where: { id: sessionId },
-        data: { recordingStartedAt },
+        data: { recordingStartedAt: session.recordingStartedAt ?? recordingStartedAt },
       })
     }
 
     res.status(201).json({ success: true, recording })
-    void enrichElevateSessionAudio(sessionId)
   } catch (error) {
     console.error('Error uploading session recording:', error)
     res.status(500).json({ error: 'Failed to upload recording' })

@@ -42,6 +42,7 @@ import {
   uploadSessionRecording,
   streamSessionRecording,
 } from './routes/recordings'
+import { createSessionSegment, closeSessionSegment } from './routes/session-segments'
 import {
   saveAdvancedMetrics,
   getAdvancedMetrics
@@ -283,6 +284,8 @@ app.post(
   uploadSessionRecording,
 )
 app.get('/sessions/:sessionId/recording/stream', requireAuthOrMediaToken, streamSessionRecording)
+app.post('/sessions/:sessionId/segments', requireAuth, createSessionSegment)
+app.patch('/sessions/:sessionId/segments/:segmentId', requireAuth, closeSessionSegment)
 
 // Protected: per-turn replay records (GET user, POST agent-internal)
 app.get('/sessions/:sessionId/turns', requireAuth, getSessionTurns)

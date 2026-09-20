@@ -12,7 +12,11 @@ import {
   buildSkipPlaybackRegions,
   detectSpeechRegions,
 } from '../lib/audioAlignment'
-import { resolveElevateSessionAudio } from '../analytics/insightProviders/resolveSessionAudio'
+import {
+  resolveElevateSessionAudio,
+  resolveSessionSegmentAudio,
+} from '../analytics/insightProviders/resolveSessionAudio'
+import { compareSegmentTurns } from '../analytics/sessionSegments'
 
 const INTERNAL_AGENT_TOKEN =
   process.env.INTERNAL_AGENT_TOKEN?.trim() ||
@@ -59,7 +63,43 @@ export async function getSessionTurns(req: Request, res: Response) {
 
     let turns: any[] = await prisma.sessionTurn.findMany({
       where: { sessionId },
-      orderBy: { turnIndex: 'asc' },
+      orderBy: { sequenceNo: 'asc' },
+    })
+    const segments = await prisma.sessionSegment.findMany({
+      where: { sessionId },
+      orderBy: { segmentIndex: 'asc' },
+      include: { recording: { select: { duration: true } } },
+    })
+    const segmentOffsets = new Map<string, number>()
+    let replayOffset = 0
+    for (const segment of segments) {
+      segmentOffsets.set(segment.id, replayOffset)
+      if (segment.audioStatus === 'available' && segment.recording) {
+        replayOffset += Math.max(
+          0,
+          segment.recordingDurationSec ?? segment.recording.duration,
+        )
+      }
+    }
+    turns = turns.map((turn) => {
+      if (!turn.segmentId) return turn
+      const segment = segments.find((item) => item.id === turn.segmentId)
+      if (!segment || segment.audioStatus !== 'available' || !segment.recording) {
+        return { ...turn, audioStart: null, audioEnd: null, words: null }
+      }
+      const offset = segmentOffsets.get(turn.segmentId) ?? 0
+      return {
+        ...turn,
+        audioStart: turn.audioStart == null ? null : turn.audioStart + offset,
+        audioEnd: turn.audioEnd == null ? null : turn.audioEnd + offset,
+        words: Array.isArray(turn.words)
+          ? turn.words.map((word: any) => ({
+              ...word,
+              start: typeof word.start === 'number' ? word.start + offset : word.start,
+              end: typeof word.end === 'number' ? word.end + offset : word.end,
+            }))
+          : turn.words,
+      }
     })
 
     // Graceful degradation: if no per-turn rows were captured (e.g. sessions
@@ -136,6 +176,17 @@ export async function getSessionTurns(req: Request, res: Response) {
       recordingStartedAt: session?.recordingStartedAt ?? null,
       transcriptHidden: flags.hideTranscriptText,
       degraded,
+      segments: segments.map((segment) => ({
+        id: segment.id,
+        segmentIndex: segment.segmentIndex,
+        startedAt: segment.startedAt,
+        endedAt: segment.endedAt,
+        activeDurationSec: segment.activeDurationSec,
+        audioStatus: segment.audioStatus,
+        replayOffsetSec: segmentOffsets.get(segment.id) ?? null,
+        recordingDurationSec:
+          segment.recordingDurationSec ?? segment.recording?.duration ?? null,
+      })),
       speechRegions,
       skipPlaybackRegions,
       session: session
@@ -168,6 +219,10 @@ export async function saveSessionTurnsForAgent(req: Request, res: Response) {
     }
 
     const { sessionId } = req.params
+    const segmentId =
+      typeof req.body?.segmentId === 'string' && req.body.segmentId.trim()
+        ? req.body.segmentId.trim()
+        : null
     const turns = (req.body?.turns ?? []) as IncomingTurn[]
     if (!Array.isArray(turns) || turns.length === 0) {
       return res.status(400).json({ error: 'turns[] is required' })
@@ -176,6 +231,12 @@ export async function saveSessionTurnsForAgent(req: Request, res: Response) {
     const session = await prisma.session.findUnique({ where: { id: sessionId } })
     if (!session) {
       return res.status(404).json({ error: 'Session not found' })
+    }
+    const segment = segmentId
+      ? await prisma.sessionSegment.findUnique({ where: { id: segmentId } })
+      : null
+    if (segmentId && (!segment || segment.sessionId !== sessionId)) {
+      return res.status(404).json({ error: 'Session segment not found' })
     }
 
     // Primary alignment: derive per-turn timings straight from the recording.
@@ -186,7 +247,9 @@ export async function saveSessionTurnsForAgent(req: Request, res: Response) {
     let alignmentInfo = 'audio: none'
     let alignedById: Map<number, IncomingTurn> | null = null
     try {
-      const resolved = await resolveElevateSessionAudio(sessionId)
+      const resolved = segmentId
+        ? await resolveSessionSegmentAudio(segmentId)
+        : await resolveElevateSessionAudio(sessionId)
       if (resolved?.audioPath) {
         const result = await alignTurnsToAudio(turns as any, resolved.audioPath)
         alignmentInfo = `audio: aligned=${result.aligned} regions=${result.regionCount} userTurns=${result.userTurnCount}`
@@ -206,15 +269,16 @@ export async function saveSessionTurnsForAgent(req: Request, res: Response) {
     // region count didn't match the user-turn count).
     const sttEpochMs = Number(req.body?.sttEpochMs)
     let shiftSec = 0
-    if (Number.isFinite(sttEpochMs) && session.recordingStartedAt) {
-      shiftSec = sttEpochMs / 1000 - session.recordingStartedAt.getTime() / 1000
+    const recordingStartedAt = segment?.recordingStartedAt ?? session.recordingStartedAt
+    if (Number.isFinite(sttEpochMs) && recordingStartedAt) {
+      shiftSec = sttEpochMs / 1000 - recordingStartedAt.getTime() / 1000
       if (!Number.isFinite(shiftSec)) shiftSec = 0
     }
     console.log(
       `[turns] ${sessionId} align (${alignmentInfo}); fallback shift=${shiftSec.toFixed(
         2,
       )}s (sttEpochMs=${Number.isFinite(sttEpochMs) ? sttEpochMs : 'none'} recordingStartedAt=${
-        session.recordingStartedAt?.toISOString() ?? 'none'
+        recordingStartedAt?.toISOString() ?? 'none'
       })`,
     )
     const shiftTime = (v: number | null | undefined): number | null =>
@@ -228,40 +292,123 @@ export async function saveSessionTurnsForAgent(req: Request, res: Response) {
       )
     }
 
+    const validTurns = turns.filter(
+      (t) => typeof t.turnIndex === 'number' && t.role && typeof t.text === 'string',
+    )
     let saved = 0
-    for (const t of turns) {
-      if (typeof t.turnIndex !== 'number' || !t.role || typeof t.text !== 'string') {
-        continue
-      }
-      const a = alignedById?.get(t.turnIndex)
-      const data = a
-        ? {
-            role: t.role,
-            text: t.text,
-            audioStart: a.audioStart ?? null,
-            audioEnd: a.audioEnd ?? null,
-            words: (a.words ?? undefined) as any,
-            metrics: (t.metrics ?? undefined) as any,
-            score: (t.score ?? undefined) as any,
-            coachNote: t.coachNote ?? null,
-          }
-        : {
-            role: t.role,
-            text: t.text,
-            audioStart: shiftTime(t.audioStart),
-            audioEnd: shiftTime(t.audioEnd),
-            words: shiftWords(t.words) as any,
-            metrics: (t.metrics ?? undefined) as any,
-            score: (t.score ?? undefined) as any,
-            coachNote: t.coachNote ?? null,
-          }
-      await prisma.sessionTurn.upsert({
-        where: { sessionId_turnIndex: { sessionId, turnIndex: t.turnIndex } },
-        create: { sessionId, turnIndex: t.turnIndex, ...data },
-        update: data,
+    await prisma.$transaction(async (tx) => {
+      // Serialize sequence allocation for all segments in one session.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${sessionId}))`
+      const latest = await tx.sessionTurn.findFirst({
+        where: { sessionId },
+        orderBy: { sequenceNo: 'desc' },
+        select: { sequenceNo: true },
       })
-      saved += 1
-    }
+      let nextSequence = (latest?.sequenceNo ?? -1) + 1
+
+      for (const t of validTurns) {
+        const a = alignedById?.get(t.turnIndex)
+        const data = a
+          ? {
+              role: t.role,
+              text: t.text,
+              audioStart: a.audioStart ?? null,
+              audioEnd: a.audioEnd ?? null,
+              words: (a.words ?? undefined) as any,
+              metrics: (t.metrics ?? undefined) as any,
+              score: (t.score ?? undefined) as any,
+              coachNote: t.coachNote ?? null,
+            }
+          : {
+              role: t.role,
+              text: t.text,
+              audioStart: shiftTime(t.audioStart),
+              audioEnd: shiftTime(t.audioEnd),
+              words: shiftWords(t.words) as any,
+              metrics: (t.metrics ?? undefined) as any,
+              score: (t.score ?? undefined) as any,
+              coachNote: t.coachNote ?? null,
+            }
+
+        if (segmentId) {
+          const existing = await tx.sessionTurn.findUnique({
+            where: {
+              segmentId_localTurnIndex: {
+                segmentId,
+                localTurnIndex: t.turnIndex,
+              },
+            },
+          })
+          if (existing) {
+            await tx.sessionTurn.update({ where: { id: existing.id }, data })
+          } else {
+            const sequenceNo = nextSequence++
+            await tx.sessionTurn.create({
+              data: {
+                sessionId,
+                segmentId,
+                localTurnIndex: t.turnIndex,
+                sequenceNo,
+                turnIndex: sequenceNo,
+                ...data,
+              },
+            })
+          }
+        } else {
+          // Legacy agents use the old session-local index.
+          await tx.sessionTurn.upsert({
+            where: { sessionId_turnIndex: { sessionId, turnIndex: t.turnIndex } },
+            create: {
+              sessionId,
+              localTurnIndex: t.turnIndex,
+              sequenceNo: t.turnIndex,
+              turnIndex: t.turnIndex,
+              ...data,
+            },
+            update: data,
+          })
+        }
+        saved += 1
+      }
+
+      if (segmentId) {
+        // Arrival order is not reliable: a closing segment can finish persisting
+        // after its successor has already started. Re-number from persisted
+        // segment order so replay remains globally monotonic and contiguous.
+        const allTurns = await tx.sessionTurn.findMany({
+          where: { sessionId },
+          include: { segment: { select: { segmentIndex: true } } },
+        })
+        allTurns.sort((a, b) =>
+          compareSegmentTurns(
+            {
+              segmentIndex: a.segment?.segmentIndex ?? null,
+              localTurnIndex: a.localTurnIndex,
+            },
+            {
+              segmentIndex: b.segment?.segmentIndex ?? null,
+              localTurnIndex: b.localTurnIndex,
+            },
+          ),
+        )
+        const temporaryBase = 1_000_000_000
+        for (let index = 0; index < allTurns.length; index += 1) {
+          await tx.sessionTurn.update({
+            where: { id: allTurns[index].id },
+            data: {
+              sequenceNo: temporaryBase + index,
+              turnIndex: temporaryBase + index,
+            },
+          })
+        }
+        for (let index = 0; index < allTurns.length; index += 1) {
+          await tx.sessionTurn.update({
+            where: { id: allTurns[index].id },
+            data: { sequenceNo: index, turnIndex: index },
+          })
+        }
+      }
+    })
 
     res.status(201).json({ success: true, count: saved })
   } catch (error) {

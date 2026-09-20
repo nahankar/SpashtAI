@@ -76,37 +76,37 @@ enum InterviewRating {
 }
 
 model User {
-  id             String          @id @default(cuid())
-  email          String          @unique
+  id    String @id @default(cuid())
+  email String @unique
 
   // Authentication
-  passwordHash          String?
-  googleId              String?   @unique
-  emailVerified         Boolean   @default(false)
-  verificationToken     String?   @unique
-  resetPasswordToken    String?   @unique
-  resetPasswordExpiry   DateTime?
+  passwordHash        String?
+  googleId            String?   @unique
+  emailVerified       Boolean   @default(false)
+  verificationToken   String?   @unique
+  resetPasswordToken  String?   @unique
+  resetPasswordExpiry DateTime?
 
   // Profile
-  firstName     String?
-  lastName      String?
-  avatar        String?
-  phone         String?
-  dateOfBirth   DateTime?
-  gender        Gender?
-  pincode       String?
-  city          String?   // resolved from pincode — admin only
-  state         String?   // admin only
-  country       String?   // admin only
+  firstName   String?
+  lastName    String?
+  avatar      String?
+  phone       String?
+  dateOfBirth DateTime?
+  gender      Gender?
+  pincode     String?
+  city        String? // resolved from pincode — admin only
+  state       String? // admin only
+  country     String? // admin only
 
   // Authorization
-  role          UserRole @default(USER)
+  role UserRole @default(USER)
 
   // Activity
-  lastLoginAt   DateTime?
-  lastActiveAt  DateTime?
-  loginCount    Int      @default(0)
-  rewardPoints  Float    @default(0)
+  lastLoginAt  DateTime?
+  lastActiveAt DateTime?
+  loginCount   Int       @default(0)
+  rewardPoints Float     @default(0)
 
   // Per-user content/export restrictions (admin-controlled).
   // "hide*" gate VIEWING of transcript/audio content (default: visible).
@@ -126,37 +126,37 @@ model User {
   // Pro license (admin-controlled). Gates premium UI features such as
   // playback "Key Moments" and the "Ask AI Coach" assistant. Default OFF;
   // admins always have access regardless of this flag.
-  enablePro         Boolean @default(false)
+  enablePro Boolean @default(false)
 
   // Ultra license (admin-controlled). Gates the highest-tier features such as
   // Replay video-file uploads. Default OFF; admins always have access.
-  enableUltra       Boolean @default(false)
+  enableUltra Boolean @default(false)
 
   // Relations
-  sessions       Session[]
-  replaySessions ReplaySession[]
-  preparations   Preparation[]
-  activityLogs   UserActivity[]
-  featureUsage   FeatureUsage[]
-  progressPulse  ProgressPulse[]
-  feedback         UserFeedback[]
-  coachThreads     CoachThread[]
+  sessions                Session[]
+  replaySessions          ReplaySession[]
+  preparations            Preparation[]
+  activityLogs            UserActivity[]
+  featureUsage            FeatureUsage[]
+  progressPulse           ProgressPulse[]
+  feedback                UserFeedback[]
+  coachThreads            CoachThread[]
   coachHomeResultReceipts CoachHomeResultReceipt[]
 
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([email])
   @@index([role])
 }
 
 model FeatureUsage {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  feature   String
-  action    String
+  feature String
+  action  String
 
   sessionId String?
   metadata  Json?
@@ -168,12 +168,12 @@ model FeatureUsage {
 }
 
 model UserActivity {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  action    String
-  resource  String?
+  action     String
+  resource   String?
   resourceId String?
 
   ipAddress String?
@@ -186,15 +186,15 @@ model UserActivity {
 }
 
 model AdminAction {
-  id        String   @id @default(cuid())
-  adminId   String
+  id      String @id @default(cuid())
+  adminId String
 
-  action    String
+  action         String
   targetUserId   String?
   targetResource String?
 
-  reason    String?  @db.Text
-  metadata  Json?
+  reason   String? @db.Text
+  metadata Json?
 
   timestamp DateTime @default(now())
 
@@ -202,19 +202,19 @@ model AdminAction {
 }
 
 model SystemMetrics {
-  id        String   @id @default(cuid())
-  date      DateTime @unique
+  id   String   @id @default(cuid())
+  date DateTime @unique
 
-  totalUsers          Int
-  activeUsers         Int
-  newUsers            Int
+  totalUsers  Int
+  activeUsers Int
+  newUsers    Int
 
-  replayUploads       Int
-  elevateSessions     Int
+  replayUploads        Int
+  elevateSessions      Int
   totalMinutesAnalyzed Int
 
-  avgResponseTime     Float?
-  errorRate           Float?
+  avgResponseTime Float?
+  errorRate       Float?
 
   createdAt DateTime @default(now())
 
@@ -230,11 +230,11 @@ model Preparation {
   status      PreparationStatus @default(ACTIVE)
   completedAt DateTime?
 
-  interview  InterviewPreparation?
-  stages     PreparationStage[]
-  questions  InterviewQuestion[]
-  reflections StageReflection[]
-  practices  PreparationPractice[]
+  interview    InterviewPreparation?
+  stages       PreparationStage[]
+  questions    InterviewQuestion[]
+  reflections  StageReflection[]
+  practices    PreparationPractice[]
   coachThreads CoachThread[]
 
   createdAt DateTime @default(now())
@@ -287,18 +287,18 @@ model PreparationStage {
 }
 
 model InterviewQuestion {
-  id             String                  @id @default(cuid())
-  preparationId  String
-  preparation    Preparation             @relation(fields: [preparationId], references: [id], onDelete: Cascade)
-  stageId        String?
-  stage          PreparationStage?       @relation(fields: [stageId], references: [id], onDelete: SetNull)
-  questionText   String                  @db.Text
-  source         InterviewQuestionSource @default(ACTUAL_INTERVIEW)
-  category       String?
-  topic          String?
-  difficulty     String?
-  notes          String?                 @db.Text
-  askedAt        DateTime?
+  id            String                  @id @default(cuid())
+  preparationId String
+  preparation   Preparation             @relation(fields: [preparationId], references: [id], onDelete: Cascade)
+  stageId       String?
+  stage         PreparationStage?       @relation(fields: [stageId], references: [id], onDelete: SetNull)
+  questionText  String                  @db.Text
+  source        InterviewQuestionSource @default(ACTUAL_INTERVIEW)
+  category      String?
+  topic         String?
+  difficulty    String?
+  notes         String?                 @db.Text
+  askedAt       DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -346,17 +346,17 @@ model PreparationPractice {
 }
 
 model Session {
-  id          String   @id @default(cuid())
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId      String
-  module      String   // elevate | pitch | fluency
-  sessionName String?
-  focusArea   String?  // e.g. clarity, confidence, filler_words
-  focusContext String? // free-text context from Replay C2A or user input
-  startedAt   DateTime @default(now())
-  endedAt     DateTime?
-  durationSec Int?
-  sessionPointsAwarded Boolean @default(false)
+  id                   String    @id @default(cuid())
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId               String
+  module               String // elevate | pitch | fluency
+  sessionName          String?
+  focusArea            String? // e.g. clarity, confidence, filler_words
+  focusContext         String? // free-text context from Replay C2A or user input
+  startedAt            DateTime  @default(now())
+  endedAt              DateTime?
+  durationSec          Int?
+  sessionPointsAwarded Boolean   @default(false)
 
   viewCount    Int       @default(0)
   lastViewedAt DateTime?
@@ -369,10 +369,11 @@ model Session {
   recordingStartedAt DateTime?
 
   // Relations
-  metrics     SessionMetrics?
-  transcript  SessionTranscript?
-  recordings  SessionRecording[]
-  turns       SessionTurn[]
+  metrics             SessionMetrics?
+  transcript          SessionTranscript?
+  recordings          SessionRecording[]
+  segments            SessionSegment[]
+  turns               SessionTurn[]
   preparationPractice PreparationPractice?
 
   @@index([userId, startedAt])
@@ -383,130 +384,164 @@ model Session {
 // offsets, word timings, metrics, scores, coach notes). Session-level rollups
 // stay in SessionMetrics; this is the queryable per-answer primary object.
 model SessionTurn {
-  id        String   @id @default(cuid())
-  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  id        String          @id @default(cuid())
+  session   Session         @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   sessionId String
+  segment   SessionSegment? @relation(fields: [segmentId], references: [id], onDelete: SetNull)
+  segmentId String?
 
-  turnIndex Int      // 0-based order within the session (reconciled with messages[])
-  role      String   // 'user' | 'assistant'
-  text      String   @db.Text
+  turnIndex      Int // 0-based order within the session (reconciled with messages[])
+  localTurnIndex Int // Agent-local index; restarts for each segment.
+  sequenceNo     Int // Session-global monotonic replay order.
+  role           String // 'user' | 'assistant'
+  text           String @db.Text
 
   // Audio timeline (seconds since Session.recordingStartedAt). Null when timing
   // could not be measured/aligned (e.g. backend without word timestamps).
   audioStart Float?
   audioEnd   Float?
 
-  words   Json?    // [{ w: string, start: number, end: number }] (user turns only, v1)
-  metrics Json?    // TurnMetricsSnapshot: { wpm, fillerCount, fillerRate, hedgingCount, vocabDiversity, speakingSeconds, ... }
-  score   Json?    // LLM judge: { stars, confidence, tags: string[] }
+  words     Json? // [{ w: string, start: number, end: number }] (user turns only, v1)
+  metrics   Json? // TurnMetricsSnapshot: { wpm, fillerCount, fillerRate, hedgingCount, vocabDiversity, speakingSeconds, ... }
+  score     Json? // LLM judge: { stars, confidence, tags: string[] }
   coachNote String? @db.Text
 
   createdAt DateTime @default(now())
 
   @@unique([sessionId, turnIndex])
+  @@unique([sessionId, sequenceNo])
+  @@unique([segmentId, localTurnIndex])
   @@index([sessionId])
+  @@index([segmentId])
+}
+
+model SessionSegment {
+  id                   String    @id
+  session              Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId            String
+  segmentIndex         Int
+  roomName             String
+  startedAt            DateTime
+  recordingStartedAt   DateTime?
+  recordingDurationSec Float?
+  endedAt              DateTime?
+  activeDurationSec    Int?
+  audioStatus          String    @default("pending") // pending | available | failed | unavailable
+
+  recording SessionRecording?
+  turns     SessionTurn[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([sessionId, segmentIndex])
+  @@index([sessionId, startedAt])
 }
 
 model SessionMetrics {
-  id        String   @id @default(cuid())
-  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  sessionId String   @unique
-  
+  id        String  @id @default(cuid())
+  session   Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId String  @unique
+
   // LiveKit metrics
-  totalLlmTokens        Int     @default(0)
-  totalLlmDuration      Float   @default(0)
-  avgTtft              Float   @default(0)  // time to first token
-  totalTtsDuration     Float   @default(0)
-  totalTtsAudioDuration Float   @default(0)
-  avgTtsTtfb           Float   @default(0)  // time to first byte
-  totalEouDelay        Float   @default(0)  // end of utterance delay
+  totalLlmTokens         Int   @default(0)
+  totalLlmDuration       Float @default(0)
+  avgTtft                Float @default(0) // time to first token
+  totalTtsDuration       Float @default(0)
+  totalTtsAudioDuration  Float @default(0)
+  avgTtsTtfb             Float @default(0) // time to first byte
+  totalEouDelay          Float @default(0) // end of utterance delay
   conversationLatencyAvg Float @default(0)
-  
+
   // User linguistic metrics
-  userWpm              Float   @default(0)
-  userFillerCount      Int     @default(0)
-  userFillerRate       Float   @default(0)
-  userAvgSentenceLength Float  @default(0)
-  userSpeakingTime     Float   @default(0)
-  userVocabDiversity   Float   @default(0)
-  userResponseTimeAvg  Float   @default(0)
-  
+  userWpm               Float @default(0)
+  userFillerCount       Int   @default(0)
+  userFillerRate        Float @default(0)
+  userAvgSentenceLength Float @default(0)
+  userSpeakingTime      Float @default(0)
+  userVocabDiversity    Float @default(0)
+  userResponseTimeAvg   Float @default(0)
+
   // Assistant linguistic metrics
-  assistantWpm         Float   @default(0)
-  assistantFillerCount Int     @default(0)
-  assistantFillerRate  Float   @default(0)
+  assistantWpm               Float @default(0)
+  assistantFillerCount       Int   @default(0)
+  assistantFillerRate        Float @default(0)
   assistantAvgSentenceLength Float @default(0)
-  assistantSpeakingTime Float  @default(0)
-  assistantVocabDiversity Float @default(0)
-  assistantResponseTimeAvg Float @default(0)
-  
-  totalTurns           Int     @default(0)
-  
+  assistantSpeakingTime      Float @default(0)
+  assistantVocabDiversity    Float @default(0)
+  assistantResponseTimeAvg   Float @default(0)
+
+  totalTurns Int @default(0)
+
   // Advanced analytics (spaCy, Praat, Gentle)
-  contentMetrics       Json?   // NLP analysis: vocabulary, grammar, entities
-  deliveryMetrics      Json?   // Audio analysis: prosody, pauses, speech rate
-  performanceInsights  Json?   // Comprehensive scoring and feedback
-  processingStatus     Json?   // Track what's been processed
+  contentMetrics      Json? // NLP analysis: vocabulary, grammar, entities
+  deliveryMetrics     Json? // Audio analysis: prosody, pauses, speech rate
+  performanceInsights Json? // Comprehensive scoring and feedback
+  processingStatus    Json? // Track what's been processed
 
   // Metrics Engine v2: skill-based scoring
-  skillScores          Json?   // 8 skill scores (clarity, confidence, etc.)
-  communicationSignals Json?   // Raw signal extraction output from spaCy/textstat
-  coachingInsights     Json?   // AI-generated coaching feedback
-  
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @default(now()) @updatedAt
+  skillScores          Json? // 8 skill scores (clarity, confidence, etc.)
+  communicationSignals Json? // Raw signal extraction output from spaCy/textstat
+  coachingInsights     Json? // AI-generated coaching feedback
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
 }
 
 model SessionTranscript {
-  id        String   @id @default(cuid())
-  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  sessionId String   @unique
-  
+  id        String  @id @default(cuid())
+  session   Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId String  @unique
+
   // Full conversation data as JSON
   conversationData Json
-  
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 model SessionRecording {
-  id         String   @id @default(cuid())
-  session    Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  sessionId  String   // Removed @unique to allow multiple recordings per session
-  
+  id        String          @id @default(cuid())
+  session   Session         @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId String // Removed @unique to allow multiple recordings per session
+  segment   SessionSegment? @relation(fields: [segmentId], references: [id], onDelete: SetNull)
+  segmentId String?         @unique
+
   // Egress recording details
-  egressId   String   @unique
-  filePath   String   // Local path or S3 URL
-  duration   Int      @default(0)  // Duration in seconds
-  fileSize   Int      @default(0)  // File size in bytes
-  status     String   @default("completed")  // completed, failed, processing
-  recordingType String @default("user")  // user, agent, merged
-  
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  egressId      String  @unique
+  filePath      String // Local path or S3 URL
+  duration      Int     @default(0) // Duration in seconds
+  fileSize      Int     @default(0) // File size in bytes
+  status        String  @default("completed") // completed, failed, processing
+  recordingType String  @default("user") // user, agent, merged
+  contentHash   String?
+  mimeType      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // ── Replay Feature ──
 
 model ReplaySession {
-  id          String   @id @default(cuid())
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId      String
+  id     String @id @default(cuid())
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
 
-  sessionName      String?
-  meetingType      String
-  userRole         String
-  focusAreas       String[]
-  meetingGoal      String?
-  meetingDate      DateTime?
-  participantName  String?
+  sessionName     String?
+  meetingType     String
+  userRole        String
+  focusAreas      String[]
+  meetingGoal     String?
+  meetingDate     DateTime?
+  participantName String?
 
   // pending | transcribing | analyzing | completed | failed
-  status       String   @default("pending")
+  status       String  @default("pending")
   errorMessage String?
 
-  viewCount    Int       @default(0)
-  exportCount  Int       @default(0)
+  viewCount   Int @default(0)
+  exportCount Int @default(0)
 
   progressPulseStatus String? // 'tracked' | 'skipped' | null (not yet decided)
 
@@ -525,12 +560,12 @@ model ReplayUpload {
   replaySession   ReplaySession @relation(fields: [replaySessionId], references: [id], onDelete: Cascade)
   replaySessionId String
 
-  fileType     String   // audio | video | transcript | text
+  fileType     String // audio | video | transcript | text
   originalName String
   storedPath   String
   fileSize     Int
   mimeType     String
-  duration     Float?   // seconds, for audio/video
+  duration     Float? // seconds, for audio/video
 
   createdAt DateTime @default(now())
 }
@@ -541,29 +576,29 @@ model ReplayResult {
   replaySessionId String        @unique
 
   // Transcript
-  transcriptText       String  @db.Text
+  transcriptText       String @db.Text
   structuredTranscript Json?
-  speakerCount         Int     @default(1)
-  transcriptionSource  String  // aws_transcribe | uploaded | pasted
+  speakerCount         Int    @default(1)
+  transcriptionSource  String // aws_transcribe | uploaded | pasted
 
   // Computed metrics
-  wordsPerMinute      Float   @default(0)
-  fillerWordCount     Int     @default(0)
-  fillerWordRate      Float   @default(0)
-  avgSentenceLength   Float   @default(0)
-  vocabularyDiversity Float   @default(0)
-  totalTurns          Int     @default(0)
-  speakingPercentage  Float   @default(0)
+  wordsPerMinute      Float @default(0)
+  fillerWordCount     Int   @default(0)
+  fillerWordRate      Float @default(0)
+  avgSentenceLength   Float @default(0)
+  vocabularyDiversity Float @default(0)
+  totalTurns          Int   @default(0)
+  speakingPercentage  Float @default(0)
 
   // Confidence signals
-  hedgingCount        Int     @default(0)
-  hedgingRate         Float   @default(0)
+  hedgingCount Int   @default(0)
+  hedgingRate  Float @default(0)
 
   // Behavioral metrics
-  interruptionCount   Int     @default(0)
-  longestMonologueSec Int     @default(0)
-  questionsAsked      Int     @default(0)
-  repetitionRequests  Int     @default(0)
+  interruptionCount   Int    @default(0)
+  longestMonologueSec Int    @default(0)
+  questionsAsked      Int    @default(0)
+  repetitionRequests  Int    @default(0)
   avgResponseTimeSec  Float?
 
   // AI scores (1-10)
@@ -598,16 +633,16 @@ model ReplayResult {
 // ── My Progress Pulse ──
 
 model ProgressPulse {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  skill     String   // clarity, confidence, filler_words, engagement, pacing, structure, conciseness, action_items
-  score     Float    // 0-10 scale
-  source    String   // 'replay' | 'elevate'
-  sessionId String?  // references the originating session (Replay or Elevate)
+  skill     String // clarity, confidence, filler_words, engagement, pacing, structure, conciseness, action_items
+  score     Float // 0-10 scale
+  source    String // 'replay' | 'elevate'
+  sessionId String? // references the originating session (Replay or Elevate)
 
-  metadata  Json?    // extra context (e.g. wpm, fillerRate, raw metric values)
+  metadata Json? // extra context (e.g. wpm, fillerRate, raw metric values)
 
   recordedAt DateTime @default(now())
 
@@ -617,17 +652,17 @@ model ProgressPulse {
 
 // ── Platform feature flags (global until multi-tenant) ──
 model PlatformFeatureFlag {
-  feature          String   @unique // "elevate" | "replay"
-  label            String
-  description      String?  @db.Text
-  enabled          Boolean  @default(true) // legacy; migrated to hidden/disabled
-  hidden           Boolean  @default(false)
-  disabled         Boolean  @default(false)
-  overlayComment   String?  @db.Text
-  overlayPosition  String   @default("center") // top | center
-  updatedBy        String?
-  updatedAt        DateTime @updatedAt
-  createdAt        DateTime @default(now())
+  feature         String   @unique // "elevate" | "replay"
+  label           String
+  description     String?  @db.Text
+  enabled         Boolean  @default(true) // legacy; migrated to hidden/disabled
+  hidden          Boolean  @default(false)
+  disabled        Boolean  @default(false)
+  overlayComment  String?  @db.Text
+  overlayPosition String   @default("center") // top | center
+  updatedBy       String?
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
 }
 
 // Admin-editable LLM prompts for the live Elevate coach (agent loads at session start).
@@ -706,24 +741,24 @@ enum FeedbackPriority {
 }
 
 model UserFeedback {
-  id             String              @id @default(cuid())
-  feedbackNumber String              @unique
+  id             String                   @id @default(cuid())
+  feedbackNumber String                   @unique
   userId         String
-  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type           UserFeedbackType    @default(FEEDBACK)
+  user           User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type           UserFeedbackType         @default(FEEDBACK)
   subject        String?
-  body           String              @db.Text
-  status         UserFeedbackStatus  @default(OPEN)
+  body           String                   @db.Text
+  status         UserFeedbackStatus       @default(OPEN)
   priority       FeedbackPriority?
-  pointsAwarded  Boolean             @default(false)
+  pointsAwarded  Boolean                  @default(false)
   acknowledgedAt DateTime?
   sessionId      String?
   sessionUrl     String?
   sessionModule  String?
   attachments    UserFeedbackAttachment[]
   notes          UserFeedbackNote[]
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
 
   @@index([userId, createdAt])
   @@index([status])
@@ -732,13 +767,13 @@ model UserFeedback {
 }
 
 model UserFeedbackAttachment {
-  id          String       @id @default(cuid())
-  feedbackId  String
-  feedback    UserFeedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
-  fileName    String
-  mimeType    String
-  storedPath  String
-  createdAt   DateTime     @default(now())
+  id         String       @id @default(cuid())
+  feedbackId String
+  feedback   UserFeedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  fileName   String
+  mimeType   String
+  storedPath String
+  createdAt  DateTime     @default(now())
 }
 
 model UserFeedbackNote {
@@ -770,22 +805,22 @@ model PlatformSettings {
 }
 
 model PricingSettings {
-  id             String  @id @default("default")
-  enabled        Boolean @default(false)
-  comingSoonText String? @db.Text
+  id             String   @id @default("default")
+  enabled        Boolean  @default(false)
+  comingSoonText String?  @db.Text
   updatedAt      DateTime @updatedAt
 }
 
 model PricingPlan {
-  id           String   @id @default(cuid())
+  id           String               @id @default(cuid())
   name         String
   priceMonthly Float
-  description  String?  @db.Text
-  isPromoted   Boolean  @default(false)
-  sortOrder    Int      @default(0)
+  description  String?              @db.Text
+  isPromoted   Boolean              @default(false)
+  sortOrder    Int                  @default(0)
   features     PricingPlanFeature[]
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
 }
 
 model PricingPlanFeature {
@@ -806,18 +841,18 @@ model LegalDocument {
 }
 
 model CoachThread {
-  id             String   @id @default(cuid())
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId         String
-  title          String?
-  status         String   @default("active") // active | archived
-  preparationId  String?
-  preparation    Preparation? @relation(fields: [preparationId], references: [id], onDelete: SetNull)
-  focusArea       String?
-  turns          CoachTurn[]
-  actions        CoachAction[]
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id            String        @id @default(cuid())
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId        String
+  title         String?
+  status        String        @default("active") // active | archived
+  preparationId String?
+  preparation   Preparation?  @relation(fields: [preparationId], references: [id], onDelete: SetNull)
+  focusArea     String?
+  turns         CoachTurn[]
+  actions       CoachAction[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   @@index([userId, updatedAt])
   @@index([userId, status])
@@ -830,8 +865,8 @@ model CoachTurn {
   id        String      @id @default(cuid())
   thread    CoachThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
   threadId  String
-  role      String      // user | coach
-  kind      String?     // validated by the Coach route's TURN_KINDS allowlist
+  role      String // user | coach
+  kind      String? // validated by the Coach route's TURN_KINDS allowlist
   text      String?     @db.Text
   payload   Json?
   createdAt DateTime    @default(now())
@@ -843,8 +878,8 @@ model CoachAction {
   id        String      @id @default(cuid())
   thread    CoachThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
   threadId  String
-  module    String      // elevate | replay | prepare | progress
-  action    String      // launch | complete
+  module    String // elevate | replay | prepare | progress
+  action    String // launch | complete
   targetId  String?
   createdAt DateTime    @default(now())
 
@@ -853,12 +888,12 @@ model CoachAction {
 }
 
 model CoachHomeResultReceipt {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  module    String   // elevate | replay
-  targetId  String
-  seenAt    DateTime @default(now())
+  id       String   @id @default(cuid())
+  userId   String
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  module   String // elevate | replay
+  targetId String
+  seenAt   DateTime @default(now())
 
   @@unique([userId, module, targetId])
   @@index([userId, seenAt])

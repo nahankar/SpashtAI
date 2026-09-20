@@ -53,10 +53,11 @@ function dedupeTranscriptMessages(
  *   • bugs in the agent's calc never leak into the dashboard
  *   • old sessions can be reprocessed by re-running this function
  *
- * Returns the canonical (wpm, speakingSec) tuple. Falls back to the agent's
- * value when raw signals are missing.
+ * Returns WPM only when both word count and measured speaking time are
+ * available. Active room/session time is intentionally never used as a
+ * speaking-time estimate.
  */
-function canonicalWpm(opts: {
+export function canonicalWpm(opts: {
   agentWpm: number
   agentSpeakingSec: number
   totalWords?: number
@@ -81,16 +82,10 @@ function canonicalWpm(opts: {
     return { wpm, speakingSec: agentSec, source: 'agent-measured' }
   }
 
-  // Fallback: derive from session wall-clock. Coarse but real (not the legacy
-  // 150-WPM tautology). Assumes ~40% of session is user speech.
-  if (inferredWords > 0 && sessionSec > 0) {
-    const estUserSec = Math.max(sessionSec * 0.4, 1)
-    const wpm = Math.round((inferredWords / estUserSec) * 60)
-    return { wpm, speakingSec: estUserSec, source: 'wall-clock-estimated' }
-  }
-
-  // Last resort: pass through whatever the agent sent.
-  return { wpm: Math.round(agentWpm), speakingSec: agentSec, source: 'agent-passthrough' }
+  // The schema stores numeric fields, so zero is the explicit unavailable
+  // value. Do not manufacture speaking time from room-active duration and do
+  // not persist an ungrounded WPM into Replay or Pulse.
+  return { wpm: 0, speakingSec: 0, source: 'unavailable' }
 }
 
 export async function saveSessionMetrics(req: Request, res: Response) {
@@ -109,9 +104,10 @@ export async function saveSessionMetrics(req: Request, res: Response) {
     // Compute canonical WPM server-side. The agent's value is one input, not
     // the verdict — see `canonicalWpm` doc above for the full rationale.
     const sessionDurationSec =
-      session.startedAt && session.endedAt
+      session.durationSec ??
+      (session.startedAt && session.endedAt
         ? (session.endedAt.getTime() - session.startedAt.getTime()) / 1000
-        : 0
+        : 0)
 
     const userCanon = canonicalWpm({
       agentWpm: metricsData.userMetrics?.words_per_minute || 0,
@@ -660,29 +656,12 @@ export async function calculateTextMetrics(req: Request, res: Response) {
       ? assistantResponseTimes.reduce((a, b) => a + b, 0) / assistantResponseTimes.length 
       : 0
 
-    // Text-only fallback: estimate active speaking windows — never divide word
-    // count by full session wall-clock (includes silence + coach speech).
-    const userSpeakingTime =
-      totalDurationSec > 0
-        ? Math.max(totalDurationSec * 0.38, (userWordCount / 200) * 60, 1)
-        : userWordCount > 0
-          ? (userWordCount / 150) * 60
-          : 0
-    const assistantSpeakingTime =
-      totalDurationSec > 0
-        ? Math.max(totalDurationSec * 0.35, (assistantWordCount / 160) * 60, 1)
-        : assistantWordCount > 0
-          ? (assistantWordCount / 150) * 60
-          : 0
-
-    const userWpm =
-      userSpeakingTime > 0
-        ? Math.min(Math.round((userWordCount / userSpeakingTime) * 60), 200)
-        : 0
-    const assistantWpm =
-      assistantSpeakingTime > 0
-        ? Math.min(Math.round((assistantWordCount / assistantSpeakingTime) * 60), 200)
-        : 0
+    // Transcript timestamps measure conversation/response windows, not actual
+    // speech. Keep WPM unavailable until VAD/STT/audio supplies speaking time.
+    const userSpeakingTime = 0
+    const assistantSpeakingTime = 0
+    const userWpm = 0
+    const assistantWpm = 0
 
     // Estimate tokens from text (1 token ≈ 4 characters for English)
     const totalChars = userText.length + assistantText.length

@@ -18,7 +18,7 @@ import {
 import { saveSkillScoresToPulse } from '../analytics/progressPulse'
 import { generateTurnSuggestions } from '../analytics/turnSuggestions'
 import { getElevateSessionOwnerId, resolveRequestExportFlags } from '../lib/userExportFlags'
-import { fetchProsodyForPath } from '../analytics/audioEnrichment'
+import { enrichElevateSessionAudio, fetchProsodyForPath } from '../analytics/audioEnrichment'
 import {
   hasRealProsody,
   mergeCommunicationSignals,
@@ -26,6 +26,7 @@ import {
   resolveAudioStatus,
   shouldWritePulse,
 } from '../analytics/audioStatus'
+import { detectSpeechRegions } from '../lib/audioAlignment'
 
 const SIGNAL_API_URL = process.env.SIGNAL_API_URL || 'http://localhost:4001'
 const INTERNAL_AGENT_TOKEN =
@@ -48,7 +49,7 @@ export async function analyzeSession(req: Request, res: Response) {
     // 1. Load session + transcript
     const session = await prisma.session.findUnique({
       where: { id: sessionId },
-      include: { transcript: true },
+      include: { transcript: true, segments: true },
     })
 
     if (!session) {
@@ -84,7 +85,9 @@ export async function analyzeSession(req: Request, res: Response) {
     // Calculate duration
     const startedAt = session.startedAt ? new Date(session.startedAt).getTime() : 0
     const endedAt = session.endedAt ? new Date(session.endedAt).getTime() : Date.now()
-    const durationSec = startedAt ? (endedAt - startedAt) / 1000 : 0
+    const durationSec =
+      session.durationSec ??
+      (startedAt ? (endedAt - startedAt) / 1000 : 0)
 
     // 2. Call Python signal extraction API
     let signals: TextSignals
@@ -118,9 +121,6 @@ export async function analyzeSession(req: Request, res: Response) {
       signals = buildFallbackSignals(messages, durationSec)
     }
 
-    // 3. Calculate skill scores
-    const { scores, components } = calculateSkillScores(signals, messages.length)
-
     const existingMetrics = await prisma.sessionMetrics.findUnique({
       where: { sessionId },
       select: {
@@ -153,9 +153,35 @@ export async function analyzeSession(req: Request, res: Response) {
       }
     }
 
+    const allSegmentAudioAvailable =
+      session.segments.length > 0 &&
+      session.segments.every((segment) => segment.audioStatus === 'available')
+    let measuredSpeakingSec: number | null = null
+    if (audioResolved?.audioPath && allSegmentAudioAvailable) {
+      try {
+        const speechRegions = await detectSpeechRegions(audioResolved.audioPath)
+        measuredSpeakingSec = speechRegions.reduce(
+          (sum, region) => sum + Math.max(0, region.end - region.start),
+          0,
+        )
+        if (measuredSpeakingSec > 0 && signals.speechRate.totalWords > 0) {
+          signals.speechRate.wpm =
+            (signals.speechRate.totalWords / measuredSpeakingSec) * 60
+        }
+      } catch (error) {
+        console.warn('[analytics] aggregate speaking-time measurement skipped:', error)
+      }
+    }
+
     const mergedSignals = mergeCommunicationSignals(
       existingMetrics?.communicationSignals,
       signals as unknown as Record<string, unknown>,
+    )
+    // Scores must be calculated after real prosody and aggregate speaking time
+    // are present; calculating earlier silently made delivery text-only.
+    const { scores, components } = calculateSkillScores(
+      mergedSignals as unknown as TextSignals,
+      messages.length,
     )
     const audioStatus = resolveAudioStatus({
       hasReadableRecording: Boolean(audioResolved?.audioPath),
@@ -192,12 +218,26 @@ export async function analyzeSession(req: Request, res: Response) {
       where: { sessionId },
       create: {
         sessionId,
+        ...(measuredSpeakingSec != null ? { userWpm: signals.speechRate.wpm } : {}),
+        userFillerCount: signals.fillers.count,
+        userFillerRate: signals.fillers.rate * 100,
+        userAvgSentenceLength: signals.sentenceComplexity.avgLength,
+        ...(measuredSpeakingSec != null ? { userSpeakingTime: measuredSpeakingSec } : {}),
+        userVocabDiversity: signals.vocabDiversity.ratio,
+        totalTurns: messages.length,
         skillScores: skillScoresJson,
         communicationSignals: signalsJson,
         coachingInsights: insightsJson,
         processingStatus: processingStatusJson,
       },
       update: {
+        ...(measuredSpeakingSec != null ? { userWpm: signals.speechRate.wpm } : {}),
+        userFillerCount: signals.fillers.count,
+        userFillerRate: signals.fillers.rate * 100,
+        userAvgSentenceLength: signals.sentenceComplexity.avgLength,
+        ...(measuredSpeakingSec != null ? { userSpeakingTime: measuredSpeakingSec } : {}),
+        userVocabDiversity: signals.vocabDiversity.ratio,
+        totalTurns: messages.length,
         skillScores: skillScoresJson,
         communicationSignals: signalsJson,
         coachingInsights: insightsJson,
@@ -245,6 +285,12 @@ export async function analyzeSession(req: Request, res: Response) {
       },
       pulseEntriesCreated: pulseCount,
     })
+    // Acoustics are best-effort inline. Retry out of band so one failed prosody
+    // call does not leave delivery metrics permanently empty for a session
+    // whose recording is readable.
+    if (audioResolved?.audioPath && !audioProcessed) {
+      void enrichElevateSessionAudio(sessionId)
+    }
     reqLog(req).info(
       { event: 'analyze.succeeded', sessionId, source, pulseEntriesCreated: pulseCount },
       'session analyzed',

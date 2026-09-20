@@ -74,6 +74,12 @@ interface SessionInfo {
   durationSec?: number | null
 }
 
+interface ReplaySegment {
+  id: string
+  segmentIndex: number
+  audioStatus: 'pending' | 'available' | 'failed' | 'unavailable'
+}
+
 type RoleFilter = 'all' | 'user' | 'assistant'
 type QualityChip = 'fillers' | 'hesitations' | 'pace' | 'great' | 'improvements'
 
@@ -360,6 +366,7 @@ export function SessionReplay({
   const [turns, setTurns] = useState<ReplayTurn[]>([])
   const [transcriptHidden, setTranscriptHidden] = useState(false)
   const [degraded, setDegraded] = useState(false)
+  const [segments, setSegments] = useState<ReplaySegment[]>([])
   const [sessionInfo, setSessionInfo] = useState<SessionInfo | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -409,6 +416,7 @@ export function SessionReplay({
         setTurns(Array.isArray(data.turns) ? data.turns : [])
         setTranscriptHidden(Boolean(data.transcriptHidden))
         setDegraded(Boolean(data.degraded))
+        setSegments(Array.isArray(data.segments) ? data.segments : [])
         setSessionInfo(data.session ?? null)
         setSpeechRegions(
           Array.isArray(data.speechRegions)
@@ -1114,6 +1122,14 @@ export function SessionReplay({
         <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           Showing the saved transcript. Per-message timing and metrics weren't captured for this
           session — new sessions will include synced highlighting and per-turn analytics.
+        </div>
+      )}
+      {segments.some(
+        (segment) => segment.audioStatus === 'failed' || segment.audioStatus === 'unavailable',
+      ) && (
+        <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          Some parts of this paused session have no replay audio. Their transcript is still
+          included.
         </div>
       )}
 
