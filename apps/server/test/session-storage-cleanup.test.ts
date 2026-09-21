@@ -60,4 +60,16 @@ describe('session recording storage cleanup', () => {
 
     expect(existsSync(unrelated)).toBe(true)
   })
+
+  it('treats an already-absent S3 bucket as successfully cleaned', async () => {
+    mocks.deleteObject.mockRejectedValue({
+      name: 'NoSuchBucket',
+      $metadata: { httpStatusCode: 404 },
+    })
+
+    const { deleteSessionStorage } = await import('../src/lib/sessionStorageCleanup')
+    await expect(
+      deleteSessionStorage('session-3', ['s3://missing-bucket/session-3.webm']),
+    ).resolves.toBeUndefined()
+  })
 })

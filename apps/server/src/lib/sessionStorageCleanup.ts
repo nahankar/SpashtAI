@@ -128,7 +128,18 @@ export async function deleteSessionStorage(
   const s3 = new S3Client({ region, ...awsCredentialsConfig() })
   const results = await Promise.allSettled([
     ...[...s3Objects.values()].map(({ bucket, key }) =>
-      s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key })),
+      s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key })).catch((error: any) => {
+        const status = error?.$metadata?.httpStatusCode
+        if (
+          status === 404 ||
+          error?.name === 'NoSuchBucket' ||
+          error?.name === 'NoSuchKey' ||
+          error?.name === 'NotFound'
+        ) {
+          return
+        }
+        throw error
+      }),
     ),
     ...[...localPaths].map((filePath) =>
       unlink(filePath).catch((error: NodeJS.ErrnoException) => {
