@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   deleteObject: vi.fn(),
+  listEgress: vi.fn(),
+  stopEgress: vi.fn(),
 }))
 
 vi.mock('@aws-sdk/client-s3', () => ({
@@ -19,6 +21,12 @@ vi.mock('@aws-sdk/client-s3', () => ({
     }
   },
 }))
+vi.mock('livekit-server-sdk', () => ({
+  EgressClient: class {
+    listEgress = mocks.listEgress
+    stopEgress = mocks.stopEgress
+  },
+}))
 
 describe('session recording storage cleanup', () => {
   let audioRoot: string
@@ -30,10 +38,16 @@ describe('session recording storage cleanup', () => {
     audioRoot = await mkdtemp(join(tmpdir(), 'spasht-session-audio-'))
     outsideRoot = await mkdtemp(join(tmpdir(), 'spasht-outside-audio-'))
     process.env.LOCAL_AUDIO_PATH = audioRoot
+    process.env.LIVEKIT_URL = 'ws://localhost:7880'
+    process.env.LIVEKIT_API_KEY = 'key'
+    process.env.LIVEKIT_API_SECRET = 'secret'
   })
 
   afterEach(async () => {
     delete process.env.LOCAL_AUDIO_PATH
+    delete process.env.LIVEKIT_URL
+    delete process.env.LIVEKIT_API_KEY
+    delete process.env.LIVEKIT_API_SECRET
     await rm(audioRoot, { recursive: true, force: true })
     await rm(outsideRoot, { recursive: true, force: true })
   })
@@ -71,5 +85,22 @@ describe('session recording storage cleanup', () => {
     await expect(
       deleteSessionStorage('session-3', ['s3://missing-bucket/session-3.webm']),
     ).resolves.toBeUndefined()
+  })
+
+  it('tolerates the agent winning a concurrent Egress stop race', async () => {
+    const egress = {
+      egressId: 'EG_1',
+      request: { value: { file: { filepath: 's3://bucket/session-4.webm' } } },
+    }
+    mocks.listEgress
+      .mockResolvedValueOnce([egress])
+      .mockResolvedValueOnce([egress])
+      .mockResolvedValueOnce([])
+    mocks.stopEgress.mockRejectedValue(new Error('already stopped'))
+
+    const { stopSessionEgress } = await import('../src/lib/sessionStorageCleanup')
+    const paths = await stopSessionEgress(['room-4'])
+
+    expect(paths.has('s3://bucket/session-4.webm')).toBe(true)
   })
 })

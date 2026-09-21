@@ -32,10 +32,14 @@ router.get('/overview', async (_req: Request, res: Response) => {
           role: { notIn: ['ADMIN', 'SUPER_ADMIN'] },
         },
       }),
-      enabled.includes('elevate') ? prisma.session.count() : Promise.resolve(0),
+      enabled.includes('elevate')
+        ? prisma.session.count({ where: { discardedAt: null } })
+        : Promise.resolve(0),
       enabled.includes('replay') ? prisma.replaySession.count() : Promise.resolve(0),
       enabled.includes('elevate')
-        ? prisma.session.count({ where: { startedAt: { gte: monthAgo } } })
+        ? prisma.session.count({
+            where: { startedAt: { gte: monthAgo }, discardedAt: null },
+          })
         : Promise.resolve(0),
       enabled.includes('replay')
         ? prisma.replaySession.count({ where: { createdAt: { gte: monthAgo } } })

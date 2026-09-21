@@ -437,7 +437,7 @@ router.get('/:id/sessions', async (req: Request, res: Response) => {
   try {
     const [elevateSessions, replaySessions] = await Promise.all([
       prisma.session.findMany({
-        where: { userId: req.params.id },
+        where: { userId: req.params.id, discardedAt: null },
         orderBy: { startedAt: 'desc' },
         take: 50,
         select: {

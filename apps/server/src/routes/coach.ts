@@ -439,7 +439,7 @@ async function summariseElevateSession(
   ownerId: string,
 ): Promise<CompletedSessionSummary | null> {
   const session = await prisma.session.findFirst({
-    where: { id: sessionId, userId: ownerId },
+    where: { id: sessionId, userId: ownerId, discardedAt: null },
     include: { metrics: true },
   })
   if (!session) return null

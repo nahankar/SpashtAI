@@ -3,45 +3,15 @@ import { prisma } from '../lib/prisma'
 import { logger, reqLog } from '../lib/logger'
 import { awardSessionActivePoints } from '../lib/points'
 import { isPrivilegedRole } from '../lib/userExportFlags'
-import { RoomServiceClient } from 'livekit-server-sdk'
-import {
-  clearSessionDiscarding,
-  markSessionDiscarding,
-} from '../lib/sessionDiscard'
-import {
-  deleteSessionStorage,
-  stopSessionEgress,
-} from '../lib/sessionStorageCleanup'
-
-async function disconnectSessionRooms(roomNames: string[]): Promise<void> {
-  const livekitUrl = process.env.LIVEKIT_URL || ''
-  const apiKey = process.env.LIVEKIT_API_KEY || ''
-  const apiSecret = process.env.LIVEKIT_API_SECRET || ''
-  if (!livekitUrl || !apiKey || !apiSecret || roomNames.length === 0) return
-
-  const httpUrl = livekitUrl.startsWith('wss://')
-    ? livekitUrl.replace('wss://', 'https://')
-    : livekitUrl.replace('ws://', 'http://')
-  const roomService = new RoomServiceClient(httpUrl, apiKey, apiSecret)
-  const uniqueRoomNames = [...new Set(roomNames)]
-  const results = await Promise.allSettled(
-    uniqueRoomNames.map((roomName) => roomService.deleteRoom(roomName)),
-  )
-  results.forEach((result, index) => {
-    if (result.status === 'rejected') {
-      logger.warn(
-        { err: result.reason, roomName: uniqueRoomNames[index] },
-        'Failed to disconnect discarded session room',
-      )
-    }
-  })
-}
+import { enqueueSessionDeletion } from '../lib/sessionDeletionWorker'
 
 export async function listSessions(req: Request, res: Response) {
   try {
     // Non-privileged users only see their own sessions. Admins/super-admins
     // keep the full list so admin views don't regress.
-    const where = isPrivilegedRole(req.user?.role) ? {} : { userId: req.user!.userId }
+    const where = isPrivilegedRole(req.user?.role)
+      ? { discardedAt: null }
+      : { userId: req.user!.userId, discardedAt: null }
     const sessions = await prisma.session.findMany({
       where,
       orderBy: { startedAt: 'desc' },
@@ -51,7 +21,20 @@ export async function listSessions(req: Request, res: Response) {
         }
       }
     })
-    res.json({ sessions })
+    const deletionWhere = isPrivilegedRole(req.user?.role)
+      ? { discardedAt: { not: null } }
+      : { userId: req.user!.userId, discardedAt: { not: null } }
+    const deletions = await prisma.session.findMany({
+      where: deletionWhere,
+      orderBy: { discardedAt: 'desc' },
+      select: {
+        id: true,
+        sessionName: true,
+        discardedAt: true,
+        deletionStatus: true,
+      },
+    })
+    res.json({ sessions, deletions })
   } catch (error) {
     logger.error({ err: error }, 'Error listing sessions:')
     res.status(500).json({ error: 'Failed to list sessions' })
@@ -296,15 +279,6 @@ export async function deleteSession(req: Request, res: Response) {
     // Check if session exists
     const session = await prisma.session.findUnique({
       where: { id },
-      include: {
-        segments: {
-          where: { endedAt: null },
-          select: { roomName: true },
-        },
-        recordings: {
-          select: { filePath: true },
-        },
-      },
     })
     
     if (!session) {
@@ -316,42 +290,42 @@ export async function deleteSession(req: Request, res: Response) {
       return res.status(403).json({ error: 'Access denied' })
     }
 
-    markSessionDiscarding(id)
-    try {
-      const roomNames = session.segments.map((segment) => segment.roomName)
-
-      // Stop Egress first so S3 has finalized its objects and LiveKit can tell
-      // us their exact locations even if metadata had not reached Postgres.
-      const egressPaths = await stopSessionEgress(roomNames)
-      await disconnectSessionRooms(roomNames)
-
-      // Re-read after Egress shutdown to include any metadata that raced with
-      // the discard request before the agent observed the discarding state.
-      const latestRecordings = await prisma.sessionRecording.findMany({
-        where: { sessionId: id },
-        select: { filePath: true },
-      })
-      const storagePaths = new Set([
-        ...session.recordings.map((recording) => recording.filePath),
-        ...latestRecordings.map((recording) => recording.filePath),
-        ...egressPaths,
+    if (!session.discardedAt) {
+      const discardedAt = new Date()
+      await prisma.$transaction([
+        prisma.session.update({
+          where: { id },
+          data: {
+            discardedAt,
+            deletionStatus: 'pending',
+            deletionAttempts: 0,
+            deletionError: null,
+            nextDeletionAttemptAt: discardedAt,
+          },
+        }),
+        // Pulse must disappear at tombstone time, not after storage cleanup.
+        prisma.progressPulse.deleteMany({
+          where: { sessionId: id, source: 'elevate' },
+        }),
       ])
-      await deleteSessionStorage(id, storagePaths)
-
-      // Delete Pulse explicitly, then let the Session cascade remove metrics,
-      // transcripts, turns, segments, and recording rows.
-      await prisma.progressPulse.deleteMany({
-        where: { sessionId: id, source: 'elevate' },
-      })
-      await prisma.session.delete({
+    } else {
+      // A repeated DELETE is an idempotent request to retry cleanup now.
+      await prisma.session.update({
         where: { id },
+        data: {
+          deletionStatus: 'pending',
+          nextDeletionAttemptAt: new Date(),
+        },
       })
-    } finally {
-      clearSessionDiscarding(id)
     }
-    
-    console.log(`🗑️  Deleted session: ${id}`)
-    res.json({ success: true, message: 'Session deleted successfully' })
+
+    enqueueSessionDeletion(id)
+
+    res.status(202).json({
+      success: true,
+      deletionStatus: 'pending',
+      message: 'Session is being securely discarded',
+    })
   } catch (error) {
     logger.error({ err: error }, 'Error deleting session:')
     res.status(500).json({ error: 'Failed to delete session' })

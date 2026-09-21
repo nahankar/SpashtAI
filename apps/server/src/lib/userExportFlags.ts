@@ -74,8 +74,8 @@ export async function getEffectiveExportFlags(
 }
 
 export async function getElevateSessionOwnerId(sessionId: string): Promise<string | null> {
-  const session = await prisma.session.findUnique({
-    where: { id: sessionId },
+  const session = await prisma.session.findFirst({
+    where: { id: sessionId, discardedAt: null },
     select: { userId: true },
   })
   return session?.userId ?? null

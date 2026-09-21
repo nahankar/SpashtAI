@@ -175,6 +175,8 @@ async def fetch_session_lifecycle(session_id: str) -> str:
                 headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
                 timeout=aiohttp.ClientTimeout(total=5.0),
             ) as response:
+                if response.status == 410:
+                    return "missing"
                 if response.status != 200:
                     return "unknown"
                 payload = await response.json()

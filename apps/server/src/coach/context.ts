@@ -137,7 +137,7 @@ async function loadPreparation(
 
 async function loadLastElevate(userId: string): Promise<ElevateContext | null> {
   const session = await prisma.session.findFirst({
-    where: { userId, module: 'elevate', endedAt: { not: null } },
+    where: { userId, module: 'elevate', endedAt: { not: null }, discardedAt: null },
     orderBy: { startedAt: 'desc' },
     include: { metrics: true },
   })

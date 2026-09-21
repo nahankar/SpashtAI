@@ -1,7 +1,6 @@
 import type { Request, Response } from 'express'
 import { prisma } from '../lib/prisma'
 import { logger } from '../lib/logger'
-import { isSessionDiscarding } from '../lib/sessionDiscard'
 import { awardSessionActivePoints } from '../lib/points'
 import {
   exportDenied,
@@ -246,11 +245,11 @@ export async function getConversationForAgent(req: Request, res: Response) {
     // resume a finalized session (prevents phantom re-dispatched sessions).
     const sessionRow = await prisma.session.findUnique({
       where: { id: sessionId },
-      select: { endedAt: true },
+      select: { endedAt: true, discardedAt: true },
     })
     const exists = Boolean(sessionRow)
     const ended = Boolean(sessionRow?.endedAt)
-    const discarding = isSessionDiscarding(sessionId)
+    const discarding = Boolean(sessionRow?.discardedAt)
 
     const transcript = await prisma.sessionTranscript.findUnique({
       where: { sessionId },
@@ -316,10 +315,13 @@ export async function searchConversations(req: Request, res: Response) {
   try {
     const { userId, query, module, limit = 10, offset = 0 } = req.query
     
-    const whereConditions: any = {}
+    const whereConditions: any = {
+      session: { discardedAt: null },
+    }
     
     if (userId) {
       whereConditions.session = {
+        ...whereConditions.session,
         userId: userId as string
       }
     }

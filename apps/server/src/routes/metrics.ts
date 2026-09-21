@@ -461,7 +461,7 @@ export async function getUserSessionsMetrics(req: Request, res: Response) {
     const { limit = 10, offset = 0 } = req.query
 
     const sessions = await prisma.session.findMany({
-      where: { userId },
+      where: { userId, discardedAt: null },
       include: {
         metrics: true,
         transcript: {
@@ -477,10 +477,12 @@ export async function getUserSessionsMetrics(req: Request, res: Response) {
     })
 
     // Calculate summary statistics
-    const totalSessions = await prisma.session.count({ where: { userId } })
+    const totalSessions = await prisma.session.count({
+      where: { userId, discardedAt: null },
+    })
     const avgMetrics = await prisma.sessionMetrics.aggregate({
       where: {
-        session: { userId }
+        session: { userId, discardedAt: null }
       },
       _avg: {
         userWpm: true,

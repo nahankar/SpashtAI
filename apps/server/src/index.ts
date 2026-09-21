@@ -101,6 +101,8 @@ import pino from 'pino'
 import pinoHttp from 'pino-http'
 import { randomUUID } from 'crypto'
 import { prisma } from './lib/prisma'
+import { discardedSessionGuard } from './lib/sessionDiscard'
+import { startSessionDeletionWorker } from './lib/sessionDeletionWorker'
 
 const app = express()
 // Cloudflare → Nginx → Express; required for rate limiting and client IP
@@ -153,6 +155,7 @@ app.use(cors({
 app.use(express.json())
 
 app.use('/api/', apiLimiter)
+app.use(discardedSessionGuard)
 
 // Liveness: process is up. Cheap, dependency-free (kept as-is for uptime pings).
 app.get('/health', (_req, res) => {
@@ -423,6 +426,8 @@ async function startServer() {
   } catch (err) {
     console.warn('⚠️  Platform settings seeding failed:', err)
   }
+
+  startSessionDeletionWorker()
 
   // During `tsx watch` hot-reloads the previous process can still hold the port
   // for a brief moment when the new one starts. Instead of crashing on

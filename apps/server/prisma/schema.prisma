@@ -363,6 +363,14 @@ model Session {
 
   progressPulseStatus String? // 'tracked' | 'skipped' | null (not yet decided)
 
+  // Terminal discard tombstone. Tombstoned sessions are hidden and return
+  // 410 to every read/write path while storage cleanup retries durably.
+  discardedAt                 DateTime?
+  deletionStatus              String?   // pending | retrying | failed
+  deletionAttempts            Int       @default(0)
+  deletionError               String?   @db.Text
+  nextDeletionAttemptAt       DateTime?
+
   // Shared audio timeline anchor (t0): all SessionTurn.audioStart/audioEnd and
   // word timings are expressed as seconds since this instant, aligned to the
   // start of the streamable recording so the replay UI can seek directly.
@@ -378,6 +386,7 @@ model Session {
 
   @@index([userId, startedAt])
   @@index([userId, module, endedAt])
+  @@index([discardedAt, nextDeletionAttemptAt])
 }
 
 // Per-turn record powering the "conversation as replay" UX (per-message audio

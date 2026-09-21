@@ -737,7 +737,12 @@ describe('Prepare C1 Elevate linkage', () => {
 
     expect(response.status).toBe(201)
     expect(prismaMock.session.findFirst).toHaveBeenCalledWith({
-      where: { id: SESSION_ID, userId: 'user-a', module: 'elevate' },
+      where: {
+        id: SESSION_ID,
+        userId: 'user-a',
+        module: 'elevate',
+        discardedAt: null,
+      },
       select: { id: true },
     })
     expect(prismaMock.preparationPractice.create).toHaveBeenCalledWith({

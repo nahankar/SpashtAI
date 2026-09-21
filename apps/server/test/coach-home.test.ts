@@ -176,6 +176,7 @@ describe('Coach Home result visibility', () => {
         userId: 'user-a',
         module: 'elevate',
         endedAt: { not: null },
+        discardedAt: null,
       },
       select: { id: true },
     })

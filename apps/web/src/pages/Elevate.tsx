@@ -306,6 +306,11 @@ export function Elevate() {
     progressPulseStatus?: string | null
   }
   const [pastSessions, setPastSessions] = useState<ElevateSessionItem[]>([])
+  const [pendingDeletions, setPendingDeletions] = useState<Array<{
+    id: string
+    sessionName?: string | null
+    deletionStatus?: string | null
+  }>>([])
   const [pastLoading, setPastLoading] = useState(true)
   const [elevSearch, setElevSearch] = useState('')
   const [elevSortField, setElevSortField] = useState<SortField>('date')
@@ -378,17 +383,27 @@ export function Elevate() {
     })
     if (!ok) return
     try {
-      await fetch(`${API_BASE_URL}/sessions/${id}`, {
+      const response = await fetch(`${API_BASE_URL}/sessions/${id}`, {
         method: 'DELETE',
         headers: getAuthHeaders(),
       })
+      if (!response.ok) throw new Error(`Discard failed with HTTP ${response.status}`)
+      const deleted = pastSessions.find((session) => session.id === id)
       setPastSessions((prev) => prev.filter((s) => s.id !== id))
+      setPendingDeletions((prev) => [
+        {
+          id,
+          sessionName: deleted?.sessionName || 'Elevate session',
+          deletionStatus: 'pending',
+        },
+        ...prev.filter((item) => item.id !== id),
+      ])
       setSelectedElevate((prev) => { const n = new Set(prev); n.delete(id); return n })
-      toast.success('Session deleted')
+      toast.success('Discarding session securely')
     } catch {
       toast.error('Failed to delete session')
     }
-  }, [confirmDialog])
+  }, [confirmDialog, pastSessions])
 
   const handleDeleteSelectedElevate = useCallback(async () => {
     if (selectedElevate.size === 0) return
@@ -400,7 +415,7 @@ export function Elevate() {
     })
     if (!ok) return
     try {
-      await Promise.all(
+      const responses = await Promise.all(
         Array.from(selectedElevate).map((id) =>
           fetch(`${API_BASE_URL}/sessions/${id}`, {
             method: 'DELETE',
@@ -408,13 +423,25 @@ export function Elevate() {
           })
         )
       )
+      if (responses.some((response) => !response.ok)) {
+        throw new Error('One or more discard requests failed')
+      }
+      const deleting = pastSessions.filter((session) => selectedElevate.has(session.id))
       setPastSessions((prev) => prev.filter((s) => !selectedElevate.has(s.id)))
+      setPendingDeletions((prev) => [
+        ...deleting.map((session) => ({
+          id: session.id,
+          sessionName: session.sessionName || 'Elevate session',
+          deletionStatus: 'pending',
+        })),
+        ...prev.filter((item) => !selectedElevate.has(item.id)),
+      ])
       setSelectedElevate(new Set())
-      toast.success('Sessions deleted')
+      toast.success('Discarding sessions securely')
     } catch {
       toast.error('Failed to delete some sessions')
     }
-  }, [selectedElevate, confirmDialog])
+  }, [selectedElevate, confirmDialog, pastSessions])
 
   const [, setReprocessingElevate] = useState<Set<string>>(new Set())
 
@@ -465,6 +492,7 @@ export function Elevate() {
       if (res.ok) {
         const data = await res.json()
         setPastSessions(data.sessions || [])
+        setPendingDeletions(data.deletions || [])
       }
     } catch { /* non-critical */ }
     finally { if (!silent) setPastLoading(false) }
@@ -1670,8 +1698,6 @@ export function Elevate() {
       console.warn('Failed to stop discarded browser recording:', error)
     })
     if (segmentId) intentionalDisconnectSegmentsRef.current.add(segmentId)
-    setToken(null)
-    setUrl(null)
 
     if (currentSessionId) {
       try {
@@ -1683,18 +1709,27 @@ export function Elevate() {
           throw new Error(`Discard failed with HTTP ${response.status}`)
         }
         setPastSessions((prev) => prev.filter((s) => s.id !== currentSessionId))
+        setPendingDeletions((prev) => [
+          {
+            id: currentSessionId,
+            sessionName: viewSessionName || elevateSessionName || 'Elevate session',
+            deletionStatus: 'pending',
+          },
+          ...prev.filter((item) => item.id !== currentSessionId),
+        ])
         setSelectedElevate((prev) => { const n = new Set(prev); n.delete(currentSessionId); return n })
-        toast.success('Session discarded')
+        toast.success('Discarding session securely. Cleanup will retry automatically.')
       } catch (error) {
         console.error('Failed to discard session:', error)
-        setIsSessionPaused(true)
-        setPauseReason('disconnected')
+        if (segmentId) intentionalDisconnectSegmentsRef.current.delete(segmentId)
         setIsLeaving(false)
-        toast.error('Could not fully discard the session. Please retry.')
+        toast.error('Could not start secure discard. Please retry.')
         return
       }
     }
 
+    setToken(null)
+    setUrl(null)
     setSessionId(null)
     setRoomName('')
     setSegmentId(null)
@@ -1712,7 +1747,7 @@ export function Elevate() {
       navigate('/elevate')
     }
     setIsLeaving(false)
-  }, [sessionId, segmentId, clearMessages, resetMetrics, navigate, confirmDialog, prepareLaunch, isLeaving])
+  }, [sessionId, segmentId, clearMessages, resetMetrics, navigate, confirmDialog, prepareLaunch, isLeaving, viewSessionName, elevateSessionName])
 
   // Return from a viewed session's results back to the Elevate session list.
   const handleBackToElevate = useCallback(() => {
@@ -1797,6 +1832,22 @@ export function Elevate() {
           <div className="flex items-center justify-center py-16 text-muted-foreground">
             Loading sessions...
           </div>
+        )}
+
+        {!pastLoading && pendingDeletions.length > 0 && (
+          <Card className="border-amber-500/30 bg-amber-500/5">
+            <CardContent className="flex items-start gap-3 py-4">
+              <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-amber-600" />
+              <div>
+                <p className="text-sm font-medium">Discarding—retrying cleanup</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {pendingDeletions.length === 1
+                    ? `${pendingDeletions[0].sessionName || 'Your session'} is permanently unavailable while its recordings are removed.`
+                    : `${pendingDeletions.length} sessions are permanently unavailable while their recordings are removed.`}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
         )}
 
         {!pastLoading && pastSessions.length > 0 && (

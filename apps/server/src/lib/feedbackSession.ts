@@ -38,7 +38,7 @@ export async function resolveFeedbackSessionLink(
 
   if (sessionModule === 'elevate') {
     const session = await prisma.session.findFirst({
-      where: { id, userId },
+      where: { id, userId, discardedAt: null },
       select: { id: true },
     })
     if (!session) return empty

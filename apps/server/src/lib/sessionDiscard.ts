@@ -1,13 +1,28 @@
-const discardingSessionIds = new Set<string>()
+import type { NextFunction, Request, Response } from 'express'
+import { prisma } from './prisma'
 
-export function markSessionDiscarding(sessionId: string): void {
-  discardingSessionIds.add(sessionId)
-}
+export async function discardedSessionGuard(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  if (req.method === 'DELETE') return next()
+  const match = req.path.match(/^\/(?:internal\/)?sessions\/([^/]+)/)
+  if (!match) return next()
 
-export function clearSessionDiscarding(sessionId: string): void {
-  discardingSessionIds.delete(sessionId)
-}
+  try {
+    const sessionId = decodeURIComponent(match[1])
+    const session = await prisma.session.findUnique({
+      where: { id: sessionId },
+      select: { discardedAt: true, deletionStatus: true },
+    })
+    if (!session?.discardedAt) return next()
 
-export function isSessionDiscarding(sessionId: string): boolean {
-  return discardingSessionIds.has(sessionId)
+    res.status(410).json({
+      error: 'Session discarded',
+      deletionStatus: session.deletionStatus || 'pending',
+    })
+  } catch (error) {
+    next(error)
+  }
 }

@@ -71,6 +71,15 @@ export async function getLivekitToken(req: Request, res: Response) {
     if (!identity || !room) {
       return res.status(400).json({ error: 'identity and room are required' })
     }
+    if (sessionId) {
+      const session = await prisma.session.findUnique({
+        where: { id: sessionId },
+        select: { discardedAt: true },
+      })
+      if (session?.discardedAt) {
+        return res.status(410).json({ error: 'Session discarded' })
+      }
+    }
 
     const { apiKey, apiSecret, lkUrl, httpUrl } = getLivekitConfig()
     if (!apiKey || !apiSecret || !lkUrl) {

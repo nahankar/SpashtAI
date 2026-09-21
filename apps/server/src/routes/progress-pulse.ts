@@ -376,6 +376,7 @@ async function buildCoachingContext(
         module: 'elevate',
         focusArea: focusArea || undefined,
         endedAt: { not: null },
+        discardedAt: null,
       },
       orderBy: { startedAt: 'desc' },
       select: {
@@ -444,6 +445,7 @@ async function buildCoachingContext(
         module: 'elevate',
         focusArea: focusArea || undefined,
         endedAt: { not: null },
+        discardedAt: null,
       },
     })
     }
@@ -500,8 +502,8 @@ export async function getCoachingContextForAgent(req: Request, res: Response) {
     // Look up the user from the session (Elevate session or Replay session)
     let userId: string | null = null
 
-    const elevateSession = await prisma.session.findUnique({
-      where: { id: sessionId },
+    const elevateSession = await prisma.session.findFirst({
+      where: { id: sessionId, discardedAt: null },
       select: { userId: true },
     })
     if (elevateSession) {

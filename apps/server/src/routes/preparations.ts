@@ -467,6 +467,7 @@ router.post('/:id/practices', async (req, res) => {
         id: parsed.data.sessionId,
         userId: userId(req),
         module: 'elevate',
+        discardedAt: null,
       },
       select: { id: true },
     })

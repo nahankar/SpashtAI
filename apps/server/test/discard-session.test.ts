@@ -1,45 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  deleteRoom: vi.fn(),
-  listEgress: vi.fn(),
-  deleteObject: vi.fn(),
+  enqueueSessionDeletion: vi.fn(),
   prisma: {
+    $transaction: vi.fn(),
     session: {
       findUnique: vi.fn(),
-      delete: vi.fn(),
+      update: vi.fn(),
     },
     progressPulse: { deleteMany: vi.fn() },
-    sessionRecording: { findMany: vi.fn() },
     sessionTranscript: { findUnique: vi.fn() },
   },
 }))
 
 vi.mock('../src/lib/prisma', () => ({ prisma: mocks.prisma }))
-vi.mock('livekit-server-sdk', () => ({
-  RoomServiceClient: class {
-    deleteRoom = mocks.deleteRoom
-  },
-  EgressClient: class {
-    listEgress = mocks.listEgress
-    stopEgress = vi.fn()
-  },
-}))
-vi.mock('@aws-sdk/client-s3', () => ({
-  S3Client: class {
-    send = mocks.deleteObject
-  },
-  DeleteObjectCommand: class {
-    input: unknown
-    constructor(input: unknown) {
-      this.input = input
-    }
-  },
+vi.mock('../src/lib/sessionDeletionWorker', () => ({
+  enqueueSessionDeletion: mocks.enqueueSessionDeletion,
 }))
 
 import { getConversationForAgent } from '../src/routes/conversations'
-import { clearSessionDiscarding, markSessionDiscarding } from '../src/lib/sessionDiscard'
+import { discardedSessionGuard } from '../src/lib/sessionDiscard'
 import { deleteSession } from '../src/routes/sessions'
+import { getLivekitToken } from '../src/routes/livekit'
 
 function response() {
   const res: any = {
@@ -60,10 +42,10 @@ function response() {
 describe('discarded Elevate session lifecycle', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    process.env.LIVEKIT_URL = 'ws://localhost:7880'
-    process.env.LIVEKIT_API_KEY = 'devkey'
-    process.env.LIVEKIT_API_SECRET = 'devsecret'
     delete process.env.INTERNAL_AGENT_TOKEN
+    mocks.prisma.$transaction.mockResolvedValue([])
+    mocks.prisma.session.update.mockResolvedValue({})
+    mocks.prisma.progressPulse.deleteMany.mockResolvedValue({ count: 0 })
   })
 
   it('reports a deleted session as missing to the agent', async () => {
@@ -90,22 +72,20 @@ describe('discarded Elevate session lifecycle', () => {
   })
 
   it('tells the agent when an existing session is being discarded', async () => {
-    mocks.prisma.session.findUnique.mockResolvedValue({ endedAt: null })
+    mocks.prisma.session.findUnique.mockResolvedValue({
+      endedAt: null,
+      discardedAt: new Date(),
+    })
     mocks.prisma.sessionTranscript.findUnique.mockResolvedValue(null)
-    markSessionDiscarding('session-discarding')
     const res = response()
 
-    try {
-      await getConversationForAgent(
-        {
-          params: { sessionId: 'session-discarding' },
-          header: () => 'dev-internal-agent-token',
-        } as any,
-        res,
-      )
-    } finally {
-      clearSessionDiscarding('session-discarding')
-    }
+    await getConversationForAgent(
+      {
+        params: { sessionId: 'session-discarding' },
+        header: () => 'dev-internal-agent-token',
+      } as any,
+      res,
+    )
 
     expect(res.body).toMatchObject({
       exists: true,
@@ -114,21 +94,58 @@ describe('discarded Elevate session lifecycle', () => {
     })
   })
 
-  it('disconnects active LiveKit rooms before deleting the session row', async () => {
+  it('returns 410 for delayed reads and writes to a tombstoned session', async () => {
+    mocks.prisma.session.findUnique.mockResolvedValue({
+      discardedAt: new Date(),
+      deletionStatus: 'failed',
+    })
+    const res = response()
+    const next = vi.fn()
+
+    await discardedSessionGuard(
+      {
+        method: 'POST',
+        path: '/internal/sessions/session-discarding/turns',
+      } as any,
+      res,
+      next,
+    )
+
+    expect(next).not.toHaveBeenCalled()
+    expect(res.statusCode).toBe(410)
+    expect(res.body).toEqual({
+      error: 'Session discarded',
+      deletionStatus: 'failed',
+    })
+  })
+
+  it('blocks new LiveKit tokens for tombstoned sessions', async () => {
+    mocks.prisma.session.findUnique.mockResolvedValue({
+      discardedAt: new Date(),
+    })
+    const res = response()
+
+    await getLivekitToken(
+      {
+        query: {
+          identity: 'user-1',
+          room: 'room-1',
+          sessionId: 'session-discarding',
+        },
+      } as any,
+      res,
+    )
+
+    expect(res.statusCode).toBe(410)
+    expect(res.body).toEqual({ error: 'Session discarded' })
+  })
+
+  it('persists a terminal tombstone and queues cleanup', async () => {
     mocks.prisma.session.findUnique.mockResolvedValue({
       id: 'session-1',
       userId: 'user-1',
-      segments: [{ roomName: 'room-active' }],
-      recordings: [{ filePath: 's3://recordings/session-1.webm' }],
+      discardedAt: null,
     })
-    mocks.deleteRoom.mockResolvedValue(undefined)
-    mocks.listEgress.mockResolvedValue([])
-    mocks.deleteObject.mockResolvedValue({})
-    mocks.prisma.sessionRecording.findMany.mockResolvedValue([
-      { filePath: 's3://recordings/session-1.webm' },
-    ])
-    mocks.prisma.progressPulse.deleteMany.mockResolvedValue({ count: 0 })
-    mocks.prisma.session.delete.mockResolvedValue({ id: 'session-1' })
     const res = response()
 
     await deleteSession(
@@ -139,33 +156,26 @@ describe('discarded Elevate session lifecycle', () => {
       res,
     )
 
-    expect(mocks.deleteRoom).toHaveBeenCalledWith('room-active')
-    expect(mocks.deleteObject).toHaveBeenCalledWith(
+    expect(mocks.prisma.session.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        input: { Bucket: 'recordings', Key: 'session-1.webm' },
+        where: { id: 'session-1' },
+        data: expect.objectContaining({
+          discardedAt: expect.any(Date),
+          deletionStatus: 'pending',
+        }),
       }),
     )
-    expect(mocks.prisma.session.delete).toHaveBeenCalledWith({
-      where: { id: 'session-1' },
-    })
-    expect(mocks.deleteRoom.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.prisma.session.delete.mock.invocationCallOrder[0],
-    )
-    expect(res.body).toMatchObject({ success: true })
+    expect(mocks.enqueueSessionDeletion).toHaveBeenCalledWith('session-1')
+    expect(res.statusCode).toBe(202)
+    expect(res.body).toMatchObject({ success: true, deletionStatus: 'pending' })
   })
 
-  it('keeps the database tombstone when object deletion fails', async () => {
+  it('makes repeated discard idempotently retry cleanup', async () => {
     mocks.prisma.session.findUnique.mockResolvedValue({
       id: 'session-2',
       userId: 'user-1',
-      segments: [],
-      recordings: [{ filePath: 's3://recordings/session-2.webm' }],
+      discardedAt: new Date(),
     })
-    mocks.listEgress.mockResolvedValue([])
-    mocks.prisma.sessionRecording.findMany.mockResolvedValue([
-      { filePath: 's3://recordings/session-2.webm' },
-    ])
-    mocks.deleteObject.mockRejectedValue(new Error('S3 unavailable'))
     const res = response()
 
     await deleteSession(
@@ -176,7 +186,14 @@ describe('discarded Elevate session lifecycle', () => {
       res,
     )
 
-    expect(mocks.prisma.session.delete).not.toHaveBeenCalled()
-    expect(res.statusCode).toBe(500)
+    expect(mocks.prisma.session.update).toHaveBeenCalledWith({
+      where: { id: 'session-2' },
+      data: {
+        deletionStatus: 'pending',
+        nextDeletionAttemptAt: expect.any(Date),
+      },
+    })
+    expect(mocks.enqueueSessionDeletion).toHaveBeenCalledWith('session-2')
+    expect(res.statusCode).toBe(202)
   })
 })
