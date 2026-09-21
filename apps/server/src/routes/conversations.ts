@@ -247,6 +247,7 @@ export async function getConversationForAgent(req: Request, res: Response) {
       where: { id: sessionId },
       select: { endedAt: true },
     })
+    const exists = Boolean(sessionRow)
     const ended = Boolean(sessionRow?.endedAt)
 
     const transcript = await prisma.sessionTranscript.findUnique({
@@ -256,6 +257,7 @@ export async function getConversationForAgent(req: Request, res: Response) {
     if (!transcript) {
       return res.json({
         sessionId,
+        exists,
         ended,
         messages: [],
         metadata: {
@@ -271,6 +273,7 @@ export async function getConversationForAgent(req: Request, res: Response) {
 
     res.json({
       sessionId,
+      exists,
       ended,
       messages,
       metadata: {

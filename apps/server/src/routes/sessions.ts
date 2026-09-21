@@ -3,6 +3,31 @@ import { prisma } from '../lib/prisma'
 import { logger, reqLog } from '../lib/logger'
 import { awardSessionActivePoints } from '../lib/points'
 import { isPrivilegedRole } from '../lib/userExportFlags'
+import { RoomServiceClient } from 'livekit-server-sdk'
+
+async function disconnectSessionRooms(roomNames: string[]): Promise<void> {
+  const livekitUrl = process.env.LIVEKIT_URL || ''
+  const apiKey = process.env.LIVEKIT_API_KEY || ''
+  const apiSecret = process.env.LIVEKIT_API_SECRET || ''
+  if (!livekitUrl || !apiKey || !apiSecret || roomNames.length === 0) return
+
+  const httpUrl = livekitUrl.startsWith('wss://')
+    ? livekitUrl.replace('wss://', 'https://')
+    : livekitUrl.replace('ws://', 'http://')
+  const roomService = new RoomServiceClient(httpUrl, apiKey, apiSecret)
+  const uniqueRoomNames = [...new Set(roomNames)]
+  const results = await Promise.allSettled(
+    uniqueRoomNames.map((roomName) => roomService.deleteRoom(roomName)),
+  )
+  results.forEach((result, index) => {
+    if (result.status === 'rejected') {
+      logger.warn(
+        { err: result.reason, roomName: uniqueRoomNames[index] },
+        'Failed to disconnect discarded session room',
+      )
+    }
+  })
+}
 
 export async function listSessions(req: Request, res: Response) {
   try {
@@ -262,7 +287,13 @@ export async function deleteSession(req: Request, res: Response) {
     
     // Check if session exists
     const session = await prisma.session.findUnique({
-      where: { id }
+      where: { id },
+      include: {
+        segments: {
+          where: { endedAt: null },
+          select: { roomName: true },
+        },
+      },
     })
     
     if (!session) {
@@ -278,6 +309,11 @@ export async function deleteSession(req: Request, res: Response) {
     await prisma.progressPulse.deleteMany({
       where: { sessionId: id, source: 'elevate' },
     })
+
+    // End active LiveKit jobs before removing their persistence target. The
+    // agent still stops egress during teardown, then observes the missing row
+    // and skips analytics, turns, and all other writes.
+    await disconnectSessionRooms(session.segments.map((segment) => segment.roomName))
 
     // Delete the session (cascade will handle related data)
     await prisma.session.delete({

@@ -160,13 +160,12 @@ async def fetch_session_history(session_id: str, max_messages: int = 60) -> list
         return []
 
 
-async def fetch_session_ended(session_id: str) -> bool:
-    """Return True if the session is already finalized (endedAt set).
+async def fetch_session_lifecycle(session_id: str) -> str:
+    """Return active, ended, missing, or unknown for a persisted session.
 
-    Used to refuse resuming a finalized session — otherwise a re-dispatch or
-    reconnect can spawn a phantom duplicate job on a dead session that just
-    burns resources and crashes on the no-audio STT timeout. Fails open
-    (returns False) so a transient lookup error never blocks a real session.
+    A missing session means the user discarded it. Unknown fails open so a
+    transient API error never blocks a real session or loses valid teardown
+    data.
     """
     url = f"{SERVER_URL}/internal/sessions/{session_id}/conversation"
     try:
@@ -177,12 +176,19 @@ async def fetch_session_ended(session_id: str) -> bool:
                 timeout=aiohttp.ClientTimeout(total=5.0),
             ) as response:
                 if response.status != 200:
-                    return False
+                    return "unknown"
                 payload = await response.json()
-                return bool(payload.get("ended"))
+                if payload.get("exists") is False:
+                    return "missing"
+                return "ended" if payload.get("ended") else "active"
     except Exception as e:
-        logger.warning("⚠️ Failed to check session ended-state: %s", e)
-        return False
+        logger.warning("⚠️ Failed to check session lifecycle: %s", e)
+        return "unknown"
+
+
+async def fetch_session_ended(session_id: str) -> bool:
+    """Compatibility helper for callers that only need finalized state."""
+    return await fetch_session_lifecycle(session_id) == "ended"
 
 
 def _debug_log(msg: str):
@@ -1545,15 +1551,16 @@ async def entrypoint(ctx: JobContext):
     install_session_log_context()
     bind_log_context(session_id=session_id, room=ctx.room.name)
 
-    # Refuse to resume a session that is already finalized. A re-dispatch or
-    # reconnect can hand us an ended session's ID via room metadata; starting a
-    # full coaching session on it produces a phantom duplicate that has no live
-    # audio and crashes on the 15s no-audio STT timeout. Exit gracefully.
-    if persistence_enabled and await fetch_session_ended(session_id):
+    # Refuse jobs for finalized or discarded sessions. A delayed dispatch can
+    # otherwise start a phantom agent after the browser has already left.
+    initial_lifecycle = (
+        await fetch_session_lifecycle(session_id) if persistence_enabled else "unknown"
+    )
+    if initial_lifecycle in ("ended", "missing"):
         logger.warning(
-            "🛑 Session %s is already ended — refusing to resume a finalized session; "
-            "shutting down this job to avoid a phantom duplicate.",
+            "🛑 Session %s is %s — refusing to start a stale job.",
             session_id,
+            initial_lifecycle,
         )
         return
 
@@ -2416,6 +2423,21 @@ async def entrypoint(ctx: JobContext):
         logger.error("❌ Agent error: %s", e, exc_info=True)
         raise
     finally:
+        # Discard deletes the Session row immediately after disconnecting the
+        # room. Teardown must still stop active egress recordings, but must not
+        # analyze or persist a session the user explicitly threw away.
+        cleanup_persistence_enabled = persistence_enabled
+        session_discarded = False
+        if persistence_enabled:
+            cleanup_lifecycle = await fetch_session_lifecycle(session_id)
+            session_discarded = cleanup_lifecycle == "missing"
+            cleanup_persistence_enabled = not session_discarded
+            if session_discarded:
+                logger.info(
+                    "🗑️ Session was discarded — stopping recordings without "
+                    "saving metadata or running analytics"
+                )
+
         # Stop ALL THREE recordings and save metadata
         user_file_path = None
         agent_file_path = None
@@ -2425,7 +2447,7 @@ async def entrypoint(ctx: JobContext):
             # Stop user recording
             user_metadata = await user_recorder.stop_recording()
             if user_metadata:
-                if persistence_enabled:
+                if cleanup_persistence_enabled:
                     await user_recorder.save_metadata_to_db(user_metadata)
                 user_file_path = user_metadata.get("file_path")
                 logger.info("✅ User recording stopped and metadata saved")
@@ -2438,7 +2460,7 @@ async def entrypoint(ctx: JobContext):
             if agent_recorder.recording_id:
                 agent_metadata = await agent_recorder.stop_recording()
                 if agent_metadata:
-                    if persistence_enabled:
+                    if cleanup_persistence_enabled:
                         await agent_recorder.save_metadata_to_db(agent_metadata)
                     agent_file_path = agent_metadata.get("file_path")
                     logger.info("✅ Agent recording stopped and metadata saved")
@@ -2453,7 +2475,7 @@ async def entrypoint(ctx: JobContext):
             if room_recorder.egress_id:
                 room_metadata = await room_recorder.stop_recording()
                 if room_metadata:
-                    if persistence_enabled:
+                    if cleanup_persistence_enabled:
                         await room_recorder.save_metadata_to_db(room_metadata)
                     room_file_path = room_metadata.get("file_path")
                     logger.info("✅ Room composite recording stopped and metadata saved")
@@ -2487,9 +2509,25 @@ async def entrypoint(ctx: JobContext):
             logger.info(f"  Agent: {agent_file_path}")
         if room_file_path:
             logger.info(f"  Room Composite: {room_file_path}")
+
+        # Deletion can race with recording shutdown, so check again immediately
+        # before the expensive analytics phase.
+        if cleanup_persistence_enabled:
+            post_recording_lifecycle = await fetch_session_lifecycle(session_id)
+            if post_recording_lifecycle == "missing":
+                session_discarded = True
+                cleanup_persistence_enabled = False
+                logger.info(
+                    "🗑️ Session was discarded during recording shutdown — "
+                    "skipping analytics and all remaining persistence"
+                )
         
         # Process advanced analytics at session end
-        if advanced_metrics and (user_file_path or advanced_metrics.user_transcript):
+        if (
+            not session_discarded
+            and advanced_metrics
+            and (user_file_path or advanced_metrics.user_transcript)
+        ):
             try:
                 logger.info("🔬 Starting advanced analytics processing...")
                 
@@ -2568,7 +2606,7 @@ async def entrypoint(ctx: JobContext):
                 
                 # Save advanced metrics to database
                 logger.info("💾 Saving advanced metrics to database...")
-                if persistence_enabled and not segment_id:
+                if cleanup_persistence_enabled and not segment_id:
                     await advanced_metrics.save_to_database()
                     logger.info("✅ Metrics saved to database!")
                 elif segment_id:
@@ -2580,7 +2618,7 @@ async def entrypoint(ctx: JobContext):
                 
                 # A segment ending is not the same as the user ending the session.
                 # Segment-aware browser sessions are finalized only by explicit Leave.
-                if persistence_enabled and not segment_id:
+                if cleanup_persistence_enabled and not segment_id:
                     try:
                         import aiohttp
                         async with aiohttp.ClientSession() as session:
@@ -2601,7 +2639,7 @@ async def entrypoint(ctx: JobContext):
                                     logger.warning(f"⚠️ Failed to mark session as ended: {response.status}")
                     except Exception as end_error:
                         logger.error(f"❌ Error marking session as ended: {end_error}")
-                elif not persistence_enabled:
+                elif not cleanup_persistence_enabled:
                     logger.warning("⚠️ Skipping session end DB mark (ephemeral mode)")
                 else:
                     logger.info("⏸️ Segment closed; session remains resumable until explicit Leave")
@@ -2615,7 +2653,7 @@ async def entrypoint(ctx: JobContext):
         # data. Build per-turn rows from committed turns + captured STT word
         # timings. User words are sliced greedily by word count (both streams are
         # chronological); assistant turns carry text only.
-        if persistence_enabled and advanced_metrics:
+        if cleanup_persistence_enabled and advanced_metrics:
             try:
                 stt_words = list(getattr(agent, "_stt_words", []) or [])
                 stt_segments = list(getattr(agent, "_stt_segments", []) or [])
@@ -2675,7 +2713,7 @@ async def entrypoint(ctx: JobContext):
         # ── Text-only v2 backstop if the browser never called /analyze ──────
         # Never tracks Pulse. Skip when the Leave path already persisted scores.
         should_run_final_backstop = (
-            persistence_enabled
+            cleanup_persistence_enabled
             and (not segment_id or await fetch_session_ended(session_id))
         )
         if should_run_final_backstop:
