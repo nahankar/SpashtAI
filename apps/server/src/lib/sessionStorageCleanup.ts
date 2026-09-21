@@ -45,10 +45,20 @@ export async function stopSessionEgress(roomNames: string[]): Promise<Set<string
   for (const roomName of [...new Set(roomNames)]) {
     const active = await client.listEgress({ roomName, active: true })
     active.forEach((egress) => collectStoragePaths(egress, paths))
-    const stopped = await Promise.all(active.map((egress) => client.stopEgress(egress.egressId)))
-    stopped.forEach((egress) => collectStoragePaths(egress, paths))
+    // The agent may stop the same Egress concurrently after the browser leaves.
+    // Treat a stop rejection as a race, then verify terminal state explicitly.
+    const stopped = await Promise.allSettled(
+      active.map((egress) => client.stopEgress(egress.egressId)),
+    )
+    stopped.forEach((result) => {
+      if (result.status === 'fulfilled') collectStoragePaths(result.value, paths)
+    })
     const all = await client.listEgress({ roomName })
     all.forEach((egress) => collectStoragePaths(egress, paths))
+    const stillActive = await client.listEgress({ roomName, active: true })
+    if (stillActive.length > 0) {
+      throw new Error(`Could not stop ${stillActive.length} active Egress job(s) for ${roomName}`)
+    }
   }
   return paths
 }
