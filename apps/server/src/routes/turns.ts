@@ -17,6 +17,11 @@ import {
   resolveSessionSegmentAudio,
 } from '../analytics/insightProviders/resolveSessionAudio'
 import { compareSegmentTurns } from '../analytics/sessionSegments'
+import {
+  lockWritableSession,
+  SessionDiscardedError,
+  SessionMissingError,
+} from '../lib/sessionDiscard'
 
 const INTERNAL_AGENT_TOKEN =
   process.env.INTERNAL_AGENT_TOKEN?.trim() ||
@@ -297,6 +302,7 @@ export async function saveSessionTurnsForAgent(req: Request, res: Response) {
     )
     let saved = 0
     await prisma.$transaction(async (tx) => {
+      await lockWritableSession(tx, sessionId)
       // Serialize sequence allocation for all segments in one session.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${sessionId}))`
       const latest = await tx.sessionTurn.findFirst({
@@ -412,6 +418,9 @@ export async function saveSessionTurnsForAgent(req: Request, res: Response) {
 
     res.status(201).json({ success: true, count: saved })
   } catch (error) {
+    if (error instanceof SessionDiscardedError || error instanceof SessionMissingError) {
+      return res.status(error.status).json({ error: error.message })
+    }
     console.error('Error saving session turns:', error)
     res.status(500).json({ error: 'Failed to save session turns' })
   }

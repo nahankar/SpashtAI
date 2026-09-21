@@ -44,6 +44,12 @@ describe('Pause integration contracts', () => {
       flags: { hideAudioDownload: false },
       accessDenied: false,
     })
+    mocks.prisma.$transaction.mockImplementation(async (callback) =>
+      callback({
+        ...mocks.prisma,
+        $queryRaw: vi.fn().mockResolvedValue([{ discardedAt: null }]),
+      }),
+    )
   })
 
   afterEach(() => {
@@ -96,6 +102,7 @@ describe('Pause integration contracts', () => {
     }))
     mocks.prisma.$transaction.mockImplementation(async (callback) =>
       callback({
+        $queryRaw: vi.fn().mockResolvedValue([{ discardedAt: null }]),
         sessionSegment: {
           update,
           aggregate: vi.fn().mockResolvedValue({ _sum: { activeDurationSec: 120 } }),

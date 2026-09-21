@@ -9,6 +9,11 @@ import { spawn } from 'child_process'
 import { join, dirname } from 'path'
 import { existsSync } from 'fs'
 import { fileURLToPath } from 'url'
+import {
+  lockWritableSession,
+  SessionDiscardedError,
+  SessionMissingError,
+} from '../lib/sessionDiscard'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -158,14 +163,20 @@ export async function saveSessionMetrics(req: Request, res: Response) {
       totalTurns: metricsData.totalTurns || 0,
     }
 
-    const metrics = await prisma.sessionMetrics.upsert({
-      where: { sessionId },
-      update: sharedFields,
-      create: { sessionId, ...sharedFields },
+    const metrics = await prisma.$transaction(async (tx) => {
+      await lockWritableSession(tx, sessionId)
+      return tx.sessionMetrics.upsert({
+        where: { sessionId },
+        update: sharedFields,
+        create: { sessionId, ...sharedFields },
+      })
     })
 
     res.json({ success: true, metrics })
   } catch (error) {
+    if (error instanceof SessionDiscardedError || error instanceof SessionMissingError) {
+      return res.status(error.status).json({ error: error.message })
+    }
     console.error('Error saving session metrics:', error)
     res.status(500).json({ error: 'Failed to save metrics' })
   }
@@ -186,19 +197,25 @@ export async function saveSessionTranscript(req: Request, res: Response) {
     }
 
     // Save or update transcript
-    const transcript = await prisma.sessionTranscript.upsert({
-      where: { sessionId },
-      update: {
-        conversationData: transcriptData
-      },
-      create: {
-        sessionId,
-        conversationData: transcriptData
-      }
+    const transcript = await prisma.$transaction(async (tx) => {
+      await lockWritableSession(tx, sessionId)
+      return tx.sessionTranscript.upsert({
+        where: { sessionId },
+        update: {
+          conversationData: transcriptData
+        },
+        create: {
+          sessionId,
+          conversationData: transcriptData
+        }
+      })
     })
 
     res.json({ success: true, transcript })
   } catch (error) {
+    if (error instanceof SessionDiscardedError || error instanceof SessionMissingError) {
+      return res.status(error.status).json({ error: error.message })
+    }
     console.error('Error saving session transcript:', error)
     res.status(500).json({ error: 'Failed to save transcript' })
   }
@@ -706,10 +723,13 @@ export async function calculateTextMetrics(req: Request, res: Response) {
     }
 
     // Save to database
-    await prisma.sessionMetrics.upsert({
-      where: { sessionId },
-      update: metricsData,
-      create: { sessionId, ...metricsData }
+    await prisma.$transaction(async (tx) => {
+      await lockWritableSession(tx, sessionId)
+      await tx.sessionMetrics.upsert({
+        where: { sessionId },
+        update: metricsData,
+        create: { sessionId, ...metricsData }
+      })
     })
 
     res.json({
@@ -727,6 +747,9 @@ export async function calculateTextMetrics(req: Request, res: Response) {
     })
 
   } catch (error) {
+    if (error instanceof SessionDiscardedError || error instanceof SessionMissingError) {
+      return res.status(error.status).json({ error: error.message })
+    }
     console.error('Error calculating text metrics:', error)
     res.status(500).json({ 
       error: 'Failed to calculate text metrics',

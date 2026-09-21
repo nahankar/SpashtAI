@@ -1,6 +1,11 @@
 import { Request, Response } from 'express'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/prisma'
+import {
+  lockWritableSession,
+  SessionDiscardedError,
+  SessionMissingError,
+} from '../lib/sessionDiscard'
 
 export async function saveAdvancedMetrics(req: Request, res: Response) {
   try {
@@ -45,13 +50,19 @@ export async function saveAdvancedMetrics(req: Request, res: Response) {
       data.processingStatus = processingStatus as Prisma.InputJsonValue
     }
 
-    const updated = await prisma.sessionMetrics.update({
-      where: { sessionId },
-      data,
+    const updated = await prisma.$transaction(async (tx) => {
+      await lockWritableSession(tx, sessionId)
+      return tx.sessionMetrics.update({
+        where: { sessionId },
+        data,
+      })
     })
 
     res.json(updated)
   } catch (error) {
+    if (error instanceof SessionDiscardedError || error instanceof SessionMissingError) {
+      return res.status(error.status).json({ error: error.message })
+    }
     console.error('Error saving advanced metrics:', error)
     res.status(500).json({ error: 'Failed to save advanced metrics' })
   }

@@ -1,4 +1,5 @@
 import { prisma } from './prisma'
+import { lockWritableSession } from './sessionDiscard'
 
 export const POINTS_FEEDBACK = 0.25
 export const POINTS_PER_5_MIN_ACTIVE = 0.5
@@ -64,6 +65,7 @@ export async function awardSessionActivePoints(
   sessionId: string,
 ): Promise<{ awarded: number; total: number }> {
   return prisma.$transaction(async (tx) => {
+    await lockWritableSession(tx, sessionId)
     const session = await tx.session.findUnique({
       where: { id: sessionId },
       select: { userId: true, sessionPointsAwarded: true },

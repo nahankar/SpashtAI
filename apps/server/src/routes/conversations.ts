@@ -9,6 +9,11 @@ import {
 } from '../lib/userExportFlags'
 import { dedupeConversationMessages } from '../lib/dedupeMessages'
 import { WebSocketServer, WebSocket } from 'ws'
+import {
+  lockWritableSession,
+  SessionDiscardedError,
+  SessionMissingError,
+} from '../lib/sessionDiscard'
 
 let wss: WebSocketServer | null = null
 
@@ -82,11 +87,11 @@ export async function addConversationMessage(req: Request, res: Response) {
       ...(audio_url && { audio_url }) // Include audio_url if provided
     }
 
-    // Robust against concurrent first writes (user + assistant message at session start).
-    // We retry once if another request creates the transcript between read and create.
-    let transcript: any = null
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const existing = await prisma.sessionTranscript.findUnique({
+    // The Session row lock serializes concurrent messages with discard and
+    // avoids a delayed agent write reviving data behind a tombstone.
+    const transcript = await prisma.$transaction(async (tx) => {
+      await lockWritableSession(tx, sessionId)
+      const existing = await tx.sessionTranscript.findUnique({
         where: { sessionId },
       })
 
@@ -95,7 +100,7 @@ export async function addConversationMessage(req: Request, res: Response) {
         const messages = Array.isArray(conversationData.messages) ? conversationData.messages : []
         messages.push(messageData)
 
-        transcript = await prisma.sessionTranscript.update({
+        return tx.sessionTranscript.update({
           where: { sessionId },
           data: {
             conversationData: {
@@ -105,26 +110,19 @@ export async function addConversationMessage(req: Request, res: Response) {
             },
           },
         })
-        break
       }
 
-      try {
-        transcript = await prisma.sessionTranscript.create({
-          data: {
-            sessionId,
-            conversationData: {
-              messages: [messageData],
-              created: new Date().toISOString(),
-              lastUpdated: new Date().toISOString(),
-            },
+      return tx.sessionTranscript.create({
+        data: {
+          sessionId,
+          conversationData: {
+            messages: [messageData],
+            created: new Date().toISOString(),
+            lastUpdated: new Date().toISOString(),
           },
-        })
-        break
-      } catch (e: any) {
-        // P2002 = another concurrent request created it first; retry as update path.
-        if (e?.code !== 'P2002' || attempt === 1) throw e
-      }
-    }
+        },
+      })
+    })
     
     // Broadcast to WebSocket clients for real-time updates
     broadcastToSession(sessionId, {
@@ -145,6 +143,9 @@ export async function addConversationMessage(req: Request, res: Response) {
       transcriptId: transcript.id
     })
   } catch (error) {
+    if (error instanceof SessionDiscardedError || error instanceof SessionMissingError) {
+      return res.status(error.status).json({ error: error.message })
+    }
     // Don't log req.body — it contains transcript content (PII). err carries the stack.
     logger.error(
       { err: error, sessionId: req.params.sessionId },
@@ -296,16 +297,23 @@ export async function updateSessionState(req: Request, res: Response) {
     const { sessionId } = req.params
     const { state, metadata } = req.body
     
-    // Broadcast session state to WebSocket clients
-    broadcastToSession(sessionId, {
-      action: 'session_state_changed',
-      state,
-      metadata,
-      timestamp: new Date().toISOString()
+    await prisma.$transaction(async (tx) => {
+      await lockWritableSession(tx, sessionId)
+      // Keep the row lock through the broadcast so state cannot be emitted
+      // after a discard has already won the serialization race.
+      broadcastToSession(sessionId, {
+        action: 'session_state_changed',
+        state,
+        metadata,
+        timestamp: new Date().toISOString()
+      })
     })
     
     res.json({ success: true })
   } catch (error) {
+    if (error instanceof SessionDiscardedError || error instanceof SessionMissingError) {
+      return res.status(error.status).json({ error: error.message })
+    }
     logger.error({ err: error }, 'Error updating session state:')
     res.status(500).json({ error: 'Failed to update session state' })
   }

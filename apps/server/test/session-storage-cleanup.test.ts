@@ -99,8 +99,46 @@ describe('session recording storage cleanup', () => {
     mocks.stopEgress.mockRejectedValue(new Error('already stopped'))
 
     const { stopSessionEgress } = await import('../src/lib/sessionStorageCleanup')
-    const paths = await stopSessionEgress(['room-4'])
+    const result = await stopSessionEgress(['room-4'])
 
-    expect(paths.has('s3://bucket/session-4.webm')).toBe(true)
+    expect(result.paths.has('s3://bucket/session-4.webm')).toBe(true)
+    expect(result.skippedUnavailable).toBe(false)
+  })
+
+  it('skips the known Redis-disabled error when no active writer is evidenced', async () => {
+    mocks.listEgress.mockRejectedValue(new Error('egress not connected (redis required)'))
+
+    const { stopSessionEgress } = await import('../src/lib/sessionStorageCleanup')
+    const result = await stopSessionEgress(['room-browser-only'], [
+      {
+        egressId: 'client-segment-browser',
+        filePath: join(audioRoot, 'browser.webm'),
+        status: 'completed',
+      },
+    ])
+
+    expect(result.skippedUnavailable).toBe(true)
+  })
+
+  it('blocks purge when Redis is unavailable and a writer may still be active', async () => {
+    mocks.listEgress.mockRejectedValue(new Error('egress not connected (redis required)'))
+
+    const { stopSessionEgress } = await import('../src/lib/sessionStorageCleanup')
+    await expect(
+      stopSessionEgress(['room-active'], [
+        {
+          egressId: 'EG_active',
+          filePath: '/out/user_track_session.mp4',
+          status: 'processing',
+        },
+      ]),
+    ).rejects.toThrow('redis required')
+  })
+
+  it('keeps ambiguous Egress network failures retryable', async () => {
+    mocks.listEgress.mockRejectedValue(new Error('request timed out'))
+
+    const { stopSessionEgress } = await import('../src/lib/sessionStorageCleanup')
+    await expect(stopSessionEgress(['room-timeout'])).rejects.toThrow('timed out')
   })
 })

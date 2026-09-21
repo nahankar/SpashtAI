@@ -5,6 +5,14 @@ import {
   getElevateSessionOwnerId,
   resolveRequestExportFlags,
 } from '../lib/userExportFlags'
+import {
+  lockWritableSession,
+  SessionDiscardedError,
+  SessionMissingError,
+} from '../lib/sessionDiscard'
+import { deleteRecordingArtifact } from '../lib/sessionStorageCleanup'
+import { enqueueSessionDeletion } from '../lib/sessionDeletionWorker'
+import { isValidInternalAgentRequest } from '../middleware/auth'
 
 export async function saveAudioMetadata(req: Request, res: Response) {
   try {
@@ -21,11 +29,6 @@ export async function saveAudioMetadata(req: Request, res: Response) {
       userId
     } = req.body
 
-    // Get or update session transcript to include audio metadata
-    let transcript = await prisma.sessionTranscript.findUnique({
-      where: { sessionId }
-    })
-
     const audioMetadata = {
       participantType,
       s3Key,
@@ -38,37 +41,58 @@ export async function saveAudioMetadata(req: Request, res: Response) {
       userId
     }
 
-    if (transcript) {
-      // Add audio metadata to existing transcript
-      const conversationData = transcript.conversationData as any
-      const audioFiles = Array.isArray(conversationData.audioFiles) 
-        ? conversationData.audioFiles 
-        : []
-      audioFiles.push(audioMetadata)
+    const isAgentCallback = isValidInternalAgentRequest(req)
+    const discarded = await prisma.$transaction(async (tx) => {
+      let wasDiscarded = false
+      try {
+        await lockWritableSession(tx, sessionId)
+      } catch (error) {
+        if (!(error instanceof SessionDiscardedError) || !isAgentCallback) throw error
+        wasDiscarded = true
+      }
 
-      await prisma.sessionTranscript.update({
+      const transcript = await tx.sessionTranscript.findUnique({ where: { sessionId } })
+      const conversationData = (transcript?.conversationData as any) || {}
+      const audioFiles = Array.isArray(conversationData.audioFiles)
+        ? conversationData.audioFiles
+        : []
+      const nextConversationData = {
+        ...conversationData,
+        messages: Array.isArray(conversationData.messages) ? conversationData.messages : [],
+        audioFiles: [...audioFiles, audioMetadata],
+        lastUpdated: new Date().toISOString(),
+        ...(transcript ? {} : { created: new Date().toISOString() }),
+      }
+
+      await tx.sessionTranscript.upsert({
         where: { sessionId },
-        data: {
-          conversationData: {
-            ...conversationData,
-            audioFiles,
-            lastUpdated: new Date().toISOString()
-          }
-        }
-      })
-    } else {
-      // Create new transcript with audio metadata
-      await prisma.sessionTranscript.create({
-        data: {
+        update: { conversationData: nextConversationData },
+        create: {
           sessionId,
-          conversationData: {
-            messages: [],
-            audioFiles: [audioMetadata],
-            created: new Date().toISOString(),
-            lastUpdated: new Date().toISOString()
-          }
-        }
+          conversationData: nextConversationData,
+        },
       })
+
+      if (wasDiscarded) {
+        await tx.session.update({
+          where: { id: sessionId },
+          data: {
+            deletionStatus: 'pending',
+            nextDeletionAttemptAt: new Date(),
+            deletionLeaseId: null,
+            deletionLeaseUntil: null,
+          },
+        })
+      }
+      return wasDiscarded
+    })
+
+    if (discarded) {
+      enqueueSessionDeletion(sessionId)
+      if (typeof s3Bucket === 'string' && s3Bucket && typeof s3Key === 'string' && s3Key) {
+        await deleteRecordingArtifact(`s3://${s3Bucket}/${s3Key}`)
+      }
+      return res.status(410).json({ error: 'Session discarded' })
     }
 
     res.status(201).json({ 
@@ -77,6 +101,24 @@ export async function saveAudioMetadata(req: Request, res: Response) {
       audioMetadata
     })
   } catch (error) {
+    if (
+      error instanceof SessionMissingError &&
+      isValidInternalAgentRequest(req) &&
+      typeof req.body?.s3Bucket === 'string' &&
+      req.body.s3Bucket &&
+      typeof req.body?.s3Key === 'string' &&
+      req.body.s3Key
+    ) {
+      try {
+        await deleteRecordingArtifact(`s3://${req.body.s3Bucket}/${req.body.s3Key}`)
+      } catch (cleanupError) {
+        console.error('Failed to compensate late legacy audio artifact:', cleanupError)
+        return res.status(503).json({ error: 'Audio cleanup pending retry' })
+      }
+    }
+    if (error instanceof SessionDiscardedError || error instanceof SessionMissingError) {
+      return res.status(error.status).json({ error: error.message })
+    }
     console.error('Error saving audio metadata:', error)
     res.status(500).json({ error: 'Failed to save audio metadata' })
   }

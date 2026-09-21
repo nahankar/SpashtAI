@@ -132,6 +132,48 @@ def _recording_bucket() -> str:
     return os.getenv("S3_RECORDING_BUCKET", "spashtai-s3-prod")
 
 
+async def delete_discarded_recording_artifacts(paths: list[Optional[str]]) -> None:
+    """Compensate files created while discard raced with Egress shutdown."""
+    unique_paths = {path for path in paths if path}
+    audio_root = os.path.realpath(os.path.join(os.path.dirname(__file__), "audio_storage"))
+
+    for stored_path in unique_paths:
+        try:
+            if stored_path.startswith("s3://"):
+                import boto3
+
+                bucket_and_key = stored_path[len("s3://"):]
+                bucket, separator, key = bucket_and_key.partition("/")
+                if not separator or not bucket or not key:
+                    raise ValueError(f"Invalid S3 recording path: {stored_path}")
+                await asyncio.to_thread(
+                    boto3.client("s3").delete_object,
+                    Bucket=bucket,
+                    Key=key,
+                )
+                logger.info("🗑️ Deleted discarded S3 recording: %s", stored_path)
+                continue
+
+            candidate = (
+                os.path.join(audio_root, stored_path[len("/out/"):])
+                if stored_path.startswith("/out/")
+                else stored_path
+            )
+            resolved = os.path.realpath(candidate)
+            if os.path.commonpath([audio_root, resolved]) != audio_root:
+                logger.warning("⚠️ Refusing to delete recording outside audio root: %s", stored_path)
+                continue
+            try:
+                await asyncio.to_thread(os.remove, resolved)
+                logger.info("🗑️ Deleted discarded local recording: %s", resolved)
+            except FileNotFoundError:
+                pass
+        except Exception as exc:
+            # The server-side tombstone worker remains the durable retry path
+            # for metadata that was persisted before the discard won the race.
+            logger.error("❌ Failed to delete discarded recording %s: %s", stored_path, exc)
+
+
 async def fetch_session_history(session_id: str, max_messages: int = 60) -> list[dict]:
     """
     Fetch prior conversation messages for a session from server.
@@ -2525,6 +2567,11 @@ async def entrypoint(ctx: JobContext):
                     "🗑️ Session was discarded during recording shutdown — "
                     "skipping analytics and all remaining persistence"
                 )
+
+        if session_discarded:
+            await delete_discarded_recording_artifacts(
+                [user_file_path, agent_file_path, room_file_path]
+            )
         
         # Process advanced analytics at session end
         if (

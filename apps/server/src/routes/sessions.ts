@@ -1,9 +1,18 @@
 import type { Request, Response } from 'express'
+import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/prisma'
 import { logger, reqLog } from '../lib/logger'
 import { awardSessionActivePoints } from '../lib/points'
 import { isPrivilegedRole } from '../lib/userExportFlags'
 import { enqueueSessionDeletion } from '../lib/sessionDeletionWorker'
+import {
+  lockWritableSession,
+  RecordingOwnershipError,
+  SessionDiscardedError,
+  SessionMissingError,
+} from '../lib/sessionDiscard'
+import { deleteRecordingArtifact } from '../lib/sessionStorageCleanup'
+import { isValidInternalAgentRequest } from '../middleware/auth'
 
 export async function listSessions(req: Request, res: Response) {
   try {
@@ -117,25 +126,26 @@ export async function endSession(req: Request, res: Response) {
     const { id } = req.params
     const { endedAt, durationSec } = req.body
 
-    const existing = await prisma.session.findUnique({ where: { id } })
-    if (!existing) {
-      return res.status(404).json({ error: 'Session not found' })
-    }
+    const { session, alreadyEnded } = await prisma.$transaction(async (tx) => {
+      await lockWritableSession(tx, id)
+      const existing = await tx.session.findUnique({ where: { id } })
+      if (!existing) throw new SessionMissingError()
 
-    // Avoid double-awarding points if end is called more than once
-    const alreadyEnded = existing.endedAt != null
-
-    const session = await prisma.session.update({
-      where: { id },
-      data: {
-        endedAt: endedAt ? new Date(endedAt) : existing.endedAt ?? new Date(),
-        durationSec: durationSec ?? existing.durationSec,
-      },
-      include: {
-        user: {
-          select: { id: true, email: true, rewardPoints: true },
-        },
-      },
+      return {
+        alreadyEnded: existing.endedAt != null,
+        session: await tx.session.update({
+          where: { id },
+          data: {
+            endedAt: endedAt ? new Date(endedAt) : existing.endedAt ?? new Date(),
+            durationSec: durationSec ?? existing.durationSec,
+          },
+          include: {
+            user: {
+              select: { id: true, email: true, rewardPoints: true },
+            },
+          },
+        }),
+      }
     })
 
     let pointsAwarded = 0
@@ -156,6 +166,9 @@ export async function endSession(req: Request, res: Response) {
     )
     res.json({ success: true, session, pointsAwarded, totalPoints })
   } catch (error) {
+    if (error instanceof SessionDiscardedError || error instanceof SessionMissingError) {
+      return res.status(error.status).json({ error: error.message })
+    }
     logger.error({ err: error }, 'Error ending session:')
     res.status(500).json({ error: 'Failed to end session' })
   }
@@ -216,57 +229,139 @@ export async function saveRecording(req: Request, res: Response) {
     const { sessionId } = req.params
     const { egress_id, file_path, duration, file_size, status, recording_type } = req.body
     
-    if (!egress_id || !file_path) {
+    if (
+      typeof egress_id !== 'string' ||
+      !egress_id.trim() ||
+      typeof file_path !== 'string' ||
+      !file_path.trim()
+    ) {
       return res.status(400).json({ error: 'egress_id and file_path are required' })
     }
     
     // Convert status to string if it's a number (LiveKit sends integer status codes)
     const statusStr = typeof status === 'number' ? String(status) : (status || 'completed')
     
-    // Ensure session exists
-    const session = await prisma.session.findUnique({ where: { id: sessionId } })
-    if (!session) {
-      return res.status(404).json({ error: 'Session not found' })
-    }
-    
-    // Check if recording with this egress_id already exists
-    const existingRecording = await prisma.sessionRecording.findUnique({
-      where: { egressId: egress_id }
-    })
-    
-    if (existingRecording) {
-      // Update existing recording
-      const recording = await prisma.sessionRecording.update({
-        where: { egressId: egress_id },
-        data: {
-          filePath: file_path,
-          duration: duration || 0,
-          fileSize: file_size || 0,
-          status: statusStr,
-          recordingType: recording_type || 'user',
-          updatedAt: new Date()
+    const isAgentCallback = isValidInternalAgentRequest(req)
+    const result = await prisma.$transaction(async (tx) => {
+      try {
+        await lockWritableSession(tx, sessionId)
+      } catch (error) {
+        if (!(error instanceof SessionDiscardedError) || !isAgentCallback) throw error
+
+        const existingDiscarded = await tx.sessionRecording.findUnique({
+          where: { egressId: egress_id },
+        })
+        if (existingDiscarded && existingDiscarded.sessionId !== sessionId) {
+          throw new RecordingOwnershipError()
         }
+
+        // Persist the exact late Egress artifact as cleanup metadata and fence
+        // any worker that took an earlier recording snapshot.
+        if (existingDiscarded) {
+          await tx.sessionRecording.update({
+            where: { egressId: egress_id },
+            data: {
+              filePath: file_path,
+              duration: duration || 0,
+              fileSize: file_size || 0,
+              status: statusStr,
+              recordingType: recording_type || 'user',
+            },
+          })
+        } else {
+          await tx.sessionRecording.create({
+            data: {
+              sessionId,
+              egressId: egress_id,
+              filePath: file_path,
+              duration: duration || 0,
+              fileSize: file_size || 0,
+              status: statusStr,
+              recordingType: recording_type || 'user',
+            },
+          })
+        }
+        await tx.session.update({
+          where: { id: sessionId },
+          data: {
+            deletionStatus: 'pending',
+            nextDeletionAttemptAt: new Date(),
+            deletionLeaseId: null,
+            deletionLeaseUntil: null,
+          },
+        })
+        return { discarded: true as const }
+      }
+      const existing = await tx.sessionRecording.findUnique({
+        where: { egressId: egress_id },
       })
-      console.log(`🎙️ Updated recording for session ${sessionId}: ${file_path} (${recording_type || 'user'})`)
-      return res.status(200).json({ success: true, recording })
-    }
-    
-    // Create new recording (supports multiple recordings per session)
-    const recording = await prisma.sessionRecording.create({
-      data: {
-        sessionId: sessionId,
-        egressId: egress_id,
-        filePath: file_path,
-        duration: duration || 0,
-        fileSize: file_size || 0,
-        status: statusStr,
-        recordingType: recording_type || 'user'
+      if (existing) {
+        if (existing.sessionId !== sessionId) {
+          throw new RecordingOwnershipError()
+        }
+        return {
+          discarded: false as const,
+          created: false,
+          recording: await tx.sessionRecording.update({
+            where: { egressId: egress_id },
+            data: {
+              filePath: file_path,
+              duration: duration || 0,
+              fileSize: file_size || 0,
+              status: statusStr,
+              recordingType: recording_type || 'user',
+              updatedAt: new Date(),
+            },
+          }),
+        }
+      }
+      return {
+        discarded: false as const,
+        created: true,
+        recording: await tx.sessionRecording.create({
+          data: {
+            sessionId,
+            egressId: egress_id,
+            filePath: file_path,
+            duration: duration || 0,
+            fileSize: file_size || 0,
+            status: statusStr,
+            recordingType: recording_type || 'user',
+          },
+        }),
       }
     })
+
+    if (result.discarded) {
+      enqueueSessionDeletion(sessionId)
+      await deleteRecordingArtifact(file_path)
+      return res.status(410).json({ error: 'Session discarded' })
+    }
     
     console.log(`🎙️ Saved recording for session ${sessionId}: ${file_path} (${recording_type || 'user'})`)
-    res.status(201).json({ success: true, recording })
+    res.status(result.created ? 201 : 200).json({ success: true, recording: result.recording })
   } catch (error) {
+    if (error instanceof RecordingOwnershipError) {
+      return res.status(error.status).json({ error: error.message })
+    }
+    if (
+      error instanceof SessionMissingError &&
+      isValidInternalAgentRequest(req) &&
+      typeof req.body?.file_path === 'string'
+    ) {
+      try {
+        await deleteRecordingArtifact(req.body.file_path)
+      } catch (cleanupError) {
+        logger.error(
+          { err: cleanupError, sessionId: req.params.sessionId },
+          'Failed to compensate late Egress artifact for deleted session',
+        )
+        return res.status(503).json({ error: 'Recording cleanup pending retry' })
+      }
+    }
+    if (error instanceof SessionDiscardedError || error instanceof SessionMissingError) {
+      return res.status(error.status).json({ error: error.message })
+    }
     logger.error({ err: error }, 'Error saving recording:')
     res.status(500).json({ error: 'Failed to save recording' })
   }
@@ -292,8 +387,10 @@ export async function deleteSession(req: Request, res: Response) {
 
     if (!session.discardedAt) {
       const discardedAt = new Date()
-      await prisma.$transaction([
-        prisma.session.update({
+      // The tombstone is the durable cleanup outbox. Keep this transaction
+      // independent from best-effort denormalized cleanup such as Pulse.
+      await prisma.$transaction(async (tx) => {
+        await tx.session.update({
           where: { id },
           data: {
             discardedAt,
@@ -302,12 +399,8 @@ export async function deleteSession(req: Request, res: Response) {
             deletionError: null,
             nextDeletionAttemptAt: discardedAt,
           },
-        }),
-        // Pulse must disappear at tombstone time, not after storage cleanup.
-        prisma.progressPulse.deleteMany({
-          where: { sessionId: id, source: 'elevate' },
-        }),
-      ])
+        })
+      })
     } else {
       // A repeated DELETE is an idempotent request to retry cleanup now.
       await prisma.session.update({
@@ -319,6 +412,14 @@ export async function deleteSession(req: Request, res: Response) {
       })
     }
 
+    // Tombstoned sessions are already hidden by every read path. Pulse cleanup
+    // is immediate when possible and is retried by the durable worker otherwise.
+    await prisma.progressPulse.deleteMany({
+      where: { sessionId: id, source: 'elevate' },
+    }).catch((error) => {
+      logger.warn({ err: error, sessionId: id }, 'Deferred Pulse cleanup for discarded session')
+    })
+
     enqueueSessionDeletion(id)
 
     res.status(202).json({
@@ -327,7 +428,11 @@ export async function deleteSession(req: Request, res: Response) {
       message: 'Session is being securely discarded',
     })
   } catch (error) {
-    logger.error({ err: error }, 'Error deleting session:')
+    const prismaError =
+      error instanceof Prisma.PrismaClientKnownRequestError
+        ? { prismaCode: error.code, prismaMeta: error.meta }
+        : {}
+    logger.error({ err: error, sessionId: req.params.id, ...prismaError }, 'Error deleting session:')
     res.status(500).json({ error: 'Failed to delete session' })
   }
 }

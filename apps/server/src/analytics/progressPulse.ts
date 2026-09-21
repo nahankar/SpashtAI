@@ -7,6 +7,7 @@
 
 import type { SkillScores } from './skillScores'
 import { prisma } from '../lib/prisma'
+import { lockWritableSession } from '../lib/sessionDiscard'
 
 const TREND_CURRENT_WEIGHT = 0.7
 const TREND_HISTORY_WEIGHT = 0.3
@@ -85,9 +86,6 @@ export async function saveSkillScoresToPulse(
   scores: SkillScores,
   components?: Record<string, Record<string, number>>,
 ): Promise<number> {
-  const already = await prisma.progressPulse.count({ where: { sessionId } })
-  if (already > 0) return 0
-
   const entries = skillScoresToPulseEntries(scores, components)
   if (entries.length === 0) return 0
 
@@ -98,16 +96,20 @@ export async function saveSkillScoresToPulse(
     })),
   )
 
-  await prisma.progressPulse.createMany({
-    data: smoothedEntries.map((e) => ({
-      userId,
-      sessionId,
-      source,
-      skill: e.skill,
-      score: e.score,
-      metadata: e.metadata ?? undefined,
-    })),
+  return prisma.$transaction(async (tx) => {
+    if (source === 'elevate') await lockWritableSession(tx, sessionId)
+    const already = await tx.progressPulse.count({ where: { sessionId } })
+    if (already > 0) return 0
+    await tx.progressPulse.createMany({
+      data: smoothedEntries.map((e) => ({
+        userId,
+        sessionId,
+        source,
+        skill: e.skill,
+        score: e.score,
+        metadata: e.metadata ?? undefined,
+      })),
+    })
+    return smoothedEntries.length
   })
-
-  return smoothedEntries.length
 }

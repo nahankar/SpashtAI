@@ -18,6 +18,11 @@ import {
   recordingPayloadMatches,
   segmentRecordingFilename,
 } from '../analytics/sessionSegments'
+import {
+  lockWritableSession,
+  SessionDiscardedError,
+  SessionMissingError,
+} from '../lib/sessionDiscard'
 
 // Absolute base dir for client-uploaded recordings. Stored as an absolute
 // filePath so resolveElevateSessionAudio's absolute-path branch finds it.
@@ -64,15 +69,19 @@ async function fingerprintFile(filePath: string): Promise<{ hash: string; size: 
  * Also persists the shared audio anchor (Session.recordingStartedAt = t0).
  */
 export async function uploadSessionRecording(req: Request, res: Response) {
+  let promotedPath: string | null = null
   try {
     const { sessionId } = req.params
 
     const session = await prisma.session.findUnique({
       where: { id: sessionId },
-      select: { id: true, userId: true, recordingStartedAt: true },
+      select: { id: true, userId: true, recordingStartedAt: true, discardedAt: true },
     })
     if (!session) {
       return res.status(404).json({ error: 'Session not found' })
+    }
+    if (session.discardedAt) {
+      return res.status(410).json({ error: 'Session discarded' })
     }
     if (
       req.user &&
@@ -117,12 +126,15 @@ export async function uploadSessionRecording(req: Request, res: Response) {
       if (!samePayload) {
         return res.status(409).json({ error: 'segmentId already has a different recording' })
       }
-      if (segment.audioStatus !== 'available') {
-        await prisma.sessionSegment.update({
-          where: { id: segmentId },
-          data: { audioStatus: 'available' },
-        })
-      }
+      await prisma.$transaction(async (tx) => {
+        await lockWritableSession(tx, sessionId)
+        if (segment.audioStatus !== 'available') {
+          await tx.sessionSegment.update({
+            where: { id: segmentId },
+            data: { audioStatus: 'available' },
+          })
+        }
+      })
       return res.status(200).json({
         success: true,
         recording: segment.recording,
@@ -149,10 +161,12 @@ export async function uploadSessionRecording(req: Request, res: Response) {
     } finally {
       await unlink(tempPath).catch(() => undefined)
     }
+    promotedPath = absPath
 
     let recording
     try {
       recording = await prisma.$transaction(async (tx) => {
+        await lockWritableSession(tx, sessionId)
         const created = await tx.sessionRecording.create({
           data: {
             sessionId,
@@ -192,11 +206,27 @@ export async function uploadSessionRecording(req: Request, res: Response) {
             data: { durationSec: aggregate._sum.activeDurationSec ?? 0 },
           })
         }
+        if (
+          segment.segmentIndex === 0 &&
+          recordingStartedAt &&
+          !Number.isNaN(recordingStartedAt.getTime())
+        ) {
+          await tx.session.update({
+            where: { id: sessionId },
+            data: { recordingStartedAt: session.recordingStartedAt ?? recordingStartedAt },
+          })
+        }
         return created
       })
+      promotedPath = null
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         const raced = await prisma.sessionRecording.findUnique({ where: { segmentId } })
+        const current = await prisma.session.findUnique({
+          where: { id: sessionId },
+          select: { discardedAt: true },
+        })
+        if (current?.discardedAt) throw new SessionDiscardedError()
         if (
           raced &&
           recordingPayloadMatches(raced, {
@@ -216,19 +246,12 @@ export async function uploadSessionRecording(req: Request, res: Response) {
       throw error
     }
 
-    if (
-      segment.segmentIndex === 0 &&
-      recordingStartedAt &&
-      !Number.isNaN(recordingStartedAt.getTime())
-    ) {
-      await prisma.session.update({
-        where: { id: sessionId },
-        data: { recordingStartedAt: session.recordingStartedAt ?? recordingStartedAt },
-      })
-    }
-
     res.status(201).json({ success: true, recording })
   } catch (error) {
+    if (error instanceof SessionDiscardedError || error instanceof SessionMissingError) {
+      if (promotedPath) await unlink(promotedPath).catch(() => undefined)
+      return res.status(error.status).json({ error: error.message })
+    }
     console.error('Error uploading session recording:', error)
     res.status(500).json({ error: 'Failed to upload recording' })
   }

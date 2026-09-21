@@ -27,6 +27,7 @@ import {
   shouldWritePulse,
 } from '../analytics/audioStatus'
 import { detectSpeechRegions } from '../lib/audioAlignment'
+import { lockWritableSession, SessionDiscardedError } from '../lib/sessionDiscard'
 
 const SIGNAL_API_URL = process.env.SIGNAL_API_URL || 'http://localhost:4001'
 const INTERNAL_AGENT_TOKEN =
@@ -214,35 +215,38 @@ export async function analyzeSession(req: Request, res: Response) {
       audioProcessed,
     })
 
-    await prisma.sessionMetrics.upsert({
-      where: { sessionId },
-      create: {
-        sessionId,
-        ...(measuredSpeakingSec != null ? { userWpm: signals.speechRate.wpm } : {}),
-        userFillerCount: signals.fillers.count,
-        userFillerRate: signals.fillers.rate * 100,
-        userAvgSentenceLength: signals.sentenceComplexity.avgLength,
-        ...(measuredSpeakingSec != null ? { userSpeakingTime: measuredSpeakingSec } : {}),
-        userVocabDiversity: signals.vocabDiversity.ratio,
-        totalTurns: messages.length,
-        skillScores: skillScoresJson,
-        communicationSignals: signalsJson,
-        coachingInsights: insightsJson,
-        processingStatus: processingStatusJson,
-      },
-      update: {
-        ...(measuredSpeakingSec != null ? { userWpm: signals.speechRate.wpm } : {}),
-        userFillerCount: signals.fillers.count,
-        userFillerRate: signals.fillers.rate * 100,
-        userAvgSentenceLength: signals.sentenceComplexity.avgLength,
-        ...(measuredSpeakingSec != null ? { userSpeakingTime: measuredSpeakingSec } : {}),
-        userVocabDiversity: signals.vocabDiversity.ratio,
-        totalTurns: messages.length,
-        skillScores: skillScoresJson,
-        communicationSignals: signalsJson,
-        coachingInsights: insightsJson,
-        processingStatus: processingStatusJson,
-      },
+    await prisma.$transaction(async (tx) => {
+      await lockWritableSession(tx, sessionId)
+      await tx.sessionMetrics.upsert({
+        where: { sessionId },
+        create: {
+          sessionId,
+          ...(measuredSpeakingSec != null ? { userWpm: signals.speechRate.wpm } : {}),
+          userFillerCount: signals.fillers.count,
+          userFillerRate: signals.fillers.rate * 100,
+          userAvgSentenceLength: signals.sentenceComplexity.avgLength,
+          ...(measuredSpeakingSec != null ? { userSpeakingTime: measuredSpeakingSec } : {}),
+          userVocabDiversity: signals.vocabDiversity.ratio,
+          totalTurns: messages.length,
+          skillScores: skillScoresJson,
+          communicationSignals: signalsJson,
+          coachingInsights: insightsJson,
+          processingStatus: processingStatusJson,
+        },
+        update: {
+          ...(measuredSpeakingSec != null ? { userWpm: signals.speechRate.wpm } : {}),
+          userFillerCount: signals.fillers.count,
+          userFillerRate: signals.fillers.rate * 100,
+          userAvgSentenceLength: signals.sentenceComplexity.avgLength,
+          ...(measuredSpeakingSec != null ? { userSpeakingTime: measuredSpeakingSec } : {}),
+          userVocabDiversity: signals.vocabDiversity.ratio,
+          totalTurns: messages.length,
+          skillScores: skillScoresJson,
+          communicationSignals: signalsJson,
+          coachingInsights: insightsJson,
+          processingStatus: processingStatusJson,
+        },
+      })
     })
 
     let pulseCount = 0
@@ -296,6 +300,9 @@ export async function analyzeSession(req: Request, res: Response) {
       'session analyzed',
     )
   } catch (error: any) {
+    if (error instanceof SessionDiscardedError) {
+      return res.status(410).json({ error: error.message })
+    }
     reqLog(req).error({ err: error, event: 'analyze.failed', sessionId, source }, 'analytics pipeline error')
     res.status(500).json({ error: 'Analytics pipeline failed', details: error.message })
   }

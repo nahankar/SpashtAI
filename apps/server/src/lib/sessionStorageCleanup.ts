@@ -34,16 +34,92 @@ function collectStoragePaths(value: unknown, output: Set<string>, seen = new Set
   Object.values(value).forEach((item) => collectStoragePaths(item, output, seen))
 }
 
-export async function stopSessionEgress(roomNames: string[]): Promise<Set<string>> {
+export interface SessionRecordingReference {
+  egressId: string
+  filePath: string
+  status: string
+}
+
+export interface EgressStopResult {
+  paths: Set<string>
+  skippedUnavailable: boolean
+}
+
+function isTerminalRecordingStatus(status: string): boolean {
+  return [
+    '3',
+    '4',
+    '5',
+    '6',
+    'completed',
+    'complete',
+    'failed',
+    'aborted',
+    'cancelled',
+    'canceled',
+    'egress_complete',
+    'egress_failed',
+    'egress_aborted',
+    'egress_limit_reached',
+  ].includes(status.toLowerCase())
+}
+
+function isLiveKitEgressId(egressId: string): boolean {
+  return /^EG_/i.test(egressId) && !egressId.startsWith('client-')
+}
+
+function isEgressOwnedPath(filePath: string): boolean {
+  const name = filePath.split('/').pop() || ''
+  return /^(?:participant_(?:user|agent)_|track_(?:user|agent)_|room_composite_session_|(?:user|agent)(?:_track)?_).+\.mp4$/i.test(
+    name,
+  )
+}
+
+function hasPotentiallyActiveEgress(recordings: SessionRecordingReference[]): boolean {
+  return recordings.some(
+    (recording) =>
+      !isTerminalRecordingStatus(recording.status) &&
+      (isLiveKitEgressId(recording.egressId) || isEgressOwnedPath(recording.filePath)),
+  )
+}
+
+function isRedisDisabledEgressError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  const normalized = message.toLowerCase()
+  return normalized.includes('egress not connected') && normalized.includes('redis required')
+}
+
+export async function stopSessionEgress(
+  roomNames: string[],
+  recordings: SessionRecordingReference[] = [],
+): Promise<EgressStopResult> {
   const paths = new Set<string>()
   const url = livekitHttpUrl()
   const apiKey = process.env.LIVEKIT_API_KEY || ''
   const apiSecret = process.env.LIVEKIT_API_SECRET || ''
-  if (!url || !apiKey || !apiSecret) return paths
+  const potentiallyActive = hasPotentiallyActiveEgress(recordings)
+  if (!url || !apiKey || !apiSecret) {
+    if (potentiallyActive) {
+      throw new Error('Cannot verify a known Egress job without LiveKit credentials')
+    }
+    return { paths, skippedUnavailable: true }
+  }
 
   const client = new EgressClient(url, apiKey, apiSecret)
   for (const roomName of [...new Set(roomNames)]) {
-    const active = await client.listEgress({ roomName, active: true })
+    let active
+    try {
+      active = await client.listEgress({ roomName, active: true })
+    } catch (error) {
+      // A Redis-disabled LiveKit cannot have a functioning Egress control
+      // plane. It is safe to skip only when there is no persisted evidence of
+      // a possibly-active Egress writer. Timeouts and all other failures remain
+      // ambiguous and must keep the tombstone retryable.
+      if (isRedisDisabledEgressError(error) && !potentiallyActive) {
+        return { paths, skippedUnavailable: true }
+      }
+      throw error
+    }
     active.forEach((egress) => collectStoragePaths(egress, paths))
     // The agent may stop the same Egress concurrently after the browser leaves.
     // Treat a stop rejection as a race, then verify terminal state explicitly.
@@ -60,7 +136,7 @@ export async function stopSessionEgress(roomNames: string[]): Promise<Set<string
       throw new Error(`Could not stop ${stillActive.length} active Egress job(s) for ${roomName}`)
     }
   }
-  return paths
+  return { paths, skippedUnavailable: false }
 }
 
 function parseS3Uri(uri: string): { bucket: string; key: string } | null {
@@ -91,6 +167,35 @@ function resolveLocalRecordingPath(storedPath: string): string | null {
   return isInside(serverAudioRoot, candidate) || isInside(agentAudioRoot, candidate)
     ? candidate
     : null
+}
+
+export async function deleteRecordingArtifact(storedPath: string): Promise<void> {
+  const parsed = parseS3Uri(storedPath)
+  if (parsed) {
+    const region = process.env.AWS_REGION || 'us-east-1'
+    const s3 = new S3Client({ region, ...awsCredentialsConfig() })
+    await s3
+      .send(new DeleteObjectCommand({ Bucket: parsed.bucket, Key: parsed.key }))
+      .catch((error: any) => {
+        const status = error?.$metadata?.httpStatusCode
+        if (
+          status === 404 ||
+          error?.name === 'NoSuchBucket' ||
+          error?.name === 'NoSuchKey' ||
+          error?.name === 'NotFound'
+        ) {
+          return
+        }
+        throw error
+      })
+    return
+  }
+
+  const localPath = resolveLocalRecordingPath(storedPath)
+  if (!localPath) throw new Error('Recording path is outside approved storage roots')
+  await unlink(localPath).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== 'ENOENT') throw error
+  })
 }
 
 async function generatedMergedFiles(sessionId: string): Promise<string[]> {

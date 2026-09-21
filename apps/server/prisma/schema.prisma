@@ -370,6 +370,8 @@ model Session {
   deletionAttempts            Int       @default(0)
   deletionError               String?   @db.Text
   nextDeletionAttemptAt       DateTime?
+  deletionLeaseId             String?
+  deletionLeaseUntil          DateTime?
 
   // Shared audio timeline anchor (t0): all SessionTurn.audioStart/audioEnd and
   // word timings are expressed as seconds since this instant, aligned to the
@@ -387,6 +389,7 @@ model Session {
   @@index([userId, startedAt])
   @@index([userId, module, endedAt])
   @@index([discardedAt, nextDeletionAttemptAt])
+  @@index([discardedAt, deletionLeaseUntil, nextDeletionAttemptAt])
 }
 
 // Per-turn record powering the "conversation as replay" UX (per-message audio

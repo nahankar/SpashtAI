@@ -6,6 +6,11 @@ import {
   activeSegmentDurationSec,
   mergeSegmentAudioStatus,
 } from '../analytics/sessionSegments'
+import {
+  lockWritableSession,
+  SessionDiscardedError,
+  SessionMissingError,
+} from '../lib/sessionDiscard'
 
 const AUDIO_STATUSES = new Set(['pending', 'available', 'failed', 'unavailable'])
 
@@ -61,6 +66,7 @@ export async function createSessionSegment(req: Request, res: Response) {
     try {
       segment = await prisma.$transaction(
         async (tx) => {
+          await lockWritableSession(tx, sessionId)
           const openSegments = await tx.sessionSegment.findMany({
             where: { sessionId, endedAt: null },
           })
@@ -115,6 +121,9 @@ export async function createSessionSegment(req: Request, res: Response) {
 
     return res.status(201).json({ segment })
   } catch (error) {
+    if (error instanceof SessionDiscardedError || error instanceof SessionMissingError) {
+      return res.status(error.status).json({ error: error.message })
+    }
     console.error('Error creating session segment:', error)
     return res.status(500).json({ error: 'Failed to create session segment' })
   }
@@ -148,6 +157,7 @@ export async function closeSessionSegment(req: Request, res: Response) {
     const nextAudioStatus = mergeSegmentAudioStatus(segment.audioStatus, audioStatus)
 
     const updated = await prisma.$transaction(async (tx) => {
+      await lockWritableSession(tx, sessionId)
       const next = await tx.sessionSegment.update({
         where: { id: segmentId },
         data: {
@@ -169,6 +179,9 @@ export async function closeSessionSegment(req: Request, res: Response) {
 
     return res.json({ segment: updated })
   } catch (error) {
+    if (error instanceof SessionDiscardedError || error instanceof SessionMissingError) {
+      return res.status(error.status).json({ error: error.message })
+    }
     console.error('Error closing session segment:', error)
     return res.status(500).json({ error: 'Failed to close session segment' })
   }

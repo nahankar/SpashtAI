@@ -37,16 +37,23 @@ export function requireAuthOrMediaToken(req: Request, res: Response, next: NextF
   requireAuth(req, res, next)
 }
 
+export function isValidInternalAgentRequest(req: Request): boolean {
+  const rawHeader =
+    typeof req.header === 'function'
+      ? req.header('x-internal-agent-token')
+      : req.headers?.['x-internal-agent-token']
+  const internalToken = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader
+  const configured = process.env.INTERNAL_AGENT_TOKEN?.trim()
+  const expected =
+    configured || (process.env.NODE_ENV !== 'production' ? 'dev-internal-agent-token' : '')
+  return Boolean(internalToken && expected && internalToken === expected)
+}
+
 // Allow either a normal user JWT or the LiveKit agent's internal shared-secret
 // (`x-internal-agent-token` header). Use this on endpoints that the Python
 // agent worker calls server-side at session end (metrics persistence, etc.).
 export function requireAuthOrAgent(req: Request, res: Response, next: NextFunction): void {
-  const internalToken = req.header('x-internal-agent-token')
-  const configured = process.env.INTERNAL_AGENT_TOKEN?.trim()
-  const isProduction = process.env.NODE_ENV === 'production'
-  // Keep a fallback only for explicit local development convenience.
-  const expected = configured || (!isProduction ? 'dev-internal-agent-token' : '')
-  if (internalToken && internalToken === expected) {
+  if (isValidInternalAgentRequest(req)) {
     return next()
   }
 
