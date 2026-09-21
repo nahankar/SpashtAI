@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express'
 import { prisma } from '../lib/prisma'
 import { logger } from '../lib/logger'
+import { isSessionDiscarding } from '../lib/sessionDiscard'
 import { awardSessionActivePoints } from '../lib/points'
 import {
   exportDenied,
@@ -249,6 +250,7 @@ export async function getConversationForAgent(req: Request, res: Response) {
     })
     const exists = Boolean(sessionRow)
     const ended = Boolean(sessionRow?.endedAt)
+    const discarding = isSessionDiscarding(sessionId)
 
     const transcript = await prisma.sessionTranscript.findUnique({
       where: { sessionId },
@@ -259,6 +261,7 @@ export async function getConversationForAgent(req: Request, res: Response) {
         sessionId,
         exists,
         ended,
+        discarding,
         messages: [],
         metadata: {
           created: null,
@@ -275,6 +278,7 @@ export async function getConversationForAgent(req: Request, res: Response) {
       sessionId,
       exists,
       ended,
+      discarding,
       messages,
       metadata: {
         created: conversationData.created,

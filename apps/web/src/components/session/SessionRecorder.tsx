@@ -20,6 +20,7 @@ export type SessionRecorderHandle = {
   finalize: () => Promise<{ ok: boolean; audioCapture: AudioCaptureReport }>
   waitForFinalization: () => Promise<{ ok: boolean; audioCapture: AudioCaptureReport }>
   retryUpload: () => Promise<{ ok: boolean; audioCapture: AudioCaptureReport }>
+  discard: () => Promise<void>
 }
 
 interface SessionRecorderProps {
@@ -64,6 +65,7 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
     const startMsRef = useRef<number>(0)
     const durationSecRef = useRef<number>(0)
     const uploadedRef = useRef(false)
+    const discardRef = useRef(false)
     const capturedBlobRef = useRef<Blob | null>(null)
     const finalizePromiseRef = useRef<Promise<{
       ok: boolean
@@ -191,6 +193,13 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
           audioCapture: ok ? 'uploaded' : 'failed',
         }
       },
+      discard: async () => {
+        // Discard is terminal: stop MediaRecorder but never upload the blob.
+        // This must happen before the server inventories and deletes storage.
+        discardRef.current = true
+        if (isRecordingRef.current) await stopRef.current()
+        capturedBlobRef.current = null
+      },
     }))
 
     useEffect(() => {
@@ -230,6 +239,7 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
     useEffect(() => {
       if (disabled) return
       const onDisconnected = async () => {
+        if (discardRef.current) return
         if (uploadedRef.current) return
         if (!isRecordingRef.current) return
         const blob = await stopRef.current()
@@ -249,7 +259,7 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
 
     useEffect(() => {
       return () => {
-        if (uploadedRef.current || !isRecordingRef.current) return
+        if (discardRef.current || uploadedRef.current || !isRecordingRef.current) return
         void stopRef.current().then((blob) => {
           if (blob) {
             if (startMsRef.current) {

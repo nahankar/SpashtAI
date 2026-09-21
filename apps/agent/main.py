@@ -178,6 +178,8 @@ async def fetch_session_lifecycle(session_id: str) -> str:
                 if response.status != 200:
                     return "unknown"
                 payload = await response.json()
+                if payload.get("discarding") is True:
+                    return "missing"
                 if payload.get("exists") is False:
                     return "missing"
                 return "ended" if payload.get("ended") else "active"

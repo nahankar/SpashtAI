@@ -4,6 +4,14 @@ import { logger, reqLog } from '../lib/logger'
 import { awardSessionActivePoints } from '../lib/points'
 import { isPrivilegedRole } from '../lib/userExportFlags'
 import { RoomServiceClient } from 'livekit-server-sdk'
+import {
+  clearSessionDiscarding,
+  markSessionDiscarding,
+} from '../lib/sessionDiscard'
+import {
+  deleteSessionStorage,
+  stopSessionEgress,
+} from '../lib/sessionStorageCleanup'
 
 async function disconnectSessionRooms(roomNames: string[]): Promise<void> {
   const livekitUrl = process.env.LIVEKIT_URL || ''
@@ -293,6 +301,9 @@ export async function deleteSession(req: Request, res: Response) {
           where: { endedAt: null },
           select: { roomName: true },
         },
+        recordings: {
+          select: { filePath: true },
+        },
       },
     })
     
@@ -305,20 +316,39 @@ export async function deleteSession(req: Request, res: Response) {
       return res.status(403).json({ error: 'Access denied' })
     }
 
-    // Remove associated Progress Pulse entries
-    await prisma.progressPulse.deleteMany({
-      where: { sessionId: id, source: 'elevate' },
-    })
+    markSessionDiscarding(id)
+    try {
+      const roomNames = session.segments.map((segment) => segment.roomName)
 
-    // End active LiveKit jobs before removing their persistence target. The
-    // agent still stops egress during teardown, then observes the missing row
-    // and skips analytics, turns, and all other writes.
-    await disconnectSessionRooms(session.segments.map((segment) => segment.roomName))
+      // Stop Egress first so S3 has finalized its objects and LiveKit can tell
+      // us their exact locations even if metadata had not reached Postgres.
+      const egressPaths = await stopSessionEgress(roomNames)
+      await disconnectSessionRooms(roomNames)
 
-    // Delete the session (cascade will handle related data)
-    await prisma.session.delete({
-      where: { id }
-    })
+      // Re-read after Egress shutdown to include any metadata that raced with
+      // the discard request before the agent observed the discarding state.
+      const latestRecordings = await prisma.sessionRecording.findMany({
+        where: { sessionId: id },
+        select: { filePath: true },
+      })
+      const storagePaths = new Set([
+        ...session.recordings.map((recording) => recording.filePath),
+        ...latestRecordings.map((recording) => recording.filePath),
+        ...egressPaths,
+      ])
+      await deleteSessionStorage(id, storagePaths)
+
+      // Delete Pulse explicitly, then let the Session cascade remove metrics,
+      // transcripts, turns, segments, and recording rows.
+      await prisma.progressPulse.deleteMany({
+        where: { sessionId: id, source: 'elevate' },
+      })
+      await prisma.session.delete({
+        where: { id },
+      })
+    } finally {
+      clearSessionDiscarding(id)
+    }
     
     console.log(`🗑️  Deleted session: ${id}`)
     res.json({ success: true, message: 'Session deleted successfully' })

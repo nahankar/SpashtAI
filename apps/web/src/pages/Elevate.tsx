@@ -1655,6 +1655,7 @@ export function Elevate() {
   }, [sessionId, segmentId, clearMessages, resetMetrics, navigate, cameFromHistory, confirmDialog, updateUser, loadPastSessions, prepareLaunch, isLeaving, inboundBoothDemo, focusArea, launchedFromCoach, originCoachThreadId])
 
   const handleDiscard = useCallback(async () => {
+    if (isLeaving) return
     const yes = await confirmDialog({
       title: 'Discard this session?',
       description: 'This will permanently delete the session and all its data. This cannot be undone.',
@@ -1663,10 +1664,37 @@ export function Elevate() {
     })
     if (!yes) return
 
+    setIsLeaving(true)
     const currentSessionId = sessionId
+    await recorderRef.current?.discard().catch((error) => {
+      console.warn('Failed to stop discarded browser recording:', error)
+    })
     if (segmentId) intentionalDisconnectSegmentsRef.current.add(segmentId)
     setToken(null)
     setUrl(null)
+
+    if (currentSessionId) {
+      try {
+        const response = await fetch(`${API_BASE_URL}/sessions/${currentSessionId}`, {
+          method: 'DELETE',
+          headers: getAuthHeaders(),
+        })
+        if (!response.ok) {
+          throw new Error(`Discard failed with HTTP ${response.status}`)
+        }
+        setPastSessions((prev) => prev.filter((s) => s.id !== currentSessionId))
+        setSelectedElevate((prev) => { const n = new Set(prev); n.delete(currentSessionId); return n })
+        toast.success('Session discarded')
+      } catch (error) {
+        console.error('Failed to discard session:', error)
+        setIsSessionPaused(true)
+        setPauseReason('disconnected')
+        setIsLeaving(false)
+        toast.error('Could not fully discard the session. Please retry.')
+        return
+      }
+    }
+
     setSessionId(null)
     setRoomName('')
     setSegmentId(null)
@@ -1677,27 +1705,14 @@ export function Elevate() {
     localStorage.removeItem('spashtai_active_session')
     localStorage.removeItem('spashtai_session_timestamp')
 
-    if (currentSessionId) {
-      try {
-        await fetch(`${API_BASE_URL}/sessions/${currentSessionId}`, {
-          method: 'DELETE',
-          headers: getAuthHeaders(),
-        })
-        setPastSessions((prev) => prev.filter((s) => s.id !== currentSessionId))
-        setSelectedElevate((prev) => { const n = new Set(prev); n.delete(currentSessionId); return n })
-        toast.success('Session discarded')
-      } catch {
-        toast.error('Failed to delete session')
-      }
-    }
-
     if (prepareLaunch) {
       navigate(`/prepare/interviews/${encodeURIComponent(prepareLaunch.preparationId)}`)
     } else {
       setShowHistory(true)
       navigate('/elevate')
     }
-  }, [sessionId, segmentId, clearMessages, resetMetrics, navigate, confirmDialog, prepareLaunch])
+    setIsLeaving(false)
+  }, [sessionId, segmentId, clearMessages, resetMetrics, navigate, confirmDialog, prepareLaunch, isLeaving])
 
   // Return from a viewed session's results back to the Elevate session list.
   const handleBackToElevate = useCallback(() => {
@@ -2288,7 +2303,7 @@ export function Elevate() {
                         Record My Audio
                       </Button>
                     )}
-                    <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={handleDiscard}>
+                    <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={handleDiscard} disabled={isLeaving}>
                       Discard Session
                     </Button>
                   </div>
@@ -2357,7 +2372,7 @@ export function Elevate() {
                       inputBlocked={isPausing || pauseAudioFailure != null}
                       enableAudioRecord={exportFlags.enableAudioExport}
                     />
-                    <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={handleDiscard}>
+                    <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={handleDiscard} disabled={isLeaving}>
                       Discard Session
                     </Button>
                   </div>
