@@ -7,7 +7,6 @@ import {
 } from '../lib/userExportFlags'
 import { spawn } from 'child_process'
 import { join, dirname } from 'path'
-import { existsSync } from 'fs'
 import { fileURLToPath } from 'url'
 import {
   lockWritableSession,
@@ -15,6 +14,7 @@ import {
   SessionMissingError,
 } from '../lib/sessionDiscard'
 import { assessPaceEvidence } from '../analytics/pace'
+import { resolveAgentPython } from '../lib/agentPython'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -885,12 +885,7 @@ export async function reprocessSessionMetrics(req: Request, res: Response) {
       : selectedRecording.filePath
     
     const pythonScript = join(__dirname, '../../../agent/reprocess_session.py')
-    const pythonCandidates = [
-      join(__dirname, '../../../agent/.venv312/bin/python'),
-      join(__dirname, '../../../.venv/bin/python'),
-      'python3',
-    ]
-    const pythonEnv = pythonCandidates.find((p) => p === 'python3' || existsSync(p)) ?? 'python3'
+    const pythonEnv = resolveAgentPython()
     
     // Spawn Python process
     const python = spawn(pythonEnv, [pythonScript, sessionId, localAudioPath, transcript])
@@ -912,7 +907,11 @@ export async function reprocessSessionMetrics(req: Request, res: Response) {
         if (code === 0) {
           resolve()
         } else {
-          reject(new Error(`Python script exited with code ${code}: ${errorOutput}`))
+          reject(
+            new Error(
+              `Python script exited with code ${code} (interpreter ${pythonEnv}): ${errorOutput}`,
+            ),
+          )
         }
       })
     })
