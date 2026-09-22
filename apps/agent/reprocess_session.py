@@ -63,7 +63,10 @@ async def reprocess_session(session_id: str, audio_file_path: str, transcript: s
         
         # Save to database
         logger.info("💾 Saving results to database...")
-        await collector.save_to_database()
+        # This standalone collector has no live LLM/TTS/turn state. Persist
+        # only the recomputed delivery/content/insight block so reprocessing
+        # cannot erase the session's original basic metrics with zeroes.
+        await collector.save_to_database(include_basic_metrics=False)
         
         logger.info("✅ Reprocessing complete!")
         

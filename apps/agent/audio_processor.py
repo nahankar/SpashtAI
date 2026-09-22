@@ -3,11 +3,13 @@ Advanced Audio Processing Pipeline for SpashtAI
 Integrates with Gentle forced alignment, Praat prosodic analysis, and S3 storage
 """
 import asyncio
+import hashlib
 import logging
 import io
 import json
 import os
 import tempfile
+import time
 import wave
 import subprocess
 from dataclasses import dataclass, asdict
@@ -217,6 +219,55 @@ class GentleAligner:
     def __init__(self, gentle_url: Optional[str] = None):
         self.gentle_url = (gentle_url or os.getenv("GENTLE_URL", "http://localhost:8765")).rstrip("/")
         self.session = None
+        self.cache_dir = Path(
+            os.getenv(
+                "GENTLE_ALIGNMENT_CACHE_DIR",
+                str(Path(__file__).resolve().parent / "audio_storage" / ".gentle-cache"),
+            )
+        )
+
+    def _cache_path(self, audio_path: str, transcript: str) -> Path:
+        """Content-addressed cache key; never reuse alignment for changed evidence."""
+        digest = hashlib.sha256()
+        digest.update(b"gentle-alignment-v1\0")
+        with open(audio_path, "rb") as audio_file:
+            for chunk in iter(lambda: audio_file.read(1024 * 1024), b""):
+                digest.update(chunk)
+        digest.update(b"\0")
+        digest.update(transcript.encode("utf-8"))
+        return self.cache_dir / f"{digest.hexdigest()}.json"
+
+    def _read_cached_alignment(self, cache_path: Path) -> Optional[List[WordAlignment]]:
+        try:
+            if not cache_path.exists():
+                return None
+            payload = json.loads(cache_path.read_text(encoding="utf-8"))
+            alignments = [WordAlignment(**item) for item in payload.get("alignments", [])]
+            if alignments:
+                logger.info("⚡ Reusing exact Gentle alignment cache: %s", cache_path.name)
+                return alignments
+        except Exception as e:
+            logger.warning("Ignoring invalid Gentle alignment cache %s: %s", cache_path, e)
+            cache_path.unlink(missing_ok=True)
+        return None
+
+    def _write_cached_alignment(
+        self,
+        cache_path: Path,
+        alignments: List[WordAlignment],
+    ) -> None:
+        if not alignments:
+            return
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            temp_path = cache_path.with_suffix(f".{os.getpid()}.tmp")
+            temp_path.write_text(
+                json.dumps({"alignments": [asdict(item) for item in alignments]}),
+                encoding="utf-8",
+            )
+            os.replace(temp_path, cache_path)
+        except Exception as e:
+            logger.warning("Could not save Gentle alignment cache: %s", e)
 
     async def is_available(self) -> bool:
         try:
@@ -231,6 +282,11 @@ class GentleAligner:
         """Perform forced alignment using Gentle service (sync mode — returns JSON, not HTML poll page)."""
         try:
             import aiohttp
+
+            cache_path = self._cache_path(audio_path, transcript)
+            cached = self._read_cached_alignment(cache_path)
+            if cached is not None:
+                return cached
 
             duration = wav_duration_seconds(audio_path)
             # Gentle can take ~1–2× realtime on CPU; floor at 120s for short clips
@@ -267,7 +323,9 @@ class GentleAligner:
                             return []
 
                         result = await response.json()
-                        return self._parse_gentle_response(result)
+                        alignments = self._parse_gentle_response(result)
+                        self._write_cached_alignment(cache_path, alignments)
+                        return alignments
 
         except Exception as e:
             logger.error(f"Error in Gentle alignment: {e}")
@@ -469,7 +527,12 @@ class AudioProcessor:
             gentle_ok = await self.gentle_aligner.is_available()
             if gentle_ok:
                 logger.info("🎯 Performing forced alignment with Gentle...")
+                align_started = time.monotonic()
                 alignments = await self.gentle_aligner.align(audio_path, normalized_transcript)
+                logger.info(
+                    "⏱️ Gentle alignment stage completed in %.2fs",
+                    time.monotonic() - align_started,
+                )
             else:
                 logger.warning(
                     "⚠️ Gentle not reachable at %s — WPM/pauses will use audio duration + transcript. "
@@ -486,7 +549,12 @@ class AudioProcessor:
             
             # Step 3: Prosodic analysis with Praat
             logger.info("🎼 Performing prosodic analysis...")
+            praat_started = time.monotonic()
             prosody = self.praat_analyzer.extract_prosodic_features(audio_path, alignments)
+            logger.info(
+                "⏱️ Praat analysis stage completed in %.2fs",
+                time.monotonic() - praat_started,
+            )
             
             # Step 4: Filler counts — same strict rules as live coaching (speech_patterns)
             delivery_metrics = self._calculate_delivery_metrics(

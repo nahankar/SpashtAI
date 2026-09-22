@@ -823,15 +823,16 @@ export function SessionReplay({
   // session-level skills like Clarity/Structure.
   const trendPoints = useMemo(() => {
     return turns
-      .filter(
-        (t) =>
-          t.role === 'user' &&
-          t.audioStart != null &&
-          isSubstantivePaceTurn(t.metrics as Record<string, unknown> | undefined),
-      )
+      .filter((t) => t.role === 'user' && t.audioStart != null)
       .map((t) => {
         const m = t.metrics
-        const wpm = m?.wpm ?? null
+        // WPM remains strict: old/estimated turns cannot become headline pace
+        // evidence. Fluency and confidence are independent measured signals,
+        // so they must remain visible even when pace itself is unavailable.
+        const hasAcceptedPace = isSubstantivePaceTurn(
+          m as Record<string, unknown> | undefined,
+        )
+        const wpm = hasAcceptedPace ? (m?.wpm ?? null) : null
         const fluency =
           m?.filler_rate != null ? Math.max(0, Math.min(10, 10 - m.filler_rate)) : null
         let confidence: number | null = null
@@ -858,12 +859,7 @@ export function SessionReplay({
   // metrics. Each is a one-click jump so the user can hear the evidence behind
   // their scores (traceability), not just read a number.
   const keyMoments = useMemo(() => {
-    const us = turns.filter(
-      (t) =>
-        t.role === 'user' &&
-        t.audioStart != null &&
-        isSubstantivePaceTurn(t.metrics as Record<string, unknown> | undefined),
-    )
+    const us = turns.filter((t) => t.role === 'user' && t.audioStart != null)
     if (us.length < 2) return []
     type Tone = 'good' | 'warn' | 'bad'
     const out: {
@@ -892,7 +888,13 @@ export function SessionReplay({
       seen.add(best.t.turnIndex)
     }
 
-    const withWpm = us.filter((t) => t.metrics?.wpm != null)
+    // Fastest/slowest are pace claims and therefore require accepted pace
+    // evidence. Strongest turn and filler moments do not.
+    const withWpm = us.filter(
+      (t) =>
+        t.metrics?.wpm != null &&
+        isSubstantivePaceTurn(t.metrics as Record<string, unknown>),
+    )
     if (withWpm.length) {
       const fast = withWpm.reduce((a, b) => ((b.metrics!.wpm as number) > (a.metrics!.wpm as number) ? b : a))
       out.push({

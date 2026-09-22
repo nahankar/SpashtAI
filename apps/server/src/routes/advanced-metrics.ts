@@ -47,7 +47,19 @@ export async function saveAdvancedMetrics(req: Request, res: Response) {
       data.performanceInsights = performanceInsights as Prisma.InputJsonValue
     }
     if (processingStatus !== undefined) {
-      data.processingStatus = processingStatus as Prisma.InputJsonValue
+      // Advanced reprocessing owns content/audio/insight flags, not the pace
+      // evidence contract saved by the live agent. Merge instead of replacing
+      // so a reprocess cannot erase pace source/status/confidence.
+      const previous =
+        existing.processingStatus &&
+        typeof existing.processingStatus === 'object' &&
+        !Array.isArray(existing.processingStatus)
+          ? (existing.processingStatus as Record<string, unknown>)
+          : {}
+      data.processingStatus = {
+        ...previous,
+        ...(processingStatus as Record<string, unknown>),
+      } as Prisma.InputJsonValue
     }
 
     const updated = await prisma.$transaction(async (tx) => {
