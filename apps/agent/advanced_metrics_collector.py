@@ -66,6 +66,7 @@ class AdvancedMetricsCollector:
     
     def __init__(self, session_id: str):
         self.session_id = session_id
+        self.audio_input_signature = None
         
         # Initialize all analysis components
         self.basic_collector = MetricsCollector(session_id)
@@ -472,27 +473,31 @@ class AdvancedMetricsCollector:
                 # 2. Save advanced metrics
                 advanced_payload = {
                     "session_id": self.session_id,
+                    "audio_input_signature": self.audio_input_signature,
                     "start_time": self.session_metrics.start_time.isoformat() if self.session_metrics.start_time else None,
                     "end_time": self.session_metrics.end_time.isoformat() if self.session_metrics.end_time else None,
-                    
-                    # Content metrics
-                    "content_processed": self.session_metrics.content_processed,
-                    "content_metrics": asdict(self.session_metrics.content_metrics) if self.session_metrics.content_metrics else None,
-                    
-                    # Delivery metrics
-                    "audio_processed": self.session_metrics.audio_processed,
-                    "delivery_metrics": asdict(self.session_metrics.delivery_metrics) if self.session_metrics.delivery_metrics else None,
-                    
-                    # Performance insights
-                    "insights_generated": self.session_metrics.insights_generated,
-                    "performance_insights": asdict(self.session_metrics.performance_insights) if self.session_metrics.performance_insights else None,
-                    
-                    # Processing status
                     "processing_errors": self.session_metrics.processing_errors,
-                    
-                    # Basic metrics for reference
                     "basic_metrics": asdict(self.session_metrics.basic_metrics) if self.session_metrics.basic_metrics else None
                 }
+                # Fail closed per analysis block. An unavailable recomputation
+                # must never erase stronger metrics or flip a completed flag.
+                if self.session_metrics.content_metrics:
+                    advanced_payload["content_processed"] = True
+                    advanced_payload["content_metrics"] = asdict(
+                        self.session_metrics.content_metrics
+                    )
+                if self.session_metrics.delivery_metrics:
+                    advanced_payload["audio_processed"] = bool(
+                        self.session_metrics.audio_processed
+                    )
+                    advanced_payload["delivery_metrics"] = asdict(
+                        self.session_metrics.delivery_metrics
+                    )
+                if self.session_metrics.performance_insights:
+                    advanced_payload["insights_generated"] = True
+                    advanced_payload["performance_insights"] = asdict(
+                        self.session_metrics.performance_insights
+                    )
                 
                 # Serialize datetime objects
                 advanced_payload = serialize_datetime_objects(advanced_payload)

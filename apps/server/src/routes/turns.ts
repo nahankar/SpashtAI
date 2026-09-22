@@ -22,6 +22,10 @@ import {
   SessionDiscardedError,
   SessionMissingError,
 } from '../lib/sessionDiscard'
+import {
+  queuePaceReconciliation,
+  requeuePaceReconciliationData,
+} from '../lib/paceReconciliationWorker'
 
 const INTERNAL_AGENT_TOKEN =
   process.env.INTERNAL_AGENT_TOKEN?.trim() ||
@@ -75,7 +79,9 @@ export async function getSessionTurns(req: Request, res: Response) {
       orderBy: { segmentIndex: 'asc' },
       include: { recording: { select: { duration: true } } },
     })
-    const resolvedAudio = await resolveElevateSessionAudio(sessionId).catch(() => null)
+    const resolvedAudio = await resolveElevateSessionAudio(sessionId, {
+      requireCompleteSegments: true,
+    }).catch(() => null)
     // This is the one canonical segment list for both the merged stream and
     // replay offsets. Unreadable files are absent, so later words cannot drift.
     const segmentOffsets = new Map(
@@ -250,7 +256,9 @@ export async function saveSessionTurnsForAgent(req: Request, res: Response) {
     try {
       const resolved = segmentId
         ? await resolveSessionSegmentAudio(segmentId)
-        : await resolveElevateSessionAudio(sessionId)
+        : await resolveElevateSessionAudio(sessionId, {
+            requireCompleteSegments: true,
+          })
       if (resolved?.audioPath) {
         const result = await alignTurnsToAudio(turns as any, resolved.audioPath)
         alignmentInfo = `audio: aligned=${result.aligned} regions=${result.regionCount} userTurns=${result.userTurnCount}`
@@ -297,7 +305,7 @@ export async function saveSessionTurnsForAgent(req: Request, res: Response) {
       (t) => typeof t.turnIndex === 'number' && t.role && typeof t.text === 'string',
     )
     let saved = 0
-    await prisma.$transaction(async (tx) => {
+    const paceRequeued = await prisma.$transaction(async (tx) => {
       await lockWritableSession(tx, sessionId)
       // Serialize sequence allocation for all segments in one session.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${sessionId}))`
@@ -410,7 +418,19 @@ export async function saveSessionTurnsForAgent(req: Request, res: Response) {
           })
         }
       }
+      const lifecycle = await tx.session.findUnique({
+        where: { id: sessionId },
+        select: { endedAt: true },
+      })
+      if (lifecycle?.endedAt) {
+        await tx.session.update({
+          where: { id: sessionId },
+          data: requeuePaceReconciliationData(),
+        })
+      }
+      return Boolean(lifecycle?.endedAt)
     })
+    if (paceRequeued) queuePaceReconciliation(sessionId)
 
     res.status(201).json({ success: true, count: saved })
   } catch (error) {

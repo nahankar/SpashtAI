@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   hasRealProsody,
   mergeCommunicationSignals,
+  mergeCommunicationSignalsForAudioInput,
+  mergeCommunicationSignalsPreferExistingProsody,
   mergeProcessingStatus,
   resolveAudioStatus,
   shouldRetryUploadStatus,
@@ -43,6 +45,51 @@ describe('Elevate audio status', () => {
     expect(
       mergeCommunicationSignals({ fillers: { rate: 0.1 } }, { fillers: { rate: 0.2 }, prosody: {} }),
     ).toEqual({ fillers: { rate: 0.2 } })
+  })
+
+  it('preserves prosody committed while a stale analytics run was in flight', () => {
+    const merged = mergeCommunicationSignalsPreferExistingProsody(
+      { prosody: { pitchVariation: 9 }, fillers: { rate: 0.1 } },
+      { prosody: { pitchVariation: 2 }, fillers: { rate: 0.2 } },
+    )
+    expect(merged.prosody).toEqual({ pitchVariation: 9 })
+    expect(merged.fillers).toEqual({ rate: 0.2 })
+  })
+
+  it('replaces prosody when a complete newer audio fingerprint is analyzed', () => {
+    const merged = mergeCommunicationSignalsForAudioInput({
+      existing: { prosody: { pitchVariation: 2 } },
+      incoming: { prosody: { pitchVariation: 8 }, fillers: { rate: 0.1 } },
+      existingSignature: 'segment-1',
+      currentSignature: 'segments-1-and-2',
+      incomingSignature: 'segments-1-and-2',
+    })
+    expect(merged.signals.prosody).toEqual({ pitchVariation: 8 })
+    expect(merged.audioProcessed).toBe(true)
+  })
+
+  it('removes stale prosody when the full expected audio is unresolved', () => {
+    const merged = mergeCommunicationSignalsForAudioInput({
+      existing: { prosody: { pitchVariation: 2 } },
+      incoming: { fillers: { rate: 0.1 } },
+      existingSignature: 'segment-1',
+      currentSignature: 'segment-2-pending',
+      incomingSignature: null,
+    })
+    expect(merged.signals.prosody).toBeUndefined()
+    expect(merged.audioProcessed).toBe(false)
+  })
+
+  it('keeps certified prosody through a transient resolver failure', () => {
+    const merged = mergeCommunicationSignalsForAudioInput({
+      existing: { prosody: { pitchVariation: 6.4 } },
+      incoming: { fillers: { rate: 0.1 } },
+      existingSignature: 'segments-current',
+      currentSignature: 'segments-current',
+      incomingSignature: null,
+    })
+    expect(merged.signals.prosody).toEqual({ pitchVariation: 6.4 })
+    expect(merged.audioProcessed).toBe(true)
   })
 
   it('does not write Pulse when skipped, already saved, or not requested', () => {

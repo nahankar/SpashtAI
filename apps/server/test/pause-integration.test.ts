@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
     session: {
       findUnique: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
     },
     sessionSegment: {
       findMany: vi.fn(),
@@ -46,6 +47,7 @@ describe('Pause integration contracts', () => {
       accessDenied: false,
     })
     mocks.prisma.sessionMetrics.findUnique.mockResolvedValue(null)
+    mocks.prisma.session.updateMany.mockResolvedValue({ count: 1 })
     mocks.prisma.$transaction.mockImplementation(async (callback) =>
       callback({
         ...mocks.prisma,
@@ -64,11 +66,15 @@ describe('Pause integration contracts', () => {
     await writeFile(audioPath, Buffer.from('webm-audio'))
     mocks.prisma.sessionSegment.findMany.mockResolvedValue([
       {
+        id: 'segment-1',
         segmentIndex: 0,
+        audioStatus: 'available',
+        recordingDurationSec: 1,
         recording: {
           filePath: audioPath,
           mimeType: 'audio/webm',
           updatedAt: new Date('2026-09-20T10:00:00Z'),
+          duration: 1,
         },
       },
     ])
@@ -191,5 +197,13 @@ describe('Pause integration contracts', () => {
     expect(response.status).toBe(200)
     expect(response.body.metrics.userWpm).toBe(120)
     expect(response.body.metrics.userSpeakingTime).toBe(50)
+    expect(mocks.prisma.session.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          paceReconciliationStatus: 'pending',
+          paceReconciliationAttempts: 0,
+        }),
+      }),
+    )
   })
 })

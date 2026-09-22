@@ -5,7 +5,10 @@ import { logger, reqLog } from '../lib/logger'
 import { awardSessionActivePoints } from '../lib/points'
 import { isPrivilegedRole } from '../lib/userExportFlags'
 import { enqueueSessionDeletion } from '../lib/sessionDeletionWorker'
-import { queuePaceReconciliation } from '../lib/paceReconciliationWorker'
+import {
+  queuePaceReconciliation,
+  requeuePaceReconciliationData,
+} from '../lib/paceReconciliationWorker'
 import {
   lockWritableSession,
   RecordingOwnershipError,
@@ -14,6 +17,7 @@ import {
 } from '../lib/sessionDiscard'
 import { deleteRecordingArtifact } from '../lib/sessionStorageCleanup'
 import { isValidInternalAgentRequest } from '../middleware/auth'
+import { scheduleElevateSessionAudioEnrichmentIfAnalyzed } from '../analytics/audioEnrichment'
 
 export async function listSessions(req: Request, res: Response) {
   try {
@@ -139,14 +143,7 @@ export async function endSession(req: Request, res: Response) {
           data: {
             endedAt: endedAt ? new Date(endedAt) : existing.endedAt ?? new Date(),
             durationSec: durationSec ?? existing.durationSec,
-            paceReconciliationStatus:
-              existing.endedAt && existing.paceReconciliationStatus
-                ? existing.paceReconciliationStatus
-                : 'pending',
-            nextPaceReconciliationAt:
-              existing.endedAt && existing.paceReconciliationStatus
-                ? existing.nextPaceReconciliationAt
-                : new Date(),
+            ...(!existing.endedAt ? requeuePaceReconciliationData() : {}),
           },
           include: {
             user: {
@@ -351,6 +348,9 @@ export async function saveRecording(req: Request, res: Response) {
     }
     
     console.log(`🎙️ Saved recording for session ${sessionId}: ${file_path} (${recording_type || 'user'})`)
+    if (statusStr === 'completed') {
+      scheduleElevateSessionAudioEnrichmentIfAnalyzed(sessionId)
+    }
     res.status(result.created ? 201 : 200).json({ success: true, recording: result.recording })
   } catch (error) {
     if (error instanceof RecordingOwnershipError) {

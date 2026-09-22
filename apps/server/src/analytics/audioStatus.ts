@@ -50,6 +50,38 @@ export function mergeCommunicationSignals(existing: unknown, incoming: Record<st
   return next
 }
 
+export function mergeCommunicationSignalsPreferExistingProsody(
+  existing: unknown,
+  incoming: Record<string, unknown>,
+) {
+  const next = { ...incoming }
+  if (hasRealProsody(existing)) delete next.prosody
+  return mergeCommunicationSignals(existing, next)
+}
+
+export function mergeCommunicationSignalsForAudioInput(input: {
+  existing: unknown
+  incoming: Record<string, unknown>
+  existingSignature: unknown
+  currentSignature: string
+  incomingSignature?: string | null
+}) {
+  const incoming = { ...input.incoming }
+  const incomingMatches = input.incomingSignature === input.currentSignature
+  if (!incomingMatches) delete incoming.prosody
+  const existingMatches =
+    input.existingSignature === input.currentSignature &&
+    hasRealProsody(input.existing)
+  const signals = existingMatches
+    ? mergeCommunicationSignalsPreferExistingProsody(input.existing, incoming)
+    : mergeCommunicationSignals(undefined, incoming)
+  return {
+    signals,
+    audioProcessed:
+      (incomingMatches || existingMatches) && hasRealProsody(signals),
+  }
+}
+
 export function mergeProcessingStatus(
   existing: unknown,
   next: { audioStatus: AudioStatus; audioProcessed: boolean },

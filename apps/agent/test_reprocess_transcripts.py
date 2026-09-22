@@ -46,6 +46,7 @@ class ReprocessTranscriptSeparationTest(unittest.IsolatedAsyncioTestCase):
                     "first segment missing middle final segment",
                     "",
                     "first segment final segment",
+                    "audio-signature-v2",
                 )
 
         self.assertTrue(result["success"])
@@ -56,6 +57,30 @@ class ReprocessTranscriptSeparationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             _Collector.instance.content_transcript_seen,
             "first segment missing middle final segment",
+        )
+        self.assertEqual(
+            _Collector.instance.audio_input_signature,
+            "audio-signature-v2",
+        )
+
+    async def test_missing_committed_turns_skip_partial_audio_alignment(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            audio = Path(temp_dir) / "partial.webm"
+            audio.write_bytes(b"audio")
+            with patch("reprocess_session.AdvancedMetricsCollector", _Collector):
+                result = await reprocess_session(
+                    "session-missing-turns",
+                    str(audio),
+                    "full session content remains available",
+                    "",
+                    "",
+                )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(_Collector.instance.delivery_transcript_seen, "")
+        self.assertEqual(
+            _Collector.instance.content_transcript_seen,
+            "full session content remains available",
         )
 
 

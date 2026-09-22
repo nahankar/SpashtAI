@@ -3,6 +3,8 @@ import {
   mergePaceIntoProcessingStatus,
   PACE_RECONCILIATION_BATCH_SIZE,
   paceReconciliationEligibilityWhere,
+  requeuePaceReconciliationData,
+  reconciliationStatusAfterAttempt,
   shouldAttemptPaceReconciliation,
 } from '../src/lib/paceReconciliationWorker'
 
@@ -50,6 +52,24 @@ describe('pace reconciliation lifecycle', () => {
         },
       ],
     })
+  })
+
+  it('requeues late evidence after a job was waiting for evidence', () => {
+    const now = new Date('2026-09-23T00:05:00Z')
+    expect(requeuePaceReconciliationData(now)).toEqual({
+      paceReconciliationStatus: 'pending',
+      paceReconciliationAttempts: 0,
+      paceReconciliationError: null,
+      nextPaceReconciliationAt: now,
+      paceReconciliationLeaseId: null,
+      paceReconciliationLeaseUntil: null,
+    })
+  })
+
+  it('waits for late evidence instead of permanently completing an unready job', () => {
+    expect(reconciliationStatusAfterAttempt(false, 5)).toBe('waiting_for_evidence')
+    expect(reconciliationStatusAfterAttempt(false, 2)).toBe('retry')
+    expect(reconciliationStatusAfterAttempt(true, 1)).toBe('completed')
   })
 
   it('merges pace into the latest status without losing concurrent keys', () => {

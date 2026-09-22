@@ -313,6 +313,21 @@ export function derivePaceEvidenceFromTurns(
 }
 
 /** Prefer better live evidence; otherwise use reconciled committed turns. */
+export function selectPreferredPaceAssessment(
+  persisted: PaceAssessment,
+  incoming: PaceAssessment,
+): PaceAssessment {
+  if (persisted.status !== 'available') return incoming
+  if (incoming.status !== 'available') return persisted
+  const rank: Record<PaceConfidence, number> = { low: 0, medium: 1, high: 2 }
+  if (rank[persisted.confidence] !== rank[incoming.confidence]) {
+    return rank[persisted.confidence] > rank[incoming.confidence]
+      ? persisted
+      : incoming
+  }
+  return persisted.coverage >= incoming.coverage ? persisted : incoming
+}
+
 export function selectBestPaceEvidence(
   persistedRaw: unknown,
   turns: PersistedPaceTurn[],
@@ -323,13 +338,7 @@ export function selectBestPaceEvidence(
     derivePaceEvidenceFromTurns(turns),
     expectedWords,
   )
-  if (live.status !== 'available') return reconciled
-  if (reconciled.status !== 'available') return live
-  const rank: Record<PaceConfidence, number> = { low: 0, medium: 1, high: 2 }
-  if (rank[live.confidence] !== rank[reconciled.confidence]) {
-    return rank[live.confidence] > rank[reconciled.confidence] ? live : reconciled
-  }
-  return live.coverage >= reconciled.coverage ? live : reconciled
+  return selectPreferredPaceAssessment(live, reconciled)
 }
 
 /** Weighted coefficient of variation from substantive, measured user turns. */

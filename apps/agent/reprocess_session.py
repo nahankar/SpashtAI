@@ -7,6 +7,7 @@ import sys
 import asyncio
 import os
 import logging
+from typing import Optional
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -26,7 +27,8 @@ async def reprocess_session(
     audio_file_path: str,
     transcript: str,
     supplied_words_json: str = "",
-    delivery_transcript: str = "",
+    delivery_transcript: Optional[str] = None,
+    audio_input_signature: Optional[str] = None,
 ):
     """
     Reprocess a session's audio with Gentle/Praat analysis
@@ -74,12 +76,14 @@ async def reprocess_session(
 
         # Initialize advanced metrics collector
         collector = AdvancedMetricsCollector(session_id)
+        collector.audio_input_signature = audio_input_signature
         
         # Parse transcript into conversation turns (simple split for now)
         # You can enhance this to parse actual turn-by-turn data if available
         words = transcript.split()
-        collector.user_transcript = delivery_transcript or transcript
-        collector.conversation_turns.append(('user', transcript, 0))
+        collector.user_transcript = (
+            transcript if delivery_transcript is None else delivery_transcript
+        )
         
         logger.info("🎵 Analyzing audio delivery with Gentle/Praat...")
         
@@ -88,6 +92,7 @@ async def reprocess_session(
         
         # Run content analysis
         collector.user_transcript = transcript
+        collector.conversation_turns.append(('user', transcript, 0))
         logger.info("📚 Analyzing content with spaCy...")
         await collector._analyze_content()
         
@@ -132,8 +137,8 @@ async def reprocess_session(
         return {"error": str(e), "success": False}
 
 def main():
-    if len(sys.argv) not in (4, 5, 6):
-        print("Usage: python reprocess_session.py <session_id> <audio_file_path> <full_transcript> [word_timestamps_json] [delivery_transcript]")
+    if len(sys.argv) not in (4, 5, 6, 7):
+        print("Usage: python reprocess_session.py <session_id> <audio_file_path> <full_transcript> [word_timestamps_json] [delivery_transcript] [audio_input_signature]")
         print("Example: python reprocess_session.py session_123 /path/to/user_audio.mp4 'Hello world'")
         sys.exit(1)
     
@@ -141,7 +146,8 @@ def main():
     audio_file_path = sys.argv[2]
     transcript = sys.argv[3]
     supplied_words_json = sys.argv[4] if len(sys.argv) >= 5 else ""
-    delivery_transcript = sys.argv[5] if len(sys.argv) >= 6 else ""
+    delivery_transcript = sys.argv[5] if len(sys.argv) >= 6 else None
+    audio_input_signature = sys.argv[6] if len(sys.argv) >= 7 else None
     
     result = asyncio.run(
         reprocess_session(
@@ -150,6 +156,7 @@ def main():
             transcript,
             supplied_words_json,
             delivery_transcript,
+            audio_input_signature,
         )
     )
     

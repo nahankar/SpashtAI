@@ -12,9 +12,17 @@ import {
   SessionDiscardedError,
   SessionMissingError,
 } from '../lib/sessionDiscard'
-import { assessPaceEvidence } from '../analytics/pace'
+import {
+  assessPaceEvidence,
+  readPersistedPaceEvidence,
+  selectPreferredPaceAssessment,
+} from '../analytics/pace'
 import { resolveAgentPython } from '../lib/agentPython'
 import { getReprocessJob, startReprocessJob } from '../lib/reprocessJobs'
+import {
+  queuePaceReconciliation,
+  requeuePaceReconciliationData,
+} from '../lib/paceReconciliationWorker'
 import { resolveElevateSessionAudio } from '../analytics/insightProviders/resolveSessionAudio'
 import {
   buildReprocessTranscripts,
@@ -120,7 +128,7 @@ export async function saveSessionMetrics(req: Request, res: Response) {
         ? (session.endedAt.getTime() - session.startedAt.getTime()) / 1000
         : 0)
 
-    const userPace = assessPaceEvidence(
+    const incomingPace = assessPaceEvidence(
       metricsData.userMetrics?.pace,
       Number(metricsData.userMetrics?.total_words) || 0,
     )
@@ -133,7 +141,7 @@ export async function saveSessionMetrics(req: Request, res: Response) {
 
     console.log(
       `[metrics] session=${sessionId} userWpm: agent=${metricsData.userMetrics?.words_per_minute} ` +
-        `→ canonical=${userPace.wpm ?? 'unavailable'} (${userPace.source ?? 'none'}); ` +
+        `→ canonical=${incomingPace.wpm ?? 'unavailable'} (${incomingPace.source ?? 'none'}); ` +
         `assistantWpm: agent=${metricsData.assistantMetrics?.words_per_minute} ` +
         `→ canonical=${assistantCanon.wpm} (${assistantCanon.source})`
     )
@@ -148,11 +156,12 @@ export async function saveSessionMetrics(req: Request, res: Response) {
       totalEouDelay: metricsData.totalEouDelay || 0,
       conversationLatencyAvg: metricsData.conversationLatencyAvg || 0,
 
-      userWpm: userPace.wpm ?? 0,
+      userWpm: incomingPace.wpm ?? 0,
       userFillerCount: metricsData.userMetrics?.filler_word_count || 0,
       userFillerRate: metricsData.userMetrics?.filler_word_rate || 0,
       userAvgSentenceLength: metricsData.userMetrics?.average_sentence_length || 0,
-      userSpeakingTime: userPace.status === 'available' ? userPace.speakingSeconds : 0,
+      userSpeakingTime:
+        incomingPace.status === 'available' ? incomingPace.speakingSeconds : 0,
       userVocabDiversity: metricsData.userMetrics?.vocabulary_diversity || 0,
       userResponseTimeAvg: metricsData.userMetrics?.response_time_avg || 0,
 
@@ -167,12 +176,28 @@ export async function saveSessionMetrics(req: Request, res: Response) {
       totalTurns: metricsData.totalTurns || 0,
     }
 
-    const metrics = await prisma.$transaction(async (tx) => {
+    const { metrics, paceRequeued } = await prisma.$transaction(async (tx) => {
       await lockWritableSession(tx, sessionId)
       const latest = await tx.sessionMetrics.findUnique({
         where: { sessionId },
         select: { processingStatus: true },
       })
+      const persistedRaw = readPersistedPaceEvidence(latest?.processingStatus)
+      const persistedValue =
+        persistedRaw && typeof persistedRaw === 'object' && !Array.isArray(persistedRaw)
+          ? (persistedRaw as Record<string, unknown>)
+          : {}
+      const expectedWords = Math.max(
+        Number(metricsData.userMetrics?.total_words) || 0,
+        Number(persistedValue.observedWords) || 0,
+        Number(persistedValue.transcriptWordCount) || 0,
+        Number(persistedValue.totalWords) || 0,
+      )
+      const persistedPace = assessPaceEvidence(persistedRaw, expectedWords)
+      const selectedPace = selectPreferredPaceAssessment(
+        persistedPace,
+        incomingPace,
+      )
       const previousProcessingStatus =
         latest?.processingStatus &&
         typeof latest.processingStatus === 'object' &&
@@ -182,15 +207,33 @@ export async function saveSessionMetrics(req: Request, res: Response) {
       const processingStatus = JSON.parse(
         JSON.stringify({
           ...previousProcessingStatus,
-          pace: userPace,
+          pace: selectedPace,
         }),
       )
-      return tx.sessionMetrics.upsert({
-        where: { sessionId },
-        update: { ...sharedFields, processingStatus },
-        create: { sessionId, ...sharedFields, processingStatus },
+      const finalFields = {
+        ...sharedFields,
+        userWpm: selectedPace.wpm ?? 0,
+        userSpeakingTime:
+          selectedPace.status === 'available' ? selectedPace.speakingSeconds : 0,
+      }
+      const reconciliationUpdate = await tx.session.updateMany({
+        where: { id: sessionId, endedAt: { not: null } },
+        // A metrics payload cannot prove that all committed turns have landed.
+        // Let the durable worker compare live evidence with persisted turns
+        // before it marks the job completed.
+        data: requeuePaceReconciliationData(),
       })
+      const savedMetrics = await tx.sessionMetrics.upsert({
+        where: { sessionId },
+        update: { ...finalFields, processingStatus },
+        create: { sessionId, ...finalFields, processingStatus },
+      })
+      return {
+        metrics: savedMetrics,
+        paceRequeued: reconciliationUpdate.count > 0,
+      }
     })
+    if (paceRequeued) queuePaceReconciliation(sessionId)
 
     res.json({ success: true, metrics })
   } catch (error) {
@@ -866,8 +909,10 @@ export async function reprocessSessionMetrics(req: Request, res: Response) {
 
     // Reuse the same deterministic segment merge as Replay/analytics. Selecting
     // one recording while supplying all-session text corrupts resumed sessions.
-    const resolvedAudio = await resolveElevateSessionAudio(sessionId)
-    let deliveryTranscript = fullContentTranscript
+    const resolvedAudio = await resolveElevateSessionAudio(sessionId, {
+      requireCompleteSegments: true,
+    })
+    let deliveryTranscript: string | null = fullContentTranscript
     if (resolvedAudio?.segments.length) {
       const reprocessTranscripts = buildReprocessTranscripts(
         fullContentTranscript,
@@ -913,7 +958,8 @@ export async function reprocessSessionMetrics(req: Request, res: Response) {
       localAudioPath,
       fullContentTranscript,
       JSON.stringify(persistedWords),
-      deliveryTranscript,
+      deliveryTranscript ?? '',
+      resolvedAudio.inputSignature,
     ])
 
     res.status(202).json({

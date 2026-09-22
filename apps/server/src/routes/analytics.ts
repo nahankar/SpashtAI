@@ -8,6 +8,7 @@
  */
 
 import { Request, Response } from 'express'
+import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/prisma'
 import { logger, reqLog } from '../lib/logger'
 import {
@@ -20,13 +21,18 @@ import {
   generateCoachingInsights,
   resolveElevateSessionAudio,
 } from '../analytics/insightGenerator'
+import { resolveElevateAudioInputSignature } from '../analytics/insightProviders/resolveSessionAudio'
 import { saveSkillScoresToPulse } from '../analytics/progressPulse'
 import { generateTurnSuggestions } from '../analytics/turnSuggestions'
 import { getElevateSessionOwnerId, resolveRequestExportFlags } from '../lib/userExportFlags'
-import { enrichElevateSessionAudio, fetchProsodyForPath } from '../analytics/audioEnrichment'
+import {
+  fetchProsodyForPath,
+  scheduleElevateSessionAudioEnrichmentIfAnalyzed,
+} from '../analytics/audioEnrichment'
 import {
   hasRealProsody,
   mergeCommunicationSignals,
+  mergeCommunicationSignalsForAudioInput,
   mergeProcessingStatus,
   resolveAudioStatus,
   shouldWritePulse,
@@ -38,6 +44,10 @@ import {
   readPersistedPaceEvidence,
   selectBestPaceEvidence,
 } from '../analytics/pace'
+import {
+  queuePaceReconciliation,
+  requeuePaceReconciliationData,
+} from '../lib/paceReconciliationWorker'
 
 const SIGNAL_API_URL = process.env.SIGNAL_API_URL || 'http://localhost:4001'
 const INTERNAL_AGENT_TOKEN =
@@ -156,11 +166,15 @@ export async function analyzeSession(req: Request, res: Response) {
 
     // 4. Acoustic prosody only from a readable recording. A short wait covers
     // an in-flight browser upload; timeout stays pending, never unavailable.
-    let audioResolved = await resolveElevateSessionAudio(sessionId)
+    let audioResolved = await resolveElevateSessionAudio(sessionId, {
+      requireCompleteSegments: true,
+    })
     if (!audioResolved) {
       for (let i = 0; i < 3 && !audioResolved; i += 1) {
         await new Promise((r) => setTimeout(r, 1000))
-        audioResolved = await resolveElevateSessionAudio(sessionId)
+        audioResolved = await resolveElevateSessionAudio(sessionId, {
+          requireCompleteSegments: true,
+        })
       }
     }
 
@@ -211,8 +225,19 @@ export async function analyzeSession(req: Request, res: Response) {
       },
     }
 
+    const existingProcessingStatus =
+      existingMetrics?.processingStatus &&
+      typeof existingMetrics.processingStatus === 'object' &&
+      !Array.isArray(existingMetrics.processingStatus)
+        ? (existingMetrics.processingStatus as Record<string, unknown>)
+        : {}
+    const initialExistingSignals =
+      audioResolved &&
+      existingProcessingStatus.audioInputSignature === audioResolved.inputSignature
+        ? existingMetrics?.communicationSignals
+        : undefined
     const mergedSignals = mergeCommunicationSignals(
-      existingMetrics?.communicationSignals,
+      initialExistingSignals,
       signals as unknown as Record<string, unknown>,
     )
     // Scores must be calculated after real prosody and aggregate speaking time
@@ -221,12 +246,12 @@ export async function analyzeSession(req: Request, res: Response) {
       mergedSignals as unknown as TextSignals,
       analysisMessages.length,
     )
+    let persistedScores = scores
+    let persistedComponents = components
     const audioStatus = resolveAudioStatus({
       hasReadableRecording: Boolean(audioResolved?.audioPath),
       capture: typeof audioCapture === 'string' ? audioCapture : null,
     })
-    const audioProcessed = hasRealProsody(mergedSignals)
-
     let insights
     try {
       insights = await generateCoachingInsights({
@@ -244,26 +269,100 @@ export async function analyzeSession(req: Request, res: Response) {
       insights = existingMetrics?.coachingInsights ?? { error: insightErr.message }
     }
 
-    const skillScoresJson = JSON.parse(JSON.stringify({ scores, components }))
-    const signalsJson = JSON.parse(JSON.stringify(mergedSignals))
     const insightsJson = JSON.parse(JSON.stringify(insights))
+    let paceRequeued = false
     await prisma.$transaction(async (tx) => {
       await lockWritableSession(tx, sessionId)
       const latestMetrics = await tx.sessionMetrics.findUnique({
         where: { sessionId },
-        select: { processingStatus: true },
+        select: {
+          processingStatus: true,
+          communicationSignals: true,
+          deliveryMetrics: true,
+        },
       })
+      const currentAudioInputSignature = await resolveElevateAudioInputSignature(
+        sessionId,
+        tx,
+      )
       const finalPace = selectBestPaceEvidence(
         readPersistedPaceEvidence(latestMetrics?.processingStatus),
         session.turns,
         signals.speechRate.totalWords,
       )
+      const finalIncomingSignals: Record<string, unknown> = {
+        ...(signals as unknown as Record<string, unknown>),
+        speechRate: {
+          ...signals.speechRate,
+          wpm: finalPace.wpm ?? 0,
+          status: finalPace.status,
+          source: finalPace.source,
+          confidence: finalPace.confidence,
+          evidence: {
+            origin: finalPace.origin,
+            sourceComposition: finalPace.sourceComposition,
+            totalWords: finalPace.totalWords,
+            speakingSeconds: finalPace.speakingSeconds,
+            samples: finalPace.samples,
+            estimatedSamples: finalPace.estimatedSamples,
+            coverage: finalPace.coverage,
+            excludedMicroTurnCount: finalPace.excludedMicroTurnCount,
+            excludedShortDurationCount: finalPace.excludedShortDurationCount,
+            excludedUnreliableTurnCount: finalPace.excludedUnreliableTurnCount,
+            timestampCoverage: finalPace.timestampCoverage,
+            invalidTimestampCount: finalPace.invalidTimestampCount,
+            outOfOrderTimestampCount: finalPace.outOfOrderTimestampCount,
+          },
+        },
+      }
+      const latestStatus =
+        latestMetrics?.processingStatus &&
+        typeof latestMetrics.processingStatus === 'object' &&
+        !Array.isArray(latestMetrics.processingStatus)
+          ? (latestMetrics.processingStatus as Record<string, unknown>)
+          : {}
+      const audioMerge = mergeCommunicationSignalsForAudioInput({
+        existing: latestMetrics?.communicationSignals,
+        incoming: finalIncomingSignals,
+        existingSignature: latestStatus.audioInputSignature,
+        currentSignature: currentAudioInputSignature,
+        incomingSignature: audioResolved?.inputSignature,
+      })
+      const finalMergedSignals = audioMerge.signals
+      const finalScores = calculateSkillScores(
+        finalMergedSignals as unknown as TextSignals,
+        analysisMessages.length,
+      )
+      persistedScores = finalScores.scores
+      persistedComponents = finalScores.components
+      const skillScoresJson = JSON.parse(JSON.stringify(finalScores))
+      const signalsJson = JSON.parse(JSON.stringify(finalMergedSignals))
+      const finalAudioProcessed = audioMerge.audioProcessed
+      const deliveryIsCurrent =
+        latestStatus.deliveryAudioInputSignature === currentAudioInputSignature
+      const clearStaleDelivery =
+        Boolean(latestMetrics?.deliveryMetrics) && !deliveryIsCurrent
+      const anyAudioProcessed =
+        finalAudioProcessed ||
+        (deliveryIsCurrent && Boolean(latestMetrics?.deliveryMetrics))
+      const mergedProcessingStatus = mergeProcessingStatus(
+        latestMetrics?.processingStatus,
+        {
+          audioStatus,
+          audioProcessed: anyAudioProcessed,
+        },
+      )
       const processingStatusJson = JSON.parse(
         JSON.stringify({
-          ...mergeProcessingStatus(latestMetrics?.processingStatus, {
-            audioStatus,
-            audioProcessed,
-          }),
+          ...mergedProcessingStatus,
+          audio_processed: anyAudioProcessed,
+          audioInputSignature: finalAudioProcessed
+            ? currentAudioInputSignature
+            : null,
+          delivery_metrics_stale: clearStaleDelivery,
+          ...(clearStaleDelivery
+            ? { deliveryAudioInputSignature: null }
+            : {}),
           pace: finalPace,
         }),
       )
@@ -283,6 +382,12 @@ export async function analyzeSession(req: Request, res: Response) {
           communicationSignals: signalsJson,
           coachingInsights: insightsJson,
           processingStatus: processingStatusJson,
+          ...(clearStaleDelivery
+            ? {
+                deliveryMetrics: Prisma.JsonNull,
+                performanceInsights: Prisma.JsonNull,
+              }
+            : {}),
         },
         update: {
           userWpm: finalPace.wpm ?? 0,
@@ -297,9 +402,23 @@ export async function analyzeSession(req: Request, res: Response) {
           communicationSignals: signalsJson,
           coachingInsights: insightsJson,
           processingStatus: processingStatusJson,
+          ...(clearStaleDelivery
+            ? {
+                deliveryMetrics: Prisma.JsonNull,
+                performanceInsights: Prisma.JsonNull,
+              }
+            : {}),
         },
       })
+      if (session.endedAt) {
+        await tx.session.update({
+          where: { id: sessionId },
+          data: requeuePaceReconciliationData(),
+        })
+        paceRequeued = true
+      }
     })
+    if (paceRequeued) queuePaceReconciliation(sessionId)
 
     let pulseCount = 0
     const existingPulseRows = sessionId
@@ -318,8 +437,8 @@ export async function analyzeSession(req: Request, res: Response) {
           session.userId,
           sessionId,
           source as 'elevate' | 'replay',
-          scores,
-          components,
+          persistedScores,
+          persistedComponents,
         )
       } catch (pulseErr: any) {
         console.error('Progress Pulse save failed:', pulseErr.message)
@@ -328,8 +447,8 @@ export async function analyzeSession(req: Request, res: Response) {
 
     res.json({
       sessionId,
-      skillScores: scores,
-      components,
+      skillScores: persistedScores,
+      components: persistedComponents,
       coachingInsights: insights,
       signalsSummary: {
         wpm: signals.speechRate.wpm,
@@ -341,11 +460,11 @@ export async function analyzeSession(req: Request, res: Response) {
       },
       pulseEntriesCreated: pulseCount,
     })
-    // Acoustics are best-effort inline. Retry out of band so one failed prosody
-    // call does not leave delivery metrics permanently empty for a session
-    // whose recording is readable.
-    if (audioResolved?.audioPath && !audioProcessed) {
-      void enrichElevateSessionAudio(sessionId)
+    // Persist the queue transition even when audio is still uploading. The
+    // worker re-resolves after commit, so neither a process crash nor a segment
+    // arriving during analysis can strand partial acoustics.
+    if (audioStatus === 'available' || audioStatus === 'pending') {
+      scheduleElevateSessionAudioEnrichmentIfAnalyzed(sessionId)
     }
     reqLog(req).info(
       { event: 'analyze.succeeded', sessionId, source, pulseEntriesCreated: pulseCount },

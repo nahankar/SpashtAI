@@ -105,6 +105,7 @@ import { prisma } from './lib/prisma'
 import { discardedSessionGuard } from './lib/sessionDiscard'
 import { startSessionDeletionWorker } from './lib/sessionDeletionWorker'
 import { startPaceReconciliationWorker } from './lib/paceReconciliationWorker'
+import { startAudioEnrichmentRetryWorker } from './analytics/audioEnrichment'
 
 const app = express()
 // Cloudflare → Nginx → Express; required for rate limiting and client IP
@@ -432,6 +433,7 @@ async function startServer() {
 
   startSessionDeletionWorker()
   startPaceReconciliationWorker()
+  startAudioEnrichmentRetryWorker()
 
   // During `tsx watch` hot-reloads the previous process can still hold the port
   // for a brief moment when the new one starts. Instead of crashing on

@@ -48,6 +48,25 @@ export function paceReconciliationEligibilityWhere(
   }
 }
 
+export function requeuePaceReconciliationData(now = new Date()) {
+  return {
+    paceReconciliationStatus: 'pending',
+    paceReconciliationAttempts: 0,
+    paceReconciliationError: null,
+    nextPaceReconciliationAt: now,
+    paceReconciliationLeaseId: null,
+    paceReconciliationLeaseUntil: null,
+  }
+}
+
+export function reconciliationStatusAfterAttempt(
+  reconciled: boolean,
+  attempts: number,
+): 'completed' | 'waiting_for_evidence' | 'retry' {
+  if (reconciled) return 'completed'
+  return attempts >= MAX_NOT_READY_ATTEMPTS ? 'waiting_for_evidence' : 'retry'
+}
+
 export async function reconcileEndedSessionPace(
   sessionId: string,
   leaseId?: string,
@@ -165,14 +184,17 @@ export async function processPaceReconciliation(sessionId: string): Promise<bool
       where: { id: sessionId },
       select: { paceReconciliationAttempts: true },
     })
-    const completed = reconciled || (job?.paceReconciliationAttempts ?? 0) >= MAX_NOT_READY_ATTEMPTS
+    const attempts = job?.paceReconciliationAttempts ?? 0
+    const nextStatus = reconciliationStatusAfterAttempt(reconciled, attempts)
+    const waitingForEvidence = nextStatus === 'waiting_for_evidence'
     await prisma.session.updateMany({
       where: { id: sessionId, paceReconciliationLeaseId: leaseId },
       data: {
-        paceReconciliationStatus: completed ? 'completed' : 'retry',
-        nextPaceReconciliationAt: completed
-          ? null
-          : new Date(Date.now() + retryDelayMs(job?.paceReconciliationAttempts ?? 1)),
+        paceReconciliationStatus: nextStatus,
+        nextPaceReconciliationAt:
+          reconciled || waitingForEvidence
+            ? null
+            : new Date(Date.now() + retryDelayMs(attempts || 1)),
         paceReconciliationLeaseId: null,
         paceReconciliationLeaseUntil: null,
       },

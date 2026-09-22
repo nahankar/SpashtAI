@@ -5,6 +5,7 @@ import { join, dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { rename, unlink, writeFile } from 'fs/promises'
 import { promisify } from 'util'
+import { Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 
 const RECORDING_PRIORITY = ['user', 'room_composite', 'merged_audio', 'agent'] as const
@@ -30,6 +31,57 @@ export interface ResolvedSessionAudio {
   audioPath: string
   audioMime?: string
   segments: ResolvedAudioSegment[]
+  inputSignature: string
+}
+
+type AudioSignatureClient = Pick<
+  Prisma.TransactionClient,
+  'sessionSegment' | 'sessionRecording'
+>
+
+function digestAudioInputs(inputs: unknown): string {
+  return createHash('sha256').update(JSON.stringify(inputs)).digest('hex')
+}
+
+function segmentInputSignature(segments: Array<any>): string {
+  return digestAudioInputs(
+    segments
+      .map((segment) => ({
+        segmentId: segment.id,
+        segmentIndex: segment.segmentIndex,
+        audioStatus: segment.audioStatus,
+        contentHash: segment.recording?.contentHash ?? null,
+        fileSize: segment.recording?.fileSize ?? null,
+        updatedAt: segment.recording?.updatedAt?.toISOString?.() ?? null,
+        filePath: segment.recording?.filePath ?? null,
+      })),
+  )
+}
+
+export async function resolveElevateAudioInputSignature(
+  sessionId: string,
+  db: AudioSignatureClient = prisma,
+): Promise<string> {
+  const segments = await db.sessionSegment.findMany({
+    where: { sessionId },
+    orderBy: { segmentIndex: 'asc' },
+    include: { recording: true },
+  })
+  if (segments.length > 0) return segmentInputSignature(segments)
+  const recordings = await db.sessionRecording.findMany({
+    where: { sessionId, status: 'completed' },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+  })
+  return digestAudioInputs(
+    recordings.map((recording) => ({
+      id: recording.id,
+      recordingType: recording.recordingType,
+      contentHash: recording.contentHash ?? null,
+      fileSize: recording.fileSize,
+      updatedAt: recording.updatedAt?.toISOString?.() ?? null,
+      filePath: recording.filePath,
+    })),
+  )
 }
 
 export function resolvePositiveSegmentDuration(
@@ -43,6 +95,28 @@ export function resolvePositiveSegmentDuration(
     return Number(mediaDuration)
   }
   return 0
+}
+
+async function probeMediaDuration(audioPath: string): Promise<number> {
+  try {
+    const { stdout } = await execFileAsync(
+      'ffprobe',
+      [
+        '-v',
+        'error',
+        '-show_entries',
+        'format=duration',
+        '-of',
+        'default=noprint_wrappers=1:nokey=1',
+        audioPath,
+      ],
+      { timeout: 5_000, maxBuffer: 64 * 1024 },
+    )
+    const duration = Number(stdout.trim())
+    return Number.isFinite(duration) && duration > 0 ? duration : 0
+  } catch {
+    return 0
+  }
 }
 
 async function ensureMergedRecording(outputPath: string, audioPaths: string[]): Promise<void> {
@@ -104,30 +178,59 @@ function resolveFilePath(storedPath: string): string | null {
  */
 export async function resolveElevateSessionAudio(
   sessionId: string,
+  options: { requireCompleteSegments?: boolean } = {},
 ): Promise<ResolvedSessionAudio | null> {
   const segments = await prisma.sessionSegment.findMany({
-    where: { sessionId, audioStatus: 'available', recording: { isNot: null } },
+    where: { sessionId },
     orderBy: { segmentIndex: 'asc' },
     include: { recording: true },
   })
-  const segmentFiles = segments.flatMap((segment) => {
+  const inputSignature = segmentInputSignature(segments)
+  const segmentCandidates = await Promise.all(segments.map(async (segment) => {
+    if (segment.audioStatus !== 'available' || !segment.recording) return null
     const storedPath = segment.recording?.filePath
-    if (!storedPath) return []
+    if (!storedPath) return null
     const audioPath = resolveFilePath(storedPath)
-    return audioPath
-      ? [{
-          audioPath,
-          audioMime: segment.recording?.mimeType || mimeFromPath(audioPath),
-          updatedAt: segment.recording!.updatedAt,
-          segmentId: segment.id,
-          segmentIndex: segment.segmentIndex,
-          durationSec: resolvePositiveSegmentDuration(
-            segment.recordingDurationSec,
-            segment.recording!.duration,
-          ),
-        }]
-      : []
-  })
+    if (!audioPath) return null
+    let durationSec = resolvePositiveSegmentDuration(
+      segment.recordingDurationSec,
+      segment.recording!.duration,
+    )
+    if (durationSec <= 0) durationSec = await probeMediaDuration(audioPath)
+    if (durationSec <= 0) {
+      console.warn(
+        `[audio] omitting segment ${segment.id}: readable file has no trustworthy duration`,
+      )
+      return null
+    }
+    return {
+      audioPath,
+      audioMime: segment.recording?.mimeType || mimeFromPath(audioPath),
+      updatedAt: segment.recording!.updatedAt,
+      segmentId: segment.id,
+      segmentIndex: segment.segmentIndex,
+      durationSec,
+    }
+  }))
+  const segmentFiles = segmentCandidates.filter(
+    (candidate): candidate is NonNullable<typeof candidate> => candidate != null,
+  )
+  // `failed` and `unavailable` describe capture outcome, not whether the user
+  // spoke.  For example, a user can speak, then deliberately choose “Pause
+  // without replay audio”. Replay may sequence the readable subset and label
+  // the gap, but session-level delivery evidence must never certify that
+  // partial subset as the whole practice.
+  const expectedSegments = segments
+  if (
+    options.requireCompleteSegments &&
+    expectedSegments.length > 0 &&
+    segmentFiles.length !== expectedSegments.length
+  ) {
+    console.warn(
+      `[audio] refusing partial session audio for ${sessionId}: resolved ${segmentFiles.length}/${expectedSegments.length} expected segments`,
+    )
+    return null
+  }
   let replayOffsetSec = 0
   const resolvedSegments: ResolvedAudioSegment[] = segmentFiles.map((file) => {
     const resolved = {
@@ -145,6 +248,7 @@ export async function resolveElevateSessionAudio(
       audioPath: segmentFiles[0].audioPath,
       audioMime: segmentFiles[0].audioMime,
       segments: resolvedSegments,
+      inputSignature,
     }
   }
 
@@ -158,8 +262,17 @@ export async function resolveElevateSessionAudio(
       mergedPath,
       segmentFiles.map((file) => file.audioPath),
     )
-    return { audioPath: mergedPath, audioMime: 'audio/webm', segments: resolvedSegments }
+    return {
+      audioPath: mergedPath,
+      audioMime: 'audio/webm',
+      segments: resolvedSegments,
+      inputSignature,
+    }
   }
+
+  // A segmented session must never fall back to an arbitrary single recording:
+  // that would pair partial audio with the full-session legacy transcript.
+  if (segments.length > 0) return null
 
   const recordings = await prisma.sessionRecording.findMany({
     where: { sessionId, status: 'completed' },
@@ -175,6 +288,7 @@ export async function resolveElevateSessionAudio(
         audioPath,
         audioMime: rec.mimeType || mimeFromPath(audioPath),
         segments: [],
+        inputSignature: await resolveElevateAudioInputSignature(sessionId),
       }
     }
   }

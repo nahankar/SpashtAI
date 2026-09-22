@@ -364,7 +364,7 @@ model Session {
   progressPulseStatus String? // 'tracked' | 'skipped' | null (not yet decided)
 
   // Durable post-Leave pace reconciliation job.
-  paceReconciliationStatus     String? // pending | processing | retry | completed
+  paceReconciliationStatus     String? // pending | processing | retry | waiting_for_evidence | completed
   paceReconciliationAttempts   Int       @default(0)
   paceReconciliationError      String?   @db.Text
   nextPaceReconciliationAt     DateTime?

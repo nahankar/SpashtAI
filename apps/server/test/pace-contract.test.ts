@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   assessPaceEvidence,
   measuredTurnVariability,
+  selectPreferredPaceAssessment,
   selectBestPaceEvidence,
 } from '../src/analytics/pace'
 import { calculateWeightedOverallScore } from '../src/analytics/skillScores'
@@ -284,5 +285,34 @@ describe('authoritative pace contract', () => {
     expect(result.source).toBe('word_timestamps')
     expect(result.confidence).toBe('high')
     expect(result.wpm).toBe(120)
+  })
+
+  it('preserves available persisted pace against a delayed empty payload', () => {
+    const persisted = assessPaceEvidence(
+      {
+        source: 'validated_turn_audio',
+        status: 'available',
+        totalWords: 100,
+        speakingSeconds: 50,
+        samples: 3,
+        estimatedSamples: 0,
+      },
+      100,
+    )
+    const incoming = assessPaceEvidence(
+      {
+        source: null,
+        status: 'insufficient_evidence',
+        totalWords: 0,
+        speakingSeconds: 0,
+        samples: 0,
+      },
+      100,
+    )
+
+    const selected = selectPreferredPaceAssessment(persisted, incoming)
+    expect(selected.status).toBe('available')
+    expect(selected.wpm).toBe(120)
+    expect(selected.totalWords).toBe(100)
   })
 })

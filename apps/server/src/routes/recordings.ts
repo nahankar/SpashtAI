@@ -13,6 +13,7 @@ import {
   resolveRequestExportFlags,
 } from '../lib/userExportFlags'
 import { resolveElevateSessionAudio } from '../analytics/insightProviders/resolveSessionAudio'
+import { scheduleElevateSessionAudioEnrichmentIfAnalyzed } from '../analytics/audioEnrichment'
 import {
   activeSegmentDurationSec,
   recordingPayloadMatches,
@@ -135,6 +136,7 @@ export async function uploadSessionRecording(req: Request, res: Response) {
           })
         }
       })
+      scheduleElevateSessionAudioEnrichmentIfAnalyzed(sessionId)
       return res.status(200).json({
         success: true,
         recording: segment.recording,
@@ -239,6 +241,7 @@ export async function uploadSessionRecording(req: Request, res: Response) {
             where: { id: segmentId },
             data: { audioStatus: 'available' },
           })
+          scheduleElevateSessionAudioEnrichmentIfAnalyzed(sessionId)
           return res.status(200).json({ success: true, recording: raced, idempotent: true })
         }
         return res.status(409).json({ error: 'segmentId already has a different recording' })
@@ -246,6 +249,7 @@ export async function uploadSessionRecording(req: Request, res: Response) {
       throw error
     }
 
+    scheduleElevateSessionAudioEnrichmentIfAnalyzed(sessionId)
     res.status(201).json({ success: true, recording })
   } catch (error) {
     if (error instanceof SessionDiscardedError || error instanceof SessionMissingError) {

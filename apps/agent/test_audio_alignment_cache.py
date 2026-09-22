@@ -214,6 +214,9 @@ class SyntheticTimingFailClosedTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(delivery.articulation_rate, 0.0)
             self.assertEqual(delivery.pause_count, 0)
             self.assertEqual(delivery.pause_profile, [])
+            self.assertEqual(delivery.timing_origin, "unavailable")
+            self.assertEqual(delivery.evidence_quality, 0)
+            self.assertEqual(delivery.aligned_word_count, 0)
 
 
 if __name__ == "__main__":

@@ -71,9 +71,10 @@ export function buildReprocessTranscripts(
   fullContentTranscript: string,
   segments: ResolvedAudioSegment[],
   turns: ReprocessTurn[],
-): { contentTranscript: string; deliveryTranscript: string } {
+): { contentTranscript: string; deliveryTranscript: string | null } {
+  const resolvedTranscript = buildReprocessTimelineTranscript(segments, turns)
   const deliveryTranscript =
-    buildReprocessTimelineTranscript(segments, turns) || fullContentTranscript
+    resolvedTranscript || (segments.length === 0 ? fullContentTranscript : null)
   return {
     contentTranscript: fullContentTranscript,
     deliveryTranscript,

@@ -108,4 +108,19 @@ describe('reprocess timeline', () => {
       deliveryTranscript: 'first last',
     })
   })
+
+  it('never aligns readable partial audio against a full-session fallback transcript', () => {
+    const segments = [
+      {
+        segmentId: 'segment-1',
+        segmentIndex: 0,
+        replayOffsetSec: 0,
+        durationSec: 10,
+      },
+    ]
+    expect(buildReprocessTranscripts('full session text', segments, [])).toEqual({
+      contentTranscript: 'full session text',
+      deliveryTranscript: null,
+    })
+  })
 })

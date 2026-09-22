@@ -134,6 +134,9 @@ class DeliveryMetrics:
     voice_quality_score: float  # 0-10 based on harmonicity
     confidence_indicators: Dict[str, float]
     pause_profile: List[Dict[str, object]]
+    timing_origin: str
+    evidence_quality: int
+    aligned_word_count: int
 
 class AudioBuffer:
     """Manages audio data collection during Nova Sonic sessions"""
@@ -759,6 +762,17 @@ class AudioProcessor:
             voice_quality_score=voice_quality,
             confidence_indicators=confidence_indicators,
             pause_profile=[asdict(pause) for pause in pauses],
+            timing_origin=(
+                "validated_word_timestamps"
+                if all(item.timing_origin == "actual" for item in alignments)
+                else "forced_alignment"
+            ),
+            evidence_quality=(
+                3
+                if all(item.timing_origin == "actual" for item in alignments)
+                else 2
+            ),
+            aligned_word_count=len(alignments),
         )
     
     def _fallback_analysis(
@@ -797,6 +811,9 @@ class AudioProcessor:
             voice_quality_score=self._calculate_voice_quality_score(prosody) if prosody else 0.0,
             confidence_indicators={},
             pause_profile=[],
+            timing_origin="prosody_only" if prosody else "unavailable",
+            evidence_quality=1 if prosody else 0,
+            aligned_word_count=0,
         )
     
     def _calculate_voice_quality_score(self, prosody: ProsodyMetrics) -> float:
