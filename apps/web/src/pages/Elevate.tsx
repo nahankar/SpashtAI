@@ -49,6 +49,7 @@ import { generateSessionPdf, type SessionReport } from '@/lib/generate-session-p
 import { CoachAudioBootstrap } from '@/components/session/CoachAudioBootstrap'
 import { SessionRecorder, type SessionRecorderHandle } from '@/components/session/SessionRecorder'
 import { settleRecordingBeforePause } from '@/lib/pauseCapture'
+import { runReprocess } from '@/lib/reprocess'
 import { stripThinkingBlocks } from '@/lib/stripThinking'
 import {
   UserTurnBubble,
@@ -453,15 +454,8 @@ export function Elevate() {
   const handleReprocessElevate = useCallback(async (id: string) => {
     setReprocessingElevate((prev) => new Set(prev).add(id))
     try {
-      const res = await fetch(`${API_BASE_URL}/sessions/${id}/reprocess`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-      })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        throw new Error(body.error || 'Reprocessing failed')
-      }
-      toast.success('Session reprocessed')
+      const outcome = await runReprocess(id)
+      toast.success(outcome.message)
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Failed to reprocess session')
     } finally {

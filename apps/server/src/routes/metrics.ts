@@ -5,7 +5,6 @@ import {
   getElevateSessionOwnerId,
   resolveRequestExportFlags,
 } from '../lib/userExportFlags'
-import { spawn } from 'child_process'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import {
@@ -15,6 +14,7 @@ import {
 } from '../lib/sessionDiscard'
 import { assessPaceEvidence } from '../analytics/pace'
 import { resolveAgentPython } from '../lib/agentPython'
+import { getReprocessJob, startReprocessJob } from '../lib/reprocessJobs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -886,50 +886,64 @@ export async function reprocessSessionMetrics(req: Request, res: Response) {
     
     const pythonScript = join(__dirname, '../../../agent/reprocess_session.py')
     const pythonEnv = resolveAgentPython()
-    
-    // Spawn Python process
-    const python = spawn(pythonEnv, [pythonScript, sessionId, localAudioPath, transcript])
-    
-    let output = ''
-    let errorOutput = ''
-    
-    python.stdout.on('data', (data: Buffer) => {
-      output += data.toString()
-    })
-    
-    python.stderr.on('data', (data: Buffer) => {
-      errorOutput += data.toString()
-    })
-    
-    // Wait for completion
-    await new Promise<void>((resolve, reject) => {
-      python.on('close', (code: number) => {
-        if (code === 0) {
-          resolve()
-        } else {
-          reject(
-            new Error(
-              `Python script exited with code ${code} (interpreter ${pythonEnv}): ${errorOutput}`,
-            ),
-          )
-        }
-      })
-    })
-    
-    const analysisResult = JSON.parse(output)
 
-    res.json({
-      message: 'Session reprocessing completed successfully',
+    // Audio analysis runs for minutes, so hand it to a background job and let
+    // the client poll /reprocess-status instead of holding the connection open
+    // past the proxy timeout.
+    const job = startReprocessJob(sessionId, pythonEnv, [
+      pythonScript,
+      sessionId,
+      localAudioPath,
+      transcript,
+    ])
+
+    res.status(202).json({
+      message: 'Session reprocessing started',
       sessionId: sessionId,
-      status: 'completed',
+      status: job.status,
+      startedAt: job.startedAt,
       recordingTypeUsed: selectedRecording.recordingType,
-      result: analysisResult
     })
 
   } catch (error) {
     console.error('Error reprocessing session metrics:', error)
     res.status(500).json({ 
       error: 'Failed to reprocess session metrics',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    })
+  }
+}
+
+/**
+ * Progress of a background reprocessing job
+ * GET /sessions/:sessionId/reprocess-status
+ */
+export async function getReprocessStatus(req: Request, res: Response) {
+  try {
+    const { sessionId } = req.params
+
+    const ownerId = await getElevateSessionOwnerId(sessionId)
+    const { flags, accessDenied } = await resolveRequestExportFlags(req, ownerId)
+    if (accessDenied) {
+      return exportDenied(res, 'Access denied')
+    }
+    if (!flags.enableReprocess) {
+      return exportDenied(res, 'Audio reprocessing is disabled for your account')
+    }
+
+    const job = getReprocessJob(sessionId)
+    if (!job) {
+      // No job in memory: either nothing was started, or the API restarted
+      // while it ran. The Python process saves metrics itself, so the caller
+      // should reload rather than treat this as a failure.
+      return res.json({ sessionId, status: 'unknown' })
+    }
+
+    return res.json(job)
+  } catch (error) {
+    console.error('Error reading reprocess status:', error)
+    res.status(500).json({
+      error: 'Failed to read reprocess status',
       details: error instanceof Error ? error.message : 'Unknown error'
     })
   }

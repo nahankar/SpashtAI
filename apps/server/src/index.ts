@@ -17,6 +17,7 @@ import {
   downloadSessionTranscript,
   getUserSessionsMetrics,
   reprocessSessionMetrics,
+  getReprocessStatus,
   calculateTextMetrics
 } from './routes/metrics'
 import {
@@ -257,6 +258,7 @@ app.get('/sessions/:sessionId/transcript', requireAuth, getSessionTranscript)
 app.get('/sessions/:sessionId/transcript/download', requireAuth, downloadSessionTranscript)
 app.get('/users/:userId/sessions/metrics', requireAuth, getUserSessionsMetrics)
 app.post('/sessions/:sessionId/reprocess', requireAuth, reprocessSessionMetrics)
+app.get('/sessions/:sessionId/reprocess-status', requireAuth, getReprocessStatus)
 app.post('/sessions/:sessionId/calculate-text-metrics', requireAuth, calculateTextMetrics)
 
 // Protected: conversations

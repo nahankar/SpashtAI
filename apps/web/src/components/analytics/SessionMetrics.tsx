@@ -7,6 +7,7 @@ import { getAuthHeaders } from '@/lib/api-client';
 import { useUserExportFlags } from '@/hooks/useUserExportFlags';
 import { toast } from 'sonner';
 import { hasAvailablePace, type PaceProcessingStatus } from '@/lib/pace';
+import { runReprocess } from '@/lib/reprocess';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
 
@@ -117,22 +118,11 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExp
 
   const handleReprocess = async () => {
     setIsReprocessing(true);
-    setReprocessStatus('Starting reprocessing...');
-    
+
     try {
-      const response = await fetch(`${API_BASE_URL}/sessions/${sessionId}/reprocess`, {
-        method: 'POST',
-        headers: getAuthHeaders()
-      });
+      const outcome = await runReprocess(sessionId, setReprocessStatus);
+      setReprocessStatus(`✅ ${outcome.message} Refreshing metrics...`);
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Reprocessing failed');
-      }
-
-      await response.json();
-      setReprocessStatus('✅ Reprocessing complete! Refreshing metrics...');
-      
       // Reload the page after 2 seconds to show updated metrics
       setTimeout(() => {
         window.location.reload();
@@ -140,7 +130,7 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExp
       
     } catch (error) {
       setReprocessStatus(`❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      setTimeout(() => setReprocessStatus(''), 5000);
+      setTimeout(() => setReprocessStatus(''), 8000);
     } finally {
       setIsReprocessing(false);
     }
