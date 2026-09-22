@@ -415,6 +415,7 @@ class AdvancedMetricsCollector:
                             "total_speaking_time": basic.user_metrics.total_speaking_time if basic.user_metrics else 0,
                             "vocabulary_diversity": basic.user_metrics.vocabulary_diversity if basic.user_metrics else 0,
                             "response_time_avg": basic.user_metrics.response_time_avg if basic.user_metrics else 0,
+                            "pace": self.basic_collector.get_pace_evidence(),
                         },
                         
                         # Assistant metrics

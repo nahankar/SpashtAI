@@ -12,6 +12,7 @@ export interface TurnMetrics {
   vocab_diversity?: number
   wpm?: number | null
   speaking_seconds?: number | null
+  pace_source?: 'word_timestamps' | 'validated_turn_audio' | 'estimated' | null
   qualitative_pace?: string | null
   coaching_tip?: string | null
 }
@@ -55,6 +56,17 @@ export function normalizeTurnMetricsFromApi(
     raw.speaking_seconds != null && raw.speaking_seconds !== ''
       ? Number(raw.speaking_seconds)
       : null
+  const pace_source =
+    raw.pace_source === 'word_timestamps' ||
+    raw.pace_source === 'validated_turn_audio' ||
+    raw.pace_source === 'estimated'
+      ? raw.pace_source
+      : null
+  const paceAccepted =
+    (pace_source === 'word_timestamps' || pace_source === 'validated_turn_audio') &&
+    typeof speaking_seconds === 'number' &&
+    Number.isFinite(speaking_seconds) &&
+    speaking_seconds > 0
   let vocab_diversity =
     raw.vocab_diversity != null && raw.vocab_diversity !== ''
       ? Number(raw.vocab_diversity)
@@ -62,12 +74,13 @@ export function normalizeTurnMetricsFromApi(
   if (vocab_diversity == null && text) {
     vocab_diversity = vocabDiversityOf(text)
   }
-  const qualitative_pace =
-    typeof raw.qualitative_pace === 'string'
+  const qualitative_pace = paceAccepted
+    ? typeof raw.qualitative_pace === 'string'
       ? raw.qualitative_pace
       : wpm != null
         ? qualitativePaceFromWpm(wpm)
         : null
+    : null
 
   return {
     word_count,
@@ -76,10 +89,12 @@ export function normalizeTurnMetricsFromApi(
     hedging_count,
     acknowledgment_count: Number(raw.acknowledgment_count ?? 0),
     vocab_diversity,
-    wpm: Number.isFinite(wpm as number) ? wpm : null,
+    wpm: paceAccepted && Number.isFinite(wpm as number) ? wpm : null,
     speaking_seconds: Number.isFinite(speaking_seconds as number) ? speaking_seconds : null,
+    pace_source,
     qualitative_pace,
-    coaching_tip: typeof raw.coaching_tip === 'string' ? raw.coaching_tip : null,
+    coaching_tip:
+      paceAccepted && typeof raw.coaching_tip === 'string' ? raw.coaching_tip : null,
   }
 }
 

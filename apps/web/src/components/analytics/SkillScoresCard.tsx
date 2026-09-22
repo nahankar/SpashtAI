@@ -33,13 +33,14 @@ interface SkillScoresCardProps {
 const HEARABLE_SKILLS = new Set(['pacing', 'conciseness', 'confidence'])
 
 interface SkillScoresData {
+  overallScore?: number | null
   scores: {
     clarity: number
     conciseness: number
     confidence: number
     structure: number
     engagement: number
-    pacing: number
+    pacing: number | null
     delivery: number | null
     emotionalControl: number | null
   }
@@ -217,9 +218,10 @@ export function SkillScoresCard({
     return val !== null && val !== undefined
   })
 
-  const avgScore =
-    availableSkills.reduce((sum, s) => sum + (scores[s.key as keyof typeof scores] as number), 0) /
-    availableSkills.length
+  const overallScore =
+    typeof skillData.overallScore === 'number' && Number.isFinite(skillData.overallScore)
+      ? skillData.overallScore
+      : null
 
   const hasComponents = components && Object.keys(components).length > 0
 
@@ -239,8 +241,8 @@ export function SkillScoresCard({
         <CardContent>
           <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:gap-8">
             <div className="shrink-0 text-center">
-              <div className={`text-5xl font-bold ${getScoreColor(avgScore)}`}>
-                {avgScore.toFixed(1)}
+              <div className={`text-5xl font-bold ${overallScore != null ? getScoreColor(overallScore) : 'text-muted-foreground'}`}>
+                {overallScore != null ? overallScore.toFixed(1) : '—'}
               </div>
               <div className="mt-1 text-sm text-muted-foreground">out of 10</div>
             </div>

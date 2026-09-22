@@ -26,7 +26,26 @@ import {
 } from './normalization'
 
 export interface TextSignals {
-  speechRate: { wpm: number; variability: number; totalWords: number }
+  speechRate: {
+    wpm: number
+    variability: number | null
+    totalWords: number
+    status?: 'available' | 'insufficient_evidence'
+    source?: 'word_timestamps' | 'validated_turn_audio' | null
+    confidence?: 'high' | 'medium' | 'low'
+    evidence?: {
+      totalWords: number
+      speakingSeconds: number
+      samples: number
+      estimatedSamples: number
+      coverage: number
+      excludedMicroTurnCount: number
+      excludedUnreliableTurnCount: number
+      timestampCoverage: number
+      invalidTimestampCount: number
+      outOfOrderTimestampCount: number
+    }
+  }
   fillers: { count: number; rate: number; byType: Record<string, number> }
   hedging: { count: number; rate: number; phrases: string[] }
   sentenceComplexity: {
@@ -70,7 +89,7 @@ export interface SkillScores {
   confidence: number
   structure: number
   engagement: number
-  pacing: number
+  pacing: number | null
   delivery: number | null
   emotionalControl: number | null
 }
@@ -126,10 +145,21 @@ export function calculateSkillScores(
   const e_relevance = normalizeResponseRelevance(signals.questionHandling.relevanceScores)
   const engagement = clamp(0.35 * e_questions + 0.35 * e_balance + 0.3 * e_relevance)
 
-  // ── Pacing (Phase 1: text-estimated only) ──
-  const p_rate = normalizeWpm(signals.speechRate.wpm)
-  const p_variability = normalizeSpeedVariability(signals.speechRate.variability)
-  const pacing = clamp(0.6 * p_rate + 0.4 * p_variability)
+  // ── Pacing ──
+  // Pacing is scoreable only when the WPM denominator came from validated
+  // timing evidence. Text estimates and ambiguous silence spans remain null.
+  const paceAvailable = signals.speechRate.status === 'available'
+  const p_rate = paceAvailable ? normalizeWpm(signals.speechRate.wpm) : null
+  const p_variability =
+    paceAvailable &&
+    typeof signals.speechRate.variability === 'number' &&
+    Number.isFinite(signals.speechRate.variability)
+    ? normalizeSpeedVariability(signals.speechRate.variability)
+    : null
+  const pacing =
+    p_rate != null && p_variability != null
+      ? clamp(0.6 * p_rate + 0.4 * p_variability)
+      : null
 
   // ── Delivery & Emotional Control (Phase 2: audio required) ──
 
@@ -150,7 +180,9 @@ export function calculateSkillScores(
       confidence: { hedging: cf_hedging, fillers: cf_filler },
       structure: { ideaStructure: s_structure, coherence: s_coherence, sentenceStructure: s_sentStruct },
       engagement: { questionRate: e_questions, talkBalance: e_balance, responseRelevance: e_relevance },
-      pacing: { speechRate: p_rate, variability: p_variability },
+      ...(p_rate != null && p_variability != null
+        ? { pacing: { speechRate: p_rate, variability: p_variability } }
+        : {}),
     },
   }
 }

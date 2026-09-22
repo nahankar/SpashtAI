@@ -27,7 +27,9 @@ export function buildCoachingPrompt(
     .join('\n')
 
   const signalSummary = [
-    `WPM: ${sig.speechRate.wpm}`,
+    sig.speechRate.status === 'available'
+      ? `WPM: ${sig.speechRate.wpm.toFixed(1)} (${sig.speechRate.source}, ${sig.speechRate.confidence} confidence)`
+      : 'WPM: unavailable — do not label the overall pace slow or fast',
     `Filler words: ${sig.fillers.count} (${(sig.fillers.rate * 100).toFixed(1)}% rate)`,
     `Hedging phrases: ${sig.hedging.count} (${sig.hedging.phrases.slice(0, 5).join(', ')})`,
     `Avg sentence length: ${sig.sentenceComplexity.avgLength} words`,

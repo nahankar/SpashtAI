@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card'
 import { Gauge } from 'lucide-react'
 import { getAuthHeaders } from '@/lib/api-client'
+import { isSubstantivePaceTurn } from '@/lib/pace'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 
@@ -13,7 +14,11 @@ export interface PacePoint {
 
 interface TurnWithPace {
   role?: string
-  metrics?: { wpm?: number | null }
+  metrics?: {
+    wpm?: number | null
+    word_count?: number | null
+    pace_source?: string | null
+  }
 }
 
 const IDEAL_MIN = 120
@@ -165,7 +170,11 @@ export function PaceTrendCard({
         const turns: TurnWithPace[] = Array.isArray(data.turns) ? data.turns : []
         let n = 0
         const pts: PacePoint[] = turns
-          .filter((t) => t.role === 'user' && t.metrics?.wpm != null && t.metrics.wpm > 0)
+          .filter(
+            (t) =>
+              t.role === 'user' &&
+              isSubstantivePaceTurn(t.metrics as Record<string, unknown> | undefined),
+          )
           .map((t) => {
             n += 1
             return { label: n, wpm: Math.round(Number(t.metrics?.wpm)) }

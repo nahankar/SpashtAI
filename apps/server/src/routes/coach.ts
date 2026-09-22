@@ -6,6 +6,7 @@ import type { CoachHistoryTurn, CompletedSessionSummary } from '../coach/prompt'
 import { mergeCoachTurnPayload } from '../coach/turn-sync'
 import { loadCoachHome, markCoachHomeResultSeen } from '../coach/home'
 import { isCoachFocusArea } from '../coach/focusAreas'
+import { assessPaceEvidence, readPersistedPaceEvidence } from '../analytics/pace'
 
 const router = Router()
 const MAX_TURNS = 40
@@ -419,11 +420,15 @@ function numberOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
-function readSkillScores(raw: Prisma.JsonValue | null): Array<{ skill: string; score: number }> {
+function readSkillScores(
+  raw: Prisma.JsonValue | null,
+  includePacing = true,
+): Array<{ skill: string; score: number }> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return []
   const scores = (raw as Record<string, unknown>).scores
   if (!scores || typeof scores !== 'object' || Array.isArray(scores)) return []
   return Object.entries(scores as Record<string, unknown>)
+    .filter(([skill]) => includePacing || skill !== 'pacing')
     .map(([skill, score]) => ({ skill, score: numberOrNull(score) }))
     .filter((entry): entry is { skill: string; score: number } => entry.score != null)
 }
@@ -443,13 +448,20 @@ async function summariseElevateSession(
     include: { metrics: true },
   })
   if (!session) return null
+  const persistedPace = readPersistedPaceEvidence(session.metrics?.processingStatus)
+  const expectedWords =
+    persistedPace && typeof persistedPace === 'object'
+      ? Number((persistedPace as Record<string, unknown>).totalWords) || 0
+      : 0
+  const paceAvailable =
+    assessPaceEvidence(persistedPace, expectedWords).status === 'available'
   return {
     module: 'elevate',
     focusArea: session.focusArea,
     durationSec: session.durationSec,
-    wpm: numberOrNull(session.metrics?.userWpm),
+    wpm: paceAvailable ? numberOrNull(session.metrics?.userWpm) : null,
     fillerRate: numberOrNull(session.metrics?.userFillerRate),
-    skillScores: readSkillScores(session.metrics?.skillScores ?? null),
+    skillScores: readSkillScores(session.metrics?.skillScores ?? null, paceAvailable),
     topStrength: readCoachingText(session.metrics?.coachingInsights ?? null, 'topStrength'),
     primaryImprovement: readCoachingText(
       session.metrics?.coachingInsights ?? null,

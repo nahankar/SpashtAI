@@ -123,6 +123,8 @@ class MetricsCollector:
 
         self._utterance_peeker = None
         self._session_totals_peeker = None
+        self._pace_evidence_peeker = None
+        self._pace_turn_acceptor = None
         self._on_user_turn_metrics = None
         self._on_turn_committed = None
         self._stitcher = TurnStitcher(metrics_for_user=self._compute_user_turn_metrics)
@@ -145,6 +147,38 @@ class MetricsCollector:
         VAD duration (the single-segment peeker is not)."""
         self._session_totals_peeker = peeker
 
+    def set_pace_evidence_peeker(self, peeker) -> None:
+        """Callable returning the source/status/confidence pace contract."""
+        self._pace_evidence_peeker = peeker
+
+    def set_pace_turn_acceptor(self, acceptor) -> None:
+        """Callable promoting one stitched user turn into headline pace."""
+        self._pace_turn_acceptor = acceptor
+
+    def get_pace_evidence(self) -> dict:
+        if not self._pace_evidence_peeker:
+            return {
+                "source": None,
+                "status": "insufficient_evidence",
+                "confidence": "low",
+                "totalWords": 0,
+                "speakingSeconds": 0,
+                "samples": 0,
+                "estimatedSamples": 0,
+            }
+        try:
+            return self._pace_evidence_peeker()
+        except Exception:
+            return {
+                "source": None,
+                "status": "insufficient_evidence",
+                "confidence": "low",
+                "totalWords": 0,
+                "speakingSeconds": 0,
+                "samples": 0,
+                "estimatedSamples": 0,
+            }
+
     def set_user_turn_metrics_callback(self, callback) -> None:
         """Called with (stitched_text, TurnMetricsSnapshot, turn_index) when a user utterance completes."""
         self._on_user_turn_metrics = callback
@@ -158,7 +192,11 @@ class MetricsCollector:
         return self._user_turn_metrics_seq + 1
 
     def publish_pending_user_utterance_metrics(self) -> bool:
-        """Publish per-turn metrics for the in-progress user utterance (end-of-speech)."""
+        """Display-only preview for the in-progress user utterance (end-of-speech).
+
+        Does not promote into headline pace evidence. That happens once, when
+        TurnStitcher finalizes the logical turn and `_apply_committed_turn` runs.
+        """
         text = self._stitcher.peek_pending_user()
         if not text or len(text.strip()) < 3:
             return False
@@ -199,7 +237,11 @@ class MetricsCollector:
         # segment. The old last-utterance path failed compute_turn_metrics'
         # word-count match guard on multi-segment turns and fell back to a
         # constant 150 WPM ("Ideal") for every turn.
+        # Display/commit snapshot only — never promote here. Pending live
+        # preview and stitcher finalize share this helper; headline evidence
+        # is accepted once in `_apply_committed_turn`.
         seconds = self._turn_measured_seconds()
+        utt = self._utterance_peeker() if self._utterance_peeker else None
         if seconds and seconds > 0:
             wc = len(re.findall(r"[A-Za-z']+(?:[-'][A-Za-z']+)?", text))
             if wc >= 3:
@@ -209,14 +251,27 @@ class MetricsCollector:
                     utterance_words=wc,
                     utterance_seconds=seconds,
                     utterance_wpm=wpm,
+                    pace_source=utt.pace_source if utt else None,
                 )
-        utt = self._utterance_peeker() if self._utterance_peeker else None
         return compute_turn_metrics(
             text,
             utterance_words=utt.words if utt else None,
             utterance_seconds=utt.seconds if utt else None,
             utterance_wpm=utt.wpm if utt else None,
+            pace_source=utt.pace_source if utt else None,
         )
+
+    def _promote_committed_user_pace(self, metrics: TurnMetricsSnapshot) -> None:
+        if not self._pace_turn_acceptor:
+            return
+        try:
+            self._pace_turn_acceptor(
+                metrics.word_count,
+                metrics.speaking_seconds,
+                metrics.pace_source,
+            )
+        except Exception as e:
+            logger.warning("pace turn accept failed: %s", e)
 
     def ingest_conversation_fragment(
         self,
@@ -249,13 +304,15 @@ class MetricsCollector:
                 self._on_turn_committed(speaker, text)
             except Exception as e:
                 logger.warning("turn committed callback failed: %s", e)
-        if speaker == "user" and user_metrics and self._on_user_turn_metrics:
-            self._user_turn_metrics_seq += 1
-            turn_index = self._user_turn_metrics_seq
-            try:
-                self._on_user_turn_metrics(text, user_metrics, turn_index, True)
-            except Exception as e:
-                logger.warning("user turn metrics callback failed: %s", e)
+        if speaker == "user" and user_metrics:
+            self._promote_committed_user_pace(user_metrics)
+            if self._on_user_turn_metrics:
+                self._user_turn_metrics_seq += 1
+                turn_index = self._user_turn_metrics_seq
+                try:
+                    self._on_user_turn_metrics(text, user_metrics, turn_index, True)
+                except Exception as e:
+                    logger.warning("user turn metrics callback failed: %s", e)
         if speaker == "user":
             # Advance the per-turn pacing baseline to the current cumulative
             # total so the NEXT user turn measures only its own speaking time.

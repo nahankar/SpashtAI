@@ -59,6 +59,7 @@ import type { SessionTurnRecord } from '@/hooks/useSessionMetrics'
 import { getPreparation, linkPreparationPractice } from '@/lib/prepare-api'
 import { COACH_BUBBLE, USER_BUBBLE } from '@/lib/conversation'
 import { isUsableProsody } from '@/lib/prosody'
+import { hasAvailablePace, isSubstantivePaceTurn } from '@/lib/pace'
 import { markCoachHomeResultSeen, recordCoachAction } from '@/lib/coach-api'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
@@ -99,7 +100,11 @@ async function closeSessionSegment(
 
 interface PaceTurn {
   role?: string
-  metrics?: { wpm?: number | null }
+  metrics?: {
+    wpm?: number | null
+    word_count?: number | null
+    pace_source?: string | null
+  }
 }
 
 interface ProgressPulseItem {
@@ -555,7 +560,11 @@ export function Elevate() {
   const completedPacePoints = useMemo<PacePoint[]>(() => {
     let n = 0
     return completedTurns
-      .filter((t) => t.role === 'user' && Number(t.metrics?.wpm) > 0)
+      .filter(
+        (t) =>
+          t.role === 'user' &&
+          isSubstantivePaceTurn(t.metrics as Record<string, unknown> | undefined),
+      )
       .map((t) => {
         n += 1
         return { label: n, wpm: Math.round(Number(t.metrics?.wpm)) }
@@ -593,10 +602,10 @@ export function Elevate() {
       const turnsData = turnsRes && turnsRes.ok ? await turnsRes.json() : null
 
       const scores: Record<string, number | null> = skill?.scores ?? {}
-      const scoreVals = Object.values(scores).filter((v): v is number => typeof v === 'number')
-      const overallScore = scoreVals.length
-        ? scoreVals.reduce((s, v) => s + v, 0) / scoreVals.length
-        : null
+      const overallScore =
+        typeof skill?.overallScore === 'number' && Number.isFinite(skill.overallScore)
+          ? skill.overallScore
+          : null
 
       const sr = signals?.speechRate ?? {}
       const vocab = signals?.vocabDiversity ?? {}
@@ -608,6 +617,7 @@ export function Elevate() {
       const avgSentenceLen = sc.avgLength ?? 0
       const syntacticComplexity = (sc.subordinateRatio ?? 0) * 10
       const sophistication = vocab.sophistication ?? 0
+      const paceAvailable = hasAvailablePace(m.processingStatus)
 
       const metricSections: SessionReport['metrics'] = [
         {
@@ -616,10 +626,12 @@ export function Elevate() {
           items: [
             {
               label: 'Words Per Minute',
-              value: String(m.userWpm),
-              unit: 'WPM',
-              tone: DELIVERY_VERDICTS.speechRate(m.userWpm).tone,
-              hint: DELIVERY_VERDICTS.speechRate(m.userWpm).tip,
+              value: paceAvailable ? String(Math.round(m.userWpm)) : 'Not available',
+              unit: paceAvailable ? 'WPM' : undefined,
+              tone: paceAvailable ? DELIVERY_VERDICTS.speechRate(m.userWpm).tone : undefined,
+              hint: paceAvailable
+                ? DELIVERY_VERDICTS.speechRate(m.userWpm).tip
+                : 'Reliable speech-time evidence was not available, so pace was not scored.',
             },
             {
               label: 'Filler Rate',
@@ -630,7 +642,11 @@ export function Elevate() {
             },
             { label: 'Avg Sentence Length', value: m.userAvgSentenceLength.toFixed(1), unit: 'words' },
             { label: 'Vocab Diversity', value: `${(m.userVocabDiversity * 100).toFixed(0)}`, unit: '%' },
-            { label: 'Speaking Time', value: m.userSpeakingTime.toFixed(0), unit: 's' },
+            {
+              label: 'Speaking Time',
+              value: paceAvailable ? m.userSpeakingTime.toFixed(0) : 'Not available',
+              unit: paceAvailable ? 's' : undefined,
+            },
             { label: 'Avg Response Time', value: m.userResponseTimeAvg.toFixed(1), unit: 's' },
           ],
         },
@@ -683,31 +699,28 @@ export function Elevate() {
         const es = prosody.energyStability ?? 0
         metricSections.push({
           section: 'Delivery — Voice Quality',
-          description: 'How you sounded — acoustic analysis of your recording',
+          description: 'Experimental acoustic measurements; microphone and browser processing affect these values',
           items: [
             {
               label: 'Voice Quality',
               value: vq.toFixed(1),
               unit: '/10',
               score: vq,
-              tone: DELIVERY_VERDICTS.voiceQuality(vq).tone,
-              hint: DELIVERY_VERDICTS.voiceQuality(vq).tip,
+              hint: 'HNR-based recording signal; not a diagnosis of vocal strain.',
             },
             {
               label: 'Pitch Variation',
               value: pv.toFixed(1),
               unit: '/10',
               score: pv,
-              tone: DELIVERY_VERDICTS.pitchVariation(pv).tone,
-              hint: DELIVERY_VERDICTS.pitchVariation(pv).tip,
+              hint: 'Experimental score derived from pitch spread in Hz.',
             },
             {
               label: 'Energy Stability',
               value: es.toFixed(1),
               unit: '/10',
               score: es,
-              tone: DELIVERY_VERDICTS.energyStability(es).tone,
-              hint: DELIVERY_VERDICTS.energyStability(es).tip,
+              hint: 'May be flattened by browser automatic gain control.',
             },
             { label: 'Pauses', value: String(prosody.pauseCount ?? 0) },
             { label: 'Avg Pause', value: `${(prosody.meanPauseDuration ?? 0).toFixed(2)}`, unit: 's' },
@@ -719,7 +732,11 @@ export function Elevate() {
       let paceN = 0
       const paceTurns: PaceTurn[] = Array.isArray(turnsData?.turns) ? turnsData.turns : []
       const pacePoints = paceTurns
-            .filter((t) => t.role === 'user' && t.metrics?.wpm != null && t.metrics.wpm > 0)
+            .filter(
+              (t) =>
+                t.role === 'user' &&
+                isSubstantivePaceTurn(t.metrics as Record<string, unknown> | undefined),
+            )
             .map((t) => {
               paceN += 1
               return { label: paceN, wpm: Math.round(Number(t.metrics?.wpm)) }

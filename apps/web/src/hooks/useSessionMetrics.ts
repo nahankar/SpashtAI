@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getAuthHeaders } from '@/lib/api-client';
+import type { PaceProcessingStatus } from '@/lib/pace';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
 
@@ -33,6 +34,7 @@ interface SessionMetrics {
   assistantResponseTimeAvg: number;
   
   totalTurns: number;
+  processingStatus?: PaceProcessingStatus | null;
 }
 
 type MetricsResponse = SessionMetrics & {

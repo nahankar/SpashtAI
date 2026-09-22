@@ -2,6 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { Card, CardContent } from '../ui/card'
 import { Award, Gauge, MessageSquare, Hash } from 'lucide-react'
 import { getAuthHeaders } from '@/lib/api-client'
+import {
+  hasAvailablePace,
+  isSubstantivePaceTurn,
+  type PaceProcessingStatus,
+} from '@/lib/pace'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 
@@ -13,6 +18,7 @@ interface HistoricalLike {
   userWpm?: number | null
   userFillerRate?: number | null
   userFillerCount?: number | null
+  processingStatus?: PaceProcessingStatus | null
 }
 
 interface TurnSummary {
@@ -20,6 +26,8 @@ interface TurnSummary {
   metrics?: {
     wpm?: number | null
     hedging_count?: number | null
+    word_count?: number | null
+    pace_source?: string | null
   }
 }
 
@@ -98,11 +106,9 @@ export function SessionMetricsSummary({ sessionId, metrics, variant = 'card', tu
     fetch(`${API_BASE_URL}/sessions/${sessionId}/skill-scores`, { headers: getAuthHeaders() })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (cancelled || !data?.scores) return
-        const vals = Object.values(data.scores).filter(
-          (v): v is number => typeof v === 'number' && Number.isFinite(v),
-        )
-        if (vals.length) setScore(vals.reduce((s, v) => s + v, 0) / vals.length)
+        if (cancelled) return
+        const overall = data?.overallScore
+        if (typeof overall === 'number' && Number.isFinite(overall)) setScore(overall)
       })
       .catch(() => {})
     return () => {
@@ -130,7 +136,7 @@ export function SessionMetricsSummary({ sessionId, metrics, variant = 'card', tu
     const effectiveTurns = turns ?? fetchedTurns ?? []
     const userTurns = effectiveTurns.filter((t) => t.role === 'user')
     const pts = userTurns
-      .filter((t) => Number(t.metrics?.wpm) > 0)
+      .filter((t) => isSubstantivePaceTurn(t.metrics as Record<string, unknown> | undefined))
       .map((t) => Math.round(Number(t.metrics?.wpm)))
     let hedge = 0
     let hasHedge = false
@@ -143,7 +149,11 @@ export function SessionMetricsSummary({ sessionId, metrics, variant = 'card', tu
     return { pacePoints: pts, hedging: hasHedge ? hedge : null }
   }, [turns, fetchedTurns])
 
-  const wpm = metrics?.userWpm && metrics.userWpm > 0 ? Math.round(metrics.userWpm) : null
+  const paceAvailable = hasAvailablePace(metrics?.processingStatus)
+  const wpm =
+    paceAvailable && metrics?.userWpm && metrics.userWpm > 0
+      ? Math.round(metrics.userWpm)
+      : null
   const fillerRate = metrics?.userFillerRate != null ? metrics.userFillerRate : null
   const fillerCount = metrics?.userFillerCount != null ? metrics.userFillerCount : null
   const pace = paceTone(wpm ?? 0)

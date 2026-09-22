@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
       findUnique: vi.fn(),
     },
     sessionMetrics: {
+      findUnique: vi.fn(),
       upsert: vi.fn(),
     },
     $transaction: vi.fn(),
@@ -44,6 +45,7 @@ describe('Pause integration contracts', () => {
       flags: { hideAudioDownload: false },
       accessDenied: false,
     })
+    mocks.prisma.sessionMetrics.findUnique.mockResolvedValue(null)
     mocks.prisma.$transaction.mockImplementation(async (callback) =>
       callback({
         ...mocks.prisma,
@@ -173,6 +175,15 @@ describe('Pause integration contracts', () => {
           words_per_minute: 120,
           total_speaking_time: 50,
           total_words: 100,
+          pace: {
+            source: 'validated_turn_audio',
+            status: 'available',
+            confidence: 'medium',
+            totalWords: 100,
+            speakingSeconds: 50,
+            samples: 3,
+            estimatedSamples: 0,
+          },
         },
         assistantMetrics: {},
       })

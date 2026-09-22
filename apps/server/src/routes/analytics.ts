@@ -10,7 +10,12 @@
 import { Request, Response } from 'express'
 import { prisma } from '../lib/prisma'
 import { logger, reqLog } from '../lib/logger'
-import { calculateSkillScores, type TextSignals } from '../analytics/skillScores'
+import {
+  calculateSkillScores,
+  calculateWeightedOverallScore,
+  type SkillScores,
+  type TextSignals,
+} from '../analytics/skillScores'
 import {
   generateCoachingInsights,
   resolveElevateSessionAudio,
@@ -26,13 +31,18 @@ import {
   resolveAudioStatus,
   shouldWritePulse,
 } from '../analytics/audioStatus'
-import { detectSpeechRegions } from '../lib/audioAlignment'
 import { lockWritableSession, SessionDiscardedError } from '../lib/sessionDiscard'
+import {
+  assessPaceEvidence,
+  measuredTurnVariability,
+  readPersistedPaceEvidence,
+} from '../analytics/pace'
 
 const SIGNAL_API_URL = process.env.SIGNAL_API_URL || 'http://localhost:4001'
 const INTERNAL_AGENT_TOKEN =
   process.env.INTERNAL_AGENT_TOKEN?.trim() ||
   (process.env.NODE_ENV !== 'production' ? 'dev-internal-agent-token' : '')
+const MIN_ANALYTICS_USER_WORDS = 5
 
 /**
  * Run the full analytics pipeline for a session:
@@ -50,7 +60,11 @@ export async function analyzeSession(req: Request, res: Response) {
     // 1. Load session + transcript
     const session = await prisma.session.findUnique({
       where: { id: sessionId },
-      include: { transcript: true, segments: true },
+      include: {
+        transcript: true,
+        segments: true,
+        turns: { select: { role: true, metrics: true } },
+      },
     })
 
     if (!session) {
@@ -82,6 +96,13 @@ export async function analyzeSession(req: Request, res: Response) {
     if (messages.length === 0) {
       return res.status(400).json({ error: 'Transcript has no messages' })
     }
+    // Endpointing often emits one-to-three-word debris around interruptions
+    // ("and", "things", "you be great"). Keep it in the transcript, but do
+    // not let it affect aggregate language signals or skill scores.
+    const analysisMessages = messages.filter((message) => {
+      if (message.role !== 'user') return message.content.trim().split(/\s+/).length >= 2
+      return message.content.trim().split(/\s+/).length >= MIN_ANALYTICS_USER_WORDS
+    })
 
     // Calculate duration
     const startedAt = session.startedAt ? new Date(session.startedAt).getTime() : 0
@@ -101,7 +122,7 @@ export async function analyzeSession(req: Request, res: Response) {
         },
         body: JSON.stringify({
           sessionId,
-          messages,
+          messages: analysisMessages,
           durationSec,
         }),
         // Never let a slow/contended signal service stall the whole pipeline —
@@ -119,7 +140,7 @@ export async function analyzeSession(req: Request, res: Response) {
     } catch (signalErr: any) {
       console.error('Signal extraction failed, using fallback:', signalErr.message)
       // Fallback: build minimal signals from messages directly
-      signals = buildFallbackSignals(messages, durationSec)
+      signals = buildFallbackSignals(analysisMessages, durationSec)
     }
 
     const existingMetrics = await prisma.sessionMetrics.findUnique({
@@ -154,24 +175,35 @@ export async function analyzeSession(req: Request, res: Response) {
       }
     }
 
-    const allSegmentAudioAvailable =
-      session.segments.length > 0 &&
-      session.segments.every((segment) => segment.audioStatus === 'available')
-    let measuredSpeakingSec: number | null = null
-    if (audioResolved?.audioPath && allSegmentAudioAvailable) {
-      try {
-        const speechRegions = await detectSpeechRegions(audioResolved.audioPath)
-        measuredSpeakingSec = speechRegions.reduce(
-          (sum, region) => sum + Math.max(0, region.end - region.start),
-          0,
-        )
-        if (measuredSpeakingSec > 0 && signals.speechRate.totalWords > 0) {
-          signals.speechRate.wpm =
-            (signals.speechRate.totalWords / measuredSpeakingSec) * 60
-        }
-      } catch (error) {
-        console.warn('[analytics] aggregate speaking-time measurement skipped:', error)
-      }
+    // The old aggregate silence detector merged every sub-3-second pause into
+    // one giant "speech" span. Accept only persisted, source-labelled timing
+    // evidence from STT timestamps or measured utterances.
+    const pace = assessPaceEvidence(
+      readPersistedPaceEvidence(existingMetrics?.processingStatus),
+      signals.speechRate.totalWords,
+    )
+    signals.speechRate = {
+      ...signals.speechRate,
+      wpm: pace.wpm ?? 0,
+      variability:
+        pace.status === 'available'
+          ? measuredTurnVariability(session.turns)
+          : null,
+      status: pace.status,
+      source: pace.source,
+      confidence: pace.confidence,
+      evidence: {
+        totalWords: pace.totalWords,
+        speakingSeconds: pace.speakingSeconds,
+        samples: pace.samples,
+        estimatedSamples: pace.estimatedSamples,
+        coverage: pace.coverage,
+        excludedMicroTurnCount: pace.excludedMicroTurnCount,
+        excludedUnreliableTurnCount: pace.excludedUnreliableTurnCount,
+        timestampCoverage: pace.timestampCoverage,
+        invalidTimestampCount: pace.invalidTimestampCount,
+        outOfOrderTimestampCount: pace.outOfOrderTimestampCount,
+      },
     }
 
     const mergedSignals = mergeCommunicationSignals(
@@ -182,7 +214,7 @@ export async function analyzeSession(req: Request, res: Response) {
     // are present; calculating earlier silently made delivery text-only.
     const { scores, components } = calculateSkillScores(
       mergedSignals as unknown as TextSignals,
-      messages.length,
+      analysisMessages.length,
     )
     const audioStatus = resolveAudioStatus({
       hasReadableRecording: Boolean(audioResolved?.audioPath),
@@ -197,7 +229,7 @@ export async function analyzeSession(req: Request, res: Response) {
         signals: mergedSignals as unknown as TextSignals,
         sessionName: session.sessionName || undefined,
         focusArea: session.focusArea || undefined,
-        totalMessages: messages.length,
+        totalMessages: analysisMessages.length,
         durationSec,
         audioPath: audioResolved?.audioPath,
         audioMime: audioResolved?.audioMime,
@@ -210,10 +242,15 @@ export async function analyzeSession(req: Request, res: Response) {
     const skillScoresJson = JSON.parse(JSON.stringify({ scores, components }))
     const signalsJson = JSON.parse(JSON.stringify(mergedSignals))
     const insightsJson = JSON.parse(JSON.stringify(insights))
-    const processingStatusJson = mergeProcessingStatus(existingMetrics?.processingStatus, {
-      audioStatus,
-      audioProcessed,
-    })
+    const processingStatusJson = JSON.parse(
+      JSON.stringify({
+        ...mergeProcessingStatus(existingMetrics?.processingStatus, {
+          audioStatus,
+          audioProcessed,
+        }),
+        pace,
+      }),
+    )
 
     await prisma.$transaction(async (tx) => {
       await lockWritableSession(tx, sessionId)
@@ -221,11 +258,11 @@ export async function analyzeSession(req: Request, res: Response) {
         where: { sessionId },
         create: {
           sessionId,
-          ...(measuredSpeakingSec != null ? { userWpm: signals.speechRate.wpm } : {}),
+          userWpm: pace.wpm ?? 0,
           userFillerCount: signals.fillers.count,
           userFillerRate: signals.fillers.rate * 100,
           userAvgSentenceLength: signals.sentenceComplexity.avgLength,
-          ...(measuredSpeakingSec != null ? { userSpeakingTime: measuredSpeakingSec } : {}),
+          userSpeakingTime: pace.status === 'available' ? pace.speakingSeconds : 0,
           userVocabDiversity: signals.vocabDiversity.ratio,
           totalTurns: messages.length,
           skillScores: skillScoresJson,
@@ -234,11 +271,11 @@ export async function analyzeSession(req: Request, res: Response) {
           processingStatus: processingStatusJson,
         },
         update: {
-          ...(measuredSpeakingSec != null ? { userWpm: signals.speechRate.wpm } : {}),
+          userWpm: pace.wpm ?? 0,
           userFillerCount: signals.fillers.count,
           userFillerRate: signals.fillers.rate * 100,
           userAvgSentenceLength: signals.sentenceComplexity.avgLength,
-          ...(measuredSpeakingSec != null ? { userSpeakingTime: measuredSpeakingSec } : {}),
+          userSpeakingTime: pace.status === 'available' ? pace.speakingSeconds : 0,
           userVocabDiversity: signals.vocabDiversity.ratio,
           totalTurns: messages.length,
           skillScores: skillScoresJson,
@@ -316,12 +353,29 @@ export async function getSkillScores(req: Request, res: Response) {
   try {
     const metrics = await prisma.sessionMetrics.findUnique({
       where: { sessionId },
-      select: { skillScores: true },
+      select: { skillScores: true, processingStatus: true },
     })
     if (!metrics?.skillScores) {
       return res.status(404).json({ error: 'No skill scores found' })
     }
-    res.json(metrics.skillScores)
+    const payload = JSON.parse(JSON.stringify(metrics.skillScores)) as {
+      scores?: Record<string, unknown>
+      components?: Record<string, unknown>
+    }
+    const persistedPace = readPersistedPaceEvidence(metrics.processingStatus)
+    const expectedWords =
+      persistedPace && typeof persistedPace === 'object'
+        ? Number((persistedPace as Record<string, unknown>).totalWords) || 0
+        : 0
+    const pace = assessPaceEvidence(persistedPace, expectedWords)
+    if (pace.status !== 'available') {
+      if (payload.scores) payload.scores.pacing = null
+      if (payload.components) delete payload.components.pacing
+    }
+    const overallScore = payload.scores
+      ? calculateWeightedOverallScore(payload.scores as unknown as SkillScores)
+      : null
+    res.json({ ...payload, overallScore })
   } catch (error: any) {
     res.status(500).json({ error: error.message })
   }

@@ -6,6 +6,7 @@ import { Button } from '../ui/button';
 import { getAuthHeaders } from '@/lib/api-client';
 import { useUserExportFlags } from '@/hooks/useUserExportFlags';
 import { toast } from 'sonner';
+import { hasAvailablePace, type PaceProcessingStatus } from '@/lib/pace';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
 
@@ -41,6 +42,7 @@ interface SessionMetricsProps {
     assistantSpeakingTime: number;
     
     totalTurns: number;
+    processingStatus?: PaceProcessingStatus | null;
   };
   onDownloadTranscript?: (format: 'json' | 'txt') => void;
   onExportPdf?: () => Promise<void>;
@@ -187,7 +189,8 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExp
       ? metrics.userVocabDiversity
       : metrics.userVocabDiversity * 100
 
-  const wpmRating = rateWpm(metrics.userWpm)
+  const paceAvailable = hasAvailablePace(metrics.processingStatus)
+  const wpmRating = paceAvailable ? rateWpm(metrics.userWpm) : null
   const fillerRating = rateFillerRate(metrics.userFillerRate)
   const vocabRating = rateVocabDiversity(vocabDiversityPct)
 
@@ -285,10 +288,24 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExp
             <div>
               <div className="flex justify-between items-center mb-2">
                 <span className="text-sm font-medium">Words Per Minute</span>
-                <RatingBadge rating={wpmRating} />
+                {wpmRating && <RatingBadge rating={wpmRating} />}
               </div>
-              <div className="text-2xl font-bold">{metrics.userWpm.toFixed(0)} WPM</div>
-              <Progress value={Math.min((metrics.userWpm / 200) * 100, 100)} className="mt-2" />
+              {paceAvailable ? (
+                <>
+                  <div className="text-2xl font-bold">{metrics.userWpm.toFixed(0)} WPM</div>
+                  <Progress value={Math.min((metrics.userWpm / 200) * 100, 100)} className="mt-2" />
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    Measured from your turns · {metrics.processingStatus?.pace?.confidence} confidence
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="text-2xl font-bold text-muted-foreground">Not available</div>
+                  <div className="text-sm text-muted-foreground">
+                    This session did not have reliable speech-time evidence, so no overall pace was scored.
+                  </div>
+                </>
+              )}
             </div>
 
             <div>
@@ -315,10 +332,14 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExp
               <div className="flex justify-between items-center mb-2">
                 <span className="text-sm font-medium">Total Speaking Time</span>
               </div>
-              <div className="text-2xl font-bold">{(metrics.userSpeakingTime / 60).toFixed(1)} min</div>
-              <div className="text-sm text-muted-foreground">
-                {Math.round(metrics.userSpeakingTime)} seconds active
+              <div className="text-2xl font-bold">
+                {paceAvailable ? `${(metrics.userSpeakingTime / 60).toFixed(1)} min` : 'Not available'}
               </div>
+              {paceAvailable && (
+                <div className="text-sm text-muted-foreground">
+                  {Math.round(metrics.userSpeakingTime)} measured speech seconds
+                </div>
+              )}
             </div>
 
             <div>

@@ -28,6 +28,7 @@ import { getAuthHeaders, getAuthenticatedMediaUrl } from '@/lib/api-client'
 import { COACH_BUBBLE, USER_BUBBLE } from '@/lib/conversation'
 import { useIsPro } from '@/hooks/useIsPro'
 import { UserTurnBubble, normalizeTurnMetricsFromApi } from '@/components/session/UserTurnMetrics'
+import { isSubstantivePaceTurn } from '@/lib/pace'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 
@@ -97,15 +98,18 @@ const QUALITY_CHIPS: { key: QualityChip; label: string }[] = [
 function turnMatchesChip(t: ReplayTurn, c: QualityChip): boolean {
   if (t.role !== 'user' || !t.metrics) return false
   const m = t.metrics
+  const hasAcceptedPace = isSubstantivePaceTurn(
+    m as unknown as Record<string, unknown>,
+  )
   switch (c) {
     case 'fillers':
       return (m.filler_count ?? 0) > 0
     case 'hesitations':
       return (m.hedging_count ?? 0) > 0
     case 'pace':
-      return !!m.qualitative_pace && m.qualitative_pace !== 'ideal'
+      return hasAcceptedPace && !!m.qualitative_pace && m.qualitative_pace !== 'ideal'
     case 'great':
-      return (t.score?.stars ?? 0) >= 4 || m.qualitative_pace === 'ideal'
+      return (t.score?.stars ?? 0) >= 4 || (hasAcceptedPace && m.qualitative_pace === 'ideal')
     case 'improvements':
       return (
         !!(t.coachNote || m.coaching_tip) ||
@@ -819,7 +823,12 @@ export function SessionReplay({
   // session-level skills like Clarity/Structure.
   const trendPoints = useMemo(() => {
     return turns
-      .filter((t) => t.role === 'user' && t.audioStart != null)
+      .filter(
+        (t) =>
+          t.role === 'user' &&
+          t.audioStart != null &&
+          isSubstantivePaceTurn(t.metrics as Record<string, unknown> | undefined),
+      )
       .map((t) => {
         const m = t.metrics
         const wpm = m?.wpm ?? null
@@ -849,7 +858,12 @@ export function SessionReplay({
   // metrics. Each is a one-click jump so the user can hear the evidence behind
   // their scores (traceability), not just read a number.
   const keyMoments = useMemo(() => {
-    const us = turns.filter((t) => t.role === 'user' && t.audioStart != null)
+    const us = turns.filter(
+      (t) =>
+        t.role === 'user' &&
+        t.audioStart != null &&
+        isSubstantivePaceTurn(t.metrics as Record<string, unknown> | undefined),
+    )
     if (us.length < 2) return []
     type Tone = 'good' | 'warn' | 'bad'
     const out: {

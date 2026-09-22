@@ -72,7 +72,7 @@ router.get('/sessions/:sessionId/transcript', async (req, res) => {
     
     // Create transcript text
     const transcript = messages.map((msg: any) => {
-      const timestamp = new Date(msg.timestamp).toLocaleString();
+      const timestamp = new Date(msg.timestamp).toISOString();
       const role = msg.role === 'user' ? 'You' : 'Assistant';
       return `[${timestamp}] ${role}: ${msg.content}`;
     }).join('\n\n');
@@ -80,7 +80,8 @@ router.get('/sessions/:sessionId/transcript', async (req, res) => {
     // Add session metadata
     const header = `SpashtAI Interview Session Transcript
 Session ID: ${sessionId}
-Date: ${sessionTranscript.createdAt.toLocaleString()}
+Date: ${sessionTranscript.createdAt.toISOString()}
+Timestamps: ISO 8601 UTC
 Duration: ${sessionMetrics?.userSpeakingTime ? Math.round(sessionMetrics.userSpeakingTime) + 's' : 'Unknown'}
 Total Messages: ${messages.length}
 

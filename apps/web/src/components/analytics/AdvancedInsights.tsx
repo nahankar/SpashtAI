@@ -257,10 +257,10 @@ export const DELIVERY_VERDICTS: Record<string, (v: number) => MetricVerdict> = {
         : { tone: 'bad', tip: 'Uneven volume — project consistently so you stay easy to hear.' },
   voiceQuality: (v) =>
     v >= 6
-      ? { tone: 'good', tip: 'Clear, resonant voice.' }
+      ? { tone: 'good', tip: 'Recording signal shows higher harmonic clarity.' }
       : v >= 4
-        ? { tone: 'ok', tip: 'Slightly strained or breathy — relax and breathe from the diaphragm.' }
-        : { tone: 'bad', tip: 'Strained voice — warm up, hydrate, and slow down.' },
+        ? { tone: 'ok', tip: 'Recording signal shows moderate harmonic clarity.' }
+        : { tone: 'bad', tip: 'Recording signal suggests lower harmonic clarity; microphone and room conditions can affect this.' },
 }
 
 // Shared with report rendering; colocated with the component to keep verdict copy consistent.
@@ -588,7 +588,9 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
                   <Activity className="h-5 w-5" />
                   Delivery — Voice Quality
                 </CardTitle>
-                <CardDescription>How you sounded — acoustic analysis of your recording</CardDescription>
+                <CardDescription>
+                  Experimental acoustic measurements — sensitive to microphone and browser processing
+                </CardDescription>
               </CardHeader>
               <CardContent className="flex-1 space-y-4">
                 <div>
@@ -597,7 +599,6 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
                     <Badge>{d.voice_quality_score.toFixed(1)}/10</Badge>
                   </div>
                   <Progress value={d.voice_quality_score * 10} />
-                  <Verdict verdict={DELIVERY_VERDICTS.voiceQuality(d.voice_quality_score)} />
                 </div>
                 <div>
                   <div className="mb-1 flex justify-between text-sm">
@@ -605,7 +606,6 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
                     <Badge>{d.pitch_variation.toFixed(1)}/10</Badge>
                   </div>
                   <Progress value={d.pitch_variation * 10} />
-                  <Verdict verdict={DELIVERY_VERDICTS.pitchVariation(d.pitch_variation)} />
                 </div>
                 <div>
                   <div className="mb-1 flex justify-between text-sm">
@@ -613,7 +613,6 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
                     <Badge>{d.energy_stability.toFixed(1)}/10</Badge>
                   </div>
                   <Progress value={d.energy_stability * 10} />
-                  <Verdict verdict={DELIVERY_VERDICTS.energyStability(d.energy_stability)} />
                 </div>
 
                 {d.pause_count > 0 && (
@@ -628,10 +627,11 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
                 <p className="border-t pt-3 text-[11px] leading-snug text-muted-foreground">
                   <span className="font-medium text-foreground">How these are rated (0–10):</span> a
                   Praat acoustic analysis of your recording. <span className="font-medium">Pitch
-                  Variation</span> reflects how much your pitch moves (spread of fundamental frequency
-                  in semitones) — flat/monotone scores low, expressive scores high. <span className="font-medium">Energy
-                  Stability</span> is how consistent your volume is, and <span className="font-medium">Voice
-                  Quality</span> is the harmonics-to-noise ratio (clarity vs. breathiness/strain).
+                  Variation</span> reflects the spread of fundamental frequency in Hz. <span className="font-medium">Energy
+                  Stability</span> reflects recorded level consistency and may be flattened by automatic
+                  gain control. <span className="font-medium">Voice Quality</span> is based on
+                  harmonics-to-noise ratio and is not a diagnosis of vocal strain. <span className="font-medium">Pauses</span> are
+                  detected silent intervals, not necessarily rhetorical pauses.
                   Pace &amp; fillers are in <span className="font-medium">Speaking Performance</span> above.
                 </p>
               </CardContent>

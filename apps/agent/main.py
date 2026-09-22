@@ -44,6 +44,7 @@ from text_sanitize import StreamingThinkingStripper, is_thinking_only, strip_thi
 from voice_backends import VoiceBackendConfig, apply_turn_detection_update, build_session, metadata_label
 from backend_profiles import BackendProfile, SttMode, profile_for
 from live_pacing import LivePacingTracker
+from pace_timestamps import validate_timestamp_evidence
 
 # Session log context (additive, fail-safe). Guarded so a logging helper can
 # never break the live agent: if it fails to import, fall back to no-ops.
@@ -463,9 +464,21 @@ class CoachingAgent(Agent):
         start = getattr(alt, "start_time", None)
         end = getattr(alt, "end_time", None)
         words = getattr(alt, "words", None)
-        word_count = len(words) if words else len(text.split())
-        seconds = (end - start) if (start is not None and end is not None and end > start) else None
-        self._pacing_tracker.ingest_measured_final(text, word_count, seconds)
+        evidence = validate_timestamp_evidence(text, start, end, words)
+        self._pacing_tracker.ingest_measured_final(
+            text,
+            evidence.transcript_word_count,
+            evidence.seconds,
+            pace_source=(
+                "word_timestamps"
+                if evidence.word_timestamps_valid
+                else "validated_turn_audio"
+            ),
+            timestamped_word_count=evidence.timestamped_word_count,
+            transcript_word_count=evidence.transcript_word_count,
+            invalid_timestamp_count=evidence.invalid_timestamp_count,
+            out_of_order_timestamp_count=evidence.out_of_order_timestamp_count,
+        )
         # Persist raw word/segment timings (stream-relative seconds) for the
         # replay timeline. Best-effort: never let capture break transcription.
         try:
@@ -2330,6 +2343,8 @@ async def entrypoint(ctx: JobContext):
                 bc = advanced_metrics.basic_collector
                 bc.set_utterance_peeker(pacing_tracker.peek_last_utterance)
                 bc.set_session_totals_peeker(pacing_tracker.get_session_totals)
+                bc.set_pace_evidence_peeker(pacing_tracker.get_pace_evidence)
+                bc.set_pace_turn_acceptor(pacing_tracker.accept_logical_turn)
                 bc.set_user_turn_metrics_callback(_schedule_user_turn_metrics)
                 bc.set_turn_committed_callback(advanced_metrics.record_committed_turn)
                 logger.info("🔗 Turn stitcher wired (utterance peeker + per-turn metrics publish)")
@@ -2764,8 +2779,10 @@ async def entrypoint(ctx: JobContext):
             except Exception as turns_error:
                 logger.error(f"❌ Error persisting session turns: {turns_error}")
 
-        # ── Text-only v2 backstop if the browser never called /analyze ──────
-        # Never tracks Pulse. Skip when the Leave path already persisted scores.
+        # ── Final v2 reconciliation ─────────────────────────────────────────
+        # Always rerun after basic metrics + turns persist. The browser may have
+        # analyzed earlier, before authoritative pace evidence was available.
+        # This pass is idempotent and never creates Pulse entries.
         should_run_final_backstop = (
             cleanup_persistence_enabled
             and (not segment_id or await fetch_session_ended(session_id))
@@ -2776,26 +2793,17 @@ async def entrypoint(ctx: JobContext):
                 await asyncio.sleep(3)
                 async with aiohttp.ClientSession() as _as:
                     headers = {"x-internal-agent-token": INTERNAL_AGENT_TOKEN}
-                    scores_url = f"{SERVER_URL}/sessions/{session_id}/skill-scores"
-                    async with _as.get(
-                        scores_url,
+                    analyze_url = f"{SERVER_URL}/sessions/{session_id}/analyze"
+                    async with _as.post(
+                        analyze_url,
+                        json={"autoTrackPulse": False, "source": "elevate"},
                         headers=headers,
-                        timeout=aiohttp.ClientTimeout(total=8.0),
-                    ) as probe:
-                        if probe.status == 200:
-                            logger.info("ℹ️ Browser analytics already present — skipping agent /analyze")
+                        timeout=aiohttp.ClientTimeout(total=60.0),
+                    ) as resp:
+                        if resp.status == 200:
+                            logger.info("✅ Final v2 analytics reconciliation completed (non-Pulse)")
                         else:
-                            analyze_url = f"{SERVER_URL}/sessions/{session_id}/analyze"
-                            async with _as.post(
-                                analyze_url,
-                                json={"autoTrackPulse": False, "source": "elevate"},
-                                headers=headers,
-                                timeout=aiohttp.ClientTimeout(total=60.0),
-                            ) as resp:
-                                if resp.status == 200:
-                                    logger.info("✅ v2 analytics backstop completed (non-Pulse)")
-                                else:
-                                    logger.warning(f"⚠️ /analyze backstop returned {resp.status}")
+                            logger.warning(f"⚠️ Final /analyze returned {resp.status}")
             except Exception as analyze_error:
                 logger.error(f"❌ Error triggering v2 analytics backstop: {analyze_error}")
         elif segment_id:

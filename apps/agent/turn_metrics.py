@@ -29,6 +29,7 @@ class TurnMetricsSnapshot:
     speaking_seconds: Optional[float] = None
     qualitative_pace: Optional[str] = None
     coaching_tip: Optional[str] = None
+    pace_source: Optional[str] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -58,6 +59,7 @@ def compute_turn_metrics(
     utterance_words: Optional[int] = None,
     utterance_seconds: Optional[float] = None,
     utterance_wpm: Optional[float] = None,
+    pace_source: Optional[str] = None,
 ) -> TurnMetricsSnapshot:
     words = _extract_words(text)
     word_count = len(words)
@@ -80,9 +82,16 @@ def compute_turn_metrics(
     if wpm is None and word_count >= 3:
         speaking_seconds = max(word_count / 2.5, 0.4)
         wpm = round((word_count / speaking_seconds) * 60, 1)
-        qualitative = _qualitative_pace(wpm)
+        qualitative = "not-enough-data"
+        pace_source = "estimated"
 
-    tip = _coaching_tip(filler_rate, hedging_count, wpm or 0, qualitative or "")
+    pace_is_accepted = pace_source in ("word_timestamps", "validated_turn_audio")
+    tip = _coaching_tip(
+        filler_rate,
+        hedging_count,
+        (wpm or 0) if pace_is_accepted else 0,
+        (qualitative or "") if pace_is_accepted else "",
+    )
 
     return TurnMetricsSnapshot(
         word_count=word_count,
@@ -95,6 +104,7 @@ def compute_turn_metrics(
         speaking_seconds=speaking_seconds,
         qualitative_pace=qualitative,
         coaching_tip=tip,
+        pace_source=pace_source if wpm is not None else None,
     )
 
 

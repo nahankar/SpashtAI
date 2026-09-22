@@ -14,6 +14,7 @@ import {
   SessionDiscardedError,
   SessionMissingError,
 } from '../lib/sessionDiscard'
+import { assessPaceEvidence } from '../analytics/pace'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -114,12 +115,10 @@ export async function saveSessionMetrics(req: Request, res: Response) {
         ? (session.endedAt.getTime() - session.startedAt.getTime()) / 1000
         : 0)
 
-    const userCanon = canonicalWpm({
-      agentWpm: metricsData.userMetrics?.words_per_minute || 0,
-      agentSpeakingSec: metricsData.userMetrics?.total_speaking_time || 0,
-      totalWords: metricsData.userMetrics?.total_words,
-      sessionDurationSec,
-    })
+    const userPace = assessPaceEvidence(
+      metricsData.userMetrics?.pace,
+      Number(metricsData.userMetrics?.total_words) || 0,
+    )
     const assistantCanon = canonicalWpm({
       agentWpm: metricsData.assistantMetrics?.words_per_minute || 0,
       agentSpeakingSec: metricsData.assistantMetrics?.total_speaking_time || 0,
@@ -129,7 +128,7 @@ export async function saveSessionMetrics(req: Request, res: Response) {
 
     console.log(
       `[metrics] session=${sessionId} userWpm: agent=${metricsData.userMetrics?.words_per_minute} ` +
-        `→ canonical=${userCanon.wpm} (${userCanon.source}); ` +
+        `→ canonical=${userPace.wpm ?? 'unavailable'} (${userPace.source ?? 'none'}); ` +
         `assistantWpm: agent=${metricsData.assistantMetrics?.words_per_minute} ` +
         `→ canonical=${assistantCanon.wpm} (${assistantCanon.source})`
     )
@@ -144,11 +143,11 @@ export async function saveSessionMetrics(req: Request, res: Response) {
       totalEouDelay: metricsData.totalEouDelay || 0,
       conversationLatencyAvg: metricsData.conversationLatencyAvg || 0,
 
-      userWpm: userCanon.wpm,
+      userWpm: userPace.wpm ?? 0,
       userFillerCount: metricsData.userMetrics?.filler_word_count || 0,
       userFillerRate: metricsData.userMetrics?.filler_word_rate || 0,
       userAvgSentenceLength: metricsData.userMetrics?.average_sentence_length || 0,
-      userSpeakingTime: userCanon.speakingSec,
+      userSpeakingTime: userPace.status === 'available' ? userPace.speakingSeconds : 0,
       userVocabDiversity: metricsData.userMetrics?.vocabulary_diversity || 0,
       userResponseTimeAvg: metricsData.userMetrics?.response_time_avg || 0,
 
@@ -163,12 +162,29 @@ export async function saveSessionMetrics(req: Request, res: Response) {
       totalTurns: metricsData.totalTurns || 0,
     }
 
+    const previousMetrics = await prisma.sessionMetrics.findUnique({
+      where: { sessionId },
+      select: { processingStatus: true },
+    })
+    const previousProcessingStatus =
+      previousMetrics?.processingStatus &&
+      typeof previousMetrics.processingStatus === 'object' &&
+      !Array.isArray(previousMetrics.processingStatus)
+        ? previousMetrics.processingStatus
+        : {}
+    const processingStatus = JSON.parse(
+      JSON.stringify({
+        ...previousProcessingStatus,
+        pace: userPace,
+      }),
+    )
+
     const metrics = await prisma.$transaction(async (tx) => {
       await lockWritableSession(tx, sessionId)
       return tx.sessionMetrics.upsert({
         where: { sessionId },
-        update: sharedFields,
-        create: { sessionId, ...sharedFields },
+        update: { ...sharedFields, processingStatus },
+        create: { sessionId, ...sharedFields, processingStatus },
       })
     })
 
@@ -438,14 +454,15 @@ export async function downloadSessionTranscript(req: Request, res: Response) {
       textContent += `User: ${transcript.session.user.email}\n`
       textContent += `Module: ${transcript.session.module}\n`
       textContent += `Date: ${transcript.session.startedAt.toISOString()}\n`
+      textContent += `Timestamps: ISO 8601 UTC\n`
       textContent += `\n${'='.repeat(50)}\n\n`
 
       if (normalizedMessages.length > 0) {
         for (const message of normalizedMessages) {
           const speaker = message.role === 'user' ? 'User' : 'Assistant'
           const timestamp = message.timestamp
-            ? new Date(message.timestamp).toLocaleTimeString()
-            : new Date().toLocaleTimeString()
+            ? new Date(message.timestamp).toISOString()
+            : new Date().toISOString()
           textContent += `[${timestamp}] ${speaker}: ${message.content || ''}\n\n`
         }
       } else {
