@@ -11,7 +11,9 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000
 
 interface AudioFile {
   filename?: string | null;
+  downloadName?: string | null;
   url?: string | null;
+  recordingType?: string | null;
 }
 
 interface SessionMetricsProps {
@@ -67,8 +69,14 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExp
 
       const listJson = await listResponse.json();
       const allFiles: AudioFile[] = Array.isArray(listJson?.audioFiles) ? listJson.audioFiles : [];
+      // Segment recordings are stored as elevate-segment-<hash>.audio, so the
+      // speaker is only knowable from recordingType, never from the filename.
       const selectedFiles = onlyUser
-        ? allFiles.filter((f) => String(f.filename || '').toLowerCase().includes('user'))
+        ? allFiles.filter((f) =>
+            f.recordingType
+              ? f.recordingType === 'user'
+              : String(f.filename || '').toLowerCase().includes('user'),
+          )
         : allFiles;
 
       if (selectedFiles.length === 0) {
@@ -78,7 +86,7 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExp
 
       for (const file of selectedFiles) {
         const fileUrl = String(file?.url || '');
-        const fileName = String(file?.filename || 'session-audio.wav');
+        const fileName = String(file?.downloadName || file?.filename || 'session-audio.webm');
         if (!fileUrl) continue;
 
         const absoluteUrl = fileUrl.startsWith('http') ? fileUrl : `${API_BASE_URL}${fileUrl}`;

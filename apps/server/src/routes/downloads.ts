@@ -143,6 +143,47 @@ router.get('/sessions/:sessionId/transcript.json', async (req, res) => {
   }
 });
 
+const MIME_BY_EXT: Record<string, string> = {
+  wav: 'audio/wav',
+  mp3: 'audio/mpeg',
+  m4a: 'audio/mp4',
+  mp4: 'video/mp4',
+  webm: 'audio/webm',
+  ogg: 'audio/ogg',
+};
+
+const EXT_BY_MIME: Record<string, string> = {
+  'audio/wav': 'wav',
+  'audio/mpeg': 'mp3',
+  'audio/mp4': 'm4a',
+  'video/mp4': 'mp4',
+  'audio/webm': 'webm',
+  'audio/ogg': 'ogg',
+};
+
+/**
+ * Segment uploads are stored under an opaque `elevate-segment-<hash>.audio`
+ * name, which no player recognises. Derive the real container from the stored
+ * mimeType so the downloaded file is both openable and identifiable.
+ */
+export function downloadFilename(
+  sessionId: string,
+  recording: {
+    filePath: string | null;
+    mimeType: string | null;
+    recordingType: string;
+    segment?: { segmentIndex: number } | null;
+  },
+): string {
+  const storedExt = path.extname(recording.filePath || '').replace('.', '').toLowerCase();
+  const ext =
+    EXT_BY_MIME[(recording.mimeType || '').toLowerCase()] ||
+    (storedExt && storedExt !== 'audio' ? storedExt : 'webm');
+  const part =
+    recording.segment != null ? `-part${recording.segment.segmentIndex + 1}` : '';
+  return `${sessionId}-${recording.recordingType}${part}.${ext}`;
+}
+
 // List available audio files for a session
 router.get('/sessions/:sessionId/audio', async (req, res) => {
   try {
@@ -157,11 +198,13 @@ router.get('/sessions/:sessionId/audio', async (req, res) => {
     const recordings = await prisma.sessionRecording.findMany({
       where: { sessionId, status: 'completed' },
       orderBy: { createdAt: 'desc' },
+      include: { segment: { select: { segmentIndex: true } } },
     });
     const audioFiles = recordings
       .filter((r) => r.filePath)
       .map((r) => ({
         filename: path.basename(r.filePath as string),
+        downloadName: downloadFilename(sessionId, r),
         url: `/api/downloads/sessions/${sessionId}/audio/${encodeURIComponent(
           path.basename(r.filePath as string),
         )}`,
@@ -189,6 +232,7 @@ router.get('/sessions/:sessionId/audio/:filename', async (req, res) => {
     // extension: webm/m4a/wav/...) is served, instead of guessing a temp dir.
     const recordings = await prisma.sessionRecording.findMany({
       where: { sessionId, status: 'completed' },
+      include: { segment: { select: { segmentIndex: true } } },
     });
     const rec = recordings.find(
       (r) => r.filePath && path.basename(r.filePath) === safeName,
@@ -197,21 +241,19 @@ router.get('/sessions/:sessionId/audio/:filename', async (req, res) => {
       return res.status(404).json({ error: 'Audio file not found' });
     }
 
-    const mimeByExt: Record<string, string> = {
-      wav: 'audio/wav',
-      mp3: 'audio/mpeg',
-      m4a: 'audio/mp4',
-      mp4: 'video/mp4',
-      webm: 'audio/webm',
-      ogg: 'audio/ogg',
-    };
     const ext = safeName.split('.').pop()?.toLowerCase();
     try {
       const stats = await fs.stat(rec.filePath);
       const fileBuffer = await fs.readFile(rec.filePath);
-      res.setHeader('Content-Type', (ext && mimeByExt[ext]) || 'application/octet-stream');
+      res.setHeader(
+        'Content-Type',
+        rec.mimeType || (ext && MIME_BY_EXT[ext]) || 'application/octet-stream',
+      );
       res.setHeader('Content-Length', stats.size);
-      res.setHeader('Content-Disposition', `attachment; filename="${safeName}"`);
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${downloadFilename(sessionId, rec)}"`,
+      );
       res.send(fileBuffer);
     } catch (error) {
       res.status(404).json({ error: 'Audio file not found' });
