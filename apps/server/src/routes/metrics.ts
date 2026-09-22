@@ -799,7 +799,12 @@ export async function reprocessSessionMetrics(req: Request, res: Response) {
       where: { id: sessionId },
       include: {
         recordings: true,
-        transcript: true
+        transcript: true,
+        turns: {
+          where: { role: 'user' },
+          orderBy: { sequenceNo: 'asc' },
+          select: { words: true },
+        },
       }
     })
 
@@ -886,6 +891,9 @@ export async function reprocessSessionMetrics(req: Request, res: Response) {
     
     const pythonScript = join(__dirname, '../../../agent/reprocess_session.py')
     const pythonEnv = resolveAgentPython()
+    const persistedWords = session.turns.flatMap((turn) =>
+      Array.isArray(turn.words) ? turn.words : [],
+    )
 
     // Audio analysis runs for minutes, so hand it to a background job and let
     // the client poll /reprocess-status instead of holding the connection open
@@ -895,6 +903,7 @@ export async function reprocessSessionMetrics(req: Request, res: Response) {
       sessionId,
       localAudioPath,
       transcript,
+      JSON.stringify(persistedWords),
     ])
 
     res.status(202).json({

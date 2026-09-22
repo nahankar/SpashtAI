@@ -12,6 +12,7 @@ import logging
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from advanced_metrics_collector import AdvancedMetricsCollector
+from audio_processor import WordAlignment
 
 # Setup logging
 logging.basicConfig(
@@ -20,7 +21,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-async def reprocess_session(session_id: str, audio_file_path: str, transcript: str):
+async def reprocess_session(
+    session_id: str,
+    audio_file_path: str,
+    transcript: str,
+    supplied_words_json: str = "",
+):
     """
     Reprocess a session's audio with Gentle/Praat analysis
     
@@ -39,6 +45,22 @@ async def reprocess_session(session_id: str, audio_file_path: str, transcript: s
             logger.error(f"❌ Audio file not found: {audio_file_path}")
             return {"error": "Audio file not found", "success": False}
         
+        supplied_alignments = []
+        if supplied_words_json:
+            try:
+                supplied_alignments = [
+                    WordAlignment(
+                        word=str(item.get("w") or item.get("word") or ""),
+                        start=float(item["start"]),
+                        end=float(item["end"]),
+                        confidence=float(item.get("confidence", 1.0)),
+                    )
+                    for item in json.loads(supplied_words_json)
+                ]
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+                logger.warning("Ignoring malformed supplied word timestamps: %s", error)
+                supplied_alignments = []
+
         # Initialize advanced metrics collector
         collector = AdvancedMetricsCollector(session_id)
         
@@ -51,7 +73,7 @@ async def reprocess_session(session_id: str, audio_file_path: str, transcript: s
         logger.info("🎵 Analyzing audio delivery with Gentle/Praat...")
         
         # Run delivery analysis directly
-        await collector._analyze_delivery(audio_file_path)
+        await collector._analyze_delivery(audio_file_path, supplied_alignments)
         
         # Run content analysis
         logger.info("📚 Analyzing content with spaCy...")
@@ -96,16 +118,19 @@ async def reprocess_session(session_id: str, audio_file_path: str, transcript: s
         return {"error": str(e), "success": False}
 
 def main():
-    if len(sys.argv) != 4:
-        print("Usage: python reprocess_session.py <session_id> <audio_file_path> <transcript>")
+    if len(sys.argv) not in (4, 5):
+        print("Usage: python reprocess_session.py <session_id> <audio_file_path> <transcript> [word_timestamps_json]")
         print("Example: python reprocess_session.py session_123 /path/to/user_audio.mp4 'Hello world'")
         sys.exit(1)
     
     session_id = sys.argv[1]
     audio_file_path = sys.argv[2]
     transcript = sys.argv[3]
+    supplied_words_json = sys.argv[4] if len(sys.argv) == 5 else ""
     
-    result = asyncio.run(reprocess_session(session_id, audio_file_path, transcript))
+    result = asyncio.run(
+        reprocess_session(session_id, audio_file_path, transcript, supplied_words_json)
+    )
     
     import json
     print(json.dumps(result, indent=2))

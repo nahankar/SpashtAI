@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, Any, Optional
 
-from audio_processor import AudioProcessor, DeliveryMetrics
+from audio_processor import AudioProcessor, DeliveryMetrics, WordAlignment
 from content_analyzer import ContentAnalyzer, ContentMetrics
 from scoring_engine import ScoringEngine, PerformanceInsights
 from metrics_collector import MetricsCollector, SessionMetrics
@@ -175,7 +175,11 @@ class AdvancedMetricsCollector:
             logger.error(f"❌ Error finalizing basic metrics: {e}")
             self.session_metrics.processing_errors.append(f"Basic metrics: {e}")
     
-    async def _analyze_delivery(self, user_audio_file_path: Optional[str] = None):
+    async def _analyze_delivery(
+        self,
+        user_audio_file_path: Optional[str] = None,
+        supplied_alignments: Optional[list[WordAlignment]] = None,
+    ):
         """Perform audio-based delivery analysis"""
         try:
             logger.info("🎵 Analyzing audio delivery")
@@ -189,7 +193,11 @@ class AdvancedMetricsCollector:
                 user_text = user_text.strip()
             
             if user_text:
-                delivery_metrics = await self.audio_processor.analyze_delivery(user_text, user_audio_file_path)
+                delivery_metrics = await self.audio_processor.analyze_delivery(
+                    user_text,
+                    user_audio_file_path,
+                    supplied_alignments,
+                )
                 if delivery_metrics:
                     self.session_metrics.delivery_metrics = delivery_metrics
                     self.session_metrics.audio_processed = bool(

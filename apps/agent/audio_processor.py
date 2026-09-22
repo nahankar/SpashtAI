@@ -7,7 +7,9 @@ import hashlib
 import logging
 import io
 import json
+import math
 import os
+import re
 import tempfile
 import time
 import wave
@@ -478,7 +480,47 @@ class AudioProcessor:
         """Add audio chunk during session"""
         self.audio_buffer.add_chunk(audio_data, duration)
     
-    async def analyze_delivery(self, transcript: str, audio_file_path: Optional[str] = None) -> Optional[DeliveryMetrics]:
+    @staticmethod
+    def _validate_supplied_alignments(
+        alignments: Optional[List[WordAlignment]],
+        transcript: str,
+        audio_duration: float,
+    ) -> List[WordAlignment]:
+        """Accept persisted STT words only when they form complete audio evidence."""
+        if not alignments or audio_duration <= 0:
+            return []
+        transcript_words = len(re.findall(r"[A-Za-z']+(?:[-'][A-Za-z']+)?", transcript))
+        coverage = len(alignments) / transcript_words if transcript_words else 0.0
+        if coverage < 0.95 or coverage > 1.05:
+            logger.warning(
+                "Persisted STT alignment rejected: %.1f%% transcript coverage",
+                coverage * 100,
+            )
+            return []
+
+        previous_start = -1.0
+        for item in alignments:
+            if not all(math.isfinite(value) for value in (item.start, item.end)):
+                logger.warning("Persisted STT alignment rejected: non-finite timestamp")
+                return []
+            if item.start < 0 or item.end < item.start:
+                logger.warning("Persisted STT alignment rejected: invalid word interval")
+                return []
+            if item.start < previous_start:
+                logger.warning("Persisted STT alignment rejected: out-of-order words")
+                return []
+            if item.end > audio_duration + 0.5:
+                logger.warning("Persisted STT alignment rejected: word outside audio duration")
+                return []
+            previous_start = item.start
+        return alignments
+
+    async def analyze_delivery(
+        self,
+        transcript: str,
+        audio_file_path: Optional[str] = None,
+        supplied_alignments: Optional[List[WordAlignment]] = None,
+    ) -> Optional[DeliveryMetrics]:
         """Perform complete delivery analysis on collected audio or provided audio file"""
         logger.info(f"🔬 Starting delivery analysis for session {self.session_id}")
         
@@ -523,22 +565,32 @@ class AudioProcessor:
                 return None
             
             # Step 1: Forced alignment with Gentle (optional — needs docker on :8765)
-            alignments: List[WordAlignment] = []
-            gentle_ok = await self.gentle_aligner.is_available()
-            if gentle_ok:
-                logger.info("🎯 Performing forced alignment with Gentle...")
-                align_started = time.monotonic()
-                alignments = await self.gentle_aligner.align(audio_path, normalized_transcript)
+            alignments = self._validate_supplied_alignments(
+                supplied_alignments,
+                normalized_transcript,
+                audio_duration,
+            )
+            if alignments:
                 logger.info(
-                    "⏱️ Gentle alignment stage completed in %.2fs",
-                    time.monotonic() - align_started,
+                    "⚡ Using %d validated persisted STT word timestamps; Gentle not required",
+                    len(alignments),
                 )
             else:
-                logger.warning(
-                    "⚠️ Gentle not reachable at %s — WPM/pauses will use audio duration + transcript. "
-                    "Start with: cd infra/gentle && docker compose up -d",
-                    self.gentle_aligner.gentle_url,
-                )
+                gentle_ok = await self.gentle_aligner.is_available()
+                if gentle_ok:
+                    logger.info("🎯 Performing forced alignment with Gentle...")
+                    align_started = time.monotonic()
+                    alignments = await self.gentle_aligner.align(audio_path, normalized_transcript)
+                    logger.info(
+                        "⏱️ Gentle alignment stage completed in %.2fs",
+                        time.monotonic() - align_started,
+                    )
+                else:
+                    logger.warning(
+                        "⚠️ Gentle not reachable at %s — WPM/pauses will use audio duration + transcript. "
+                        "Start with: cd infra/gentle && docker compose up -d",
+                        self.gentle_aligner.gentle_url,
+                    )
             
             if not alignments:
                 logger.warning("No alignment results — using duration + transcript fallback")

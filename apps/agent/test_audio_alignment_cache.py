@@ -3,7 +3,7 @@ import unittest
 import wave
 from pathlib import Path
 
-from audio_processor import GentleAligner, WordAlignment
+from audio_processor import AudioProcessor, GentleAligner, WordAlignment
 
 
 def _write_silence(path: Path) -> None:
@@ -50,6 +50,49 @@ class GentleAlignmentCacheTest(unittest.TestCase):
 
             self.assertNotEqual(first, changed_text)
             self.assertNotEqual(first, changed_audio)
+
+
+class SuppliedAlignmentValidationTest(unittest.TestCase):
+    def test_accepts_complete_monotonic_contained_stt_words(self):
+        transcript = "one two three four five six seven eight nine ten"
+        alignments = [
+            WordAlignment(str(index), index * 0.4, index * 0.4 + 0.25, 1.0)
+            for index in range(10)
+        ]
+
+        accepted = AudioProcessor._validate_supplied_alignments(
+            alignments,
+            transcript,
+            audio_duration=5.0,
+        )
+
+        self.assertEqual(accepted, alignments)
+
+    def test_rejects_incomplete_or_out_of_audio_stt_words(self):
+        transcript = "one two three four five six seven eight nine ten"
+        incomplete = [WordAlignment("one", 0.0, 0.2, 1.0)]
+        outside_audio = [
+            WordAlignment(str(index), index * 0.4, index * 0.4 + 0.25, 1.0)
+            for index in range(10)
+        ]
+        outside_audio[-1] = WordAlignment("ten", 4.8, 5.8, 1.0)
+
+        self.assertEqual(
+            AudioProcessor._validate_supplied_alignments(
+                incomplete,
+                transcript,
+                audio_duration=5.0,
+            ),
+            [],
+        )
+        self.assertEqual(
+            AudioProcessor._validate_supplied_alignments(
+                outside_audio,
+                transcript,
+                audio_duration=5.0,
+            ),
+            [],
+        )
 
 
 if __name__ == "__main__":
