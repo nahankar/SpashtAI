@@ -55,9 +55,10 @@ class GentleAlignmentCacheTest(unittest.TestCase):
 class SuppliedAlignmentValidationTest(unittest.TestCase):
     def test_accepts_complete_monotonic_contained_stt_words(self):
         transcript = "one two three four five six seven eight nine ten"
+        tokens = transcript.split()
         alignments = [
-            WordAlignment(str(index), index * 0.4, index * 0.4 + 0.25, 1.0)
-            for index in range(10)
+            WordAlignment(token, index * 0.4, index * 0.4 + 0.25, 1.0)
+            for index, token in enumerate(tokens)
         ]
 
         accepted = AudioProcessor._validate_supplied_alignments(
@@ -71,9 +72,10 @@ class SuppliedAlignmentValidationTest(unittest.TestCase):
     def test_rejects_incomplete_or_out_of_audio_stt_words(self):
         transcript = "one two three four five six seven eight nine ten"
         incomplete = [WordAlignment("one", 0.0, 0.2, 1.0)]
+        tokens = transcript.split()
         outside_audio = [
-            WordAlignment(str(index), index * 0.4, index * 0.4 + 0.25, 1.0)
-            for index in range(10)
+            WordAlignment(token, index * 0.4, index * 0.4 + 0.25, 1.0)
+            for index, token in enumerate(tokens)
         ]
         outside_audio[-1] = WordAlignment("ten", 4.8, 5.8, 1.0)
 
@@ -88,6 +90,22 @@ class SuppliedAlignmentValidationTest(unittest.TestCase):
         self.assertEqual(
             AudioProcessor._validate_supplied_alignments(
                 outside_audio,
+                transcript,
+                audio_duration=5.0,
+            ),
+            [],
+        )
+
+    def test_rejects_timestamps_for_different_words(self):
+        transcript = "one two three four five six seven eight nine ten"
+        alignments = [
+            WordAlignment("mismatch", index * 0.4, index * 0.4 + 0.25, 1.0)
+            for index in range(10)
+        ]
+
+        self.assertEqual(
+            AudioProcessor._validate_supplied_alignments(
+                alignments,
                 transcript,
                 audio_duration=5.0,
             ),

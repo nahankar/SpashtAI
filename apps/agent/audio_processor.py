@@ -3,6 +3,7 @@ Advanced Audio Processing Pipeline for SpashtAI
 Integrates with Gentle forced alignment, Praat prosodic analysis, and S3 storage
 """
 import asyncio
+from difflib import SequenceMatcher
 import hashlib
 import logging
 import io
@@ -489,12 +490,32 @@ class AudioProcessor:
         """Accept persisted STT words only when they form complete audio evidence."""
         if not alignments or audio_duration <= 0:
             return []
-        transcript_words = len(re.findall(r"[A-Za-z']+(?:[-'][A-Za-z']+)?", transcript))
-        coverage = len(alignments) / transcript_words if transcript_words else 0.0
+        transcript_tokens = [
+            token.lower()
+            for token in re.findall(r"[A-Za-z']+(?:[-'][A-Za-z']+)?", transcript)
+        ]
+        alignment_tokens = [
+            token.lower()
+            for item in alignments
+            for token in re.findall(r"[A-Za-z']+(?:[-'][A-Za-z']+)?", item.word)
+        ]
+        coverage = len(alignments) / len(transcript_tokens) if transcript_tokens else 0.0
         if coverage < 0.95 or coverage > 1.05:
             logger.warning(
                 "Persisted STT alignment rejected: %.1f%% transcript coverage",
                 coverage * 100,
+            )
+            return []
+        lexical_match = SequenceMatcher(
+            None,
+            transcript_tokens,
+            alignment_tokens,
+            autojunk=False,
+        ).ratio()
+        if lexical_match < 0.90:
+            logger.warning(
+                "Persisted STT alignment rejected: %.1f%% lexical match",
+                lexical_match * 100,
             )
             return []
 
