@@ -20,6 +20,11 @@ from typing import Optional
 import pytz
 
 from dotenv import load_dotenv
+
+# Load process configuration before importing any module that snapshots
+# environment variables at import time (notably analytics.signal_api).
+load_dotenv()
+
 from livekit import rtc, api
 from livekit.agents import (
     AutoSubscribe,
@@ -86,8 +91,6 @@ else:
     logging.getLogger("main").info(
         "ℹ️ In-process Signal API disabled (SIGNAL_API_INPROCESS=0) — expecting a standalone signal service on :4001"
     )
-
-load_dotenv()
 
 logger = logging.getLogger("spashtai-agent")
 logger.setLevel(logging.INFO)
