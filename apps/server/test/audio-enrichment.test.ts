@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const prismaMock = vi.hoisted(() => ({
+  $transaction: vi.fn(),
   sessionMetrics: {
     findUnique: vi.fn(),
     update: vi.fn(),
@@ -13,6 +14,9 @@ const resolveMock = vi.hoisted(() => ({
 
 vi.mock('../src/lib/prisma', () => ({ prisma: prismaMock }))
 vi.mock('../src/analytics/insightProviders/resolveSessionAudio', () => resolveMock)
+vi.mock('../src/lib/sessionDiscard', () => ({
+  lockWritableSession: vi.fn(),
+}))
 
 import { enrichElevateSessionAudio } from '../src/analytics/audioEnrichment'
 
@@ -21,6 +25,8 @@ describe('late recording enrichment', () => {
     vi.restoreAllMocks()
     prismaMock.sessionMetrics.findUnique.mockReset()
     prismaMock.sessionMetrics.update.mockReset()
+    prismaMock.$transaction.mockReset()
+    prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock))
     resolveMock.resolveElevateSessionAudio.mockReset()
   })
 
@@ -45,6 +51,41 @@ describe('late recording enrichment', () => {
     const payload = prismaMock.sessionMetrics.update.mock.calls[0][0].data
     expect(payload.communicationSignals.prosody.pitchVariation).toBe(6.2)
     expect(payload.processingStatus.audioStatus).toBe('available')
+    expect(payload.processingStatus.audio_processed).toBe(true)
+  })
+
+  it('rereads status under lock so concurrent pace evidence is preserved', async () => {
+    resolveMock.resolveElevateSessionAudio.mockResolvedValue({
+      audioPath: '/tmp/session.webm',
+      segments: [],
+    })
+    prismaMock.sessionMetrics.findUnique
+      .mockResolvedValueOnce({
+        communicationSignals: { fillers: { rate: 0.1 } },
+        processingStatus: { audioStatus: 'pending' },
+      })
+      .mockResolvedValueOnce({
+        communicationSignals: { fillers: { rate: 0.1 } },
+        processingStatus: {
+          audioStatus: 'pending',
+          pace: { status: 'available', wpm: 123 },
+        },
+      })
+    prismaMock.sessionMetrics.update.mockResolvedValue({})
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          prosody: { pitchVariation: 6.2, energyStability: 7.1, voiceQuality: 8 },
+        }),
+      }),
+    )
+
+    await enrichElevateSessionAudio('session-concurrent')
+
+    const payload = prismaMock.sessionMetrics.update.mock.calls[0][0].data
+    expect(payload.processingStatus.pace).toEqual({ status: 'available', wpm: 123 })
     expect(payload.processingStatus.audio_processed).toBe(true)
   })
 

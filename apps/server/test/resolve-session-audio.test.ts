@@ -48,9 +48,12 @@ describe('resolveElevateSessionAudio path contract', () => {
     const filePath = join(audioDir, fileName)
     await writeFile(filePath, Buffer.alloc(2048))
     return {
+      id: `segment-${index}`,
       segmentIndex: index,
+      recordingDurationSec: 10 + index,
       recording: {
         filePath,
+        duration: 10 + index,
         mimeType: 'audio/webm',
         updatedAt: new Date(`2026-09-20T18:0${index}:00Z`),
       },
@@ -71,6 +74,18 @@ describe('resolveElevateSessionAudio path contract', () => {
 
     expect(resolved?.audioPath).toBeTruthy()
     expect(isAbsolute(resolved!.audioPath)).toBe(true)
+    expect(resolved?.segments).toEqual([
+      { segmentId: 'segment-0', segmentIndex: 0, replayOffsetSec: 0, durationSec: 10 },
+      { segmentId: 'segment-1', segmentIndex: 1, replayOffsetSec: 10, durationSec: 11 },
+    ])
+  })
+
+  it('falls back to media duration when persisted duration is zero', async () => {
+    const { resolvePositiveSegmentDuration } = await import(
+      '../src/analytics/insightProviders/resolveSessionAudio'
+    )
+    expect(resolvePositiveSegmentDuration(0, 12.5)).toBe(12.5)
+    expect(resolvePositiveSegmentDuration(Number.NaN, 9)).toBe(9)
   })
 
   it('returns an absolute path for a single segment', async () => {
@@ -84,6 +99,29 @@ describe('resolveElevateSessionAudio path contract', () => {
 
     expect(isAbsolute(resolved!.audioPath)).toBe(true)
     expect(resolved?.audioMime).toBe('audio/webm')
+  })
+
+  it('omits a missing middle file from both merge and timeline offsets', async () => {
+    const first = await segment(0, 'first.webm')
+    const missing = {
+      ...(await segment(1, 'missing.webm')),
+      recording: {
+        ...(await segment(1, 'missing.webm')).recording,
+        filePath: join(audioDir, 'does-not-exist.webm'),
+      },
+    }
+    const last = await segment(2, 'last.webm')
+    mocks.prisma.sessionSegment.findMany.mockResolvedValue([first, missing, last])
+
+    const { resolveElevateSessionAudio } = await import(
+      '../src/analytics/insightProviders/resolveSessionAudio'
+    )
+    const resolved = await resolveElevateSessionAudio('session-missing-middle')
+
+    expect(resolved?.segments).toEqual([
+      { segmentId: 'segment-0', segmentIndex: 0, replayOffsetSec: 0, durationSec: 10 },
+      { segmentId: 'segment-2', segmentIndex: 2, replayOffsetSec: 10, durationSec: 12 },
+    ])
   })
 
   it('resolves a relatively stored recording path to an absolute path', async () => {

@@ -94,6 +94,8 @@ class WordAlignment:
     start: float
     end: float
     confidence: float
+    utterance_id: Optional[str] = None
+    timing_origin: str = "unknown"
 
 @dataclass
 class PauseSegment:
@@ -103,6 +105,7 @@ class PauseSegment:
     duration: float
     context_before: str
     context_after: str
+    utterance_id: str
 
 @dataclass
 class ProsodyMetrics:
@@ -130,6 +133,7 @@ class DeliveryMetrics:
     energy_stability: float
     voice_quality_score: float  # 0-10 based on harmonicity
     confidence_indicators: Dict[str, float]
+    pause_profile: List[Dict[str, object]]
 
 class AudioBuffer:
     """Manages audio data collection during Nova Sonic sessions"""
@@ -232,7 +236,7 @@ class GentleAligner:
     def _cache_path(self, audio_path: str, transcript: str) -> Path:
         """Content-addressed cache key; never reuse alignment for changed evidence."""
         digest = hashlib.sha256()
-        digest.update(b"gentle-alignment-v1\0")
+        digest.update(b"gentle-alignment-v2\0")
         with open(audio_path, "rb") as audio_file:
             for chunk in iter(lambda: audio_file.read(1024 * 1024), b""):
                 digest.update(chunk)
@@ -245,7 +249,15 @@ class GentleAligner:
             if not cache_path.exists():
                 return None
             payload = json.loads(cache_path.read_text(encoding="utf-8"))
-            alignments = [WordAlignment(**item) for item in payload.get("alignments", [])]
+            alignments = [
+                WordAlignment(
+                    **{
+                        **item,
+                        "timing_origin": item.get("timing_origin", "forced_alignment"),
+                    }
+                )
+                for item in payload.get("alignments", [])
+            ]
             if alignments:
                 logger.info("⚡ Reusing exact Gentle alignment cache: %s", cache_path.name)
                 return alignments
@@ -345,21 +357,29 @@ class GentleAligner:
                         word=word_data.get('word', ''),
                         start=word_data.get('start', 0.0),
                         end=word_data.get('end', 0.0),
-                        confidence=1.0  # Gentle doesn't provide confidence scores
+                        confidence=1.0,  # Gentle doesn't provide confidence scores
+                        timing_origin="forced_alignment",
                     ))
         
         return alignments
     
-    def extract_pauses(self, alignments: List[WordAlignment], min_pause_duration: float = 0.3) -> List[PauseSegment]:
-        """Extract pause segments from word alignments"""
+    def extract_pauses(
+        self,
+        alignments: List[WordAlignment],
+        min_pause_duration: float = 0.3,
+        max_pause_duration: float = 3.0,
+    ) -> List[PauseSegment]:
+        """Extract within-utterance pauses, excluding likely inter-turn gaps."""
         pauses = []
         
         for i in range(len(alignments) - 1):
+            if not self._same_utterance(alignments[i], alignments[i + 1]):
+                continue
             current_end = alignments[i].end
             next_start = alignments[i + 1].start
             pause_duration = next_start - current_end
             
-            if pause_duration >= min_pause_duration:
+            if min_pause_duration <= pause_duration <= max_pause_duration:
                 context_before = alignments[i].word
                 context_after = alignments[i + 1].word
                 
@@ -368,23 +388,41 @@ class GentleAligner:
                     end=next_start,
                     duration=pause_duration,
                     context_before=context_before,
-                    context_after=context_after
+                    context_after=context_after,
+                    utterance_id=alignments[i].utterance_id or "",
                 ))
         
         return pauses
+
+    @staticmethod
+    def _same_utterance(current: WordAlignment, following: WordAlignment) -> bool:
+        """Only explicit committed-turn identity can prove pause continuity."""
+        return (
+            current.utterance_id is not None
+            and current.utterance_id == following.utterance_id
+        )
     
     def calculate_speech_rates(self, alignments: List[WordAlignment], total_duration: float) -> Tuple[float, float]:
-        """Calculate speech rate and articulation rate from alignments"""
+        """Calculate delivery speech rate and articulation rate.
+
+        Delivery pace includes meaningful pauses up to three seconds between
+        words. Longer gaps are treated as inter-turn/coach time. Articulation
+        rate uses voiced word spans only.
+        """
         if not alignments:
             return 0.0, 0.0
         
         total_words = len(alignments)
         
-        # Speech rate: words per minute including pauses
-        speech_rate = (total_words / total_duration) * 60 if total_duration > 0 else 0
-        
-        # Articulation rate: words per minute excluding pauses
         total_speech_time = sum(alignment.end - alignment.start for alignment in alignments)
+        meaningful_pause_time = sum(
+            gap
+            for current, following in zip(alignments, alignments[1:])
+            if self._same_utterance(current, following)
+            and 0 < (gap := following.start - current.end) <= 3.0
+        )
+        delivery_time = total_speech_time + meaningful_pause_time
+        speech_rate = (total_words / delivery_time) * 60 if delivery_time > 0 else 0
         articulation_rate = (total_words / total_speech_time) * 60 if total_speech_time > 0 else 0
         
         return speech_rate, articulation_rate
@@ -449,15 +487,20 @@ class PraatAnalyzer:
             return None
     
     def _calculate_rates_from_alignment(self, alignments: List[WordAlignment], total_duration: float) -> Tuple[float, float]:
-        """Calculate speech rates from word alignments"""
+        """Calculate delivery and articulation rates from word alignments."""
         if not alignments:
             return 0.0, 0.0
         
         total_words = len(alignments)
-        speech_rate = (total_words / total_duration) * 60 if total_duration > 0 else 0
-        
-        # Calculate actual speaking time (excluding pauses)
         speaking_time = sum(alignment.end - alignment.start for alignment in alignments)
+        meaningful_pause_time = sum(
+            gap
+            for current, following in zip(alignments, alignments[1:])
+            if GentleAligner._same_utterance(current, following)
+            and 0 < (gap := following.start - current.end) <= 3.0
+        )
+        delivery_time = speaking_time + meaningful_pause_time
+        speech_rate = (total_words / delivery_time) * 60 if delivery_time > 0 else 0
         articulation_rate = (total_words / speaking_time) * 60 if speaking_time > 0 else 0
         
         return speech_rate, articulation_rate
@@ -489,6 +532,17 @@ class AudioProcessor:
     ) -> List[WordAlignment]:
         """Accept persisted STT words only when they form complete audio evidence."""
         if not alignments or audio_duration <= 0:
+            return []
+        invalid_origins = {
+            item.timing_origin
+            for item in alignments
+            if item.timing_origin not in ("actual", "forced_alignment")
+        }
+        if invalid_origins:
+            logger.warning(
+                "Persisted STT alignment rejected: non-acoustic timing origins %s",
+                sorted(invalid_origins),
+            )
             return []
         transcript_tokens = [
             token.lower()
@@ -608,13 +662,13 @@ class AudioProcessor:
                     )
                 else:
                     logger.warning(
-                        "⚠️ Gentle not reachable at %s — WPM/pauses will use audio duration + transcript. "
+                        "⚠️ Gentle not reachable at %s — delivery pace, articulation, and pauses remain unavailable. "
                         "Start with: cd infra/gentle && docker compose up -d",
                         self.gentle_aligner.gentle_url,
                     )
             
             if not alignments:
-                logger.warning("No alignment results — using duration + transcript fallback")
+                logger.warning("No alignment results — timing-based delivery metrics remain unavailable")
                 return self._fallback_analysis(normalized_transcript, audio_duration, audio_path)
             
             # Step 2: Extract pauses from alignment
@@ -703,7 +757,8 @@ class AudioProcessor:
             pitch_variation=pitch_variation,
             energy_stability=energy_stability,
             voice_quality_score=voice_quality,
-            confidence_indicators=confidence_indicators
+            confidence_indicators=confidence_indicators,
+            pause_profile=[asdict(pause) for pause in pauses],
         )
     
     def _fallback_analysis(
@@ -712,9 +767,8 @@ class AudioProcessor:
         audio_duration: float = 0.0,
         audio_path: Optional[str] = None,
     ) -> DeliveryMetrics:
-        """Fallback when Gentle alignment is unavailable — still uses audio duration + strict fillers."""
+        """Fallback without alignment: retain fillers/prosody, not timing rates."""
         speech = analyze_speech_text(transcript)
-        total_words = speech.word_count or len(transcript.split())
         duration = audio_duration
 
         if duration <= 0 and audio_path:
@@ -724,8 +778,11 @@ class AudioProcessor:
         if audio_path and Path(audio_path).exists():
             prosody = self.praat_analyzer.extract_prosodic_features(audio_path)
 
-        speech_rate = (total_words / duration * 60) if duration > 0 else 0.0
-        articulation_rate = prosody.articulation_rate if prosody and prosody.articulation_rate > 0 else speech_rate * 1.1
+        # Full-track duration contains long coach/inter-turn silences, so it is
+        # not valid evidence for either delivery pace or articulation rate.
+        # Keep these unavailable until alignment supplies word/ pause timing.
+        speech_rate = 0.0
+        articulation_rate = 0.0
 
         return DeliveryMetrics(
             speech_rate=speech_rate,
@@ -738,7 +795,8 @@ class AudioProcessor:
             pitch_variation=prosody.pitch_variation if prosody else 0.0,
             energy_stability=prosody.intensity_stability if prosody else 0.0,
             voice_quality_score=self._calculate_voice_quality_score(prosody) if prosody else 0.0,
-            confidence_indicators={}
+            confidence_indicators={},
+            pause_profile=[],
         )
     
     def _calculate_voice_quality_score(self, prosody: ProsodyMetrics) -> float:

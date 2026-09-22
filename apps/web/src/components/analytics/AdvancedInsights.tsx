@@ -52,6 +52,7 @@ function buildFromV2(
   signals: V2Signals | null,
   _skill: V2SkillScores | null,
   coaching: V2Coaching | null,
+  advanced: AdvancedMetrics | null,
 ): AdvancedMetrics {
   const s = signals ?? {}
   const vocab = s.vocabDiversity ?? {}
@@ -94,13 +95,16 @@ function buildFromV2(
     : undefined
 
   const prosody = s.prosody ?? null
+  const alignedDelivery = advanced?.delivery_metrics
   const hasAcousticProsody = isUsableProsody(prosody)
   const delivery_metrics: AdvancedMetrics['delivery_metrics'] = signals
     ? {
         speech_rate: sr.wpm ?? 0,
-        articulation_rate: sr.wpm ?? 0,
-        pause_count: hasAcousticProsody ? (prosody?.pauseCount ?? 0) : 0,
-        mean_pause_duration: hasAcousticProsody ? (prosody?.meanPauseDuration ?? 0) : 0,
+        articulation_rate: alignedDelivery?.articulation_rate ?? 0,
+        pause_count: alignedDelivery?.pause_count ?? (hasAcousticProsody ? (prosody?.pauseCount ?? 0) : 0),
+        mean_pause_duration:
+          alignedDelivery?.mean_pause_duration ??
+          (hasAcousticProsody ? (prosody?.meanPauseDuration ?? 0) : 0),
         filler_word_count: fl.count ?? 0,
         filler_word_rate: (fl.rate ?? 0) * 100,
         pitch_variation: hasAcousticProsody ? (prosody?.pitchVariation ?? 0) : 0,
@@ -304,15 +308,17 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
     }
 
     try {
-      const [signalsRes, scoresRes, coachingRes] = await Promise.all([
+      const [signalsRes, scoresRes, coachingRes, advancedRes] = await Promise.all([
         fetch(`${API_BASE_URL}/sessions/${sessionId}/communication-signals`, { headers: getAuthHeaders() }),
         fetch(`${API_BASE_URL}/sessions/${sessionId}/skill-scores`, { headers: getAuthHeaders() }),
         fetch(`${API_BASE_URL}/sessions/${sessionId}/coaching-insights`, { headers: getAuthHeaders() }),
+        fetch(`${API_BASE_URL}/sessions/${sessionId}/advanced-metrics`, { headers: getAuthHeaders() }),
       ]);
 
       const signals = signalsRes.ok ? ((await signalsRes.json()) as V2Signals) : null;
       const skill = scoresRes.ok ? ((await scoresRes.json()) as V2SkillScores) : null;
       const coaching = coachingRes.ok ? ((await coachingRes.json()) as V2Coaching) : null;
+      const advanced = advancedRes.ok ? ((await advancedRes.json()) as AdvancedMetrics) : null;
 
       if (!signals && !skill && !coaching) {
         if (!opts?.silent) {
@@ -322,7 +328,7 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
         return false;
       }
 
-      setMetrics(buildFromV2(signals, skill, coaching));
+      setMetrics(buildFromV2(signals, skill, coaching, advanced));
       return hasRealProsody(signals);
     } catch (err) {
       console.error('Error fetching advanced metrics:', err);
@@ -615,6 +621,18 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
                   <Progress value={d.energy_stability * 10} />
                 </div>
 
+                {d.articulation_rate > 0 && (
+                  <div className="border-t pt-3">
+                    <div className="text-sm text-muted-foreground">Articulation rate</div>
+                    <div className="text-2xl font-bold">
+                      {Math.round(d.articulation_rate)} <span className="text-sm font-normal">WPM</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Voiced-word time only; pauses are excluded.
+                    </div>
+                  </div>
+                )}
+
                 {d.pause_count > 0 && (
                   <div className="border-t pt-3">
                     <div className="text-sm text-muted-foreground">Pauses</div>
@@ -631,8 +649,8 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
                   Stability</span> reflects recorded level consistency and may be flattened by automatic
                   gain control. <span className="font-medium">Voice Quality</span> is based on
                   harmonics-to-noise ratio and is not a diagnosis of vocal strain. <span className="font-medium">Pauses</span> are
-                  detected silent intervals, not necessarily rhetorical pauses.
-                  Pace &amp; fillers are in <span className="font-medium">Speaking Performance</span> above.
+                  detected within-utterance silent intervals; long inter-turn gaps are excluded.
+                  Delivery pace, which includes meaningful pauses, is in <span className="font-medium">Speaking Performance</span> above.
                 </p>
               </CardContent>
             </Card>

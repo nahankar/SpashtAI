@@ -1,4 +1,5 @@
 export interface PaceContract {
+  origin?: 'live_logical_turns' | 'reconciled_committed_turns' | null
   source?: 'word_timestamps' | 'validated_turn_audio' | null
   status?: 'available' | 'insufficient_evidence'
   confidence?: 'high' | 'medium' | 'low'
@@ -12,6 +13,7 @@ export interface PaceContract {
   observedSamples?: number
   observedEstimatedSamples?: number
   excludedMicroTurnCount?: number
+  excludedShortDurationCount?: number
   excludedUnreliableTurnCount?: number
   timestampedWordCount?: number
   transcriptWordCount?: number
@@ -47,7 +49,17 @@ export function isSubstantivePaceTurn(metrics: Record<string, unknown> | null | 
     Number.isFinite(wpm) &&
     wpm > 0 &&
     Number.isFinite(speakingSeconds) &&
-    speakingSeconds > 0 &&
+    speakingSeconds >= 4 &&
     (source === 'word_timestamps' || source === 'validated_turn_audio')
   )
+}
+
+/** User-facing fastest/slowest moments need more evidence than a chart point. */
+export function isQualifiedPaceHighlight(
+  metrics: Record<string, unknown> | null | undefined,
+): boolean {
+  if (!isSubstantivePaceTurn(metrics)) return false
+  const words = Number(metrics?.word_count)
+  const speakingSeconds = Number(metrics?.speaking_seconds)
+  return words >= 15 && speakingSeconds >= 4
 }

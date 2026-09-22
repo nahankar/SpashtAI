@@ -75,21 +75,18 @@ export async function getSessionTurns(req: Request, res: Response) {
       orderBy: { segmentIndex: 'asc' },
       include: { recording: { select: { duration: true } } },
     })
-    const segmentOffsets = new Map<string, number>()
-    let replayOffset = 0
-    for (const segment of segments) {
-      segmentOffsets.set(segment.id, replayOffset)
-      if (segment.audioStatus === 'available' && segment.recording) {
-        replayOffset += Math.max(
-          0,
-          segment.recordingDurationSec ?? segment.recording.duration,
-        )
-      }
-    }
+    const resolvedAudio = await resolveElevateSessionAudio(sessionId).catch(() => null)
+    // This is the one canonical segment list for both the merged stream and
+    // replay offsets. Unreadable files are absent, so later words cannot drift.
+    const segmentOffsets = new Map(
+      (resolvedAudio?.segments ?? []).map((segment) => [
+        segment.segmentId,
+        segment.replayOffsetSec,
+      ]),
+    )
     turns = turns.map((turn) => {
       if (!turn.segmentId) return turn
-      const segment = segments.find((item) => item.id === turn.segmentId)
-      if (!segment || segment.audioStatus !== 'available' || !segment.recording) {
+      if (!segmentOffsets.has(turn.segmentId)) {
         return { ...turn, audioStart: null, audioEnd: null, words: null }
       }
       const offset = segmentOffsets.get(turn.segmentId) ?? 0
@@ -157,9 +154,8 @@ export async function getSessionTurns(req: Request, res: Response) {
     let speechRegions: { start: number; end: number }[] = []
     let skipPlaybackRegions: { start: number; end: number }[] = wordSkipRegions
     try {
-      const resolved = await resolveElevateSessionAudio(sessionId)
-      if (resolved?.audioPath) {
-        speechRegions = await detectSpeechRegions(resolved.audioPath)
+      if (resolvedAudio?.audioPath) {
+        speechRegions = await detectSpeechRegions(resolvedAudio.audioPath)
         if (skipPlaybackRegions.length === 0) {
           const userTurnCount = turns.filter((t) => t.role === 'user').length
           const firstUserStart = turns.find(

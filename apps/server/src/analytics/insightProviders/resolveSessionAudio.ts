@@ -19,6 +19,32 @@ const audioRoot = process.env.LOCAL_AUDIO_PATH
 const execFileAsync = promisify(execFile)
 const mergeInFlight = new Map<string, Promise<void>>()
 
+export interface ResolvedAudioSegment {
+  segmentId: string
+  segmentIndex: number
+  replayOffsetSec: number
+  durationSec: number
+}
+
+export interface ResolvedSessionAudio {
+  audioPath: string
+  audioMime?: string
+  segments: ResolvedAudioSegment[]
+}
+
+export function resolvePositiveSegmentDuration(
+  recordedDuration: number | null | undefined,
+  mediaDuration: number | null | undefined,
+): number {
+  if (Number.isFinite(recordedDuration) && Number(recordedDuration) > 0) {
+    return Number(recordedDuration)
+  }
+  if (Number.isFinite(mediaDuration) && Number(mediaDuration) > 0) {
+    return Number(mediaDuration)
+  }
+  return 0
+}
+
 async function ensureMergedRecording(outputPath: string, audioPaths: string[]): Promise<void> {
   if (existsSync(outputPath)) return
   const existing = mergeInFlight.get(outputPath)
@@ -76,10 +102,9 @@ function resolveFilePath(storedPath: string): string | null {
 /**
  * Pick the best Elevate session recording and return a readable local path.
  */
-export async function resolveElevateSessionAudio(sessionId: string): Promise<{
-  audioPath: string
-  audioMime?: string
-} | null> {
+export async function resolveElevateSessionAudio(
+  sessionId: string,
+): Promise<ResolvedSessionAudio | null> {
   const segments = await prisma.sessionSegment.findMany({
     where: { sessionId, audioStatus: 'available', recording: { isNot: null } },
     orderBy: { segmentIndex: 'asc' },
@@ -94,14 +119,32 @@ export async function resolveElevateSessionAudio(sessionId: string): Promise<{
           audioPath,
           audioMime: segment.recording?.mimeType || mimeFromPath(audioPath),
           updatedAt: segment.recording!.updatedAt,
+          segmentId: segment.id,
+          segmentIndex: segment.segmentIndex,
+          durationSec: resolvePositiveSegmentDuration(
+            segment.recordingDurationSec,
+            segment.recording!.duration,
+          ),
         }]
       : []
+  })
+  let replayOffsetSec = 0
+  const resolvedSegments: ResolvedAudioSegment[] = segmentFiles.map((file) => {
+    const resolved = {
+      segmentId: file.segmentId,
+      segmentIndex: file.segmentIndex,
+      replayOffsetSec,
+      durationSec: file.durationSec,
+    }
+    replayOffsetSec += file.durationSec
+    return resolved
   })
 
   if (segmentFiles.length === 1) {
     return {
       audioPath: segmentFiles[0].audioPath,
       audioMime: segmentFiles[0].audioMime,
+      segments: resolvedSegments,
     }
   }
 
@@ -115,7 +158,7 @@ export async function resolveElevateSessionAudio(sessionId: string): Promise<{
       mergedPath,
       segmentFiles.map((file) => file.audioPath),
     )
-    return { audioPath: mergedPath, audioMime: 'audio/webm' }
+    return { audioPath: mergedPath, audioMime: 'audio/webm', segments: resolvedSegments }
   }
 
   const recordings = await prisma.sessionRecording.findMany({
@@ -128,7 +171,11 @@ export async function resolveElevateSessionAudio(sessionId: string): Promise<{
     if (!rec?.filePath) continue
     const audioPath = resolveFilePath(rec.filePath)
     if (audioPath) {
-      return { audioPath, audioMime: rec.mimeType || mimeFromPath(audioPath) }
+      return {
+        audioPath,
+        audioMime: rec.mimeType || mimeFromPath(audioPath),
+        segments: [],
+      }
     }
   }
 

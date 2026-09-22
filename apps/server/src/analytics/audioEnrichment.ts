@@ -6,6 +6,7 @@ import {
   mergeProcessingStatus,
   resolveAudioStatus,
 } from './audioStatus'
+import { lockWritableSession } from '../lib/sessionDiscard'
 
 const SIGNAL_API_URL = process.env.SIGNAL_API_URL || 'http://localhost:4001'
 const INTERNAL_AGENT_TOKEN =
@@ -62,31 +63,47 @@ export async function enrichElevateSessionAudio(sessionId: string): Promise<void
 
     const prosody = await fetchProsodyForPath(sessionId, resolved.audioPath)
     if (!hasRealProsody({ prosody })) {
-      await prisma.sessionMetrics.update({
-        where: { sessionId },
-        data: {
-          processingStatus: mergeProcessingStatus(metrics.processingStatus, {
-            audioStatus: 'available',
-            audioProcessed: false,
-          }),
-        },
+      await prisma.$transaction(async (tx) => {
+        await lockWritableSession(tx, sessionId)
+        const latest = await tx.sessionMetrics.findUnique({
+          where: { sessionId },
+          select: { processingStatus: true },
+        })
+        if (!latest) return
+        await tx.sessionMetrics.update({
+          where: { sessionId },
+          data: {
+            processingStatus: mergeProcessingStatus(latest.processingStatus, {
+              audioStatus: 'available',
+              audioProcessed: false,
+            }),
+          },
+        })
       })
       return
     }
 
-    const existing =
-      metrics.communicationSignals && typeof metrics.communicationSignals === 'object'
-        ? (metrics.communicationSignals as Record<string, unknown>)
-        : {}
-    await prisma.sessionMetrics.update({
-      where: { sessionId },
-      data: {
-        communicationSignals: { ...existing, prosody },
-        processingStatus: mergeProcessingStatus(metrics.processingStatus, {
-          audioStatus: resolveAudioStatus({ hasReadableRecording: true }),
-          audioProcessed: true,
-        }),
-      },
+    await prisma.$transaction(async (tx) => {
+      await lockWritableSession(tx, sessionId)
+      const latest = await tx.sessionMetrics.findUnique({
+        where: { sessionId },
+        select: { communicationSignals: true, processingStatus: true },
+      })
+      if (!latest || hasRealProsody(latest.communicationSignals)) return
+      const existing =
+        latest.communicationSignals && typeof latest.communicationSignals === 'object'
+          ? (latest.communicationSignals as Record<string, unknown>)
+          : {}
+      await tx.sessionMetrics.update({
+        where: { sessionId },
+        data: {
+          communicationSignals: { ...existing, prosody },
+          processingStatus: mergeProcessingStatus(latest.processingStatus, {
+            audioStatus: resolveAudioStatus({ hasReadableRecording: true }),
+            audioProcessed: true,
+          }),
+        },
+      })
     })
   } catch (error) {
     console.warn(`[analytics] audio enrichment skipped for ${sessionId}:`, error)

@@ -363,6 +363,14 @@ model Session {
 
   progressPulseStatus String? // 'tracked' | 'skipped' | null (not yet decided)
 
+  // Durable post-Leave pace reconciliation job.
+  paceReconciliationStatus     String? // pending | processing | retry | completed
+  paceReconciliationAttempts   Int       @default(0)
+  paceReconciliationError      String?   @db.Text
+  nextPaceReconciliationAt     DateTime?
+  paceReconciliationLeaseId    String?
+  paceReconciliationLeaseUntil DateTime?
+
   // Terminal discard tombstone. Tombstoned sessions are hidden and return
   // 410 to every read/write path while storage cleanup retries durably.
   discardedAt                 DateTime?
@@ -390,6 +398,8 @@ model Session {
   @@index([userId, module, endedAt])
   @@index([discardedAt, nextDeletionAttemptAt])
   @@index([discardedAt, deletionLeaseUntil, nextDeletionAttemptAt])
+  @@index([paceReconciliationStatus, nextPaceReconciliationAt])
+  @@index([paceReconciliationStatus, paceReconciliationLeaseUntil])
 }
 
 // Per-turn record powering the "conversation as replay" UX (per-message audio
@@ -413,7 +423,7 @@ model SessionTurn {
   audioStart Float?
   audioEnd   Float?
 
-  words     Json? // [{ w: string, start: number, end: number }] (user turns only, v1)
+  words     Json? // [{ w, start, end, timingOrigin: actual|synthetic }] (user turns only)
   metrics   Json? // TurnMetricsSnapshot: { wpm, fillerCount, fillerRate, hedgingCount, vocabDiversity, speakingSeconds, ... }
   score     Json? // LLM judge: { stars, confidence, tags: string[] }
   coachNote String? @db.Text

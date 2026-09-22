@@ -97,6 +97,35 @@ class LivePacingEvidenceTest(unittest.TestCase):
         self.assertEqual(evidence["totalWords"], 0)
         self.assertEqual(evidence["excludedMicroTurnCount"], 1)
 
+    def test_short_fast_burst_does_not_satisfy_headline_sample_count(self):
+        tracker = LivePacingTracker()
+        tracker.ingest_measured_final(
+            "one two three four five six seven eight",
+            8,
+            1.57,
+            pace_source="word_timestamps",
+            timestamped_word_count=8,
+            transcript_word_count=8,
+        )
+        tracker.accept_logical_turn(8, 1.57, "word_timestamps")
+        tracker.ingest_measured_final(
+            "nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen "
+            "nineteen twenty twenty-one twenty-two twenty-three twenty-four twenty-five "
+            "twenty-six twenty-seven twenty-eight",
+            20,
+            10.0,
+            pace_source="word_timestamps",
+            timestamped_word_count=20,
+            transcript_word_count=20,
+        )
+        tracker.accept_logical_turn(20, 10.0, "word_timestamps")
+
+        evidence = tracker.get_pace_evidence()
+        self.assertEqual(evidence["status"], "insufficient_evidence")
+        self.assertEqual(evidence["samples"], 1)
+        self.assertEqual(evidence["observedSamples"], 2)
+        self.assertEqual(evidence["excludedShortDurationCount"], 1)
+
     def test_estimated_turn_does_not_emit_pace_advice(self):
         metrics = compute_turn_metrics("this estimated turn has several spoken words")
 

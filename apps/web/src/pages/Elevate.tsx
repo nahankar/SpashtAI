@@ -857,7 +857,15 @@ export function Elevate() {
               }
             : null,
         metrics: metricSections,
-        paceTrend: pacePoints.length >= 2 ? { points: pacePoints, idealMin: 120, idealMax: 160 } : null,
+        paceTrend:
+          paceAvailable && pacePoints.length >= 2
+            ? {
+                points: pacePoints,
+                canonicalWpm: m.userWpm,
+                idealMin: 120,
+                idealMax: 160,
+              }
+            : null,
         progressPulse,
         nextSteps: nextSteps.length ? nextSteps : null,
         strengths: coaching?.topStrength ? [{ point: coaching.topStrength }] : undefined,
@@ -2275,6 +2283,8 @@ export function Elevate() {
                         sessionId={sessionId}
                         isSessionEnded={true}
                         points={completedPacePoints}
+                        paceAvailable={hasAvailablePace(historicalMetrics.processingStatus)}
+                        canonicalWpm={historicalMetrics.userWpm}
                       />
                     </div>
 
@@ -2506,7 +2516,12 @@ export function Elevate() {
 
                   {/* Pace variation across turns */}
                   <div className="mt-6">
-                    <PaceTrendCard sessionId={sessionId} isSessionEnded={!joined} />
+                    <PaceTrendCard
+                      sessionId={sessionId}
+                      isSessionEnded={!joined}
+                      paceAvailable={hasAvailablePace(historicalMetrics.processingStatus)}
+                      canonicalWpm={historicalMetrics.userWpm}
+                    />
                   </div>
 
                   {/* Communication Score (with inline skill breakdown) */}

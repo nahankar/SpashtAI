@@ -505,7 +505,12 @@ class CoachingAgent(Agent):
                     we = getattr(w, "end_time", None)
                     if wtext and ws is not None and we is not None:
                         self._stt_words.append(
-                            {"w": wtext, "start": float(ws), "end": float(we)}
+                            {
+                                "w": wtext,
+                                "start": float(ws),
+                                "end": float(we),
+                                "timingOrigin": "actual",
+                            }
                         )
                         appended += 1
             # AWS Transcribe via the LiveKit plugin exposes segment-level
@@ -522,7 +527,12 @@ class CoachingAgent(Agent):
                 for i, tok in enumerate(toks):
                     ws = seg_start + i * per
                     self._stt_words.append(
-                        {"w": tok, "start": ws, "end": ws + per}
+                        {
+                            "w": tok,
+                            "start": ws,
+                            "end": ws + per,
+                            "timingOrigin": "synthetic",
+                        }
                     )
         except Exception as e:
             logger.debug("stt word capture failed: %s", e)
@@ -2740,7 +2750,7 @@ async def entrypoint(ctx: JobContext):
                         user_seq += 1
                         meta = committed_user_meta.get(user_seq)
                         if meta and meta.get("metrics"):
-                            entry["metrics"] = meta["metrics"]
+                            entry["metrics"] = dict(meta["metrics"])
                         n = t.word_count or len(text.split())
                         slice_words = stt_words[word_cursor : word_cursor + n]
                         word_cursor += n
@@ -2748,6 +2758,41 @@ async def entrypoint(ctx: JobContext):
                             entry["audioStart"] = slice_words[0]["start"]
                             entry["audioEnd"] = slice_words[-1]["end"]
                             entry["words"] = slice_words
+                        origins = [
+                            str(word.get("timingOrigin") or "unknown")
+                            for word in slice_words
+                        ]
+                        invalid_intervals = sum(
+                            1
+                            for word in slice_words
+                            if not isinstance(word.get("start"), (int, float))
+                            or not isinstance(word.get("end"), (int, float))
+                            or float(word["end"]) < float(word["start"])
+                        )
+                        out_of_order = sum(
+                            1
+                            for previous, current in zip(slice_words, slice_words[1:])
+                            if isinstance(previous.get("start"), (int, float))
+                            and isinstance(current.get("start"), (int, float))
+                            and current["start"] < previous["start"]
+                        )
+                        metrics = entry.setdefault("metrics", {})
+                        metrics["timing_validation"] = {
+                            "expectedWordCount": n,
+                            "capturedWordCount": len(slice_words),
+                            "actualWordCount": origins.count("actual"),
+                            "syntheticWordCount": origins.count("synthetic"),
+                            "unknownOriginCount": origins.count("unknown"),
+                            "invalidIntervalCount": invalid_intervals,
+                            "outOfOrderCount": out_of_order,
+                            "eligibleForDeliveryEvidence": (
+                                len(slice_words) == n
+                                and n > 0
+                                and origins.count("actual") == n
+                                and invalid_intervals == 0
+                                and out_of_order == 0
+                            ),
+                        }
                     turns_payload.append(entry)
 
                 if turns_payload:
@@ -2783,14 +2828,35 @@ async def entrypoint(ctx: JobContext):
         # Always rerun after basic metrics + turns persist. The browser may have
         # analyzed earlier, before authoritative pace evidence was available.
         # This pass is idempotent and never creates Pulse entries.
-        should_run_final_backstop = (
-            cleanup_persistence_enabled
-            and (not segment_id or await fetch_session_ended(session_id))
-        )
+        session_is_final = not segment_id
+        if cleanup_persistence_enabled and segment_id:
+            # End-session and segment-shutdown race each other. The browser can
+            # set endedAt just after the worker first checks lifecycle; waiting
+            # briefly here lets an actual Leave persist the final live pace
+            # contract without making ordinary Pause segments terminal.
+            for attempt in range(2):
+                lifecycle = await fetch_session_lifecycle(session_id)
+                if lifecycle in ("ended", "missing"):
+                    session_is_final = lifecycle == "ended"
+                    break
+                if attempt == 0:
+                    await asyncio.sleep(2)
+
+            if session_is_final and advanced_metrics:
+                try:
+                    await advanced_metrics.save_to_database(
+                        include_advanced_metrics=False
+                    )
+                    logger.info("✅ Final segment metrics saved after endedAt became visible")
+                except Exception as save_error:
+                    logger.error("❌ Failed to save final segment metrics: %s", save_error)
+
+        should_run_final_backstop = cleanup_persistence_enabled and session_is_final
         if should_run_final_backstop:
             try:
                 import aiohttp
-                await asyncio.sleep(3)
+                if not segment_id:
+                    await asyncio.sleep(3)
                 async with aiohttp.ClientSession() as _as:
                     headers = {"x-internal-agent-token": INTERNAL_AGENT_TOKEN}
                     analyze_url = f"{SERVER_URL}/sessions/{session_id}/analyze"

@@ -46,7 +46,12 @@ export interface SessionReport {
       hint?: string
     }[]
   }[]
-  paceTrend?: { points: { label: string | number; wpm: number }[]; idealMin?: number; idealMax?: number } | null
+  paceTrend?: {
+    points: { label: string | number; wpm: number }[]
+    canonicalWpm: number
+    idealMin?: number
+    idealMax?: number
+  } | null
   progressPulse?: { skill: string; label: string; currentScore: number; delta?: number | null }[] | null
   /** Recommended practice sessions with deep links into Elevate. */
   nextSteps?: { title: string; description: string; url: string }[] | null
@@ -104,12 +109,12 @@ function drawPaceChart(
   y: number,
   w: number,
   h: number,
+  canonicalWpm: number,
   idealMin = 120,
   idealMax = 160,
 ): void {
   const wpms = points.map((p) => p.wpm).filter((v) => Number.isFinite(v) && v > 0)
   if (wpms.length < 2) return
-  const avg = wpms.reduce((s, v) => s + v, 0) / wpms.length
   const dataMax = Math.max(...wpms)
   const dataMin = Math.min(...wpms)
   const yMax = Math.max(200, Math.ceil((dataMax + 20) / 20) * 20)
@@ -139,11 +144,11 @@ function drawPaceChart(
     doc.text(String(v), x + padL - 2, py(v) + 1.5, { align: 'right' })
   }
 
-  // Average dashed line
+  // Canonical weighted session pace — never an arithmetic mean of turn WPMs.
   doc.setDrawColor(120, 130, 145)
   doc.setLineWidth(0.3)
   doc.setLineDashPattern([1, 1], 0)
-  doc.line(innerX, py(avg), innerX + innerW, py(avg))
+  doc.line(innerX, py(canonicalWpm), innerX + innerW, py(canonicalWpm))
   doc.setLineDashPattern([], 0)
 
   // Pace polyline
@@ -172,7 +177,7 @@ function drawPaceChart(
   doc.setLineDashPattern([1, 1], 0)
   doc.line(x + 92, legendY - 1, x + 98, legendY - 1)
   doc.setLineDashPattern([], 0)
-  doc.text(`Average ${Math.round(avg)} WPM`, x + 100, legendY)
+  doc.text(`Session pace ${Math.round(canonicalWpm)} WPM`, x + 100, legendY)
 }
 
 const SKILL_LABELS: Record<string, string> = {
@@ -823,6 +828,7 @@ export async function generateSessionPdf(report: SessionReport): Promise<void> {
       y,
       CONTENT_W,
       34,
+      report.paceTrend.canonicalWpm,
       report.paceTrend.idealMin ?? 120,
       report.paceTrend.idealMax ?? 160,
     )

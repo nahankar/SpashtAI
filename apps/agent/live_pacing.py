@@ -39,6 +39,7 @@ logger = logging.getLogger("live-pacing")
 _MIN_SPEECH_SEC = 0.4   # ignore VAD blips shorter than this
 _MIN_WORDS_FOR_WPM = 5  # don't report WPM until the user has said at least this many words
 _MIN_ACCEPTED_TURN_WORDS = 8
+_MIN_ACCEPTED_TURN_SECONDS = 4.0
 _DURATION_QUEUE_MAX = 32
 
 
@@ -137,6 +138,7 @@ class LivePacingTracker:
         self._accepted_word_timestamp_samples: int = 0
         self._accepted_validated_turn_samples: int = 0
         self._excluded_micro_turn_count: int = 0
+        self._excluded_short_duration_count: int = 0
         self._excluded_unreliable_turn_count: int = 0
         self._timestamped_word_count: int = 0
         self._transcript_word_count: int = 0
@@ -272,6 +274,7 @@ class LivePacingTracker:
                 self._accepted_word_timestamp_samples = 0
                 self._accepted_validated_turn_samples = 0
                 self._excluded_micro_turn_count = 0
+                self._excluded_short_duration_count = 0
                 self._excluded_unreliable_turn_count = 0
                 self._timestamped_word_count = 0
                 self._transcript_word_count = 0
@@ -329,6 +332,9 @@ class LivePacingTracker:
             ):
                 self._excluded_unreliable_turn_count += 1
                 return
+            if seconds < _MIN_ACCEPTED_TURN_SECONDS:
+                self._excluded_short_duration_count += 1
+                return
             self._accepted_words += words
             self._accepted_seconds += seconds
             self._accepted_samples += 1
@@ -384,7 +390,12 @@ class LivePacingTracker:
                     else "validated_turn_audio"
                 )
             return {
+                "origin": "live_logical_turns",
                 "source": source,
+                "sourceComposition": {
+                    "wordTimestampSamples": self._accepted_word_timestamp_samples,
+                    "validatedTurnAudioSamples": self._accepted_validated_turn_samples,
+                },
                 "status": "insufficient_evidence",
                 "confidence": "low",
                 "totalWords": self._accepted_words,
@@ -396,6 +407,7 @@ class LivePacingTracker:
                 "observedSamples": self._samples,
                 "observedEstimatedSamples": self._estimated_samples,
                 "excludedMicroTurnCount": self._excluded_micro_turn_count,
+                "excludedShortDurationCount": self._excluded_short_duration_count,
                 "excludedUnreliableTurnCount": self._excluded_unreliable_turn_count,
                 "timestampedWordCount": self._timestamped_word_count,
                 "transcriptWordCount": self._transcript_word_count,
@@ -417,7 +429,12 @@ class LivePacingTracker:
         if source == "word_timestamps" and not high_confidence:
             source = "validated_turn_audio"
         return {
+            "origin": "live_logical_turns",
             "source": source,
+            "sourceComposition": {
+                "wordTimestampSamples": self._accepted_word_timestamp_samples,
+                "validatedTurnAudioSamples": self._accepted_validated_turn_samples,
+            },
             "status": "available",
             "confidence": "high" if high_confidence else "medium",
             "totalWords": self._accepted_words,
@@ -429,6 +446,7 @@ class LivePacingTracker:
             "observedSamples": self._samples,
             "observedEstimatedSamples": self._estimated_samples,
             "excludedMicroTurnCount": self._excluded_micro_turn_count,
+            "excludedShortDurationCount": self._excluded_short_duration_count,
             "excludedUnreliableTurnCount": self._excluded_unreliable_turn_count,
             "timestampedWordCount": self._timestamped_word_count,
             "transcriptWordCount": self._transcript_word_count,
@@ -466,6 +484,7 @@ class LivePacingTracker:
             self._accepted_word_timestamp_samples = 0
             self._accepted_validated_turn_samples = 0
             self._excluded_micro_turn_count = 0
+            self._excluded_short_duration_count = 0
             self._excluded_unreliable_turn_count = 0
             self._timestamped_word_count = 0
             self._transcript_word_count = 0

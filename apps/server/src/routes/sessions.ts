@@ -5,6 +5,7 @@ import { logger, reqLog } from '../lib/logger'
 import { awardSessionActivePoints } from '../lib/points'
 import { isPrivilegedRole } from '../lib/userExportFlags'
 import { enqueueSessionDeletion } from '../lib/sessionDeletionWorker'
+import { queuePaceReconciliation } from '../lib/paceReconciliationWorker'
 import {
   lockWritableSession,
   RecordingOwnershipError,
@@ -138,6 +139,14 @@ export async function endSession(req: Request, res: Response) {
           data: {
             endedAt: endedAt ? new Date(endedAt) : existing.endedAt ?? new Date(),
             durationSec: durationSec ?? existing.durationSec,
+            paceReconciliationStatus:
+              existing.endedAt && existing.paceReconciliationStatus
+                ? existing.paceReconciliationStatus
+                : 'pending',
+            nextPaceReconciliationAt:
+              existing.endedAt && existing.paceReconciliationStatus
+                ? existing.nextPaceReconciliationAt
+                : new Date(),
           },
           include: {
             user: {
@@ -164,6 +173,9 @@ export async function endSession(req: Request, res: Response) {
       { event: 'elevate.session_ended', sessionId: id, durationSec: session.durationSec, pointsAwarded },
       'session ended',
     )
+    // Agent turn persistence may finish before or after endedAt. Queue near-term
+    // retries; the durable database sweep also repairs sessions after restarts.
+    queuePaceReconciliation(id)
     res.json({ success: true, session, pointsAwarded, totalPoints })
   } catch (error) {
     if (error instanceof SessionDiscardedError || error instanceof SessionMissingError) {

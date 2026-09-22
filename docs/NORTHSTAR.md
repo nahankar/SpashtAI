@@ -276,8 +276,133 @@ Admin presets: [apps/web/src/pages/admin/VoiceBackend.tsx](../apps/web/src/pages
 | **P1** | Persist utterances | 2, 3 | `conversationData.utterances[]`; turn metrics survive page reload |
 | **P2** | Turn-end async feedback | 2 | Lite/rules `feedback[]` on utterance; does not delay coach audio |
 | **P3** | Elevate session replay MVP | 4 | Timeline table on completed session; audio seek via session recording + offset |
+| **P3.1** | Delivery Evidence Moments | 2, 3, 4 | One strength and one opportunity backed by a timestamped clip, measurable evidence, confidence, and a specific retry |
 | **P4** | Pulse enrichment | 5, 6 | Utterance aggregates inform Progress Pulse and session analyze |
 | **P5** | Parked expansion | 7, 9 | Prisma `Utterance` table, Ask SpashtAI, proactive nudges |
+
+### P3.1 — Delivery Evidence Moments
+
+**Product outcome:** Move delivery coaching from generic acoustic scores to
+audible, explainable moments. Session Analytics shows a compact summary and a
+`Review delivery moments` entry point. Playback contains the evidence: a
+timestamp, short clip, transcript highlight, measured pattern, confidence, and
+one actionable retry.
+
+```text
+Delivery moments
+
+Strength
+01:48 — Pause after the main claim
+0.8s sentence-boundary pause gave the point room to land.
+[Hear it]
+
+Opportunity
+03:22 — Make the closing benefit land
+Energy decreased relative to your session baseline near the ending.
+[Hear it] [Try again]
+```
+
+**Placement:**
+
+| Surface | Responsibility |
+|---------|----------------|
+| Session Analytics | One strength, one opportunity, suppression/quality note, and entry point |
+| Playback | Moment rail with clip, transcript evidence, measurement, confidence, and retry |
+| Progress Pulse | No moment-level claims in P3.1; consume only validated aggregates later |
+
+**Canonical delivery-moment shape (target):**
+
+```json
+{
+  "moment_id": "dm-001",
+  "session_id": "s-123",
+  "utterance_id": "u-004",
+  "kind": "sentence_boundary_pause",
+  "polarity": "strength",
+  "start_ms": 108200,
+  "end_ms": 110100,
+  "clip_start_ms": 106700,
+  "clip_end_ms": 111600,
+  "transcript_range": {
+    "start_word": 41,
+    "end_word": 55
+  },
+  "evidence": {
+    "pause_seconds": 0.8,
+    "placement": "sentence_boundary",
+    "baseline_delta": null
+  },
+  "capture_quality": {
+    "alignment_coverage": 0.99,
+    "clipping_detected": false,
+    "agc_state": "unknown",
+    "quality": "sufficient"
+  },
+  "confidence": 0.91,
+  "observation": "A 0.8s pause followed the main claim.",
+  "interpretation": "This may give the point more room to land.",
+  "retry": "Repeat the sentence with the same pause before the supporting detail.",
+  "analyzer_version": "delivery-moments-v1"
+}
+```
+
+`observation` is the measured claim. `interpretation` is deliberately cautious
+until expert validation supports stronger language. `retry` must be specific to
+the audible moment.
+
+**Hard quality gates:**
+
+1. Use a committed, stitched user utterance—never an STT fragment.
+2. Require reliable user-only audio and transcript/audio alignment.
+3. Require enough voiced speech for the feature being measured.
+4. Validate timestamp finiteness, ordering, containment, lexical coverage, and
+   clip bounds.
+5. Record capture conditions: requested and effective AGC/noise/echo settings,
+   clipping, and signal quality. Suppress energy claims when capture conditions
+   are unreliable or unknown.
+6. Measure pitch movement in semitones relative to the speaker's own robust
+   voiced-speech baseline. Never classify a naturally high or low voice as a
+   problem.
+7. Classify pauses by placement in the phrase, sentence, or idea. A raw silence
+   count is not a coaching claim.
+8. Treat HNR/CPP/noise as recording-signal evidence, not a health, strain,
+   confidence, or emotion diagnosis.
+9. Withhold the moment when confidence is below threshold; absence of a moment
+   is preferable to unsupported coaching.
+10. Every shipped moment has an audible clip, measurable reason, confidence,
+    and one actionable retry.
+
+**P3.1 release gate:**
+
+- Human communication coaches label a diverse evaluation set.
+- “Helpful pause,” “flat ending,” “lost energy,” and similar interpretations
+  meet agreed precision/inter-rater thresholds before release.
+- False-positive and suppression rates are reported by capture quality,
+  microphone/browser conditions, voice range, and speaker cohort.
+- Users can hear the source clip and judge the claim themselves.
+- Strong labels remain disabled until validated; the UI falls back to neutral
+  observations.
+
+**First vertical slice (P3.1a): sentence-boundary pause evidence**
+
+Start with one conservative moment type using capabilities already present:
+stitched `SessionTurn` text, persisted word timestamps, and replay audio offsets.
+Detect a pause only when it is bounded by validated words and located at a
+sentence boundary. Ship behind a feature flag with:
+
+- one strongest candidate and one disruptive mid-thought candidate at most;
+- `Hear it` playback;
+- neutral measured copy;
+- capture/alignment suppression reasons;
+- an offline coach-labelled evaluation report.
+
+Do not begin with “nervous,” “strained,” “confident,” generic pitch scores, or
+energy interpretations. After P3.1a reaches its precision target, add
+speaker-relative ending/emphasis contours, then capture-aware energy change.
+
+> [Advanced Analytics Architecture](./Advanced-Analytics-Architecture.md) is
+> historical design context, not the product contract. P3.1 and the canonical
+> schemas in this document govern Delivery Moments.
 
 ### Do not start until P0 + P1
 

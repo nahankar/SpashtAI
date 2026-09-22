@@ -386,12 +386,18 @@ class AdvancedMetricsCollector:
         except Exception as e:
             logger.error(f"❌ Error publishing final insights: {e}")
     
-    async def save_to_database(self, *, include_basic_metrics: bool = True):
+    async def save_to_database(
+        self,
+        *,
+        include_basic_metrics: bool = True,
+        include_advanced_metrics: bool = True,
+    ):
         """Save metrics via the server API.
 
-        Standalone audio reprocessing must set ``include_basic_metrics=False``:
-        it has no live token/latency/turn collector state and must not replace
-        previously captured basic evidence with zeroes.
+        Standalone audio reprocessing sets ``include_basic_metrics=False``.
+        Late segmented-session finalization sets
+        ``include_advanced_metrics=False`` because its time-bounded analysis may
+        be incomplete; the server's final analyze pass owns that block.
         """
         try:
             import aiohttp
@@ -460,6 +466,9 @@ class AdvancedMetricsCollector:
                             logger.warning(f"⚠️ Failed to save basic metrics: HTTP {response.status}")
                             logger.debug(f"   Response: {error_text}")
                 
+                if not include_advanced_metrics:
+                    return True
+
                 # 2. Save advanced metrics
                 advanced_payload = {
                     "session_id": self.session_id,

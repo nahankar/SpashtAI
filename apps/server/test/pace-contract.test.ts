@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { assessPaceEvidence, measuredTurnVariability } from '../src/analytics/pace'
+import {
+  assessPaceEvidence,
+  measuredTurnVariability,
+  selectBestPaceEvidence,
+} from '../src/analytics/pace'
 import { calculateWeightedOverallScore } from '../src/analytics/skillScores'
 
 describe('authoritative pace contract', () => {
@@ -154,5 +158,131 @@ describe('authoritative pace contract', () => {
     )
     expect(invalid.status).toBe('insufficient_evidence')
     expect(invalid.wpm).toBeNull()
+  })
+
+  it('reconciles a weighted post-Leave aggregate from persisted measured turns', () => {
+    const result = selectBestPaceEvidence(
+      null,
+      [
+        {
+          role: 'user',
+          metrics: {
+            word_count: 20,
+            speaking_seconds: 8.1,
+            wpm: 147.8,
+            pace_source: 'validated_turn_audio',
+          },
+        },
+        {
+          role: 'user',
+          metrics: {
+            word_count: 64,
+            speaking_seconds: 36.3,
+            wpm: 105.6,
+            pace_source: 'word_timestamps',
+          },
+        },
+        {
+          role: 'user',
+          metrics: {
+            word_count: 3,
+            speaking_seconds: 3.1,
+            wpm: 58.3,
+            pace_source: 'word_timestamps',
+          },
+        },
+      ],
+      87,
+    )
+
+    expect(result.status).toBe('available')
+    expect(result.origin).toBe('reconciled_committed_turns')
+    expect(result.source).toBe('validated_turn_audio')
+    expect(result.confidence).toBe('medium')
+    expect(result.samples).toBe(2)
+    expect(result.totalWords).toBe(84)
+    expect(result.wpm).toBeCloseTo(113.51, 2)
+    expect(result.excludedMicroTurnCount).toBe(1)
+    expect(result.sourceComposition).toEqual({
+      wordTimestampSamples: 1,
+      validatedTurnAudioSamples: 1,
+    })
+  })
+
+  it('keeps a short fast burst diagnostic but does not count it as a headline sample', () => {
+    const result = selectBestPaceEvidence(
+      null,
+      [
+        {
+          role: 'user',
+          metrics: {
+            word_count: 8,
+            speaking_seconds: 1.57,
+            wpm: 305.7,
+            pace_source: 'word_timestamps',
+          },
+        },
+        {
+          role: 'user',
+          metrics: {
+            word_count: 20,
+            speaking_seconds: 10,
+            wpm: 120,
+            pace_source: 'word_timestamps',
+          },
+        },
+      ],
+      28,
+    )
+
+    expect(result.status).toBe('insufficient_evidence')
+    expect(result.wpm).toBeNull()
+    expect(result.samples).toBe(1)
+    expect(result.totalWords).toBe(20)
+    expect(result.observedSamples).toBe(2)
+    expect(result.observedWords).toBe(28)
+    expect(result.excludedShortDurationCount).toBe(1)
+  })
+
+  it('keeps higher-confidence live evidence over the reconstructed candidate', () => {
+    const result = selectBestPaceEvidence(
+      {
+        source: 'word_timestamps',
+        status: 'available',
+        totalWords: 100,
+        speakingSeconds: 50,
+        samples: 3,
+        estimatedSamples: 0,
+        timestampedWordCount: 100,
+        transcriptWordCount: 100,
+        invalidTimestampCount: 0,
+        outOfOrderTimestampCount: 0,
+      },
+      [
+        {
+          role: 'user',
+          metrics: {
+            word_count: 100,
+            speaking_seconds: 60,
+            wpm: 100,
+            pace_source: 'validated_turn_audio',
+          },
+        },
+        {
+          role: 'user',
+          metrics: {
+            word_count: 20,
+            speaking_seconds: 10,
+            wpm: 120,
+            pace_source: 'validated_turn_audio',
+          },
+        },
+      ],
+      100,
+    )
+
+    expect(result.source).toBe('word_timestamps')
+    expect(result.confidence).toBe('high')
+    expect(result.wpm).toBe(120)
   })
 })

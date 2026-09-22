@@ -36,6 +36,7 @@ import {
   assessPaceEvidence,
   measuredTurnVariability,
   readPersistedPaceEvidence,
+  selectBestPaceEvidence,
 } from '../analytics/pace'
 
 const SIGNAL_API_URL = process.env.SIGNAL_API_URL || 'http://localhost:4001'
@@ -178,8 +179,9 @@ export async function analyzeSession(req: Request, res: Response) {
     // The old aggregate silence detector merged every sub-3-second pause into
     // one giant "speech" span. Accept only persisted, source-labelled timing
     // evidence from STT timestamps or measured utterances.
-    const pace = assessPaceEvidence(
+    const pace = selectBestPaceEvidence(
       readPersistedPaceEvidence(existingMetrics?.processingStatus),
+      session.turns,
       signals.speechRate.totalWords,
     )
     signals.speechRate = {
@@ -193,12 +195,15 @@ export async function analyzeSession(req: Request, res: Response) {
       source: pace.source,
       confidence: pace.confidence,
       evidence: {
+        origin: pace.origin,
+        sourceComposition: pace.sourceComposition,
         totalWords: pace.totalWords,
         speakingSeconds: pace.speakingSeconds,
         samples: pace.samples,
         estimatedSamples: pace.estimatedSamples,
         coverage: pace.coverage,
         excludedMicroTurnCount: pace.excludedMicroTurnCount,
+        excludedShortDurationCount: pace.excludedShortDurationCount,
         excludedUnreliableTurnCount: pace.excludedUnreliableTurnCount,
         timestampCoverage: pace.timestampCoverage,
         invalidTimestampCount: pace.invalidTimestampCount,
@@ -242,27 +247,36 @@ export async function analyzeSession(req: Request, res: Response) {
     const skillScoresJson = JSON.parse(JSON.stringify({ scores, components }))
     const signalsJson = JSON.parse(JSON.stringify(mergedSignals))
     const insightsJson = JSON.parse(JSON.stringify(insights))
-    const processingStatusJson = JSON.parse(
-      JSON.stringify({
-        ...mergeProcessingStatus(existingMetrics?.processingStatus, {
-          audioStatus,
-          audioProcessed,
-        }),
-        pace,
-      }),
-    )
-
     await prisma.$transaction(async (tx) => {
       await lockWritableSession(tx, sessionId)
+      const latestMetrics = await tx.sessionMetrics.findUnique({
+        where: { sessionId },
+        select: { processingStatus: true },
+      })
+      const finalPace = selectBestPaceEvidence(
+        readPersistedPaceEvidence(latestMetrics?.processingStatus),
+        session.turns,
+        signals.speechRate.totalWords,
+      )
+      const processingStatusJson = JSON.parse(
+        JSON.stringify({
+          ...mergeProcessingStatus(latestMetrics?.processingStatus, {
+            audioStatus,
+            audioProcessed,
+          }),
+          pace: finalPace,
+        }),
+      )
       await tx.sessionMetrics.upsert({
         where: { sessionId },
         create: {
           sessionId,
-          userWpm: pace.wpm ?? 0,
+          userWpm: finalPace.wpm ?? 0,
           userFillerCount: signals.fillers.count,
           userFillerRate: signals.fillers.rate * 100,
           userAvgSentenceLength: signals.sentenceComplexity.avgLength,
-          userSpeakingTime: pace.status === 'available' ? pace.speakingSeconds : 0,
+          userSpeakingTime:
+            finalPace.status === 'available' ? finalPace.speakingSeconds : 0,
           userVocabDiversity: signals.vocabDiversity.ratio,
           totalTurns: messages.length,
           skillScores: skillScoresJson,
@@ -271,11 +285,12 @@ export async function analyzeSession(req: Request, res: Response) {
           processingStatus: processingStatusJson,
         },
         update: {
-          userWpm: pace.wpm ?? 0,
+          userWpm: finalPace.wpm ?? 0,
           userFillerCount: signals.fillers.count,
           userFillerRate: signals.fillers.rate * 100,
           userAvgSentenceLength: signals.sentenceComplexity.avgLength,
-          userSpeakingTime: pace.status === 'available' ? pace.speakingSeconds : 0,
+          userSpeakingTime:
+            finalPace.status === 'available' ? finalPace.speakingSeconds : 0,
           userVocabDiversity: signals.vocabDiversity.ratio,
           totalTurns: messages.length,
           skillScores: skillScoresJson,

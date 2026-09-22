@@ -15,6 +15,11 @@ import {
 import { assessPaceEvidence } from '../analytics/pace'
 import { resolveAgentPython } from '../lib/agentPython'
 import { getReprocessJob, startReprocessJob } from '../lib/reprocessJobs'
+import { resolveElevateSessionAudio } from '../analytics/insightProviders/resolveSessionAudio'
+import {
+  buildReprocessTranscripts,
+  buildReprocessTimelineWords,
+} from '../analytics/reprocessTimeline'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -162,25 +167,24 @@ export async function saveSessionMetrics(req: Request, res: Response) {
       totalTurns: metricsData.totalTurns || 0,
     }
 
-    const previousMetrics = await prisma.sessionMetrics.findUnique({
-      where: { sessionId },
-      select: { processingStatus: true },
-    })
-    const previousProcessingStatus =
-      previousMetrics?.processingStatus &&
-      typeof previousMetrics.processingStatus === 'object' &&
-      !Array.isArray(previousMetrics.processingStatus)
-        ? previousMetrics.processingStatus
-        : {}
-    const processingStatus = JSON.parse(
-      JSON.stringify({
-        ...previousProcessingStatus,
-        pace: userPace,
-      }),
-    )
-
     const metrics = await prisma.$transaction(async (tx) => {
       await lockWritableSession(tx, sessionId)
+      const latest = await tx.sessionMetrics.findUnique({
+        where: { sessionId },
+        select: { processingStatus: true },
+      })
+      const previousProcessingStatus =
+        latest?.processingStatus &&
+        typeof latest.processingStatus === 'object' &&
+        !Array.isArray(latest.processingStatus)
+          ? latest.processingStatus
+          : {}
+      const processingStatus = JSON.parse(
+        JSON.stringify({
+          ...previousProcessingStatus,
+          pace: userPace,
+        }),
+      )
       return tx.sessionMetrics.upsert({
         where: { sessionId },
         update: { ...sharedFields, processingStatus },
@@ -803,7 +807,7 @@ export async function reprocessSessionMetrics(req: Request, res: Response) {
         turns: {
           where: { role: 'user' },
           orderBy: { sequenceNo: 'asc' },
-          select: { words: true },
+          select: { id: true, segmentId: true, text: true, words: true },
         },
       }
     })
@@ -811,12 +815,6 @@ export async function reprocessSessionMetrics(req: Request, res: Response) {
     if (!session) {
       return res.status(404).json({ error: 'Session not found' })
     }
-
-    // Pick best available recording for resumed sessions.
-    const recordingPriority = ['user', 'room_composite', 'merged_audio', 'agent']
-    const selectedRecording = recordingPriority
-      .map((type) => session.recordings.find((r: any) => r.recordingType === type && r.filePath))
-      .find(Boolean)
 
     // Build deduplicated user transcript for audio alignment
     let transcript = ''
@@ -864,9 +862,23 @@ export async function reprocessSessionMetrics(req: Request, res: Response) {
         }
       })
     }
+    const fullContentTranscript = transcript
+
+    // Reuse the same deterministic segment merge as Replay/analytics. Selecting
+    // one recording while supplying all-session text corrupts resumed sessions.
+    const resolvedAudio = await resolveElevateSessionAudio(sessionId)
+    let deliveryTranscript = fullContentTranscript
+    if (resolvedAudio?.segments.length) {
+      const reprocessTranscripts = buildReprocessTranscripts(
+        fullContentTranscript,
+        resolvedAudio.segments,
+        session.turns,
+      )
+      deliveryTranscript = reprocessTranscripts.deliveryTranscript
+    }
 
     // If no audio recording exists, gracefully fall back to text-based metric recalculation.
-    if (!selectedRecording || !selectedRecording.filePath) {
+    if (!resolvedAudio?.audioPath) {
       const textMetricsResp = await calculateTextMetrics(req, {
         status: (code: number) => ({
           json: (payload: any) => ({ code, payload })
@@ -883,16 +895,13 @@ export async function reprocessSessionMetrics(req: Request, res: Response) {
       })
     }
 
-    // Call Python reprocessing script
-    // Convert /out/ path to local path
-    const localAudioPath = selectedRecording.filePath.startsWith('/out/')
-      ? selectedRecording.filePath.replace('/out/', join(__dirname, '../../../agent/audio_storage/'))
-      : selectedRecording.filePath
-    
+    // Call Python reprocessing script against the merged Replay timeline.
+    const localAudioPath = resolvedAudio.audioPath
     const pythonScript = join(__dirname, '../../../agent/reprocess_session.py')
     const pythonEnv = resolveAgentPython()
-    const persistedWords = session.turns.flatMap((turn) =>
-      Array.isArray(turn.words) ? turn.words : [],
+    const persistedWords = buildReprocessTimelineWords(
+      resolvedAudio.segments,
+      session.turns,
     )
 
     // Audio analysis runs for minutes, so hand it to a background job and let
@@ -902,8 +911,9 @@ export async function reprocessSessionMetrics(req: Request, res: Response) {
       pythonScript,
       sessionId,
       localAudioPath,
-      transcript,
+      fullContentTranscript,
       JSON.stringify(persistedWords),
+      deliveryTranscript,
     ])
 
     res.status(202).json({
@@ -911,7 +921,10 @@ export async function reprocessSessionMetrics(req: Request, res: Response) {
       sessionId: sessionId,
       status: job.status,
       startedAt: job.startedAt,
-      recordingTypeUsed: selectedRecording.recordingType,
+      recordingTypeUsed:
+        resolvedAudio.segments.length > 1
+          ? 'merged_segments'
+          : 'segment_audio',
     })
 
   } catch (error) {

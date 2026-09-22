@@ -34,12 +34,18 @@ export interface TextSignals {
     source?: 'word_timestamps' | 'validated_turn_audio' | null
     confidence?: 'high' | 'medium' | 'low'
     evidence?: {
+      origin: 'live_logical_turns' | 'reconciled_committed_turns' | null
+      sourceComposition: {
+        wordTimestampSamples: number
+        validatedTurnAudioSamples: number
+      }
       totalWords: number
       speakingSeconds: number
       samples: number
       estimatedSamples: number
       coverage: number
       excludedMicroTurnCount: number
+      excludedShortDurationCount: number
       excludedUnreliableTurnCount: number
       timestampCoverage: number
       invalidTimestampCount: number

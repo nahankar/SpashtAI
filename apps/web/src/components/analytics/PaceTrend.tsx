@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card'
 import { Gauge } from 'lucide-react'
 import { getAuthHeaders } from '@/lib/api-client'
-import { isSubstantivePaceTurn } from '@/lib/pace'
+import { hasAvailablePace, isSubstantivePaceTurn } from '@/lib/pace'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 
@@ -31,23 +31,26 @@ const IDEAL_MAX = 160
  */
 export function PaceTrend({
   points,
+  canonicalWpm = null,
+  provisional = false,
   idealMin = IDEAL_MIN,
   idealMax = IDEAL_MAX,
   height = 150,
 }: {
   points: PacePoint[]
+  canonicalWpm?: number | null
+  provisional?: boolean
   idealMin?: number
   idealMax?: number
   height?: number
 }) {
   const stats = useMemo(() => {
     const wpms = points.map((p) => p.wpm).filter((w) => Number.isFinite(w) && w > 0)
-    const avg = wpms.length ? wpms.reduce((s, w) => s + w, 0) / wpms.length : 0
     const dataMax = wpms.length ? Math.max(...wpms) : idealMax
     const dataMin = wpms.length ? Math.min(...wpms) : idealMin
     const yMax = Math.max(200, Math.ceil((dataMax + 20) / 20) * 20)
     const yMin = Math.max(0, Math.min(60, Math.floor((dataMin - 20) / 20) * 20))
-    return { avg, yMax, yMin }
+    return { yMax, yMin }
   }, [points, idealMin, idealMax])
 
   if (points.length < 2) {
@@ -67,7 +70,7 @@ export function PaceTrend({
   const padB = 22
   const innerW = W - padL - padR
   const innerH = H - padT - padB
-  const { yMax, yMin, avg } = stats
+  const { yMax, yMin } = stats
   const range = yMax - yMin || 1
 
   const x = (i: number) => padL + (points.length === 1 ? innerW / 2 : (i / (points.length - 1)) * innerW)
@@ -82,16 +85,20 @@ export function PaceTrend({
   return (
     <div>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height }} preserveAspectRatio="none">
-        {/* Ideal band */}
-        <rect
-          x={padL}
-          y={bandTop}
-          width={innerW}
-          height={Math.max(0, bandBottom - bandTop)}
-          fill="rgb(34 197 94 / 0.12)"
-        />
-        <line x1={padL} y1={bandTop} x2={padL + innerW} y2={bandTop} stroke="rgb(34 197 94 / 0.4)" strokeWidth={1} strokeDasharray="4 3" />
-        <line x1={padL} y1={bandBottom} x2={padL + innerW} y2={bandBottom} stroke="rgb(34 197 94 / 0.4)" strokeWidth={1} strokeDasharray="4 3" />
+        {/* Ideal comparison is only meaningful after canonical pace qualifies. */}
+        {!provisional && (
+          <>
+            <rect
+              x={padL}
+              y={bandTop}
+              width={innerW}
+              height={Math.max(0, bandBottom - bandTop)}
+              fill="rgb(34 197 94 / 0.12)"
+            />
+            <line x1={padL} y1={bandTop} x2={padL + innerW} y2={bandTop} stroke="rgb(34 197 94 / 0.4)" strokeWidth={1} strokeDasharray="4 3" />
+            <line x1={padL} y1={bandBottom} x2={padL + innerW} y2={bandBottom} stroke="rgb(34 197 94 / 0.4)" strokeWidth={1} strokeDasharray="4 3" />
+          </>
+        )}
 
         {/* Y grid labels */}
         {gridVals.map((v) => (
@@ -101,8 +108,8 @@ export function PaceTrend({
         ))}
 
         {/* Average line */}
-        {avg > 0 && (
-          <line x1={padL} y1={y(avg)} x2={padL + innerW} y2={y(avg)} stroke="rgb(100 116 139 / 0.7)" strokeWidth={1} strokeDasharray="2 2" />
+        {canonicalWpm != null && canonicalWpm > 0 && (
+          <line x1={padL} y1={y(canonicalWpm)} x2={padL + innerW} y2={y(canonicalWpm)} stroke="rgb(100 116 139 / 0.7)" strokeWidth={1} strokeDasharray="2 2" />
         )}
 
         {/* Pace line */}
@@ -129,12 +136,20 @@ export function PaceTrend({
         <span className="inline-flex items-center gap-1.5">
           <span className="h-0.5 w-4 rounded bg-green-500" /> Your pace
         </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-2.5 w-4 rounded-sm bg-green-500/20" /> Ideal {idealMin}–{idealMax} WPM
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-0.5 w-4 rounded bg-slate-400" /> Your average {Math.round(avg)} WPM
-        </span>
+        {!provisional && (
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-2.5 w-4 rounded-sm bg-green-500/20" /> Ideal {idealMin}–{idealMax} WPM
+          </span>
+        )}
+        {canonicalWpm != null && canonicalWpm > 0 ? (
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-0.5 w-4 rounded bg-slate-400" /> Session pace {Math.round(canonicalWpm)} WPM
+          </span>
+        ) : provisional ? (
+          <span className="text-amber-700">
+            Provisional turn samples — not a session pace score
+          </span>
+        ) : null}
       </div>
     </div>
   )
@@ -149,25 +164,41 @@ export function PaceTrendCard({
   sessionId,
   isSessionEnded = true,
   points: pointsProp,
+  paceAvailable: paceAvailableProp,
+  canonicalWpm: canonicalWpmProp,
 }: {
   sessionId: string
   isSessionEnded?: boolean
   /** Pre-derived pace points; when provided, skips the self-fetch. */
   points?: PacePoint[]
+  paceAvailable?: boolean
+  canonicalWpm?: number | null
 }) {
   const [fetchedPoints, setFetchedPoints] = useState<PacePoint[] | null>(null)
+  const [fetchedPace, setFetchedPace] = useState<{ available: boolean; wpm: number | null } | null>(null)
   const [loading, setLoading] = useState(false)
   const points = pointsProp ?? fetchedPoints
+  const paceAvailable = paceAvailableProp ?? fetchedPace?.available ?? false
+  const canonicalWpm =
+    paceAvailable && Number.isFinite(canonicalWpmProp ?? fetchedPace?.wpm)
+      ? Number(canonicalWpmProp ?? fetchedPace?.wpm)
+      : null
 
   useEffect(() => {
     if (!isSessionEnded || !sessionId || pointsProp) return
     let cancelled = false
     setLoading(true)
-    fetch(`${API_BASE_URL}/sessions/${sessionId}/turns`, { headers: getAuthHeaders() })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (cancelled || !data) return
-        const turns: TurnWithPace[] = Array.isArray(data.turns) ? data.turns : []
+    Promise.all([
+      fetch(`${API_BASE_URL}/sessions/${sessionId}/turns`, { headers: getAuthHeaders() }),
+      fetch(`${API_BASE_URL}/sessions/${sessionId}/metrics`, { headers: getAuthHeaders() }),
+    ])
+      .then(async ([turnsRes, metricsRes]) => ({
+        turnsData: turnsRes.ok ? await turnsRes.json() : null,
+        metrics: metricsRes.ok ? await metricsRes.json() : null,
+      }))
+      .then(({ turnsData, metrics }) => {
+        if (cancelled || !turnsData) return
+        const turns: TurnWithPace[] = Array.isArray(turnsData.turns) ? turnsData.turns : []
         let n = 0
         const pts: PacePoint[] = turns
           .filter(
@@ -180,6 +211,11 @@ export function PaceTrendCard({
             return { label: n, wpm: Math.round(Number(t.metrics?.wpm)) }
           })
         setFetchedPoints(pts)
+        const available = hasAvailablePace(metrics?.processingStatus)
+        setFetchedPace({
+          available,
+          wpm: available && Number.isFinite(metrics?.userWpm) ? Number(metrics.userWpm) : null,
+        })
       })
       .catch(() => {})
       .finally(() => {
@@ -205,7 +241,11 @@ export function PaceTrendCard({
         {loading && !points ? (
           <p className="py-4 text-center text-xs text-muted-foreground">Loading pace trend…</p>
         ) : points && points.length >= 2 ? (
-          <PaceTrend points={points} />
+          <PaceTrend
+            points={points}
+            canonicalWpm={canonicalWpm}
+            provisional={!paceAvailable}
+          />
         ) : (
           <p className="py-4 text-center text-xs text-muted-foreground">
             Per-turn pace wasn&apos;t captured for this session, so the pace trend isn&apos;t available.

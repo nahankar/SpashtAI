@@ -26,6 +26,7 @@ async def reprocess_session(
     audio_file_path: str,
     transcript: str,
     supplied_words_json: str = "",
+    delivery_transcript: str = "",
 ):
     """
     Reprocess a session's audio with Gentle/Praat analysis
@@ -54,6 +55,16 @@ async def reprocess_session(
                         start=float(item["start"]),
                         end=float(item["end"]),
                         confidence=float(item.get("confidence", 1.0)),
+                        utterance_id=(
+                            str(item.get("utterance_id") or item.get("utteranceId"))
+                            if item.get("utterance_id") or item.get("utteranceId")
+                            else None
+                        ),
+                        timing_origin=str(
+                            item.get("timingOrigin")
+                            or item.get("timing_origin")
+                            or "unknown"
+                        ),
                     )
                     for item in json.loads(supplied_words_json)
                 ]
@@ -67,7 +78,7 @@ async def reprocess_session(
         # Parse transcript into conversation turns (simple split for now)
         # You can enhance this to parse actual turn-by-turn data if available
         words = transcript.split()
-        collector.user_transcript = transcript
+        collector.user_transcript = delivery_transcript or transcript
         collector.conversation_turns.append(('user', transcript, 0))
         
         logger.info("🎵 Analyzing audio delivery with Gentle/Praat...")
@@ -76,6 +87,7 @@ async def reprocess_session(
         await collector._analyze_delivery(audio_file_path, supplied_alignments)
         
         # Run content analysis
+        collector.user_transcript = transcript
         logger.info("📚 Analyzing content with spaCy...")
         await collector._analyze_content()
         
@@ -104,6 +116,8 @@ async def reprocess_session(
                 "articulation_rate": delivery_metrics.articulation_rate if delivery_metrics else 0,
                 "pause_count": delivery_metrics.pause_count if delivery_metrics else 0,
                 "mean_pause_duration": delivery_metrics.mean_pause_duration if delivery_metrics else 0,
+                "max_pause_duration": delivery_metrics.max_pause_duration if delivery_metrics else 0,
+                "pause_profile": delivery_metrics.pause_profile if delivery_metrics else [],
                 "pitch_variation": delivery_metrics.pitch_variation if delivery_metrics else 0
             },
             "content_metrics": {
@@ -118,18 +132,25 @@ async def reprocess_session(
         return {"error": str(e), "success": False}
 
 def main():
-    if len(sys.argv) not in (4, 5):
-        print("Usage: python reprocess_session.py <session_id> <audio_file_path> <transcript> [word_timestamps_json]")
+    if len(sys.argv) not in (4, 5, 6):
+        print("Usage: python reprocess_session.py <session_id> <audio_file_path> <full_transcript> [word_timestamps_json] [delivery_transcript]")
         print("Example: python reprocess_session.py session_123 /path/to/user_audio.mp4 'Hello world'")
         sys.exit(1)
     
     session_id = sys.argv[1]
     audio_file_path = sys.argv[2]
     transcript = sys.argv[3]
-    supplied_words_json = sys.argv[4] if len(sys.argv) == 5 else ""
+    supplied_words_json = sys.argv[4] if len(sys.argv) >= 5 else ""
+    delivery_transcript = sys.argv[5] if len(sys.argv) >= 6 else ""
     
     result = asyncio.run(
-        reprocess_session(session_id, audio_file_path, transcript, supplied_words_json)
+        reprocess_session(
+            session_id,
+            audio_file_path,
+            transcript,
+            supplied_words_json,
+            delivery_transcript,
+        )
     )
     
     import json

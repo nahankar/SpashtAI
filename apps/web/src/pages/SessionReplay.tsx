@@ -28,7 +28,11 @@ import { getAuthHeaders, getAuthenticatedMediaUrl } from '@/lib/api-client'
 import { COACH_BUBBLE, USER_BUBBLE } from '@/lib/conversation'
 import { useIsPro } from '@/hooks/useIsPro'
 import { UserTurnBubble, normalizeTurnMetricsFromApi } from '@/components/session/UserTurnMetrics'
-import { isSubstantivePaceTurn } from '@/lib/pace'
+import {
+  hasAvailablePace,
+  isQualifiedPaceHighlight,
+  isSubstantivePaceTurn,
+} from '@/lib/pace'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 
@@ -372,6 +376,7 @@ export function SessionReplay({
   const [degraded, setDegraded] = useState(false)
   const [segments, setSegments] = useState<ReplaySegment[]>([])
   const [sessionInfo, setSessionInfo] = useState<SessionInfo | null>(null)
+  const [canonicalPaceAvailable, setCanonicalPaceAvailable] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -444,6 +449,22 @@ export function SessionReplay({
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [sessionId])
+
+  useEffect(() => {
+    if (!sessionId) return
+    let cancelled = false
+    fetch(`${API_BASE_URL}/sessions/${sessionId}/metrics`, { headers: getAuthHeaders() })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((metrics) => {
+        if (!cancelled) setCanonicalPaceAvailable(hasAvailablePace(metrics?.processingStatus))
+      })
+      .catch(() => {
+        if (!cancelled) setCanonicalPaceAvailable(false)
       })
     return () => {
       cancelled = true
@@ -832,7 +853,8 @@ export function SessionReplay({
         const hasAcceptedPace = isSubstantivePaceTurn(
           m as Record<string, unknown> | undefined,
         )
-        const wpm = hasAcceptedPace ? (m?.wpm ?? null) : null
+        const wpm =
+          canonicalPaceAvailable && hasAcceptedPace ? (m?.wpm ?? null) : null
         const fluency =
           m?.filler_rate != null ? Math.max(0, Math.min(10, 10 - m.filler_rate)) : null
         let confidence: number | null = null
@@ -848,7 +870,7 @@ export function SessionReplay({
         const end = t.audioEnd ?? start
         return { time: (start + end) / 2, wpm, fluency, confidence }
       })
-  }, [turns])
+  }, [turns, canonicalPaceAvailable])
 
   const trendsAvailable = useMemo(() => {
     if (!timelineEnd || !Number.isFinite(timelineEnd) || trendPoints.length < 2) return false
@@ -892,10 +914,11 @@ export function SessionReplay({
     // evidence. Strongest turn and filler moments do not.
     const withWpm = us.filter(
       (t) =>
+        canonicalPaceAvailable &&
         t.metrics?.wpm != null &&
-        isSubstantivePaceTurn(t.metrics as Record<string, unknown>),
+        isQualifiedPaceHighlight(t.metrics as Record<string, unknown>),
     )
-    if (withWpm.length) {
+    if (withWpm.length >= 3) {
       const fast = withWpm.reduce((a, b) => ((b.metrics!.wpm as number) > (a.metrics!.wpm as number) ? b : a))
       out.push({
         id: 'fast',
@@ -936,7 +959,7 @@ export function SessionReplay({
     }
 
     return out.sort((a, b) => a.time - b.time)
-  }, [turns])
+  }, [turns, canonicalPaceAvailable])
 
   // "Hear it" / Elevate deep link: land on Playback and press Play (skip gaps on).
   useEffect(() => {
