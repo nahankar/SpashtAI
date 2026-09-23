@@ -1,9 +1,17 @@
 import type { Request, Response, NextFunction } from 'express'
 import { prisma } from './prisma'
 
+/** Product modules that may be shown in navigation and counted in Pulse. */
 export type PlatformFeature = 'elevate' | 'replay' | 'prepare' | 'quick_try'
+/** Controlled capabilities that are enabled from Admin but are not modules. */
+export type InternalFeature = 'delivery_moments'
+export type ConfigurableFeature = PlatformFeature | InternalFeature
 
 export const PLATFORM_FEATURES: PlatformFeature[] = ['elevate', 'replay', 'prepare', 'quick_try']
+export const CONFIGURABLE_FEATURES: ConfigurableFeature[] = [
+  ...PLATFORM_FEATURES,
+  'delivery_moments',
+]
 const PULSE_FEATURES: PlatformFeature[] = ['elevate', 'replay', 'prepare']
 
 export interface FeatureFlagPublicState {
@@ -14,7 +22,7 @@ export interface FeatureFlagPublicState {
 }
 
 const DEFAULT_FLAGS: Array<{
-  feature: PlatformFeature
+  feature: ConfigurableFeature
   label: string
   description: string
   hidden: boolean
@@ -48,9 +56,21 @@ const DEFAULT_FLAGS: Array<{
     hidden: true,
     disabled: false,
   },
+  {
+    feature: 'delivery_moments',
+    label: 'Delivery Moments',
+    description:
+      'Evidence-backed pause moments in Playback and Session Analytics. Requires complete audio and validated word alignment.',
+    // This is a controlled analytical capability, not a navigation module.
+    // It remains off until an administrator intentionally exposes it.
+    hidden: true,
+    disabled: false,
+  },
 ]
 
-let cache: { map: Record<PlatformFeature, FeatureFlagPublicState>; expiresAt: number } | null = null
+export type FeatureFlagsMap = Record<ConfigurableFeature, FeatureFlagPublicState>
+
+let cache: { map: FeatureFlagsMap; expiresAt: number } | null = null
 const CACHE_TTL_MS = 5_000
 
 export function invalidateFeatureFlagCache(): void {
@@ -105,7 +125,7 @@ export async function ensureFeatureFlags(): Promise<void> {
   }
 }
 
-export async function getFeatureFlagsMap(): Promise<Record<PlatformFeature, FeatureFlagPublicState>> {
+export async function getFeatureFlagsMap(): Promise<FeatureFlagsMap> {
   const now = Date.now()
   if (cache && cache.expiresAt > now) {
     return cache.map
@@ -113,15 +133,21 @@ export async function getFeatureFlagsMap(): Promise<Record<PlatformFeature, Feat
 
   await ensureFeatureFlags()
   const rows = await prisma.platformFeatureFlag.findMany()
-  const map: Record<PlatformFeature, FeatureFlagPublicState> = {
+  const map: FeatureFlagsMap = {
     elevate: { hidden: false, disabled: false, overlayComment: null, overlayPosition: 'center' },
     replay: { hidden: false, disabled: false, overlayComment: null, overlayPosition: 'center' },
     prepare: { hidden: true, disabled: false, overlayComment: null, overlayPosition: 'center' },
     quick_try: { hidden: true, disabled: false, overlayComment: null, overlayPosition: 'center' },
+    delivery_moments: {
+      hidden: true,
+      disabled: false,
+      overlayComment: null,
+      overlayPosition: 'center',
+    },
   }
   for (const row of rows) {
-    if (PLATFORM_FEATURES.includes(row.feature as PlatformFeature)) {
-      map[row.feature as PlatformFeature] = rowToState(row)
+    if (CONFIGURABLE_FEATURES.includes(row.feature as ConfigurableFeature)) {
+      map[row.feature as ConfigurableFeature] = rowToState(row)
     }
   }
 
@@ -129,13 +155,13 @@ export async function getFeatureFlagsMap(): Promise<Record<PlatformFeature, Feat
   return map
 }
 
-export async function isFeatureAccessible(feature: PlatformFeature): Promise<boolean> {
+export async function isFeatureAccessible(feature: ConfigurableFeature): Promise<boolean> {
   const map = await getFeatureFlagsMap()
   const s = map[feature]
   return !s.hidden && !s.disabled
 }
 
-export async function isFeatureVisible(feature: PlatformFeature): Promise<boolean> {
+export async function isFeatureVisible(feature: ConfigurableFeature): Promise<boolean> {
   const map = await getFeatureFlagsMap()
   return !map[feature].hidden
 }

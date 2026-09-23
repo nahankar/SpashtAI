@@ -27,6 +27,7 @@ import { Input } from '@/components/ui/input'
 import { getAuthHeaders, getAuthenticatedMediaUrl } from '@/lib/api-client'
 import { COACH_BUBBLE, USER_BUBBLE } from '@/lib/conversation'
 import { useIsPro } from '@/hooks/useIsPro'
+import { toast } from 'sonner'
 import { UserTurnBubble, normalizeTurnMetricsFromApi } from '@/components/session/UserTurnMetrics'
 import { DeliveryMoments } from '@/components/analytics/DeliveryMoments'
 import {
@@ -358,6 +359,7 @@ export function SessionReplay({
   embedded = false,
   focusRequest = null,
   autoPlayNonce = null,
+  clipRequest = null,
 }: {
   /** Override the route param so this can render inside the Elevate results tab. */
   sessionId?: string
@@ -367,6 +369,8 @@ export function SessionReplay({
   focusRequest?: { skill: string; nonce: number } | null
   /** Bump to auto-press Play once the transport is ready (Elevate "Hear it"). */
   autoPlayNonce?: number | null
+  /** Play one exact merged-audio interval without skipping pauses. */
+  clipRequest?: { startSeconds: number; endSeconds: number; nonce: number } | null
 } = {}) {
   const params = useParams<{ sessionId: string }>()
   const sessionId = sessionIdProp ?? params.sessionId
@@ -411,7 +415,7 @@ export function SessionReplay({
   const deliveryClipEndRef = useRef<number | null>(null)
   const turnRefs = useRef<Record<number, HTMLDivElement | null>>({})
   const handledFocusRef = useRef<number | null>(null)
-  const effectiveAutoPlayNonce = autoPlayNonce ?? focusRequest?.nonce ?? null
+  const effectiveAutoPlayNonce = clipRequest?.nonce ?? autoPlayNonce ?? focusRequest?.nonce ?? null
 
   // ── Data: per-turn records ───────────────────────────────────────────
   useEffect(() => {
@@ -704,8 +708,18 @@ export function SessionReplay({
   const togglePlay = useCallback(async () => {
     const a = audioRef.current
     if (!a) return
-    deliveryClipEndRef.current = null
     if (a.paused) {
+      const clipEnd = deliveryClipEndRef.current
+      if (clipEnd != null && a.currentTime < clipEnd) {
+        try {
+          await a.play()
+        } catch (error) {
+          console.warn('Delivery evidence playback failed:', error)
+          toast.error('Audio playback was blocked. Press Play to retry the selected clip.')
+        }
+        return
+      }
+      deliveryClipEndRef.current = null
       const end =
         timelineEnd && Number.isFinite(timelineEnd) ? timelineEnd : duration
       if (end && Number.isFinite(end) && a.currentTime >= end - 0.15) {
@@ -715,6 +729,7 @@ export function SessionReplay({
       await applySkipGapsSeek(a)
       void a.play()
     } else {
+      deliveryClipEndRef.current = null
       a.pause()
     }
   }, [applySkipGapsSeek, timelineEnd, duration])
@@ -746,8 +761,9 @@ export function SessionReplay({
       setCurrentTime(a.currentTime)
       try {
         await a.play()
-      } catch {
-        /* browser may block autoplay when not directly tied to a click */
+      } catch (error) {
+        console.warn('Delivery evidence playback failed:', error)
+        toast.error('Audio playback was blocked. Press Play to hear the selected clip.')
       }
     },
     [skipGaps, applySkipGapsSeek],
@@ -993,15 +1009,21 @@ export function SessionReplay({
     }
 
     handledFocusRef.current = effectiveAutoPlayNonce
-    void togglePlay()
+    if (clipRequest) {
+      void playFrom(clipRequest.startSeconds, true, clipRequest.endSeconds)
+    } else {
+      void togglePlay()
+    }
   }, [
     effectiveAutoPlayNonce,
+    clipRequest,
     turns,
     audioUrl,
     audioAvailable,
     audioLoading,
     duration,
     timelineEnd,
+    playFrom,
     togglePlay,
   ])
 

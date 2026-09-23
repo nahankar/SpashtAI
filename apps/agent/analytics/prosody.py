@@ -2,8 +2,9 @@
 Acoustic prosody analysis for the v2 delivery metrics.
 
 Runs Praat (via parselmouth) for pitch / energy / voice-quality and ffmpeg
-`silencedetect` for pause statistics on the user's mic recording. Returns
-0–10 scores ready for the Delivery dashboard, plus the raw measurements.
+`silencedetect` for pause statistics on the user's mic recording. Returns raw
+measurements plus legacy compatibility indices. The indices are explicitly
+uncalibrated and must not be treated as user-facing scores or coaching labels.
 
 This is intentionally Gentle-free: the recording is the user's track only, so
 pauses are short within-speech silences (long silences are the coach replying
@@ -68,7 +69,7 @@ def _detect_pauses(audio_path: str) -> tuple[int, float]:
 
 
 def analyze_prosody(audio_path: str) -> Optional[dict]:
-    """Compute normalized (0–10) prosody scores + raw stats for a recording."""
+    """Compute experimental raw acoustics plus legacy compatibility indices."""
     if not audio_path or not Path(audio_path).exists():
         logger.warning("prosody: audio not found at %s", audio_path)
         return None
@@ -123,6 +124,9 @@ def analyze_prosody(audio_path: str) -> Optional[dict]:
         voice_quality = _clamp(hnr_mean / 2.0)
 
         return {
+            "schemaVersion": 1,
+            "analyzerVersion": "praat-raw-v1",
+            "calibrationStatus": "uncalibrated",
             "pitchVariation": round(pitch_variation, 1),
             "energyStability": round(energy_stability, 1),
             "voiceQuality": round(voice_quality, 1),

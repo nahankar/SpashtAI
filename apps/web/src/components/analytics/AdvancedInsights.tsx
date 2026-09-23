@@ -33,6 +33,12 @@ interface V2Signals {
     voiceQuality?: number
     pauseCount?: number
     meanPauseDuration?: number
+    raw?: {
+      pitchStdHz?: number
+      pitchMeanHz?: number
+      intensityStdDb?: number
+      hnrDb?: number
+    }
   } | null
 }
 interface V2SkillScores {
@@ -110,6 +116,26 @@ function buildFromV2(
         pitch_variation: hasAcousticProsody ? (prosody?.pitchVariation ?? 0) : 0,
         energy_stability: hasAcousticProsody ? (prosody?.energyStability ?? 0) : 0,
         voice_quality_score: hasAcousticProsody ? (prosody?.voiceQuality ?? 0) : 0,
+        delivery_evidence:
+          alignedDelivery?.delivery_evidence ??
+          (prosody?.raw
+            ? {
+                schema_version: 1,
+                status: 'experimental' as const,
+                calibration_status: 'uncalibrated' as const,
+                acoustic: {
+                  source: 'praat',
+                  raw_measurements: {
+                    mean_f0_hz: prosody.raw.pitchMeanHz,
+                    f0_std_hz: prosody.raw.pitchStdHz,
+                    // The signal API exposes dispersion, not the agent's
+                    // inverse-stability index. Do not relabel it.
+                    intensity_stability_inverse_std: null,
+                    harmonicity_mean_db: prosody.raw.hnrDb,
+                  },
+                },
+              }
+            : undefined),
       }
     : undefined
 
@@ -186,6 +212,25 @@ interface AdvancedMetrics {
     pitch_variation: number;
     energy_stability: number;
     voice_quality_score: number;
+    delivery_evidence?: {
+      schema_version?: number;
+      status?: 'experimental' | 'insufficient_evidence';
+      calibration_status?: 'uncalibrated' | 'calibrated';
+      timing?: {
+        source?: string;
+        transcript_coverage?: number;
+        aligned_word_count?: number;
+      };
+      acoustic?: {
+        source?: string;
+        raw_measurements?: {
+          mean_f0_hz?: number | null;
+          f0_std_hz?: number | null;
+          intensity_stability_inverse_std?: number | null;
+          harmonicity_mean_db?: number | null;
+        };
+      };
+    };
   };
   
   performance_insights?: {
@@ -445,6 +490,14 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
   const c = metrics.content_metrics
   const d = metrics.delivery_metrics
   const hasProsody = Boolean(metrics.audio_processed)
+  const rawAcoustics = d?.delivery_evidence?.acoustic?.raw_measurements
+  const rawMeasurement = (value: number | null | undefined) =>
+    typeof value === 'number' && Number.isFinite(value) ? value : null
+  const hasRawAcoustics = Boolean(
+    rawMeasurement(rawAcoustics?.f0_std_hz) != null ||
+      rawMeasurement(rawAcoustics?.harmonicity_mean_db) != null ||
+      rawMeasurement(rawAcoustics?.mean_f0_hz) != null,
+  )
   const diversityPct = c ? c.vocabulary.diversity_ratio * 100 : 0
 
   return (
@@ -592,34 +645,49 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Activity className="h-5 w-5" />
-                  Delivery — Voice Quality
+                  Delivery — Acoustic measurements
                 </CardTitle>
                 <CardDescription>
-                  Experimental acoustic measurements — sensitive to microphone and browser processing
+                  Experimental acoustic indices — sensitive to microphone and browser processing
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex-1 space-y-4">
-                <div>
-                  <div className="mb-1 flex justify-between text-sm">
-                    <span>Voice Quality</span>
-                    <Badge>{d.voice_quality_score.toFixed(1)}/10</Badge>
+                <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-snug text-amber-900">
+                  These are experimental recording indices, not a judgment of your voice, confidence, or vocal health.
+                  Coaching labels will appear only after calibration against reviewed recordings.
+                </p>
+                {hasRawAcoustics ? (
+                  <div className="grid gap-2 border-y py-3 text-sm sm:grid-cols-2">
+                    {rawMeasurement(rawAcoustics?.f0_std_hz) != null && (
+                      <div>
+                        <div className="text-muted-foreground">Pitch spread</div>
+                        <div className="font-semibold">{rawMeasurement(rawAcoustics?.f0_std_hz)!.toFixed(1)} Hz</div>
+                      </div>
+                    )}
+                    {rawMeasurement(rawAcoustics?.mean_f0_hz) != null && (
+                      <div>
+                        <div className="text-muted-foreground">Mean fundamental frequency</div>
+                        <div className="font-semibold">{rawMeasurement(rawAcoustics?.mean_f0_hz)!.toFixed(1)} Hz</div>
+                      </div>
+                    )}
+                    {rawMeasurement(rawAcoustics?.harmonicity_mean_db) != null && (
+                      <div>
+                        <div className="text-muted-foreground">Harmonicity</div>
+                        <div className="font-semibold">{rawMeasurement(rawAcoustics?.harmonicity_mean_db)!.toFixed(1)} dB</div>
+                      </div>
+                    )}
+                    {rawMeasurement(rawAcoustics?.intensity_stability_inverse_std) != null && (
+                      <div>
+                        <div className="text-muted-foreground">Intensity stability index</div>
+                        <div className="font-semibold">{rawMeasurement(rawAcoustics?.intensity_stability_inverse_std)!.toFixed(2)}</div>
+                      </div>
+                    )}
                   </div>
-                  <Progress value={d.voice_quality_score * 10} />
-                </div>
-                <div>
-                  <div className="mb-1 flex justify-between text-sm">
-                    <span>Pitch Variation</span>
-                    <Badge>{d.pitch_variation.toFixed(1)}/10</Badge>
-                  </div>
-                  <Progress value={d.pitch_variation * 10} />
-                </div>
-                <div>
-                  <div className="mb-1 flex justify-between text-sm">
-                    <span>Energy Stability</span>
-                    <Badge>{d.energy_stability.toFixed(1)}/10</Badge>
-                  </div>
-                  <Progress value={d.energy_stability * 10} />
-                </div>
+                ) : (
+                  <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
+                    Experimental recording indices are available, but this older analysis did not preserve the raw units needed for a trustworthy display.
+                  </p>
+                )}
 
                 {d.articulation_rate > 0 && (
                   <div className="border-t pt-3">
@@ -641,14 +709,12 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
                   </div>
                 )}
 
-                {/* How these acoustic scores are computed — answers "how is pitch rated?" */}
+                {/* Raw-measurement methodology, deliberately separate from future calibrated coaching. */}
                 <p className="border-t pt-3 text-[11px] leading-snug text-muted-foreground">
-                  <span className="font-medium text-foreground">How these are rated (0–10):</span> a
-                  Praat acoustic analysis of your recording. <span className="font-medium">Pitch
-                  Variation</span> reflects the spread of fundamental frequency in Hz. <span className="font-medium">Energy
-                  Stability</span> reflects recorded level consistency and may be flattened by automatic
-                  gain control. <span className="font-medium">Voice Quality</span> is based on
-                  harmonics-to-noise ratio and is not a diagnosis of vocal strain. <span className="font-medium">Pauses</span> are
+                  <span className="font-medium text-foreground">How these are measured:</span> a
+                  Praat acoustic analysis of your recording. Pitch observations use fundamental frequency in Hz;
+                  harmonicity is shown in dB. Recorded level may be flattened by automatic gain control.
+                  These observations are not a diagnosis of vocal strain. <span className="font-medium">Pauses</span> are
                   detected within-utterance silent intervals; long inter-turn gaps are excluded.
                   Delivery pace, which includes meaningful pauses, is in <span className="font-medium">Speaking Performance</span> above.
                 </p>

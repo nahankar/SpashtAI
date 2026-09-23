@@ -120,6 +120,24 @@ class ProsodyMetrics:
     articulation_rate: float  # words per minute excluding pauses
 
 @dataclass
+class DeliveryEvidence:
+    """Versioned, raw evidence behind experimental delivery analysis.
+
+    This deliberately contains observations and provenance rather than coaching
+    labels or calibrated scores.  A later calibration layer may turn validated
+    observations into coaching only when it has a matching model version and
+    sufficient capture-quality evidence.
+    """
+    schema_version: int
+    analyzer_version: str
+    audio_input_signature: Optional[str]
+    status: str
+    calibration_status: str
+    timing: Dict[str, object]
+    acoustic: Dict[str, object]
+    capture: Dict[str, object]
+
+@dataclass
 class DeliveryMetrics:
     """Complete delivery analysis combining alignment and prosody"""
     speech_rate: float
@@ -131,12 +149,15 @@ class DeliveryMetrics:
     filler_word_rate: float  # per 100 words
     pitch_variation: float
     energy_stability: float
-    voice_quality_score: float  # 0-10 based on harmonicity
+    # Legacy fields kept for old API readers. New writes leave them unscored;
+    # consumers must read delivery_evidence for provenance and raw features.
+    voice_quality_score: float
     confidence_indicators: Dict[str, float]
     pause_profile: List[Dict[str, object]]
     timing_origin: str
     evidence_quality: int
     aligned_word_count: int
+    delivery_evidence: DeliveryEvidence
 
 class AudioBuffer:
     """Manages audio data collection during Nova Sonic sessions"""
@@ -513,6 +534,9 @@ class AudioProcessor:
     
     def __init__(self, session_id: str):
         self.session_id = session_id
+        # Issued by the server before analysis. It binds the observations below
+        # to one exact, complete set of session segments.
+        self.audio_input_signature: Optional[str] = None
         self.audio_buffer = AudioBuffer()
         self.gentle_aligner = GentleAligner()
         self.praat_analyzer = PraatAnalyzer()
@@ -659,6 +683,14 @@ class AudioProcessor:
                     logger.info("🎯 Performing forced alignment with Gentle...")
                     align_started = time.monotonic()
                     alignments = await self.gentle_aligner.align(audio_path, normalized_transcript)
+                    # Gentle output (including cache entries) is still untrusted
+                    # alignment evidence. Apply the same coverage, lexical, and
+                    # timestamp checks used for persisted STT timings.
+                    alignments = self._validate_supplied_alignments(
+                        alignments,
+                        normalized_transcript,
+                        audio_duration,
+                    )
                     logger.info(
                         "⏱️ Gentle alignment stage completed in %.2fs",
                         time.monotonic() - align_started,
@@ -737,17 +769,25 @@ class AudioProcessor:
         filler_count = speech.filler_count
         filler_rate = speech.filler_rate
         
-        # Prosodic features — never invent mid-scale defaults without a waveform
+        # Prosodic features are retained as raw experimental observations.  They
+        # are not calibrated coaching scores: microphone choice, room acoustics,
+        # and browser processing can all change them materially.
         pitch_variation = prosody.pitch_variation if prosody else 0.0
         energy_stability = prosody.intensity_stability if prosody else 0.0
-        voice_quality = self._calculate_voice_quality_score(prosody) if prosody else 0.0
-        
-        confidence_indicators = {
-            'pitch_range_semitones': self._hz_to_semitones(pitch_variation) if prosody else 0.0,
-            'volume_consistency': energy_stability,
-            'speaking_pace_stability': self._calculate_pace_stability(alignments),
-            'pause_appropriateness': self._score_pause_patterns(pauses)
-        }
+        timing_origin = (
+            "validated_word_timestamps"
+            if all(item.timing_origin == "actual" for item in alignments)
+            else "forced_alignment"
+        )
+        evidence_quality = 3 if timing_origin == "validated_word_timestamps" else 2
+        delivery_evidence = self._build_delivery_evidence(
+            transcript=transcript,
+            alignments=alignments,
+            pauses=pauses,
+            prosody=prosody,
+            timing_origin=timing_origin,
+            evidence_quality=evidence_quality,
+        )
         
         return DeliveryMetrics(
             speech_rate=speech_rate,
@@ -759,20 +799,15 @@ class AudioProcessor:
             filler_word_rate=filler_rate,
             pitch_variation=pitch_variation,
             energy_stability=energy_stability,
-            voice_quality_score=voice_quality,
-            confidence_indicators=confidence_indicators,
+            # Retained for the legacy payload shape only.  No 0-10 HNR
+            # transform is emitted until a calibrated delivery model exists.
+            voice_quality_score=0.0,
+            confidence_indicators={},
             pause_profile=[asdict(pause) for pause in pauses],
-            timing_origin=(
-                "validated_word_timestamps"
-                if all(item.timing_origin == "actual" for item in alignments)
-                else "forced_alignment"
-            ),
-            evidence_quality=(
-                3
-                if all(item.timing_origin == "actual" for item in alignments)
-                else 2
-            ),
+            timing_origin=timing_origin,
+            evidence_quality=evidence_quality,
             aligned_word_count=len(alignments),
+            delivery_evidence=delivery_evidence,
         )
     
     def _fallback_analysis(
@@ -798,6 +833,8 @@ class AudioProcessor:
         speech_rate = 0.0
         articulation_rate = 0.0
 
+        timing_origin = "prosody_only" if prosody else "unavailable"
+        evidence_quality = 1 if prosody else 0
         return DeliveryMetrics(
             speech_rate=speech_rate,
             articulation_rate=articulation_rate,
@@ -808,55 +845,76 @@ class AudioProcessor:
             filler_word_rate=speech.filler_rate,
             pitch_variation=prosody.pitch_variation if prosody else 0.0,
             energy_stability=prosody.intensity_stability if prosody else 0.0,
-            voice_quality_score=self._calculate_voice_quality_score(prosody) if prosody else 0.0,
+            voice_quality_score=0.0,
             confidence_indicators={},
             pause_profile=[],
-            timing_origin="prosody_only" if prosody else "unavailable",
-            evidence_quality=1 if prosody else 0,
+            timing_origin=timing_origin,
+            evidence_quality=evidence_quality,
             aligned_word_count=0,
+            delivery_evidence=self._build_delivery_evidence(
+                transcript=transcript,
+                alignments=[],
+                pauses=[],
+                prosody=prosody,
+                timing_origin=timing_origin,
+                evidence_quality=evidence_quality,
+            ),
         )
-    
-    def _calculate_voice_quality_score(self, prosody: ProsodyMetrics) -> float:
-        """Convert harmonicity to 0-10 voice quality score"""
-        if prosody.harmonicity_mean > 10:
-            return 9.0
-        elif prosody.harmonicity_mean > 5:
-            return 7.0
-        elif prosody.harmonicity_mean > 0:
-            return 5.0
-        else:
-            return 3.0
-    
-    def _hz_to_semitones(self, hz_variation: float) -> float:
-        """Convert Hz pitch variation to semitones"""
-        if hz_variation <= 0:
-            return 0.0
-        return 12 * np.log2(hz_variation / 100.0) if hz_variation > 0 else 0.0
-    
-    def _calculate_pace_stability(self, alignments: List[WordAlignment]) -> float:
-        """Calculate stability of speaking pace (0-10 score)"""
-        if len(alignments) < 2:
-            return 5.0
-        
-        word_durations = [a.end - a.start for a in alignments]
-        stability = 1.0 / (np.std(word_durations) + 0.01)
-        return min(10.0, stability * 2)
-    
-    def _score_pause_patterns(self, pauses: List[PauseSegment]) -> float:
-        """Score pause appropriateness (0-10 score)"""
-        if not pauses:
-            return 5.0
-        
-        # Ideal: 0.5-1.5s pauses, not too many
-        appropriate_pauses = [p for p in pauses if 0.5 <= p.duration <= 1.5]
-        appropriateness = len(appropriate_pauses) / len(pauses)
-        
-        return appropriateness * 10.0
+
+    def _build_delivery_evidence(
+        self,
+        transcript: str,
+        alignments: List[WordAlignment],
+        pauses: List[PauseSegment],
+        prosody: Optional[ProsodyMetrics],
+        timing_origin: str,
+        evidence_quality: int,
+    ) -> DeliveryEvidence:
+        """Return a stable evidence contract without implying a clinical or social judgment."""
+        transcript_words = len(re.findall(r"[A-Za-z0-9']+", transcript or ""))
+        aligned_words = len(alignments)
+        coverage = aligned_words / transcript_words if transcript_words else 0.0
+        raw_acoustic = {
+            "mean_f0_hz": prosody.mean_pitch if prosody else None,
+            "f0_range_hz": prosody.pitch_range if prosody else None,
+            "f0_std_hz": prosody.pitch_variation if prosody else None,
+            "mean_intensity_db": prosody.mean_intensity if prosody else None,
+            "intensity_stability_inverse_std": prosody.intensity_stability if prosody else None,
+            "harmonicity_mean_db": prosody.harmonicity_mean if prosody else None,
+        }
+        return DeliveryEvidence(
+            schema_version=1,
+            analyzer_version="praat-raw-v1",
+            audio_input_signature=self.audio_input_signature,
+            status="experimental" if prosody or alignments else "insufficient_evidence",
+            calibration_status="uncalibrated",
+            timing={
+                "source": timing_origin,
+                "evidence_quality": evidence_quality,
+                "aligned_word_count": aligned_words,
+                "transcript_word_count": transcript_words,
+                "transcript_coverage": coverage,
+                "within_turn_pause_count": len(pauses),
+            },
+            acoustic={
+                "source": "praat" if prosody else "unavailable",
+                "raw_measurements": raw_acoustic,
+            },
+            capture={
+                # The server should populate these from browser constraints in a
+                # later capture-metadata pass.  Unknown must never be read as a
+                # clean or neutral capture.
+                "automatic_gain_control": "unknown",
+                "noise_suppression": "unknown",
+                "echo_cancellation": "unknown",
+            },
+        )
 
 # Export main classes
 __all__ = [
     'AudioProcessor', 
     'DeliveryMetrics', 
+    'DeliveryEvidence',
     'ProsodyMetrics',
     'WordAlignment',
     'PauseSegment',

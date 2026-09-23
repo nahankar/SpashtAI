@@ -7,6 +7,7 @@ import {
   resolveEffectiveDeliverySignature,
   selectAcceptedDeliveryMetrics,
   selectPreferredDeliveryMetrics,
+  normalizeDeliveryMetrics,
 } from '../src/routes/advanced-metrics'
 
 describe('advanced delivery evidence selection', () => {
@@ -62,6 +63,65 @@ describe('advanced delivery evidence selection', () => {
     }
     expect(selectPreferredDeliveryMetrics(forced, timestamped)).toBe(timestamped)
     expect(deliveryEvidenceQuality({ speech_rate: 120 })).toBe(2)
+  })
+
+  it('uses the versioned delivery-evidence contract rather than legacy score fields', () => {
+    expect(
+      deliveryEvidenceQuality({
+        speech_rate: 140,
+        evidence_quality: 3,
+        delivery_evidence: {
+          schema_version: 1,
+          status: 'insufficient_evidence',
+          timing: { evidence_quality: 3 },
+        },
+      }),
+    ).toBe(0)
+    expect(
+      deliveryEvidenceQuality({
+        voice_quality_score: 9,
+        delivery_evidence: {
+          schema_version: 1,
+          status: 'experimental',
+          timing: { evidence_quality: 2 },
+        },
+      }),
+    ).toBe(2)
+  })
+
+  it('does not allow an asynchronous worker to self-certify calibrated delivery coaching', () => {
+    const normalized = normalizeDeliveryMetrics({
+      delivery_evidence: {
+        schema_version: 1,
+        status: 'experimental',
+        calibration_status: 'calibrated',
+        timing: { evidence_quality: 2 },
+      },
+    }) as { delivery_evidence: Record<string, unknown> }
+    expect(normalized.delivery_evidence.calibration_status).toBe('uncalibrated')
+
+    const unsupported = normalizeDeliveryMetrics({
+      delivery_evidence: { schema_version: 99, status: 'experimental' },
+    }) as { delivery_evidence: Record<string, unknown> }
+    expect(unsupported.delivery_evidence.status).toBe('insufficient_evidence')
+  })
+
+  it('uses nested versioned evidence when selecting between equal-quality results', () => {
+    const broad = {
+      delivery_evidence: {
+        schema_version: 1,
+        status: 'experimental',
+        timing: { evidence_quality: 2, aligned_word_count: 80, transcript_coverage: 1 },
+      },
+    }
+    const narrow = {
+      delivery_evidence: {
+        schema_version: 1,
+        status: 'experimental',
+        timing: { evidence_quality: 2, aligned_word_count: 20, transcript_coverage: 0.95 },
+      },
+    }
+    expect(selectPreferredDeliveryMetrics(narrow, broad)).toBe(broad)
   })
 
   it('retains broader alignment coverage when evidence quality is equal', () => {

@@ -20,6 +20,12 @@ import {
   segmentRecordingFilename,
 } from '../analytics/sessionSegments'
 import {
+  captureFingerprint,
+  captureSettingsForDelivery,
+  parseRecordingCaptureSettings,
+  type StoredCaptureSettings,
+} from '../analytics/deliveryCapture'
+import {
   lockWritableSession,
   SessionDiscardedError,
   SessionMissingError,
@@ -62,6 +68,38 @@ async function fingerprintFile(filePath: string): Promise<{ hash: string; size: 
     stream.on('error', reject)
   })
   return { hash: hash.digest('hex'), size: statSync(filePath).size }
+}
+
+export async function reconcileSegmentRecordingMetadata(
+  sessionId: string,
+  segmentId: string,
+  captureSettings: StoredCaptureSettings | null,
+): Promise<'accepted' | 'capture_conflict' | 'segment_missing'> {
+  return prisma.$transaction(async (tx) => {
+    await lockWritableSession(tx, sessionId)
+    const current = await tx.sessionSegment.findUnique({
+      where: { id: segmentId },
+      select: { audioStatus: true, captureSettings: true },
+    })
+    if (!current) return 'segment_missing'
+    const saved = captureSettingsForDelivery(segmentId, current.captureSettings)
+    if (captureSettings && saved &&
+        captureFingerprint(captureSettings) !== captureFingerprint(saved)) {
+      return 'capture_conflict'
+    }
+    if (current.audioStatus !== 'available' || (captureSettings && !saved)) {
+      await tx.sessionSegment.update({
+        where: { id: segmentId },
+        data: {
+          audioStatus: 'available',
+          ...(captureSettings && !saved
+            ? { captureSettings: captureSettings as Prisma.InputJsonValue }
+            : {}),
+        },
+      })
+    }
+    return 'accepted'
+  })
 }
 
 /**
@@ -109,6 +147,13 @@ export async function uploadSessionRecording(req: Request, res: Response) {
     if (!segment || segment.sessionId !== sessionId) {
       return res.status(404).json({ error: 'Session segment not found' })
     }
+    let captureSettings
+    try {
+      captureSettings = parseRecordingCaptureSettings(req.body.captureSettings)
+    } catch (error) {
+      if (!(error instanceof Error)) throw error
+      return res.status(400).json({ error: error.message })
+    }
 
     const durationSec = req.body.durationSec ? Number(req.body.durationSec) : 0
     const recordingStartedAt = req.body.recordingStartedAt
@@ -127,15 +172,17 @@ export async function uploadSessionRecording(req: Request, res: Response) {
       if (!samePayload) {
         return res.status(409).json({ error: 'segmentId already has a different recording' })
       }
-      await prisma.$transaction(async (tx) => {
-        await lockWritableSession(tx, sessionId)
-        if (segment.audioStatus !== 'available') {
-          await tx.sessionSegment.update({
-            where: { id: segmentId },
-            data: { audioStatus: 'available' },
-          })
-        }
-      })
+      const reconciliation = await reconcileSegmentRecordingMetadata(
+        sessionId,
+        segmentId,
+        captureSettings,
+      )
+      if (reconciliation === 'capture_conflict') {
+        return res.status(409).json({ error: 'segmentId already has different capture settings' })
+      }
+      if (reconciliation === 'segment_missing') {
+        return res.status(404).json({ error: 'Session segment not found' })
+      }
       scheduleElevateSessionAudioEnrichmentIfAnalyzed(sessionId)
       return res.status(200).json({
         success: true,
@@ -187,6 +234,9 @@ export async function uploadSessionRecording(req: Request, res: Response) {
           where: { id: segmentId },
           data: {
             audioStatus: 'available',
+            ...(captureSettings
+              ? { captureSettings: captureSettings as Prisma.InputJsonValue }
+              : {}),
             recordingDurationSec: Number.isFinite(durationSec) ? durationSec : undefined,
             recordingStartedAt:
               recordingStartedAt && !Number.isNaN(recordingStartedAt.getTime())
@@ -237,10 +287,17 @@ export async function uploadSessionRecording(req: Request, res: Response) {
             mimeType,
           })
         ) {
-          await prisma.sessionSegment.update({
-            where: { id: segmentId },
-            data: { audioStatus: 'available' },
-          })
+          const reconciliation = await reconcileSegmentRecordingMetadata(
+            sessionId,
+            segmentId,
+            captureSettings,
+          )
+          if (reconciliation === 'capture_conflict') {
+            return res.status(409).json({ error: 'segmentId already has different capture settings' })
+          }
+          if (reconciliation === 'segment_missing') {
+            return res.status(404).json({ error: 'Session segment not found' })
+          }
           scheduleElevateSessionAudioEnrichmentIfAnalyzed(sessionId)
           return res.status(200).json({ success: true, recording: raced, idempotent: true })
         }

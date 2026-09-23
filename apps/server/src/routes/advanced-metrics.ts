@@ -9,9 +9,67 @@ import {
 import { resolveElevateAudioInputSignature } from '../analytics/insightProviders/resolveSessionAudio'
 import { hasRealProsody } from '../analytics/audioStatus'
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+}
+
+/**
+ * Accept delivery evidence only in the currently supported, uncalibrated
+ * schema.  A client/agent may report raw observations, but it must not be able
+ * to certify them as a calibrated coaching model simply by setting a field.
+ */
+export function normalizeDeliveryMetrics(value: unknown): unknown {
+  const delivery = asRecord(value)
+  if (!delivery) return value
+  const evidence = asRecord(delivery.delivery_evidence)
+  if (!evidence) return { ...delivery }
+
+  const schemaVersion = evidence.schema_version
+  const timing = asRecord(evidence.timing) ?? {}
+  const rawQuality = Number(timing.evidence_quality)
+  const evidenceQuality =
+    Number.isInteger(rawQuality) && rawQuality >= 0 && rawQuality <= 3
+      ? rawQuality
+      : 0
+  const status = evidence.status === 'experimental' ? 'experimental' : 'insufficient_evidence'
+
+  // Schema 1 is intentionally experimental.  When a calibrated model is
+  // introduced it must have its own server-owned version/allowlist rather than
+  // trusting a value supplied by an asynchronous worker.
+  const normalizedEvidence =
+    schemaVersion === 1
+      ? {
+          ...evidence,
+          schema_version: 1,
+          status,
+          calibration_status: 'uncalibrated',
+          timing: { ...timing, evidence_quality: evidenceQuality },
+        }
+      : {
+          schema_version: 1,
+          analyzer_version: 'unsupported',
+          audio_input_signature: null,
+          status: 'insufficient_evidence',
+          calibration_status: 'uncalibrated',
+          timing: { source: 'unavailable', evidence_quality: 0 },
+          acoustic: { source: 'unavailable' },
+          capture: {},
+        }
+
+  return { ...delivery, delivery_evidence: normalizedEvidence }
+}
+
 export function deliveryEvidenceQuality(value: unknown): number {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return -1
-  const delivery = value as Record<string, unknown>
+  const delivery = asRecord(value)
+  if (!delivery) return -1
+  const evidence = asRecord(delivery.delivery_evidence)
+  if (evidence && evidence.schema_version !== 1) return 0
+  if (evidence?.status === 'insufficient_evidence') return 0
+  const timing = asRecord(evidence?.timing)
+  const contractQuality = Number(timing?.evidence_quality)
+  if (Number.isFinite(contractQuality)) return Math.max(0, Math.min(3, contractQuality))
   const explicit = Number(delivery.evidence_quality)
   if (Number.isFinite(explicit)) return Math.max(0, Math.min(3, explicit))
   if (Number(delivery.speech_rate) > 0 || Number(delivery.articulation_rate) > 0) return 2
@@ -32,11 +90,14 @@ export function selectPreferredDeliveryMetrics(existing: unknown, incoming: unkn
     return existingQuality > incomingQuality ? existing : incoming
   }
   const evidenceCoverage = (value: unknown): [number, number] => {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return [0, 0]
-    const delivery = value as Record<string, unknown>
-    const alignedWords = Number(delivery.aligned_word_count)
+    const delivery = asRecord(value)
+    if (!delivery) return [0, 0]
+    const timing = asRecord(asRecord(delivery.delivery_evidence)?.timing)
+    const alignedWords = Number(
+      timing?.aligned_word_count ?? delivery.aligned_word_count,
+    )
     const coverage = Number(
-      delivery.alignment_coverage ?? delivery.timing_coverage ?? 0,
+      timing?.transcript_coverage ?? delivery.alignment_coverage ?? delivery.timing_coverage ?? 0,
     )
     return [
       Number.isFinite(alignedWords) ? Math.max(0, alignedWords) : 0,
@@ -128,7 +189,8 @@ export async function saveAdvancedMetrics(req: Request, res: Response) {
     const { sessionId } = req.params
     const body = req.body as Record<string, unknown>
     const contentMetrics = body.contentMetrics ?? body.content_metrics
-    const deliveryMetrics = body.deliveryMetrics ?? body.delivery_metrics
+    const submittedDeliveryMetrics = body.deliveryMetrics ?? body.delivery_metrics
+    const deliveryMetrics = normalizeDeliveryMetrics(submittedDeliveryMetrics)
     const audioInputSignature =
       typeof body.audioInputSignature === 'string'
         ? body.audioInputSignature
@@ -279,7 +341,7 @@ export async function getAdvancedMetrics(req: Request, res: Response) {
       audio_processed: (metrics.processingStatus as Record<string, unknown> | null)?.audio_processed ?? false,
       insights_generated: (metrics.processingStatus as Record<string, unknown> | null)?.insights_generated ?? false,
       content_metrics: metrics.contentMetrics,
-      delivery_metrics: metrics.deliveryMetrics,
+      delivery_metrics: normalizeDeliveryMetrics(metrics.deliveryMetrics),
       performance_insights: metrics.performanceInsights,
       processing_errors: (metrics.processingStatus as Record<string, unknown> | null)?.processing_errors,
       updated_at: metrics.updatedAt,

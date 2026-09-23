@@ -4,7 +4,13 @@ import wave
 from pathlib import Path
 from unittest.mock import AsyncMock
 
-from audio_processor import AudioProcessor, GentleAligner, WordAlignment
+from audio_processor import (
+    AudioProcessor,
+    GentleAligner,
+    PauseSegment,
+    ProsodyMetrics,
+    WordAlignment,
+)
 
 
 def _write_silence(path: Path) -> None:
@@ -181,6 +187,75 @@ class DeliveryRateSemanticsTest(unittest.TestCase):
         self.assertEqual(pauses[0].context_before, "one")
         self.assertEqual(pauses[0].context_after, "two")
         self.assertEqual(pauses[0].utterance_id, "turn-1")
+
+
+class DeliveryEvidenceContractTest(unittest.TestCase):
+    def test_delivery_evidence_keeps_raw_measurements_separate_from_coaching_scores(self):
+        processor = AudioProcessor("delivery-evidence-contract")
+        alignments = [
+            WordAlignment(
+                word,
+                index * 0.4,
+                index * 0.4 + 0.2,
+                1.0,
+                utterance_id="turn-1",
+                timing_origin="actual",
+            )
+            for index, word in enumerate(
+                "one two three four five six seven eight nine ten".split()
+            )
+        ]
+        pauses = [
+            PauseSegment(1.8, 2.2, 0.4, "five", "six", "turn-1"),
+        ]
+        prosody = ProsodyMetrics(
+            mean_pitch=145.0,
+            pitch_range=80.0,
+            pitch_variation=14.0,
+            mean_intensity=62.0,
+            intensity_stability=4.0,
+            harmonicity_mean=8.0,
+            speech_rate_precise=120.0,
+            articulation_rate=150.0,
+        )
+
+        delivery = processor._calculate_delivery_metrics(
+            alignments,
+            pauses,
+            prosody,
+            "one two three four five six seven eight nine ten",
+            5.0,
+        )
+
+        self.assertEqual(delivery.voice_quality_score, 0.0)
+        self.assertNotIn("pause_appropriateness", delivery.confidence_indicators)
+        self.assertEqual(delivery.delivery_evidence.schema_version, 1)
+        self.assertEqual(delivery.delivery_evidence.analyzer_version, "praat-raw-v1")
+        self.assertIsNone(delivery.delivery_evidence.audio_input_signature)
+        self.assertEqual(delivery.delivery_evidence.status, "experimental")
+        self.assertEqual(delivery.delivery_evidence.calibration_status, "uncalibrated")
+        self.assertEqual(
+            delivery.delivery_evidence.timing["source"],
+            "validated_word_timestamps",
+        )
+        self.assertEqual(
+            delivery.delivery_evidence.acoustic["raw_measurements"]["f0_std_hz"],
+            14.0,
+        )
+
+    def test_no_audio_evidence_fails_closed(self):
+        evidence = AudioProcessor("no-audio-evidence")._build_delivery_evidence(
+            transcript="one two",
+            alignments=[],
+            pauses=[],
+            prosody=None,
+            timing_origin="unavailable",
+            evidence_quality=0,
+        )
+
+        self.assertEqual(evidence.status, "insufficient_evidence")
+        self.assertEqual(evidence.acoustic["source"], "unavailable")
+        self.assertEqual(evidence.timing["transcript_coverage"], 0.0)
 
 
 class SyntheticTimingFailClosedTest(unittest.IsolatedAsyncioTestCase):

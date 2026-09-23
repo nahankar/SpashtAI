@@ -42,9 +42,9 @@ class FeedbackItem:
 @dataclass
 class CompositeScores:
     """Professional interview coaching scores"""
-    fluency: float      # 0-10 (speech rate, fillers, pauses)
+    fluency: float      # 0-10 (verified pace and fillers only)
     clarity: float      # 0-10 (grammar, vocabulary, structure)
-    confidence: float   # 0-10 (pitch variation, volume, language choices)
+    confidence: float   # 0-10 (language choices until acoustic calibration exists)
     impact: float       # 0-10 (content relevance, achievements, engagement)
     overall: float      # 0-10 weighted average
 
@@ -64,9 +64,11 @@ class ScoringEngine:
     def __init__(self):
         # Scoring weights for composite scores
         self.fluency_weights = {
-            'speech_rate': 0.4,
-            'filler_rate': 0.3,
-            'pause_appropriateness': 0.3
+            # Pace joins this score only with verified word/audio timing.  Raw
+            # silence intervals are delivery observations, not an objective
+            # "pause appropriateness" score.
+            'speech_rate': 0.6,
+            'filler_rate': 0.4,
         }
         
         self.clarity_weights = {
@@ -74,13 +76,6 @@ class ScoringEngine:
             'vocabulary_sophistication': 0.3,
             'structure_score': 0.2,
             'readability': 0.2
-        }
-        
-        self.confidence_weights = {
-            'pitch_variation': 0.3,
-            'energy_stability': 0.3,
-            'confidence_language': 0.2,
-            'voice_quality': 0.2
         }
         
         self.impact_weights = {
@@ -95,7 +90,6 @@ class ScoringEngine:
         self.benchmarks = {
             'speech_rate': {'excellent': 140, 'good': 120, 'average': 100, 'poor': 80},
             'filler_rate': {'excellent': 2, 'good': 5, 'average': 8, 'poor': 15},
-            'pitch_variation': {'excellent': 2.5, 'good': 1.5, 'average': 1.0, 'poor': 0.5},
             'vocabulary_diversity': {'excellent': 0.7, 'good': 0.5, 'average': 0.3, 'poor': 0.2}
         }
         
@@ -180,36 +174,26 @@ class ScoringEngine:
         delivery: Optional[DeliveryMetrics],
         linguistic: Optional[LinguisticMetrics]
     ) -> float:
-        """Calculate fluency score based on speech patterns"""
-        score = 0.0
+        """Score only measurable fluency evidence and renormalize its weights."""
+        weighted_components = []
         
         # Speech rate component
-        if delivery and delivery.speech_rate > 0:
+        if self._has_scoreable_timing(delivery):
             speech_rate_score = self._score_speech_rate(delivery.speech_rate)
-            score += speech_rate_score * self.fluency_weights['speech_rate']
-        elif linguistic and linguistic.words_per_minute > 0:
-            speech_rate_score = self._score_speech_rate(linguistic.words_per_minute)
-            score += speech_rate_score * self.fluency_weights['speech_rate']
-        else:
-            score += 5.0 * self.fluency_weights['speech_rate']  # Neutral
+            weighted_components.append((speech_rate_score, self.fluency_weights['speech_rate']))
         
         # Filler rate component
         if delivery and delivery.filler_word_rate >= 0:
             filler_score = self._score_filler_rate(delivery.filler_word_rate)
-            score += filler_score * self.fluency_weights['filler_rate']
+            weighted_components.append((filler_score, self.fluency_weights['filler_rate']))
         elif linguistic and linguistic.filler_word_rate >= 0:
             filler_score = self._score_filler_rate(linguistic.filler_word_rate)
-            score += filler_score * self.fluency_weights['filler_rate']
-        else:
-            score += 5.0 * self.fluency_weights['filler_rate']  # Neutral
-        
-        # Pause appropriateness component
-        if delivery and delivery.pause_count >= 0:
-            pause_score = self._score_pause_patterns(delivery)
-            score += pause_score * self.fluency_weights['pause_appropriateness']
-        else:
-            score += 5.0 * self.fluency_weights['pause_appropriateness']  # Neutral
-        
+            weighted_components.append((filler_score, self.fluency_weights['filler_rate']))
+
+        if not weighted_components:
+            return 5.0
+        total_weight = sum(weight for _, weight in weighted_components)
+        score = sum(value * weight for value, weight in weighted_components) / total_weight
         return min(10.0, max(0.0, score))
     
     def _calculate_clarity_score(
@@ -255,38 +239,10 @@ class ScoringEngine:
         delivery: Optional[DeliveryMetrics],
         content: Optional[ContentMetrics]
     ) -> float:
-        """Calculate confidence score based on vocal and linguistic indicators"""
-        score = 0.0
-        
-        # Pitch variation component
-        if delivery and delivery.pitch_variation > 0:
-            pitch_score = self._score_pitch_variation(delivery.pitch_variation)
-            score += pitch_score * self.confidence_weights['pitch_variation']
-        else:
-            score += 5.0 * self.confidence_weights['pitch_variation']
-        
-        # Energy stability component
-        if delivery and delivery.energy_stability > 0:
-            energy_score = min(10.0, delivery.energy_stability)
-            score += energy_score * self.confidence_weights['energy_stability']
-        else:
-            score += 5.0 * self.confidence_weights['energy_stability']
-        
-        # Confidence language component
-        if content:
-            confidence_lang_score = content.confidence_language
-            score += confidence_lang_score * self.confidence_weights['confidence_language']
-        else:
-            score += 5.0 * self.confidence_weights['confidence_language']
-        
-        # Voice quality component
-        if delivery and delivery.voice_quality_score > 0:
-            voice_score = delivery.voice_quality_score
-            score += voice_score * self.confidence_weights['voice_quality']
-        else:
-            score += 5.0 * self.confidence_weights['voice_quality']
-        
-        return min(10.0, max(0.0, score))
+        """Confidence is language-based until acoustic coaching is calibrated."""
+        if not content:
+            return 5.0
+        return min(10.0, max(0.0, content.confidence_language))
     
     def _calculate_impact_score(
         self,
@@ -366,7 +322,7 @@ class ScoringEngine:
         feedback = []
         
         # Speech rate feedback
-        speech_rate = delivery.speech_rate if delivery else (linguistic.words_per_minute if linguistic else 0)
+        speech_rate = delivery.speech_rate if self._has_scoreable_timing(delivery) else 0
         if speech_rate > 0:
             if speech_rate < 100:
                 feedback.append(FeedbackItem(
@@ -462,18 +418,6 @@ class ScoringEngine:
         """Generate confidence-specific feedback"""
         feedback = []
         
-        # Pitch variation feedback
-        if delivery and delivery.pitch_variation < 1.5:
-            feedback.append(FeedbackItem(
-                category=FeedbackCategory.CONFIDENCE,
-                priority=FeedbackPriority.HIGH,
-                score_impact=1.4,
-                message="Your pitch variation suggests monotone delivery",
-                actionable_tip="Vary your pitch to emphasize key points. Practice with vocal exercises",
-                current_value=delivery.pitch_variation,
-                target_value=2.5
-            ))
-        
         # Confidence language feedback
         if content and content.confidence_language < 6:
             feedback.append(FeedbackItem(
@@ -536,7 +480,7 @@ class ScoringEngine:
         score_areas = [
             (scores.fluency, "fluency and speaking pace"),
             (scores.clarity, "clear communication"),
-            (scores.confidence, "confident delivery"),
+            (scores.confidence, "confident language"),
             (scores.impact, "impactful content")
         ]
         
@@ -549,7 +493,7 @@ class ScoringEngine:
         if delivery:
             if delivery.filler_word_rate <= 3:
                 strengths.append("Minimal use of filler words")
-            if 140 <= delivery.speech_rate <= 170:
+            if self._has_scoreable_timing(delivery) and 140 <= delivery.speech_rate <= 170:
                 strengths.append("Excellent speaking pace")
         
         if content:
@@ -573,7 +517,7 @@ class ScoringEngine:
         score_areas = [
             (scores.fluency, "speech fluency and pacing"),
             (scores.clarity, "communication clarity"),
-            (scores.confidence, "vocal confidence"),
+            (scores.confidence, "confident language"),
             (scores.impact, "content impact and relevance")
         ]
         
@@ -594,9 +538,9 @@ class ScoringEngine:
         indicators = {}
         
         if delivery:
-            indicators['speech_rate'] = delivery.speech_rate
+            if self._has_scoreable_timing(delivery):
+                indicators['speech_rate'] = delivery.speech_rate
             indicators['filler_rate'] = delivery.filler_word_rate
-            indicators['pitch_variation'] = delivery.pitch_variation
         
         if content:
             indicators['vocabulary_sophistication'] = content.vocabulary.sophistication_score
@@ -617,7 +561,7 @@ class ScoringEngine:
         comparisons = {}
         
         # Speech rate comparison
-        speech_rate = delivery.speech_rate if delivery else (linguistic.words_per_minute if linguistic else 0)
+        speech_rate = delivery.speech_rate if self._has_scoreable_timing(delivery) else 0
         if speech_rate > 0:
             comparisons['speech_rate'] = self._benchmark_comparison(speech_rate, 'speech_rate')
         
@@ -689,35 +633,20 @@ class ScoringEngine:
         else:
             return 2.0
     
-    def _score_pitch_variation(self, variation: float) -> float:
-        """Score pitch variation on 0-10 scale"""
-        if variation >= 2.5:
-            return 10.0
-        elif variation >= 1.5:
-            return 8.0
-        elif variation >= 1.0:
-            return 6.0
-        elif variation >= 0.5:
-            return 4.0
-        else:
-            return 2.0
-    
-    def _score_pause_patterns(self, delivery: DeliveryMetrics) -> float:
-        """Score pause patterns on 0-10 scale"""
-        if delivery.pause_count == 0:
-            return 5.0  # Neutral - no data
-        
-        # Ideal: 0.5-2.0 second pauses, not too frequent
-        appropriate_pauses = 0
-        total_pauses = delivery.pause_count
-        
-        # Simplified scoring based on mean pause duration
-        if 0.5 <= delivery.mean_pause_duration <= 2.0:
-            return 8.0
-        elif 0.3 <= delivery.mean_pause_duration <= 3.0:
-            return 6.0
-        else:
-            return 4.0
+    @staticmethod
+    def _has_scoreable_timing(delivery: Optional[DeliveryMetrics]) -> bool:
+        """Only verified word/audio timing may influence a delivery score."""
+        if not delivery or delivery.speech_rate <= 0:
+            return False
+        evidence = delivery.delivery_evidence
+        if evidence.status != "experimental":
+            return False
+        timing = evidence.timing
+        return (
+            timing.get("source") in ("validated_word_timestamps", "forced_alignment")
+            and isinstance(timing.get("evidence_quality"), int)
+            and timing["evidence_quality"] >= 2
+        )
     
     def _fallback_insights(self) -> PerformanceInsights:
         """Fallback insights when analysis fails"""

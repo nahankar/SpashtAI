@@ -4,6 +4,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { getAuthHeaders } from '@/lib/api-client'
+import {
+  DeliveryEvidenceSummary,
+  type DeliveryEvidenceState,
+} from './delivery'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 const MAX_PENDING_POLLS = 15
@@ -30,6 +34,7 @@ interface DeliveryMomentResponse {
     momentCount: number
   }
   moments: DeliveryMoment[]
+  deliveryEvidence?: DeliveryEvidenceState
 }
 
 function formatTime(seconds: number) {
@@ -55,9 +60,10 @@ function unavailableCopy(reason: string | null) {
 }
 
 /**
- * P3.1a: precise pause evidence only. It intentionally avoids claims about
- * personality, vocal health, or pitch/energy until those classifiers are
- * calibrated against human-labelled recordings.
+ * Shows verified pause-placement evidence plus raw, explicitly experimental
+ * acoustic observations. It intentionally withholds personality, vocal-health,
+ * tone, and pitch/energy coaching until those interpretations are calibrated
+ * against human-labelled recordings.
  */
 export function DeliveryMoments({
   sessionId,
@@ -65,7 +71,7 @@ export function DeliveryMoments({
   compact = false,
 }: {
   sessionId: string
-  onPlayMoment?: (startSeconds: number, endSeconds: number) => void
+  onPlayMoment?: (startSeconds: number, endSeconds: number, includeGaps?: true) => void
   compact?: boolean
 }) {
   const [data, setData] = useState<DeliveryMomentResponse | null>(null)
@@ -136,7 +142,7 @@ export function DeliveryMoments({
                 variant="outline"
                 size="sm"
                 className="mt-3 h-8"
-                onClick={() => onPlayMoment(moment.clipStartSec, moment.clipEndSec)}
+                onClick={() => onPlayMoment(moment.clipStartSec, moment.clipEndSec, true)}
               >
                 <Play className="mr-1.5 h-3.5 w-3.5" /> Hear evidence · {formatTime(moment.clipStartSec)}
               </Button>
@@ -153,6 +159,26 @@ export function DeliveryMoments({
     </div>
   )
 
+  const rawEvidence = data.deliveryEvidence && (
+    <div className="mt-5 border-t pt-4">
+      <DeliveryEvidenceSummary
+        data={data.deliveryEvidence}
+        onHearEvidence={onPlayMoment
+          ? ({ startSeconds, endSeconds, includeGaps }) =>
+            onPlayMoment(startSeconds, endSeconds, includeGaps)
+          : undefined}
+      />
+    </div>
+  )
+  const verifiedPauses = (
+    <section aria-label="Verified pause moments">
+      <p className="mb-2 text-xs text-muted-foreground">
+        Verified, word-aligned pauses — limited pause-placement coaching.
+      </p>
+      {content}
+    </section>
+  )
+
   if (compact) {
     return (
       <section className="mb-4" aria-label="Delivery moments">
@@ -160,7 +186,8 @@ export function DeliveryMoments({
           <PauseCircle className="h-3.5 w-3.5" />
           <span>Delivery moments — measured pauses with aligned audio evidence</span>
         </div>
-        {content}
+        {verifiedPauses}
+        {rawEvidence}
       </section>
     )
   }
@@ -176,11 +203,12 @@ export function DeliveryMoments({
         </p>
       </CardHeader>
       <CardContent>
-        {content}
+        {verifiedPauses}
+        {rawEvidence}
         <div className="mt-3 flex items-start gap-2 text-xs text-muted-foreground">
           <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>
-            This first release evaluates pause placement only. Pitch, energy, and tone interpretations remain withheld until they are calibrated against human-labelled recordings.
+            Pause placement is interpreted conservatively. Pitch and energy observations are experimental measurements; tone, personality, and vocal-health interpretations remain withheld until calibrated against human-labelled recordings.
           </span>
         </div>
       </CardContent>

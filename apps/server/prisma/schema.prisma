@@ -446,6 +446,7 @@ model SessionSegment {
   startedAt            DateTime
   recordingStartedAt   DateTime?
   recordingDurationSec Float?
+  captureSettings      Json?     // Browser-reported requested/applied processing for this recording segment
   endedAt              DateTime?
   activeDurationSec    Int?
   audioStatus          String    @default("pending") // pending | available | failed | unavailable

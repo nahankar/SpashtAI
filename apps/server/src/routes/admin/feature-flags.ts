@@ -3,8 +3,8 @@ import { prisma } from '../../lib/prisma'
 import {
   ensureFeatureFlags,
   invalidateFeatureFlagCache,
-  PLATFORM_FEATURES,
-  type PlatformFeature,
+  CONFIGURABLE_FEATURES,
+  type ConfigurableFeature,
 } from '../../lib/featureFlags'
 
 const router = Router()
@@ -24,8 +24,8 @@ router.get('/', async (_req: Request, res: Response) => {
 
 router.put('/:feature', async (req: Request, res: Response) => {
   try {
-    const feature = req.params.feature as PlatformFeature
-    if (!PLATFORM_FEATURES.includes(feature)) {
+    const feature = req.params.feature as ConfigurableFeature
+    if (!CONFIGURABLE_FEATURES.includes(feature)) {
       return res.status(400).json({ error: `Unknown feature: ${feature}` })
     }
 

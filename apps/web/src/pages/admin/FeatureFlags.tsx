@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { Loader2, Mic, Upload, AlertCircle, BriefcaseBusiness, Timer } from 'lucide-react'
+import { Loader2, Mic, Upload, AlertCircle, BriefcaseBusiness, Timer, Activity } from 'lucide-react'
 import { useFeatureFlags } from '@/contexts/FeatureFlagsContext'
 
 interface FeatureFlagRow {
@@ -25,6 +25,7 @@ const FEATURE_ICONS: Record<string, typeof Mic> = {
   replay: Upload,
   prepare: BriefcaseBusiness,
   quick_try: Timer,
+  delivery_moments: Activity,
 }
 
 function FlagToggle({
@@ -127,7 +128,7 @@ export function FeatureFlagsAdmin() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Feature Flags</h1>
         <p className="text-muted-foreground">
-          Control module visibility and access. <strong>Hide</strong> removes a feature from the UI.
+          Control module visibility and controlled analysis capabilities. <strong>Hide</strong> removes a feature from the UI.
           <strong> Disabled</strong> shows it with an overlay but blocks access. Add overlay text like
           &quot;Coming soon&quot; or &quot;Earn points to unlock.&quot;
         </p>

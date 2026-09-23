@@ -571,9 +571,24 @@ export function Elevate() {
   // Playback tab to the moment behind a skill score ("Hear it").
   const [resultsTab, setResultsTab] = useState('playback')
   const [playbackAutoPlayNonce, setPlaybackAutoPlayNonce] = useState<number | null>(null)
+  const [deliveryClipRequest, setDeliveryClipRequest] = useState<{
+    startSeconds: number
+    endSeconds: number
+    nonce: number
+  } | null>(null)
+  const playbackNonceRef = useRef(0)
   const hearSkillMoment = () => {
+    setDeliveryClipRequest(null)
     setResultsTab('playback')
-    setPlaybackAutoPlayNonce(Date.now())
+    setPlaybackAutoPlayNonce(++playbackNonceRef.current)
+  }
+  const hearDeliveryMoment = (startSeconds: number, endSeconds: number) => {
+    setDeliveryClipRequest({
+      startSeconds,
+      endSeconds,
+      nonce: ++playbackNonceRef.current,
+    })
+    setResultsTab('playback')
   }
   const handleElevateExportPdf = async () => {
     if (!sessionId || !historicalMetrics) return
@@ -697,25 +712,19 @@ export function Elevate() {
           description: 'Experimental acoustic measurements; microphone and browser processing affect these values',
           items: [
             {
-              label: 'Voice Quality',
+              label: 'Voice Quality (experimental index)',
               value: vq.toFixed(1),
-              unit: '/10',
-              score: vq,
-              hint: 'HNR-based recording signal; not a diagnosis of vocal strain.',
+              hint: 'Uncalibrated HNR-derived index; not a diagnosis of vocal strain.',
             },
             {
-              label: 'Pitch Variation',
+              label: 'Pitch Variation (experimental index)',
               value: pv.toFixed(1),
-              unit: '/10',
-              score: pv,
-              hint: 'Experimental score derived from pitch spread in Hz.',
+              hint: 'Uncalibrated index derived from pitch spread in Hz.',
             },
             {
-              label: 'Energy Stability',
+              label: 'Energy Stability (experimental index)',
               value: es.toFixed(1),
-              unit: '/10',
-              score: es,
-              hint: 'May be flattened by browser automatic gain control.',
+              hint: 'Uncalibrated index; may be flattened by browser automatic gain control.',
             },
             { label: 'Pauses', value: String(prosody.pauseCount ?? 0) },
             { label: 'Avg Pause', value: `${(prosody.meanPauseDuration ?? 0).toFixed(2)}`, unit: 's' },
@@ -2198,6 +2207,7 @@ export function Elevate() {
                 setResultsTab(v)
                 if (v !== 'playback') {
                   setPlaybackAutoPlayNonce(null)
+                  setDeliveryClipRequest(null)
                 }
               }}
               className="space-y-4"
@@ -2304,7 +2314,7 @@ export function Elevate() {
                     </div>
 
                     <div className="mt-6">
-                      <DeliveryMoments sessionId={sessionId} />
+                      <DeliveryMoments sessionId={sessionId} onPlayMoment={hearDeliveryMoment} />
                     </div>
                   </>
                 )}
@@ -2315,6 +2325,7 @@ export function Elevate() {
                   sessionId={sessionId ?? viewSessionId ?? undefined}
                   embedded
                   autoPlayNonce={playbackAutoPlayNonce}
+                  clipRequest={deliveryClipRequest}
                 />
               </TabsContent>
             </Tabs>

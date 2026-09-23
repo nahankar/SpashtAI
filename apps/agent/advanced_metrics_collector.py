@@ -194,6 +194,10 @@ class AdvancedMetricsCollector:
                 user_text = user_text.strip()
             
             if user_text:
+                # Preserve provenance within the delivery-evidence block as
+                # well as in the envelope sent to the server. This makes a
+                # detached metric record auditable without guessing its audio.
+                self.audio_processor.audio_input_signature = self.audio_input_signature
                 delivery_metrics = await self.audio_processor.analyze_delivery(
                     user_text,
                     user_audio_file_path,

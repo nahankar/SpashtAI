@@ -67,6 +67,7 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
     const uploadedRef = useRef(false)
     const discardRef = useRef(false)
     const capturedBlobRef = useRef<Blob | null>(null)
+    const captureSettingsRef = useRef<ReturnType<typeof describeAudioCapture> | null>(null)
     const finalizePromiseRef = useRef<Promise<{
       ok: boolean
       audioCapture: AudioCaptureReport
@@ -104,6 +105,9 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
           form.append('segmentId', segmentId)
           form.append('durationSec', String(durationSec))
           if (startedAtRef.current) form.append('recordingStartedAt', startedAtRef.current)
+          if (captureSettingsRef.current) {
+            form.append('captureSettings', JSON.stringify(captureSettingsRef.current))
+          }
 
           const headers: Record<string, string> = {}
           if (token) headers.Authorization = `Bearer ${token}`
@@ -218,8 +222,9 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
           startMsRef.current = Date.now()
           startedRef.current = true
           startOutcomeRef.current = 'started'
+          captureSettingsRef.current = describeAudioCapture(track)
           startRecording(new MediaStream([track]))
-          console.log('🎙️ Auto session recording started', describeAudioCapture(track))
+          console.log('🎙️ Auto session recording started', captureSettingsRef.current)
           return
         }
         attempts += 1
