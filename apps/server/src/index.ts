@@ -38,6 +38,7 @@ import {
   getAudioAnalytics
 } from './routes/audio'
 import { getSessionTurns, saveSessionTurnsForAgent } from './routes/turns'
+import { getDeliveryMoments } from './routes/delivery-moments'
 import {
   recordingUpload,
   uploadSessionRecording,
@@ -296,6 +297,7 @@ app.patch('/sessions/:sessionId/segments/:segmentId', requireAuth, closeSessionS
 
 // Protected: per-turn replay records (GET user, POST agent-internal)
 app.get('/sessions/:sessionId/turns', requireAuth, getSessionTurns)
+app.get('/sessions/:sessionId/delivery-moments', requireAuth, getDeliveryMoments)
 app.post('/internal/sessions/:sessionId/turns', saveSessionTurnsForAgent)
 
 // Protected: advanced metrics
@@ -480,4 +482,3 @@ startServer().catch((err) => {
   console.error('Failed to start server:', err)
   process.exit(1)
 })
-

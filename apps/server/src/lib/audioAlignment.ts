@@ -226,7 +226,7 @@ export function buildSkipIntervalsFromTurnWords(
   return out.sort((a, b) => a.start - b.start)
 }
 
-function distributeWords(
+export function distributeWords(
   words: unknown,
   start: number,
   end: number,
@@ -246,9 +246,13 @@ function distributeWords(
     const ws = start + (acc / total) * span
     acc += weight(w)
     const we = start + (acc / total) * span
+    // These positions are useful for Replay karaoke, but they are allocated
+    // across a detected speech region rather than observed word boundaries.
+    // Never preserve an upstream `actual` marker: downstream delivery coaching
+    // must be able to distinguish this visual fallback from acoustic evidence.
     return w && typeof w === 'object'
-      ? { ...w, start: ws, end: we }
-      : { w: String(w), start: ws, end: we }
+      ? { ...w, start: ws, end: we, timingOrigin: 'synthetic' }
+      : { w: String(w), start: ws, end: we, timingOrigin: 'synthetic' }
   })
 }
 

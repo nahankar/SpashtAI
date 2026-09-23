@@ -26,6 +26,7 @@ import { RealTimeMetrics } from '@/components/analytics/RealTimeMetrics'
 import { SessionMetrics } from '@/components/analytics/SessionMetrics'
 import { SessionMetricsSummary } from '@/components/analytics/SessionMetricsSummary'
 import { AdvancedInsights, CONTENT_VERDICTS, DELIVERY_VERDICTS } from '@/components/analytics/AdvancedInsights'
+import { DeliveryMoments } from '@/components/analytics/DeliveryMoments'
 import { SkillScoresCard } from '@/components/analytics/SkillScoresCard'
 import { CoachingInsightsCard } from '@/components/analytics/CoachingInsightsCard'
 import { SnapshotReveal } from '@/components/elevate/SnapshotReveal'
@@ -2301,6 +2302,10 @@ export function Elevate() {
                     <div className="mt-6">
                       <AdvancedInsights sessionId={sessionId} isSessionEnded={true} />
                     </div>
+
+                    <div className="mt-6">
+                      <DeliveryMoments sessionId={sessionId} />
+                    </div>
                   </>
                 )}
               </TabsContent>
@@ -3404,5 +3409,3 @@ function ChatPanel({
     </div>
   )
 }
-
-

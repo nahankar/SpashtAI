@@ -28,6 +28,7 @@ import { getAuthHeaders, getAuthenticatedMediaUrl } from '@/lib/api-client'
 import { COACH_BUBBLE, USER_BUBBLE } from '@/lib/conversation'
 import { useIsPro } from '@/hooks/useIsPro'
 import { UserTurnBubble, normalizeTurnMetricsFromApi } from '@/components/session/UserTurnMetrics'
+import { DeliveryMoments } from '@/components/analytics/DeliveryMoments'
 import {
   hasAvailablePace,
   isQualifiedPaceHighlight,
@@ -405,6 +406,9 @@ export function SessionReplay({
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const skipSeekingRef = useRef(false)
+  // A selected delivery clip may contain a pause, so this ref temporarily
+  // suspends the convenience "Skip gaps" feature until the clip finishes.
+  const deliveryClipEndRef = useRef<number | null>(null)
   const turnRefs = useRef<Record<number, HTMLDivElement | null>>({})
   const handledFocusRef = useRef<number | null>(null)
   const effectiveAutoPlayNonce = autoPlayNonce ?? focusRequest?.nonce ?? null
@@ -700,6 +704,7 @@ export function SessionReplay({
   const togglePlay = useCallback(async () => {
     const a = audioRef.current
     if (!a) return
+    deliveryClipEndRef.current = null
     if (a.paused) {
       const end =
         timelineEnd && Number.isFinite(timelineEnd) ? timelineEnd : duration
@@ -718,6 +723,7 @@ export function SessionReplay({
     async (t: number) => {
       const a = audioRef.current
       if (!a || !Number.isFinite(t)) return
+      deliveryClipEndRef.current = null
       a.currentTime = Math.max(0, t)
       if (skipGaps) await applySkipGapsSeek(a)
       setCurrentTime(a.currentTime)
@@ -726,11 +732,17 @@ export function SessionReplay({
   )
 
   const playFrom = useCallback(
-    async (t: number) => {
+    async (t: number, includeGaps = false, clipEndSec?: number) => {
       const a = audioRef.current
       if (!a || !Number.isFinite(t)) return
+      deliveryClipEndRef.current =
+        includeGaps && Number.isFinite(clipEndSec) && (clipEndSec as number) > t
+          ? (clipEndSec as number)
+          : null
       a.currentTime = Math.max(0, t)
-      if (skipGaps) await applySkipGapsSeek(a)
+      // A delivery moment can itself be a pause. Do not let the regular
+      // convenience setting jump across the very evidence the user selected.
+      if (skipGaps && !includeGaps) await applySkipGapsSeek(a)
       setCurrentTime(a.currentTime)
       try {
         await a.play()
@@ -1021,6 +1033,8 @@ export function SessionReplay({
   useEffect(() => {
     if (!skipGaps) return
     const a = audioRef.current
+    const clipEnd = deliveryClipEndRef.current
+    if (clipEnd != null && a && a.currentTime < clipEnd - 0.01) return
     if (a) void applySkipGapsSeek(a)
   }, [skipGaps, applySkipGapsSeek])
 
@@ -1031,6 +1045,12 @@ export function SessionReplay({
     const tick = () => {
       const a = audioRef.current
       if (a && !a.paused && !skipSeekingRef.current) {
+        const clipEnd = deliveryClipEndRef.current
+        if (clipEnd != null && a.currentTime < clipEnd - 0.01) {
+          raf = requestAnimationFrame(tick)
+          return
+        }
+        if (clipEnd != null) deliveryClipEndRef.current = null
         const resolved = resolveSkipGapsTime(a.currentTime)
         if (
           resolved !== null &&
@@ -1049,6 +1069,19 @@ export function SessionReplay({
     (e: React.SyntheticEvent<HTMLAudioElement>) => {
       const a = e.currentTarget
       const t = a.currentTime
+      const clipEnd = deliveryClipEndRef.current
+      if (clipEnd != null) {
+        if (t < clipEnd - 0.01) {
+          setCurrentTime(t)
+          return
+        }
+        // Keep the "Hear evidence" action scoped to the selected clip. This
+        // prevents Skip gaps from jumping over the pause after playback resumes.
+        deliveryClipEndRef.current = null
+        if (!a.paused) a.pause()
+        setCurrentTime(clipEnd)
+        return
+      }
       // Stop at the user's last turn — ignore trailing coach audio / silence.
       if (timelineEnd && Number.isFinite(timelineEnd) && t >= timelineEnd - 0.05 && !a.paused) {
         a.pause()
@@ -1292,6 +1325,16 @@ export function SessionReplay({
             })}
           </div>
         </div>
+      )}
+
+      {audioAvailable && sessionId && (
+        <DeliveryMoments
+          sessionId={sessionId}
+          compact
+          onPlayMoment={(startSeconds, endSeconds) =>
+            playFrom(startSeconds, true, endSeconds)
+          }
+        />
       )}
 
       {/* Transcript */}

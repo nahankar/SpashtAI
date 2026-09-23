@@ -44,6 +44,35 @@ interface IncomingTurn {
 }
 
 /**
+ * Real word boundaries are delivery evidence.  The ffmpeg turn-region fallback
+ * is valuable for Replay, but it redistributes words and must never replace a
+ * complete observed timing stream just to improve karaoke positioning.
+ */
+export function hasObservedWordTiming(words: unknown): boolean {
+  return (
+    Array.isArray(words) &&
+    words.length > 0 &&
+    words.every((word) => {
+      if (!word || typeof word !== 'object' || Array.isArray(word)) return false
+      const value = word as Record<string, unknown>
+      if (typeof value.start !== 'number' || typeof value.end !== 'number') return false
+      const origin =
+        typeof value.timingOrigin === 'string'
+          ? value.timingOrigin
+          : typeof value.timing_origin === 'string'
+            ? value.timing_origin
+            : ''
+      return (
+        (origin === 'actual' || origin === 'forced_alignment') &&
+        Number.isFinite(value.start) &&
+        Number.isFinite(value.end) &&
+        value.end > value.start
+      )
+    })
+  )
+}
+
+/**
  * User-facing: fetch the per-turn records that power the Session Replay UI.
  * Returns the shared audio anchor (recordingStartedAt) so the client can seek.
  */
@@ -318,7 +347,21 @@ export async function saveSessionTurnsForAgent(req: Request, res: Response) {
 
       for (const t of validTurns) {
         const a = alignedById?.get(t.turnIndex)
-        const data = a
+        // Preserve observed word timing after its explicit STT-to-recording
+        // clock shift.  `a.words` contains a synthetic redistribution over
+        // ffmpeg speech regions and is therefore replay-only fallback data.
+        const data = hasObservedWordTiming(t.words)
+          ? {
+              role: t.role,
+              text: t.text,
+              audioStart: shiftTime(t.audioStart),
+              audioEnd: shiftTime(t.audioEnd),
+              words: shiftWords(t.words) as any,
+              metrics: (t.metrics ?? undefined) as any,
+              score: (t.score ?? undefined) as any,
+              coachNote: t.coachNote ?? null,
+            }
+          : a
           ? {
               role: t.role,
               text: t.text,
