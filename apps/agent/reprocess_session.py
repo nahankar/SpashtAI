@@ -5,6 +5,7 @@ Usage: python reprocess_session.py <session_id> <audio_file_path> <transcript>
 """
 import sys
 import asyncio
+import json
 import os
 import logging
 from typing import Optional
@@ -160,7 +161,6 @@ def main():
         )
     )
     
-    import json
     print(json.dumps(result, indent=2))
     
     sys.exit(0 if result.get("success") else 1)
