@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Progress } from '../ui/progress';
 import { MessageSquare, Download, RefreshCw, FileText, Loader2, Mic } from 'lucide-react';
@@ -7,7 +7,14 @@ import { getAuthHeaders } from '@/lib/api-client';
 import { useUserExportFlags } from '@/hooks/useUserExportFlags';
 import { toast } from 'sonner';
 import { hasAvailablePace, type PaceProcessingStatus } from '@/lib/pace';
-import { runReprocess } from '@/lib/reprocess';
+import {
+  classifyReprocessJob,
+  fetchReprocessJob,
+  isAbortError,
+  runReprocess,
+  waitForReprocess,
+  type ReprocessOutcome,
+} from '@/lib/reprocess';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
 
@@ -116,24 +123,73 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExp
     }
   };
 
-  const handleReprocess = async () => {
+  // Reprocessing runs on the server and survives this view unmounting (e.g.
+  // switching to Playback). Polling is tied to the mount, and a remount picks
+  // the running job back up instead of offering to start another.
+  const pollRef = useRef<AbortController | null>(null);
+  const waitingRef = useRef(false);
+  const [reloadReady, setReloadReady] = useState(false);
+
+  const settle = useCallback((pending: Promise<ReprocessOutcome>, controller: AbortController) => {
+    waitingRef.current = true;
     setIsReprocessing(true);
+    pending
+      .then((outcome) => {
+        setReprocessStatus(`✅ ${outcome.message} Refreshing metrics...`);
+        setTimeout(() => {
+          if (!controller.signal.aborted) window.location.reload();
+        }, 2000);
+      })
+      .catch((error: unknown) => {
+        if (isAbortError(error)) return;
+        setReprocessStatus(`❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        setTimeout(() => setReprocessStatus(''), 8000);
+      })
+      .finally(() => {
+        waitingRef.current = false;
+        if (!controller.signal.aborted) setIsReprocessing(false);
+      });
+  }, []);
 
-    try {
-      const outcome = await runReprocess(sessionId, setReprocessStatus);
-      setReprocessStatus(`✅ ${outcome.message} Refreshing metrics...`);
+  useEffect(() => {
+    if (!exportFlags.enableReprocess) return;
+    const controller = new AbortController();
+    pollRef.current = controller;
+    setIsReprocessing(false);
+    setReprocessStatus('');
+    setReloadReady(false);
 
-      // Reload the page after 2 seconds to show updated metrics
-      setTimeout(() => {
-        window.location.reload();
-      }, 2000);
-      
-    } catch (error) {
-      setReprocessStatus(`❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      setTimeout(() => setReprocessStatus(''), 8000);
-    } finally {
-      setIsReprocessing(false);
-    }
+    fetchReprocessJob(sessionId, controller.signal)
+      .then((job) => {
+        if (controller.signal.aborted || waitingRef.current) return;
+        const state = classifyReprocessJob(job);
+        if (state === 'resume') {
+          settle(
+            waitForReprocess(sessionId, { onProgress: setReprocessStatus, signal: controller.signal }, job?.startedAt),
+            controller,
+          );
+        } else if (state === 'finished_unseen') {
+          setReprocessStatus('✅ Reprocessing finished while you were away.');
+          setReloadReady(true);
+        } else if (state === 'failed_unseen') {
+          setReprocessStatus(`❌ Error: ${job?.error || 'Reprocessing failed'}`);
+        }
+      })
+      .catch(() => {
+        /* status is best-effort; the button stays available */
+      });
+
+    return () => {
+      controller.abort();
+      if (pollRef.current === controller) pollRef.current = null;
+    };
+  }, [sessionId, exportFlags.enableReprocess, settle]);
+
+  const handleReprocess = () => {
+    const controller = pollRef.current ?? new AbortController();
+    pollRef.current = controller;
+    setReloadReady(false);
+    settle(runReprocess(sessionId, setReprocessStatus, controller.signal), controller);
   };
 
   if (!metrics) {
@@ -257,8 +313,13 @@ export function SessionMetrics({ sessionId, metrics, onDownloadTranscript, onExp
             )}
           </div>
           {reprocessStatus && (
-            <div className="text-sm text-muted-foreground">
-              {reprocessStatus}
+            <div className="flex items-center gap-2 text-sm text-muted-foreground" role="status" aria-live="polite">
+              <span>{reprocessStatus}</span>
+              {reloadReady && (
+                <Button variant="link" size="sm" className="h-auto p-0" onClick={() => window.location.reload()}>
+                  Reload to see updated metrics
+                </Button>
+              )}
             </div>
           )}
         </div>
