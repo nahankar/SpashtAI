@@ -26,7 +26,6 @@ import { RealTimeMetrics } from '@/components/analytics/RealTimeMetrics'
 import { SessionMetrics } from '@/components/analytics/SessionMetrics'
 import { SessionMetricsSummary } from '@/components/analytics/SessionMetricsSummary'
 import { AdvancedInsights, CONTENT_VERDICTS, DELIVERY_VERDICTS } from '@/components/analytics/AdvancedInsights'
-import { DeliveryMoments } from '@/components/analytics/DeliveryMoments'
 import { SkillScoresCard } from '@/components/analytics/SkillScoresCard'
 import { CoachingInsightsCard } from '@/components/analytics/CoachingInsightsCard'
 import { SnapshotReveal } from '@/components/elevate/SnapshotReveal'
@@ -61,7 +60,7 @@ import type { SessionTurnRecord } from '@/hooks/useSessionMetrics'
 import { getPreparation, linkPreparationPractice } from '@/lib/prepare-api'
 import { COACH_BUBBLE, USER_BUBBLE } from '@/lib/conversation'
 import { isUsableProsody } from '@/lib/prosody'
-import { hasAvailablePace, isSubstantivePaceTurn } from '@/lib/pace'
+import { hasAvailablePace, paceTrendTurns } from '@/lib/pace'
 import { markCoachHomeResultSeen, recordCoachAction } from '@/lib/coach-api'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
@@ -552,42 +551,27 @@ export function Elevate() {
 
   // Per-turn records fetched once and shared by the summary strip + pace trend.
   const { turns: completedTurns } = useSessionTurns(sessionId, !!sessionId)
-  const completedPacePoints = useMemo<PacePoint[]>(() => {
-    let n = 0
-    return completedTurns
-      .filter(
-        (t) =>
-          t.role === 'user' &&
-          isSubstantivePaceTurn(t.metrics as Record<string, unknown> | undefined),
-      )
-      .map((t) => {
-        n += 1
-        return { label: n, wpm: Math.round(Number(t.metrics?.wpm)) }
-      })
-  }, [completedTurns])
+  const completedPacePoints = useMemo<PacePoint[]>(
+    () =>
+      paceTrendTurns(
+        completedTurns,
+        hasAvailablePace(historicalMetrics?.processingStatus),
+      ).map((t, index) => ({ label: index + 1, wpm: Math.round(Number(t.metrics?.wpm)) })),
+    [completedTurns, historicalMetrics?.processingStatus],
+  )
   
   const [elevatePdfLoading, setElevatePdfLoading] = useState(false)
   // Results view: which tab is showing, plus a one-shot request to deep-link the
   // Playback tab to the moment behind a skill score ("Hear it").
   const [resultsTab, setResultsTab] = useState('playback')
   const [playbackAutoPlayNonce, setPlaybackAutoPlayNonce] = useState<number | null>(null)
-  const [deliveryClipRequest, setDeliveryClipRequest] = useState<{
-    startSeconds: number
-    endSeconds: number
-    nonce: number
-  } | null>(null)
   const playbackNonceRef = useRef(0)
   const hearSkillMoment = () => {
-    setDeliveryClipRequest(null)
     setResultsTab('playback')
     setPlaybackAutoPlayNonce(++playbackNonceRef.current)
   }
-  const hearDeliveryMoment = (startSeconds: number, endSeconds: number) => {
-    setDeliveryClipRequest({
-      startSeconds,
-      endSeconds,
-      nonce: ++playbackNonceRef.current,
-    })
+  const openPlayback = () => {
+    setPlaybackAutoPlayNonce(null)
     setResultsTab('playback')
   }
   const handleElevateExportPdf = async () => {
@@ -732,19 +716,12 @@ export function Elevate() {
         })
       }
 
-      // Pace variation chart points — one WPM per user turn, in order.
-      let paceN = 0
+      // Pace variation chart points — one WPM per qualified user turn, in order.
       const paceTurns: PaceTurn[] = Array.isArray(turnsData?.turns) ? turnsData.turns : []
-      const pacePoints = paceTurns
-            .filter(
-              (t) =>
-                t.role === 'user' &&
-                isSubstantivePaceTurn(t.metrics as Record<string, unknown> | undefined),
-            )
-            .map((t) => {
-              paceN += 1
-              return { label: paceN, wpm: Math.round(Number(t.metrics?.wpm)) }
-            })
+      const pacePoints = paceTrendTurns(paceTurns, paceAvailable).map((t, index) => ({
+        label: index + 1,
+        wpm: Math.round(Number(t.metrics?.wpm)),
+      }))
 
       // Progress Pulse (cross-session trends), without the "Practice in Elevate" CTA.
       let progressPulse: SessionReport['progressPulse'] = null
@@ -2207,7 +2184,6 @@ export function Elevate() {
                 setResultsTab(v)
                 if (v !== 'playback') {
                   setPlaybackAutoPlayNonce(null)
-                  setDeliveryClipRequest(null)
                 }
               }}
               className="space-y-4"
@@ -2310,11 +2286,11 @@ export function Elevate() {
 
                     {/* Content & Delivery analysis */}
                     <div className="mt-6">
-                      <AdvancedInsights sessionId={sessionId} isSessionEnded={true} />
-                    </div>
-
-                    <div className="mt-6">
-                      <DeliveryMoments sessionId={sessionId} onPlayMoment={hearDeliveryMoment} />
+                      <AdvancedInsights
+                        sessionId={sessionId}
+                        isSessionEnded={true}
+                        onOpenPlayback={openPlayback}
+                      />
                     </div>
                   </>
                 )}
@@ -2325,7 +2301,6 @@ export function Elevate() {
                   sessionId={sessionId ?? viewSessionId ?? undefined}
                   embedded
                   autoPlayNonce={playbackAutoPlayNonce}
-                  clipRequest={deliveryClipRequest}
                 />
               </TabsContent>
             </Tabs>

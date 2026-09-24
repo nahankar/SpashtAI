@@ -16,7 +16,7 @@ import time
 import wave
 import subprocess
 from dataclasses import dataclass, asdict
-from typing import List, Dict, Optional, Tuple
+from typing import Any, List, Dict, Optional, Tuple
 from pathlib import Path
 import numpy as np
 from audio_storage import get_storage_instance, AudioMetadata
@@ -115,9 +115,50 @@ class ProsodyMetrics:
     pitch_variation: float  # standard deviation
     mean_intensity: float
     intensity_stability: float  # 1/std for stability score
-    harmonicity_mean: float  # voice quality
+    harmonicity_mean: Optional[float]  # dB over voiced frames; None when none are voiced
     speech_rate_precise: float  # words per minute from alignment
     articulation_rate: float  # words per minute excluding pauses
+
+
+# Praat reports unvoiced harmonicity frames as about -200 dB. Averaging them
+# with voiced frames produced impossible values such as -166 dB.
+PRAAT_UNVOICED_HNR_DB = -100.0
+# Frames more than this far below the loudest frame are treated as silence.
+SPEECH_INTENSITY_WINDOW_DB = 25.0
+
+
+def summarize_praat_frames(
+    pitch_hz: "np.ndarray",
+    intensity_db: "np.ndarray",
+    harmonicity_db: "np.ndarray",
+) -> Dict[str, Any]:
+    """Summarise Praat frames over voiced speech only.
+
+    Silence, unvoiced frames and residual octave jumps are removed first so the
+    raw measurements describe the speaker rather than gaps in the recording.
+    """
+    pitch = np.asarray(pitch_hz, dtype=float).flatten()
+    pitch = pitch[np.isfinite(pitch) & (pitch > 0)]
+    if len(pitch):
+        median = float(np.median(pitch))
+        pitch = pitch[(pitch >= median * 0.6) & (pitch <= median * 1.7)]
+
+    intensity = np.asarray(intensity_db, dtype=float).flatten()
+    intensity = intensity[np.isfinite(intensity)]
+    if len(intensity):
+        intensity = intensity[intensity >= float(np.max(intensity)) - SPEECH_INTENSITY_WINDOW_DB]
+
+    hnr = np.asarray(harmonicity_db, dtype=float).flatten()
+    hnr = hnr[np.isfinite(hnr) & (hnr > PRAAT_UNVOICED_HNR_DB)]
+
+    return {
+        "mean_pitch": float(np.mean(pitch)) if len(pitch) else 0.0,
+        "pitch_range": float(np.ptp(pitch)) if len(pitch) else 0.0,
+        "pitch_variation": float(np.std(pitch)) if len(pitch) else 0.0,
+        "mean_intensity": float(np.mean(intensity)) if len(intensity) else 0.0,
+        "intensity_stability": float(1.0 / (np.std(intensity) + 0.1)) if len(intensity) else 0.0,
+        "harmonicity_mean": float(np.mean(hnr)) if len(hnr) else None,
+    }
 
 @dataclass
 class DeliveryEvidence:
@@ -473,18 +514,14 @@ class PraatAnalyzer:
         try:
             sound = self.praat.Sound(audio_path)
             
-            # Extract pitch (fundamental frequency)
-            pitch = sound.to_pitch()
-            pitch_values = pitch.selected_array['frequency']
-            pitch_values = pitch_values[pitch_values > 0]  # Remove unvoiced segments
-            
-            # Extract intensity (loudness)
+            pitch = sound.to_pitch(pitch_floor=75.0, pitch_ceiling=400.0)
             intensity = sound.to_intensity()
-            intensity_values = intensity.values.flatten()
-            
-            # Extract harmonicity (voice quality)
             harmonicity = sound.to_harmonicity()
-            harmonicity_values = harmonicity.values.flatten()
+            summary = summarize_praat_frames(
+                pitch.selected_array['frequency'],
+                intensity.values.flatten(),
+                harmonicity.values.flatten(),
+            )
             
             # Calculate precise speech rates if alignments available
             speech_rate_precise = 0.0
@@ -496,12 +533,7 @@ class PraatAnalyzer:
                 )
             
             return ProsodyMetrics(
-                mean_pitch=float(np.mean(pitch_values)) if len(pitch_values) > 0 else 0.0,
-                pitch_range=float(np.ptp(pitch_values)) if len(pitch_values) > 0 else 0.0,
-                pitch_variation=float(np.std(pitch_values)) if len(pitch_values) > 0 else 0.0,
-                mean_intensity=float(np.mean(intensity_values)) if len(intensity_values) > 0 else 0.0,
-                intensity_stability=float(1.0 / (np.std(intensity_values) + 0.1)) if len(intensity_values) > 0 else 0.0,
-                harmonicity_mean=float(np.mean(harmonicity_values[~np.isnan(harmonicity_values)])) if len(harmonicity_values) > 0 else 0.0,
+                **summary,
                 speech_rate_precise=speech_rate_precise,
                 articulation_rate=articulation_rate
             )
@@ -884,7 +916,7 @@ class AudioProcessor:
         }
         return DeliveryEvidence(
             schema_version=1,
-            analyzer_version="praat-raw-v1",
+            analyzer_version="praat-raw-v2",
             audio_input_signature=self.audio_input_signature,
             status="experimental" if prosody or alignments else "insufficient_evidence",
             calibration_status="uncalibrated",

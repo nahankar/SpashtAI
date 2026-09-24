@@ -4,7 +4,7 @@ import { Award, Gauge, MessageSquare, Hash } from 'lucide-react'
 import { getAuthHeaders } from '@/lib/api-client'
 import {
   hasAvailablePace,
-  isSubstantivePaceTurn,
+  paceTrendTurns,
   type PaceProcessingStatus,
 } from '@/lib/pace'
 
@@ -135,9 +135,9 @@ export function SessionMetricsSummary({ sessionId, metrics, variant = 'card', tu
   const { pacePoints, hedging } = useMemo(() => {
     const effectiveTurns = turns ?? fetchedTurns ?? []
     const userTurns = effectiveTurns.filter((t) => t.role === 'user')
-    const pts = userTurns
-      .filter((t) => isSubstantivePaceTurn(t.metrics as Record<string, unknown> | undefined))
-      .map((t) => Math.round(Number(t.metrics?.wpm)))
+    const pts = paceTrendTurns(userTurns, hasAvailablePace(metrics?.processingStatus)).map((t) =>
+      Math.round(Number(t.metrics?.wpm)),
+    )
     let hedge = 0
     let hasHedge = false
     for (const t of userTurns) {
@@ -147,7 +147,7 @@ export function SessionMetricsSummary({ sessionId, metrics, variant = 'card', tu
       }
     }
     return { pacePoints: pts, hedging: hasHedge ? hedge : null }
-  }, [turns, fetchedTurns])
+  }, [turns, fetchedTurns, metrics?.processingStatus])
 
   const paceAvailable = hasAvailablePace(metrics?.processingStatus)
   const wpm =

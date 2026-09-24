@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card'
-import { Lightbulb, Target, TrendingUp, Zap, Activity, Loader2 } from 'lucide-react'
+import { Lightbulb, Target, TrendingUp, Zap, Activity, Loader2, Info } from 'lucide-react'
 import { getAuthHeaders } from '@/lib/api-client'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
@@ -11,6 +11,8 @@ interface CoachingData {
   actionableAdvice?: string
   practiceExercise?: string
   overallNarrative?: string
+  /** Present when pace advice was withheld because pace could not be verified. */
+  paceNote?: string
   error?: string
 }
 
@@ -67,7 +69,8 @@ export function CoachingInsightsCard({
       coaching.primaryImprovement ||
       coaching.actionableAdvice ||
       coaching.practiceExercise ||
-      coaching.overallNarrative)
+      coaching.overallNarrative ||
+      coaching.paceNote)
 
   return (
     <Card className={fill ? 'h-full' : ''}>
@@ -121,6 +124,16 @@ export function CoachingInsightsCard({
             <div>
               <p className="text-sm font-medium">Actionable Advice</p>
               <p className="mt-0.5 text-sm text-muted-foreground">{coaching.actionableAdvice}</p>
+            </div>
+          </div>
+        )}
+
+        {coaching?.paceNote && !coaching.error && (
+          <div className="flex items-start gap-3 rounded-lg border border-dashed p-3">
+            <Info className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <div>
+              <p className="text-sm font-medium">Pace</p>
+              <p className="mt-0.5 text-sm text-muted-foreground">{coaching.paceNote}</p>
             </div>
           </div>
         )}

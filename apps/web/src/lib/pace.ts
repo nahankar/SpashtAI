@@ -63,3 +63,27 @@ export function isQualifiedPaceHighlight(
   const speakingSeconds = Number(metrics?.speaking_seconds)
   return words >= 15 && speakingSeconds >= 4
 }
+
+/** A pace trend or fastest/slowest comparison needs at least this many qualified turns. */
+export const MIN_PACE_TREND_TURNS = 3
+
+export const PACE_UNSCORED_NOTE =
+  'Pace was not scored for this recording because verified word timing was unavailable.'
+
+/**
+ * User turns that may appear in a pace trend. Returns an empty list unless the
+ * session-level pace is verified and at least three turns meet the highlight
+ * bar, so a trend is never drawn from fragments or estimated durations.
+ */
+export function paceTrendTurns<T extends { role?: string | null; metrics?: unknown }>(
+  turns: T[],
+  paceAvailable: boolean,
+): T[] {
+  if (!paceAvailable) return []
+  const qualified = turns.filter(
+    (turn) =>
+      turn.role === 'user' &&
+      isQualifiedPaceHighlight(turn.metrics as Record<string, unknown> | null | undefined),
+  )
+  return qualified.length >= MIN_PACE_TREND_TURNS ? qualified : []
+}

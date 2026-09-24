@@ -7,13 +7,17 @@ import {
   MessageSquare, 
   AlertCircle,
   BarChart3,
-  Activity
+  Activity,
+  ChevronRight,
 } from 'lucide-react';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '../ui/accordion';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
 import { getAuthHeaders } from '@/lib/api-client';
 import { hasRealProsody, isUsableProsody } from '@/lib/prosody';
+import { hasPlausibleAcoustics, plausibleAcoustics } from '@/lib/acoustics';
+import { DeliveryEvidenceOverview } from './DeliveryMoments';
+import { MEASUREMENT_CONFIDENCE_NOTE } from './deliveryMomentsData';
 
 /**
  * V2 analytics shapes (from /communication-signals, /skill-scores,
@@ -22,7 +26,7 @@ import { hasRealProsody, isUsableProsody } from '@/lib/prosody';
  * we now derive this view from the server-side v2 engine instead.
  */
 interface V2Signals {
-  speechRate?: { wpm?: number; variability?: number; totalWords?: number }
+  speechRate?: { wpm?: number; variability?: number; totalWords?: number; status?: string }
   fillers?: { count?: number; rate?: number }
   hedging?: { count?: number; rate?: number }
   sentenceComplexity?: { avgLength?: number; subordinateRatio?: number; readability?: number }
@@ -106,6 +110,7 @@ function buildFromV2(
   const delivery_metrics: AdvancedMetrics['delivery_metrics'] = signals
     ? {
         speech_rate: sr.wpm ?? 0,
+        pace_available: sr.status === 'available',
         articulation_rate: alignedDelivery?.articulation_rate ?? 0,
         pause_count: alignedDelivery?.pause_count ?? (hasAcousticProsody ? (prosody?.pauseCount ?? 0) : 0),
         mean_pause_duration:
@@ -167,6 +172,8 @@ function buildFromV2(
 interface AdvancedInsightsProps {
   sessionId: string;
   isSessionEnded?: boolean;
+  /** Switches the host view to Playback, where verified delivery moments live. */
+  onOpenPlayback?: () => void;
 }
 
 interface AdvancedMetrics {
@@ -204,6 +211,8 @@ interface AdvancedMetrics {
   
   delivery_metrics?: {
     speech_rate: number;
+    /** Articulation rate is a pace claim and only shown with verified pace. */
+    pace_available: boolean;
     articulation_rate: number;
     pause_count: number;
     mean_pause_duration: number;
@@ -341,7 +350,7 @@ export const CONTENT_VERDICTS: Record<string, (v: number) => MetricVerdict> = {
         : { tone: 'bad', tip: 'Very complex — break long sentences into shorter ones.' },
 }
 
-export function AdvancedInsights({ sessionId, isSessionEnded = false }: AdvancedInsightsProps) {
+export function AdvancedInsights({ sessionId, isSessionEnded = false, onOpenPlayback }: AdvancedInsightsProps) {
   const [metrics, setMetrics] = useState<AdvancedMetrics | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -490,14 +499,8 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
   const c = metrics.content_metrics
   const d = metrics.delivery_metrics
   const hasProsody = Boolean(metrics.audio_processed)
-  const rawAcoustics = d?.delivery_evidence?.acoustic?.raw_measurements
-  const rawMeasurement = (value: number | null | undefined) =>
-    typeof value === 'number' && Number.isFinite(value) ? value : null
-  const hasRawAcoustics = Boolean(
-    rawMeasurement(rawAcoustics?.f0_std_hz) != null ||
-      rawMeasurement(rawAcoustics?.harmonicity_mean_db) != null ||
-      rawMeasurement(rawAcoustics?.mean_f0_hz) != null,
-  )
+  const acoustics = plausibleAcoustics(d?.delivery_evidence?.acoustic?.raw_measurements)
+  const hasRawAcoustics = hasPlausibleAcoustics(acoustics)
   const diversityPct = c ? c.vocabulary.diversity_ratio * 100 : 0
 
   return (
@@ -636,100 +639,101 @@ export function AdvancedInsights({ sessionId, isSessionEnded = false }: Advanced
         </div>
 
         {/* ── Delivery ──────────────────────────────────────────────
-            Pace & fillers live in Speaking Performance (the single source of
-            truth), so Delivery only shows what's unique to the recording: the
-            acoustic prosody (voice quality, pitch, energy) and pauses. */}
+            Pace & fillers live in Speaking Performance. This column is a
+            summary: what delivery evidence exists, with verified moments in
+            Playback and raw acoustic values collapsed as reference only. */}
         <div className="flex h-full flex-col gap-4">
-          {hasProsody && d ? (
-            <Card className="flex flex-1 flex-col">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Activity className="h-5 w-5" />
-                  Delivery — Acoustic measurements
-                </CardTitle>
-                <CardDescription>
-                  Experimental acoustic indices — sensitive to microphone and browser processing
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="flex-1 space-y-4">
-                <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-snug text-amber-900">
-                  These are experimental recording indices, not a judgment of your voice, confidence, or vocal health.
-                  Coaching labels will appear only after calibration against reviewed recordings.
-                </p>
-                {hasRawAcoustics ? (
-                  <div className="grid gap-2 border-y py-3 text-sm sm:grid-cols-2">
-                    {rawMeasurement(rawAcoustics?.f0_std_hz) != null && (
-                      <div>
-                        <div className="text-muted-foreground">Pitch spread</div>
-                        <div className="font-semibold">{rawMeasurement(rawAcoustics?.f0_std_hz)!.toFixed(1)} Hz</div>
-                      </div>
-                    )}
-                    {rawMeasurement(rawAcoustics?.mean_f0_hz) != null && (
-                      <div>
-                        <div className="text-muted-foreground">Mean fundamental frequency</div>
-                        <div className="font-semibold">{rawMeasurement(rawAcoustics?.mean_f0_hz)!.toFixed(1)} Hz</div>
-                      </div>
-                    )}
-                    {rawMeasurement(rawAcoustics?.harmonicity_mean_db) != null && (
-                      <div>
-                        <div className="text-muted-foreground">Harmonicity</div>
-                        <div className="font-semibold">{rawMeasurement(rawAcoustics?.harmonicity_mean_db)!.toFixed(1)} dB</div>
-                      </div>
-                    )}
-                    {rawMeasurement(rawAcoustics?.intensity_stability_inverse_std) != null && (
-                      <div>
-                        <div className="text-muted-foreground">Intensity stability index</div>
-                        <div className="font-semibold">{rawMeasurement(rawAcoustics?.intensity_stability_inverse_std)!.toFixed(2)}</div>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
-                    Experimental recording indices are available, but this older analysis did not preserve the raw units needed for a trustworthy display.
-                  </p>
-                )}
+          <Card className="flex flex-1 flex-col">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Activity className="h-5 w-5" aria-hidden="true" />
+                Delivery evidence
+              </CardTitle>
+              <CardDescription>What could be verified about how you said it</CardDescription>
+            </CardHeader>
+            <CardContent className="flex-1 space-y-4">
+              <DeliveryEvidenceOverview
+                sessionId={sessionId}
+                measurementsAvailable={hasProsody && hasRawAcoustics}
+                onOpenPlayback={onOpenPlayback}
+              />
 
-                {d.articulation_rate > 0 && (
-                  <div className="border-t pt-3">
-                    <div className="text-sm text-muted-foreground">Articulation rate</div>
-                    <div className="text-2xl font-bold">
-                      {Math.round(d.articulation_rate)} <span className="text-sm font-normal">WPM</span>
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      Voiced-word time only; pauses are excluded.
-                    </div>
-                  </div>
-                )}
+              {hasProsody && d && (
+                <details className="group rounded-md border px-3 py-2">
+                  <summary className="flex cursor-pointer list-none items-center gap-1.5 text-sm font-medium">
+                    <ChevronRight className="h-4 w-4 transition-transform group-open:rotate-90" aria-hidden="true" />
+                    Experimental recording measurements
+                  </summary>
+                  <div className="mt-3 space-y-3 text-sm">
+                    <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-snug text-amber-900">
+                      {MEASUREMENT_CONFIDENCE_NOTE} These are factual, uncalibrated values — not coaching
+                      and not a judgment of your voice, confidence, or vocal health.
+                    </p>
+                    {hasRawAcoustics ? (
+                      <dl className="grid gap-3 sm:grid-cols-2">
+                        {acoustics.meanF0Hz != null && (
+                          <div>
+                            <dt className="text-muted-foreground">Average pitch</dt>
+                            <dd className="font-semibold">{acoustics.meanF0Hz.toFixed(0)} Hz</dd>
+                            <dd className="text-xs text-muted-foreground">How high or low your voice sat on average.</dd>
+                          </div>
+                        )}
+                        {acoustics.f0SpreadHz != null && (
+                          <div>
+                            <dt className="text-muted-foreground">Pitch movement</dt>
+                            <dd className="font-semibold">±{acoustics.f0SpreadHz.toFixed(0)} Hz</dd>
+                            <dd className="text-xs text-muted-foreground">How far your pitch typically moved around that average.</dd>
+                          </div>
+                        )}
+                        {acoustics.harmonicityDb != null && (
+                          <div>
+                            <dt className="text-muted-foreground">Harmonicity</dt>
+                            <dd className="font-semibold">{acoustics.harmonicityDb.toFixed(1)} dB</dd>
+                            <dd className="text-xs text-muted-foreground">Tone-to-noise ratio of the recorded voice; strongly affected by microphone and room.</dd>
+                          </div>
+                        )}
+                      </dl>
+                    ) : (
+                      <p className="text-muted-foreground">
+                        No pitch or harmonicity values passed the plausibility checks for this recording.
+                      </p>
+                    )}
+                    {acoustics.withheld && (
+                      <p className="text-xs text-muted-foreground">
+                        Some values were withheld because they fall outside the plausible range for speech,
+                        which usually means an older analysis counted silence. Reprocessing the recording
+                        recomputes them.
+                      </p>
+                    )}
 
-                {d.pause_count > 0 && (
-                  <div className="border-t pt-3">
-                    <div className="text-sm text-muted-foreground">Pauses</div>
-                    <div className="text-2xl font-bold">{d.pause_count}</div>
-                    <div className="text-xs text-muted-foreground">Avg: {d.mean_pause_duration.toFixed(2)}s</div>
-                  </div>
-                )}
+                    {d.pace_available && d.articulation_rate > 0 && (
+                      <div className="border-t pt-3">
+                        <div className="text-muted-foreground">Articulation rate</div>
+                        <div className="font-semibold">{Math.round(d.articulation_rate)} WPM</div>
+                        <div className="text-xs text-muted-foreground">Speed while actually speaking; pauses are excluded.</div>
+                      </div>
+                    )}
 
-                {/* Raw-measurement methodology, deliberately separate from future calibrated coaching. */}
-                <p className="border-t pt-3 text-[11px] leading-snug text-muted-foreground">
-                  <span className="font-medium text-foreground">How these are measured:</span> a
-                  Praat acoustic analysis of your recording. Pitch observations use fundamental frequency in Hz;
-                  harmonicity is shown in dB. Recorded level may be flattened by automatic gain control.
-                  These observations are not a diagnosis of vocal strain. <span className="font-medium">Pauses</span> are
-                  detected within-utterance silent intervals; long inter-turn gaps are excluded.
-                  Delivery pace, which includes meaningful pauses, is in <span className="font-medium">Speaking Performance</span> above.
-                </p>
-              </CardContent>
-            </Card>
-          ) : (
-            <Card className="flex flex-1 flex-col border-dashed">
-              <CardContent className="flex flex-1 flex-col items-center justify-center py-6 text-center text-sm text-muted-foreground">
-                <Activity className="mb-2 h-6 w-6 opacity-50" />
-                Delivery voice quality (pitch variation, energy stability, voice quality, pauses) comes
-                from an acoustic analysis of your recording, which isn&apos;t available for this session
-                yet. Pace &amp; fillers are shown in Speaking Performance above.
-              </CardContent>
-            </Card>
-          )}
+                    {d.pause_count > 0 && (
+                      <div className="border-t pt-3">
+                        <div className="text-muted-foreground">Pauses within your turns</div>
+                        <div className="font-semibold">
+                          {d.pause_count} · avg {d.mean_pause_duration.toFixed(2)} s
+                        </div>
+                      </div>
+                    )}
+
+                    <p className="border-t pt-3 text-[11px] leading-snug text-muted-foreground">
+                      <span className="font-medium text-foreground">How these are measured:</span> a Praat
+                      acoustic analysis of your voiced speech. Pitch is fundamental frequency in Hz; harmonicity
+                      is in dB. Browser automatic gain control and noise suppression can flatten or alter these
+                      values. Pauses are silent intervals inside your turns; gaps between turns are excluded.
+                    </p>
+                  </div>
+                </details>
+              )}
+            </CardContent>
+          </Card>
         </div>
       </div>
 

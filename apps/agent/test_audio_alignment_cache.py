@@ -230,7 +230,7 @@ class DeliveryEvidenceContractTest(unittest.TestCase):
         self.assertEqual(delivery.voice_quality_score, 0.0)
         self.assertNotIn("pause_appropriateness", delivery.confidence_indicators)
         self.assertEqual(delivery.delivery_evidence.schema_version, 1)
-        self.assertEqual(delivery.delivery_evidence.analyzer_version, "praat-raw-v1")
+        self.assertEqual(delivery.delivery_evidence.analyzer_version, "praat-raw-v2")
         self.assertIsNone(delivery.delivery_evidence.audio_input_signature)
         self.assertEqual(delivery.delivery_evidence.status, "experimental")
         self.assertEqual(delivery.delivery_evidence.calibration_status, "uncalibrated")

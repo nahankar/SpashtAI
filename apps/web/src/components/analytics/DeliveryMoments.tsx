@@ -1,217 +1,251 @@
-import { useEffect, useState } from 'react'
-import { PauseCircle, Play, ShieldCheck } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { useEffect } from 'react'
+import { CheckCircle2, ChevronRight, CircleDashed, Info, PauseCircle, Play } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { getAuthHeaders } from '@/lib/api-client'
+import { DeliveryEvidenceSummary, type DeliveryEvidenceState } from './delivery'
 import {
-  DeliveryEvidenceSummary,
-  type DeliveryEvidenceState,
-} from './delivery'
+  hasVerifiedObservations,
+  MEASUREMENT_CONFIDENCE_NOTE,
+  overviewReasonCopy,
+  playbackNoticeCopy,
+  useDeliveryMoments,
+  type DeliveryMoment,
+  type DeliveryMomentResponse,
+  type PlayDeliveryMoment,
+} from './deliveryMomentsData'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
-const MAX_PENDING_POLLS = 15
-
-interface DeliveryMoment {
-  id: string
-  kind: 'sentence_boundary_pause' | 'mid_thought_pause'
-  polarity: 'strength' | 'opportunity'
-  clipStartSec: number
-  clipEndSec: number
-  pauseSeconds: number
-  confidence: number
-  observation: string
-  interpretation: string
-  retry: string
-}
-
-interface DeliveryMomentResponse {
-  status: {
-    enabled: boolean
-    state: 'available' | 'pending' | 'suppressed'
-    reason: string | null
-    validTurnCount: number
-    momentCount: number
-  }
-  moments: DeliveryMoment[]
-  deliveryEvidence?: DeliveryEvidenceState
-}
+export type { DeliveryMoment, DeliveryMomentResponse, PlayDeliveryMoment } from './deliveryMomentsData'
 
 function formatTime(seconds: number) {
   const value = Math.max(0, Math.floor(seconds))
   return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, '0')}`
 }
 
-function unavailableCopy(reason: string | null) {
-  switch (reason) {
-    case 'complete_recording_required':
-      return 'Delivery moments will appear once every recording segment is available.'
-    case 'complete_recording_unavailable':
-      return 'Delivery moments are unavailable because this session is missing one or more recording segments.'
-    case 'committed_user_turns_required':
-      return 'Delivery moments will appear after the completed turns are saved.'
-    case 'validated_word_alignment_required':
-      return 'This recording does not yet have verified word-level alignment. We do not infer pause quality from generic silence detection alone.'
-    case 'no_notable_pause':
-      return 'Verified alignment was available, but no pause met the conservative evidence threshold.'
-    default:
-      return 'Delivery moments are not enabled for this environment.'
-  }
+function ExperimentalObservations({
+  evidence,
+  onPlayMoment,
+}: {
+  evidence: DeliveryEvidenceState
+  onPlayMoment?: PlayDeliveryMoment
+}) {
+  return (
+    <details className="group mt-2 rounded-md border border-dashed px-3 py-2 text-sm">
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
+        <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" aria-hidden="true" />
+        Experimental recording measurements
+      </summary>
+      <p className="mt-2 text-xs text-muted-foreground">{MEASUREMENT_CONFIDENCE_NOTE}</p>
+      <div className="mt-3">
+        <DeliveryEvidenceSummary
+          data={evidence}
+          onHearEvidence={onPlayMoment
+            ? ({ startSeconds, endSeconds, includeGaps }) =>
+              onPlayMoment(startSeconds, endSeconds, includeGaps)
+            : undefined}
+        />
+      </div>
+    </details>
+  )
 }
 
-/**
- * Shows verified pause-placement evidence plus raw, explicitly experimental
- * acoustic observations. It intentionally withholds personality, vocal-health,
- * tone, and pitch/energy coaching until those interpretations are calibrated
- * against human-labelled recordings.
- */
-export function DeliveryMoments({
-  sessionId,
+/** Presentational Playback view: evidence and action, compact when empty. */
+export function DeliveryMomentsPlaybackView({
+  data,
+  pendingTimedOut = false,
   onPlayMoment,
-  compact = false,
 }: {
-  sessionId: string
-  onPlayMoment?: (startSeconds: number, endSeconds: number, includeGaps?: true) => void
-  compact?: boolean
+  data: DeliveryMomentResponse
+  pendingTimedOut?: boolean
+  onPlayMoment?: PlayDeliveryMoment
 }) {
-  const [data, setData] = useState<DeliveryMomentResponse | null>(null)
-  const [pendingTimedOut, setPendingTimedOut] = useState(false)
+  if (!data.status.enabled) return null
+  const evidence = data.deliveryEvidence
+  const showObservations = evidence?.state === 'ready' && evidence.moments.length > 0
 
-  useEffect(() => {
-    let cancelled = false
-    let retry: number | undefined
-    let pendingPolls = 0
-    setPendingTimedOut(false)
-    const load = () => {
-      fetch(`${API_BASE_URL}/sessions/${sessionId}/delivery-moments`, {
-        headers: getAuthHeaders(),
-      })
-        .then((response) => (response.ok ? response.json() : null))
-        .then((value) => {
-          if (cancelled || !value) return
-          const next = value as DeliveryMomentResponse
-          setData(next)
-          // A completed session can receive its final turn/upload just after
-          // Results opens. Poll only while evidence is explicitly pending, and
-          // cap the client loop so a broken upload cannot spin indefinitely.
-          if (next.status.state === 'pending') {
-            pendingPolls += 1
-            if (pendingPolls < MAX_PENDING_POLLS) retry = window.setTimeout(load, 4_000)
-            else setPendingTimedOut(true)
-          }
-        })
-        .catch(() => {
-          /* Delivery evidence is additive; replay and analytics must still load. */
-        })
-    }
-    load()
-    return () => {
-      cancelled = true
-      if (retry != null) window.clearTimeout(retry)
-    }
-  }, [sessionId])
-
-  if (!data || !data.status.enabled) return null
-  const hasMoments = data.moments.length > 0
-  const content = hasMoments ? (
-    <div className="grid gap-3 md:grid-cols-2">
-      {data.moments.map((moment) => {
-        const strength = moment.polarity === 'strength'
-        return (
-          <div
-            key={moment.id}
-            className={`rounded-lg border p-3 ${
-              strength ? 'border-emerald-200 bg-emerald-50/60' : 'border-amber-200 bg-amber-50/60'
-            }`}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <Badge
-                className={strength ? 'bg-emerald-600' : 'bg-amber-600'}
-              >
-                {strength ? 'Strength' : 'Try next'}
-              </Badge>
-              <span className="text-xs tabular-nums text-muted-foreground">
-                {moment.pauseSeconds.toFixed(1)}s pause
-              </span>
-            </div>
-            <p className="mt-2 text-sm font-medium">{moment.observation}</p>
-            <p className="mt-1 text-sm text-muted-foreground">{moment.interpretation}</p>
-            <p className="mt-2 text-sm">{moment.retry}</p>
-            {onPlayMoment && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-3 h-8"
-                onClick={() => onPlayMoment(moment.clipStartSec, moment.clipEndSec, true)}
-              >
-                <Play className="mr-1.5 h-3.5 w-3.5" /> Hear evidence · {formatTime(moment.clipStartSec)}
-              </Button>
-            )}
-          </div>
-        )
-      })}
-    </div>
-  ) : (
-    <div className="rounded-lg border border-dashed px-3 py-3 text-sm text-muted-foreground">
-      {pendingTimedOut && data.status.state === 'pending'
-        ? 'Delivery evidence is still being prepared. Automatic checking stopped; reload this page after the recording has finished saving.'
-        : unavailableCopy(data.status.reason)}
-    </div>
-  )
-
-  const rawEvidence = data.deliveryEvidence && (
-    <div className="mt-5 border-t pt-4">
-      <DeliveryEvidenceSummary
-        data={data.deliveryEvidence}
-        onHearEvidence={onPlayMoment
-          ? ({ startSeconds, endSeconds, includeGaps }) =>
-            onPlayMoment(startSeconds, endSeconds, includeGaps)
-          : undefined}
-      />
-    </div>
-  )
-  const verifiedPauses = (
-    <section aria-label="Verified pause moments">
-      <p className="mb-2 text-xs text-muted-foreground">
-        Verified, word-aligned pauses — limited pause-placement coaching.
-      </p>
-      {content}
-    </section>
-  )
-
-  if (compact) {
+  if (data.moments.length === 0) {
     return (
       <section className="mb-4" aria-label="Delivery moments">
-        <div className="mb-1.5 flex items-center gap-2 text-xs font-medium text-muted-foreground">
-          <PauseCircle className="h-3.5 w-3.5" />
-          <span>Delivery moments — measured pauses with aligned audio evidence</span>
-        </div>
-        {verifiedPauses}
-        {rawEvidence}
+        <p role="status" className="flex items-start gap-1.5 text-xs text-muted-foreground">
+          <PauseCircle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span>{playbackNoticeCopy(data, pendingTimedOut)}</span>
+        </p>
+        {showObservations && <ExperimentalObservations evidence={evidence} onPlayMoment={onPlayMoment} />}
       </section>
     )
   }
 
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-lg">
-          <PauseCircle className="h-5 w-5" /> Delivery moments
-        </CardTitle>
-        <p className="text-sm font-normal text-muted-foreground">
-          Specific moments from your recording, shown only when audio and transcript alignment are verified.
-        </p>
-      </CardHeader>
-      <CardContent>
-        {verifiedPauses}
-        {rawEvidence}
-        <div className="mt-3 flex items-start gap-2 text-xs text-muted-foreground">
-          <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span>
-            Pause placement is interpreted conservatively. Pitch and energy observations are experimental measurements; tone, personality, and vocal-health interpretations remain withheld until calibrated against human-labelled recordings.
-          </span>
+    <section className="mb-4 space-y-2" aria-label="Delivery moments">
+      <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
+        <PauseCircle className="h-3.5 w-3.5" aria-hidden="true" />
+        <span>Delivery moments</span>
+        <Badge variant="outline" className="border-emerald-300 text-emerald-800">
+          Verified · word-aligned
+        </Badge>
+        <span>
+          {data.moments.length} moment{data.moments.length === 1 ? '' : 's'} — also marked on the timeline
+        </span>
+      </div>
+      <ul className="grid gap-3 md:grid-cols-2">
+        {data.moments.map((moment) => {
+          const strength = moment.polarity === 'strength'
+          const time = formatTime(moment.clipStartSec)
+          return (
+            <li
+              key={moment.id}
+              className={`rounded-lg border p-3 ${
+                strength ? 'border-emerald-200 bg-emerald-50/60' : 'border-amber-200 bg-amber-50/60'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <Badge className={strength ? 'bg-emerald-700' : 'bg-amber-700'}>
+                  {strength ? 'Well-placed pause' : 'Try next'}
+                </Badge>
+                <span className="text-xs tabular-nums text-muted-foreground">
+                  {time} · {moment.pauseSeconds.toFixed(1)}s pause
+                </span>
+              </div>
+              <p className="mt-2 text-sm font-medium">{moment.observation}</p>
+              <p className="mt-1 text-sm text-muted-foreground">{moment.interpretation}</p>
+              <p className="mt-2 text-sm">{moment.retry}</p>
+              {onPlayMoment && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-3 h-8"
+                  aria-label={`Hear this moment at ${time}`}
+                  onClick={() => onPlayMoment(moment.clipStartSec, moment.clipEndSec, true)}
+                >
+                  <Play className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" /> Hear this moment · {time}
+                </Button>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+      {showObservations && <ExperimentalObservations evidence={evidence} onPlayMoment={onPlayMoment} />}
+    </section>
+  )
+}
+
+/**
+ * Playback container. Verified pause moments are actionable and playable;
+ * experimental acoustic observations stay collapsed and are never coaching.
+ */
+export function DeliveryMoments({
+  sessionId,
+  onPlayMoment,
+  onMomentsChange,
+}: {
+  sessionId: string
+  onPlayMoment?: PlayDeliveryMoment
+  /** Receives verified moments so the host can mark them on its timeline. */
+  onMomentsChange?: (moments: DeliveryMoment[]) => void
+}) {
+  const { data, pendingTimedOut } = useDeliveryMoments(sessionId)
+
+  useEffect(() => {
+    onMomentsChange?.(data?.status.enabled ? data.moments : [])
+  }, [data, onMomentsChange])
+
+  if (!data) return null
+  return (
+    <DeliveryMomentsPlaybackView
+      data={data}
+      pendingTimedOut={pendingTimedOut}
+      onPlayMoment={onPlayMoment}
+    />
+  )
+}
+
+function StatusLine({ ok, children }: { ok: boolean; children: React.ReactNode }) {
+  const Icon = ok ? CheckCircle2 : CircleDashed
+  return (
+    <li className="flex items-start gap-2">
+      <Icon
+        className={`mt-0.5 h-4 w-4 shrink-0 ${ok ? 'text-emerald-700' : 'text-muted-foreground'}`}
+        aria-hidden="true"
+      />
+      <span>{children}</span>
+    </li>
+  )
+}
+
+/** Presentational Session Analytics summary: status and explanation, no evidence list. */
+export function DeliveryEvidenceOverviewView({
+  data,
+  pendingTimedOut = false,
+  measurementsAvailable,
+  onOpenPlayback,
+}: {
+  data: DeliveryMomentResponse | null
+  pendingTimedOut?: boolean
+  measurementsAvailable: boolean
+  onOpenPlayback?: () => void
+}) {
+  const enabled = Boolean(data?.status.enabled)
+  const momentCount = enabled ? (data?.moments.length ?? 0) : 0
+  const recordingMeasured = measurementsAvailable || hasVerifiedObservations(data?.deliveryEvidence)
+
+  return (
+    <section aria-label="Delivery evidence summary" className="space-y-3 text-sm">
+      <ul className="space-y-2">
+        <StatusLine ok={recordingMeasured}>
+          {recordingMeasured
+            ? 'Recording measurements are available.'
+            : 'Recording measurements are not available for this session.'}
+        </StatusLine>
+        {enabled && data && (
+          <StatusLine ok={momentCount > 0}>
+            {momentCount > 0
+              ? `${momentCount} verified delivery moment${momentCount === 1 ? '' : 's'} — word-aligned pauses you can hear in Playback.`
+              : overviewReasonCopy(data, pendingTimedOut)}
+          </StatusLine>
+        )}
+      </ul>
+      {enabled && momentCount > 0 && onOpenPlayback && (
+        <Button variant="outline" size="sm" className="h-8" onClick={onOpenPlayback}>
+          <Play className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" /> Open in Playback
+        </Button>
+      )}
+      <details className="group text-xs text-muted-foreground">
+        <summary className="flex cursor-pointer list-none items-center gap-1 font-medium hover:text-foreground">
+          <Info className="h-3.5 w-3.5" aria-hidden="true" /> Why this matters
+        </summary>
+        <div className="mt-2 space-y-2 leading-snug">
+          <p>
+            A delivery moment points to a specific pause you can listen to. We only show one when the
+            timing of each word has been checked against your recording, so a moment is never guessed
+            from silence alone — a silent stretch could otherwise be the coach speaking, a network gap,
+            or the edge of a recording segment.
+          </p>
+          <p>
+            Recording measurements such as pitch and harmonicity are raw acoustic values. Your
+            microphone and browser audio processing change them, so they are shown for reference only
+            and are not used as coaching yet.
+          </p>
         </div>
-      </CardContent>
-    </Card>
+      </details>
+    </section>
+  )
+}
+
+export function DeliveryEvidenceOverview({
+  sessionId,
+  measurementsAvailable,
+  onOpenPlayback,
+}: {
+  sessionId: string
+  measurementsAvailable: boolean
+  onOpenPlayback?: () => void
+}) {
+  const { data, pendingTimedOut } = useDeliveryMoments(sessionId)
+  return (
+    <DeliveryEvidenceOverviewView
+      data={data}
+      pendingTimedOut={pendingTimedOut}
+      measurementsAvailable={measurementsAvailable}
+      onOpenPlayback={onOpenPlayback}
+    />
   )
 }

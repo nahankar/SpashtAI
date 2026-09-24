@@ -2,7 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card'
 import { Gauge } from 'lucide-react'
 import { getAuthHeaders } from '@/lib/api-client'
-import { hasAvailablePace, isSubstantivePaceTurn } from '@/lib/pace'
+import {
+  hasAvailablePace,
+  MIN_PACE_TREND_TURNS,
+  PACE_UNSCORED_NOTE,
+  paceTrendTurns,
+} from '@/lib/pace'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 
@@ -199,19 +204,12 @@ export function PaceTrendCard({
       .then(({ turnsData, metrics }) => {
         if (cancelled || !turnsData) return
         const turns: TurnWithPace[] = Array.isArray(turnsData.turns) ? turnsData.turns : []
-        let n = 0
-        const pts: PacePoint[] = turns
-          .filter(
-            (t) =>
-              t.role === 'user' &&
-              isSubstantivePaceTurn(t.metrics as Record<string, unknown> | undefined),
-          )
-          .map((t) => {
-            n += 1
-            return { label: n, wpm: Math.round(Number(t.metrics?.wpm)) }
-          })
-        setFetchedPoints(pts)
         const available = hasAvailablePace(metrics?.processingStatus)
+        const pts: PacePoint[] = paceTrendTurns(turns, available).map((t, index) => ({
+          label: index + 1,
+          wpm: Math.round(Number(t.metrics?.wpm)),
+        }))
+        setFetchedPoints(pts)
         setFetchedPace({
           available,
           wpm: available && Number.isFinite(metrics?.userWpm) ? Number(metrics.userWpm) : null,
@@ -240,15 +238,13 @@ export function PaceTrendCard({
       <CardContent>
         {loading && !points ? (
           <p className="py-4 text-center text-xs text-muted-foreground">Loading pace trend…</p>
-        ) : points && points.length >= 2 ? (
-          <PaceTrend
-            points={points}
-            canonicalWpm={canonicalWpm}
-            provisional={!paceAvailable}
-          />
+        ) : !paceAvailable ? (
+          <p className="py-4 text-center text-xs text-muted-foreground">{PACE_UNSCORED_NOTE}</p>
+        ) : points && points.length >= MIN_PACE_TREND_TURNS ? (
+          <PaceTrend points={points} canonicalWpm={canonicalWpm} />
         ) : (
           <p className="py-4 text-center text-xs text-muted-foreground">
-            Per-turn pace wasn&apos;t captured for this session, so the pace trend isn&apos;t available.
+            A pace trend needs at least {MIN_PACE_TREND_TURNS} turns of 15+ words with measured timing.
           </p>
         )}
       </CardContent>

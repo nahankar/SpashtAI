@@ -48,6 +48,7 @@ import {
   queuePaceReconciliation,
   requeuePaceReconciliationData,
 } from '../lib/paceReconciliationWorker'
+import { guardPaceClaims, isPersistedPaceAvailable } from '../analytics/paceClaims'
 
 const SIGNAL_API_URL = process.env.SIGNAL_API_URL || 'http://localhost:4001'
 const INTERNAL_AGENT_TOKEN =
@@ -271,6 +272,7 @@ export async function analyzeSession(req: Request, res: Response) {
 
     const insightsJson = JSON.parse(JSON.stringify(insights))
     let paceRequeued = false
+    let finalPaceAvailable = isPersistedPaceAvailable({ pace })
     await prisma.$transaction(async (tx) => {
       await lockWritableSession(tx, sessionId)
       const latestMetrics = await tx.sessionMetrics.findUnique({
@@ -290,6 +292,7 @@ export async function analyzeSession(req: Request, res: Response) {
         session.turns,
         signals.speechRate.totalWords,
       )
+      finalPaceAvailable = isPersistedPaceAvailable({ pace: finalPace })
       const finalIncomingSignals: Record<string, unknown> = {
         ...(signals as unknown as Record<string, unknown>),
         speechRate: {
@@ -449,7 +452,7 @@ export async function analyzeSession(req: Request, res: Response) {
       sessionId,
       skillScores: persistedScores,
       components: persistedComponents,
-      coachingInsights: insights,
+      coachingInsights: guardPaceClaims(insights, finalPaceAvailable),
       signalsSummary: {
         wpm: signals.speechRate.wpm,
         fillerRate: signals.fillers.rate,
@@ -523,12 +526,17 @@ export async function getCoachingInsights(req: Request, res: Response) {
   try {
     const metrics = await prisma.sessionMetrics.findUnique({
       where: { sessionId },
-      select: { coachingInsights: true },
+      select: { coachingInsights: true, processingStatus: true },
     })
     if (!metrics?.coachingInsights) {
       return res.status(404).json({ error: 'No coaching insights found' })
     }
-    res.json(metrics.coachingInsights)
+    res.json(
+      guardPaceClaims(
+        metrics.coachingInsights,
+        isPersistedPaceAvailable(metrics.processingStatus),
+      ),
+    )
   } catch (error: any) {
     res.status(500).json({ error: error.message })
   }
@@ -570,10 +578,10 @@ export async function getTurnSuggestions(req: Request, res: Response) {
     const turns = await prisma.sessionTurn.findMany({
       where: { sessionId },
       orderBy: { turnIndex: 'asc' },
-      select: { turnIndex: true, role: true, text: true, metrics: true },
+      select: { id: true, turnIndex: true, role: true, text: true, metrics: true },
     })
 
-    const suggestions = await generateTurnSuggestions(sessionId, turns as any)
+    const suggestions = await generateTurnSuggestions(sessionId, turns)
     res.json({ suggestions })
   } catch (error: any) {
     console.warn('[turn-suggestions] handler error:', error?.message || error)

@@ -11,11 +11,14 @@
  * re-spend tokens on every Playback open.
  */
 
+import { createHash } from 'node:crypto'
 import { InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime'
 import { getBedrockClient } from './insightProviders/bedrockClient'
 
 export interface TurnSuggestion {
   turnIndex: number
+  /** Database id of the turn the suggestion was written for. */
+  turnId: string
   /** What kind of improvement this is. */
   kind: 'concise' | 'wording' | 'clarity'
   /** One-sentence, specific coaching note. */
@@ -25,13 +28,15 @@ export interface TurnSuggestion {
 }
 
 interface TurnLike {
+  id: string
   turnIndex: number
   role: string
   text?: string | null
   metrics?: unknown
 }
 
-interface Candidate {
+export interface Candidate {
+  turnId: string
   turnIndex: number
   text: string
   wordCount: number
@@ -70,6 +75,7 @@ function selectCandidates(turns: TurnLike[]): Candidate[] {
     if (wordCount < MIN_WORDS) continue
     const fillers = typeof m.filler_count === 'number' ? (m.filler_count as number) : 0
     scored.push({
+      turnId: t.id,
       turnIndex: t.turnIndex,
       text,
       wordCount,
@@ -147,7 +153,15 @@ async function invokeLocal(prompt: string): Promise<string> {
   }
 }
 
-function parseSuggestions(raw: string, validIndexes: Set<number>): TurnSuggestion[] {
+/** Cache key changes whenever the candidate turns or their text change. */
+function candidatesKey(sessionId: string, candidates: Candidate[]): string {
+  const hash = createHash('sha256')
+  for (const c of candidates) hash.update(`${c.turnId}\u0000${c.turnIndex}\u0000${c.text}\u0001`)
+  return `${sessionId}:${hash.digest('hex')}`
+}
+
+export function parseSuggestions(raw: string, candidates: Candidate[]): TurnSuggestion[] {
+  const byIndex = new Map(candidates.map((c) => [c.turnIndex, c]))
   if (!raw) return []
   // Strip code fences and grab the first JSON array.
   const cleaned = raw.replace(/```json/gi, '').replace(/```/g, '').trim()
@@ -168,14 +182,21 @@ function parseSuggestions(raw: string, validIndexes: Set<number>): TurnSuggestio
     const o = item as Record<string, unknown>
     const turnIndex = typeof o.turnIndex === 'number' ? o.turnIndex : Number(o.turnIndex)
     const suggestion = typeof o.suggestion === 'string' ? o.suggestion.trim() : ''
-    if (!Number.isFinite(turnIndex) || !validIndexes.has(turnIndex) || !suggestion) continue
+    const candidate = byIndex.get(turnIndex)
+    if (!candidate || !suggestion) continue
     const kindRaw = typeof o.kind === 'string' ? o.kind.toLowerCase() : ''
     const kind: TurnSuggestion['kind'] =
       kindRaw === 'concise' || kindRaw === 'wording' || kindRaw === 'clarity'
         ? (kindRaw as TurnSuggestion['kind'])
         : 'wording'
     const rewrite = typeof o.rewrite === 'string' && o.rewrite.trim() ? o.rewrite.trim() : undefined
-    out.push({ turnIndex, kind, suggestion, rewrite })
+    out.push({
+      turnIndex,
+      turnId: candidate.turnId,
+      kind,
+      suggestion,
+      rewrite,
+    })
   }
   return out
 }
@@ -190,26 +211,23 @@ export async function generateTurnSuggestions(
 ): Promise<TurnSuggestion[]> {
   if (!isEnabled()) return []
 
-  const cached = cache.get(sessionId)
-  if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.data
-
   const candidates = selectCandidates(turns)
-  if (candidates.length === 0) {
-    cache.set(sessionId, { at: Date.now(), data: [] })
-    return []
-  }
+  if (candidates.length === 0) return []
+
+  const key = candidatesKey(sessionId, candidates)
+  const cached = cache.get(key)
+  if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.data
 
   try {
     const prompt = buildPrompt(candidates)
     const raw = usingLocalProvider() ? await invokeLocal(prompt) : await invokeBedrock(prompt)
-    const validIndexes = new Set(candidates.map((c) => c.turnIndex))
-    const data = parseSuggestions(raw, validIndexes)
-    cache.set(sessionId, { at: Date.now(), data })
+    const data = parseSuggestions(raw, candidates)
+    cache.set(key, { at: Date.now(), data })
     return data
   } catch (err: any) {
     console.warn(`[turn-suggestions] generation failed for ${sessionId}: ${err?.message || err}`)
     // Cache the empty result briefly so a broken provider doesn't get hammered.
-    cache.set(sessionId, { at: Date.now(), data: [] })
+    cache.set(key, { at: Date.now(), data: [] })
     return []
   }
 }

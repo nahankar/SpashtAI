@@ -21,6 +21,7 @@ export function buildCoachingPrompt(
   const includeAudio = options.includeAudioInstructions ?? false
   const { skillScores: s, signals: sig } = ctx
 
+  const paceUnavailable = sig.speechRate.status !== 'available'
   const availableScores = Object.entries(s)
     .filter(([, v]) => v !== null)
     .map(([k, v]) => `${formatSkillName(k)}: ${v}/10`)
@@ -42,14 +43,18 @@ export function buildCoachingPrompt(
   ].join('\n')
 
   const focusLine = ctx.focusArea
-    ? `The user was practicing: "${ctx.focusArea}". Tailor feedback to this area.`
+    ? `The user was practicing: "${ctx.focusArea}". Tailor feedback to this area.${
+        paceUnavailable
+          ? ' Pace could not be verified for this recording, so do not comment on pace, speed, or rushing even if the practice area is pacing; focus on other observable behaviours.'
+          : ''
+      }`
     : ''
 
   const audioBlock = includeAudio
     ? `
 AUDIO ANALYSIS (IMPORTANT):
 You are given the user's actual voice recording from this session (attached as audio).
-Listen for delivery: pacing, pauses, filler sounds, vocal confidence, energy, and emotional tone.
+Listen for delivery: ${paceUnavailable ? '' : 'pacing, '}pauses, filler sounds, vocal confidence, energy, and emotional tone.
 Combine what you hear with the text metrics below. Mention specific delivery behaviors in your feedback.
 Do not invent timestamps; describe patterns (e.g. "rushed openings", "long pause before answering").
 `
@@ -118,7 +123,12 @@ RULES:
 - Be encouraging but honest
 - The practiceExercise should be something they can do in a 5-minute Elevate session
 - The practicePlan should contain 3 targeted exercises based on the user's weakest skills. Each exercise should be specific and doable in an Elevate session. Order from most impactful to least.
-- Keep overallNarrative warm and motivating`
+- Keep overallNarrative warm and motivating${
+    paceUnavailable
+      ? `
+- Pace was NOT verified for this recording. Do not mention pace, pacing, speaking speed, rushing, slowing down, or any words-per-minute target anywhere in the response, including practicePlan.`
+      : ''
+  }`
 }
 
 function formatSkillName(key: string): string {

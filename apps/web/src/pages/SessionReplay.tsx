@@ -29,11 +29,15 @@ import { COACH_BUBBLE, USER_BUBBLE } from '@/lib/conversation'
 import { useIsPro } from '@/hooks/useIsPro'
 import { toast } from 'sonner'
 import { UserTurnBubble, normalizeTurnMetricsFromApi } from '@/components/session/UserTurnMetrics'
-import { DeliveryMoments } from '@/components/analytics/DeliveryMoments'
+import {
+  DeliveryMoments,
+  type DeliveryMoment as VerifiedDeliveryMoment,
+} from '@/components/analytics/DeliveryMoments'
 import {
   hasAvailablePace,
   isQualifiedPaceHighlight,
   isSubstantivePaceTurn,
+  paceTrendTurns,
 } from '@/lib/pace'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
@@ -142,6 +146,8 @@ type QualityTone = 'good' | 'ok' | 'bad'
 // AI phrasing suggestion for a turn (from the LLM-backed /turn-suggestions API).
 interface TurnSuggestion {
   turnIndex: number
+  /** Turn the suggestion was generated for; guards against index collisions. */
+  turnId: string
   kind: 'concise' | 'wording' | 'clarity'
   suggestion: string
   rewrite?: string
@@ -398,10 +404,11 @@ export function SessionReplay({
   const [roleFilter, setRoleFilter] = useState<RoleFilter>('user')
   const [chips, setChips] = useState<Set<QualityChip>>(new Set())
   const [skipGaps, setSkipGaps] = useState(true)
+  const [deliveryMarkers, setDeliveryMarkers] = useState<VerifiedDeliveryMoment[]>([])
   const [showTrends, setShowTrends] = useState(true)
   const [speechRegions, setSpeechRegions] = useState<{ start: number; end: number }[]>([])
   const [skipPlaybackRegions, setSkipPlaybackRegions] = useState<{ start: number; end: number }[]>([])
-  const [suggestions, setSuggestions] = useState<Record<number, TurnSuggestion>>({})
+  const [suggestions, setSuggestions] = useState<Record<string, TurnSuggestion>>({})
   // Used to line the trends ribbon up horizontally with the seek track (the
   // track is only the middle flex-1 region, not the full transport width).
   const transportRef = useRef<HTMLDivElement>(null)
@@ -543,15 +550,17 @@ export function SessionReplay({
 
   // ── Data: AI phrasing suggestions (best-effort; never blocks the UI) ──
   useEffect(() => {
+    // Never carry another session's suggestions onto this session's turns.
+    setSuggestions({})
     if (!sessionId) return
     let cancelled = false
     fetch(`${API_BASE_URL}/sessions/${sessionId}/turn-suggestions`, { headers: getAuthHeaders() })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (cancelled || !data?.suggestions) return
-        const map: Record<number, TurnSuggestion> = {}
+        if (cancelled || !Array.isArray(data?.suggestions)) return
+        const map: Record<string, TurnSuggestion> = {}
         for (const s of data.suggestions as TurnSuggestion[]) {
-          if (s && typeof s.turnIndex === 'number' && s.suggestion) map[s.turnIndex] = s
+          if (s && typeof s.turnId === 'string' && s.turnId && s.suggestion) map[s.turnId] = s
         }
         setSuggestions(map)
       })
@@ -871,18 +880,17 @@ export function SessionReplay({
   // signals we genuinely capture per turn are plotted — no interpolation of
   // session-level skills like Clarity/Structure.
   const trendPoints = useMemo(() => {
+    // WPM remains strict: a pace line needs verified session pace and at least
+    // three qualified turns. Fluency and confidence are independent measured
+    // signals, so they remain visible even when pace itself is unavailable.
+    const paceTurnIndexes = new Set(
+      paceTrendTurns(turns, canonicalPaceAvailable).map((t) => t.turnIndex),
+    )
     return turns
       .filter((t) => t.role === 'user' && t.audioStart != null)
       .map((t) => {
         const m = t.metrics
-        // WPM remains strict: old/estimated turns cannot become headline pace
-        // evidence. Fluency and confidence are independent measured signals,
-        // so they must remain visible even when pace itself is unavailable.
-        const hasAcceptedPace = isSubstantivePaceTurn(
-          m as Record<string, unknown> | undefined,
-        )
-        const wpm =
-          canonicalPaceAvailable && hasAcceptedPace ? (m?.wpm ?? null) : null
+        const wpm = paceTurnIndexes.has(t.turnIndex) ? (m?.wpm ?? null) : null
         const fluency =
           m?.filler_rate != null ? Math.max(0, Math.min(10, 10 - m.filler_rate)) : null
         let confidence: number | null = null
@@ -1352,7 +1360,7 @@ export function SessionReplay({
       {audioAvailable && sessionId && (
         <DeliveryMoments
           sessionId={sessionId}
-          compact
+          onMomentsChange={setDeliveryMarkers}
           onPlayMoment={(startSeconds, endSeconds) =>
             playFrom(startSeconds, true, endSeconds)
           }
@@ -1378,7 +1386,7 @@ export function SessionReplay({
             audioAvailable={audioAvailable}
             transcriptHidden={transcriptHidden}
             onPlayFrom={playFrom}
-            suggestion={suggestions[turn.turnIndex]}
+            suggestion={suggestions[turn.id]}
             registerRef={(el) => {
               turnRefs.current[turn.turnIndex] = el
             }}
@@ -1485,6 +1493,26 @@ export function SessionReplay({
                 />
               </div>
             )}
+            {timelineEnd > 0 &&
+              deliveryMarkers.map((moment) => {
+                const time = formatTime(moment.clipStartSec)
+                return (
+                  <button
+                    key={moment.id}
+                    type="button"
+                    className="absolute -top-3.5 h-3 w-3 -translate-x-1/2 rotate-45 rounded-[2px] border border-background bg-violet-700 shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    style={{
+                      left: `${Math.min(100, Math.max(0, (moment.clipStartSec / timelineEnd) * 100))}%`,
+                    }}
+                    aria-label={`Delivery moment at ${time} — hear this moment`}
+                    title={`Delivery moment · ${time}`}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      void playFrom(moment.clipStartSec, true, moment.clipEndSec)
+                    }}
+                  />
+                )
+              })}
             </div>
 
             <span className="w-10 shrink-0 text-xs tabular-nums text-muted-foreground">
