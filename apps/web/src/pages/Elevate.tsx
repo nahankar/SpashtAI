@@ -60,6 +60,7 @@ import type { SessionTurnRecord } from '@/hooks/useSessionMetrics'
 import { getPreparation, linkPreparationPractice } from '@/lib/prepare-api'
 import { COACH_BUBBLE, USER_BUBBLE } from '@/lib/conversation'
 import { isUsableProsody } from '@/lib/prosody'
+import { buildExperimentalMeasurementsSection } from '@/lib/pdfDeliveryMeasurements'
 import { hasAvailablePace, paceTrendTurns } from '@/lib/pace'
 import { markCoachHomeResultSeen, recordCoachAction } from '@/lib/coach-api'
 
@@ -583,17 +584,19 @@ export function Elevate() {
 
       // Pull the full v2 analysis so the PDF matches the on-screen report
       // (skill scores, coaching, content & delivery signals, transcript).
-      const [scoresRes, coachingRes, signalsRes, turnsRes] = await Promise.all([
+      const [scoresRes, coachingRes, signalsRes, turnsRes, advancedRes] = await Promise.all([
         fetch(`${API_BASE_URL}/sessions/${sessionId}/skill-scores`, { headers }).catch(() => null),
         fetch(`${API_BASE_URL}/sessions/${sessionId}/coaching-insights`, { headers }).catch(() => null),
         fetch(`${API_BASE_URL}/sessions/${sessionId}/communication-signals`, { headers }).catch(() => null),
         fetch(`${API_BASE_URL}/sessions/${sessionId}/turns`, { headers }).catch(() => null),
+        fetch(`${API_BASE_URL}/sessions/${sessionId}/advanced-metrics`, { headers }).catch(() => null),
       ])
 
       const skill = scoresRes && scoresRes.ok ? await scoresRes.json() : null
       const coaching = coachingRes && coachingRes.ok ? await coachingRes.json() : null
       const signals = signalsRes && signalsRes.ok ? await signalsRes.json() : null
       const turnsData = turnsRes && turnsRes.ok ? await turnsRes.json() : null
+      const advanced = advancedRes && advancedRes.ok ? await advancedRes.json().catch(() => null) : null
 
       const scores: Record<string, number | null> = skill?.scores ?? {}
       const overallScore =
@@ -688,32 +691,11 @@ export function Elevate() {
       }
 
       if (isUsableProsody(prosody)) {
-        const vq = prosody.voiceQuality ?? 0
-        const pv = prosody.pitchVariation ?? 0
-        const es = prosody.energyStability ?? 0
-        metricSections.push({
-          section: 'Delivery — Voice Quality',
-          description: 'Experimental acoustic measurements; microphone and browser processing affect these values',
-          items: [
-            {
-              label: 'Voice Quality (experimental index)',
-              value: vq.toFixed(1),
-              hint: 'Uncalibrated HNR-derived index; not a diagnosis of vocal strain.',
-            },
-            {
-              label: 'Pitch Variation (experimental index)',
-              value: pv.toFixed(1),
-              hint: 'Uncalibrated index derived from pitch spread in Hz.',
-            },
-            {
-              label: 'Energy Stability (experimental index)',
-              value: es.toFixed(1),
-              hint: 'Uncalibrated index; may be flattened by browser automatic gain control.',
-            },
-            { label: 'Pauses', value: String(prosody.pauseCount ?? 0) },
-            { label: 'Avg Pause', value: `${(prosody.meanPauseDuration ?? 0).toFixed(2)}`, unit: 's' },
-          ],
+        const measurements = buildExperimentalMeasurementsSection({
+          prosody,
+          alignedDelivery: advanced?.delivery_metrics ?? null,
         })
+        if (measurements) metricSections.push(measurements)
       }
 
       // Pace variation chart points — one WPM per qualified user turn, in order.
@@ -841,6 +823,7 @@ export function Elevate() {
                 actionableAdvice: coaching.actionableAdvice,
                 practiceExercise: coaching.practiceExercise,
                 overallNarrative: coaching.overallNarrative,
+                paceNote: coaching.paceNote,
               }
             : null,
         metrics: metricSections,

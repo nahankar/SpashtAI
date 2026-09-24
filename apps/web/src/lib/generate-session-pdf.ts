@@ -19,6 +19,8 @@ export interface SessionReport {
     practiceExercise?: string
     practicePlan?: { title: string; description: string; focusSkill: string }[]
     overallNarrative?: string
+    /** Present when pace advice was withheld because pace could not be verified. */
+    paceNote?: string
     decisionClarity?: { decisionsDetected: number; actionItemsDetected: number; decisions?: string[]; actionItems?: string[]; summary: string }
     meetingSummary?: { topicsDiscussed: string[]; keyOutcomes: string[]; openQuestions: string[] } | null
     error?: string
@@ -466,6 +468,7 @@ export async function generateSessionPdf(report: SessionReport): Promise<void> {
     if (ci.primaryImprovement) blocks.push({ title: 'Focus Area', text: ci.primaryImprovement, color: COLORS.amber })
     if (ci.actionableAdvice) blocks.push({ title: 'Actionable Advice', text: ci.actionableAdvice, color: COLORS.accent })
     if (ci.practiceExercise) blocks.push({ title: 'Practice Exercise', text: ci.practiceExercise, color: COLORS.accent })
+    if (ci.paceNote) blocks.push({ title: 'Pace', text: ci.paceNote, color: COLORS.muted })
 
     for (const b of blocks) {
       y = ensureSpace(doc, y, 20)
@@ -733,8 +736,8 @@ export async function generateSessionPdf(report: SessionReport): Promise<void> {
         doc.setFont('helvetica', 'normal')
         doc.setFontSize(8)
         doc.setTextColor(...COLORS.muted)
-        doc.text(section.description, MARGIN, y)
-        y += 5
+        y = drawWrappedText(doc, section.description, MARGIN, y, CONTENT_W, 4)
+        y += 1
       }
 
       const colW = CONTENT_W / 3
