@@ -143,7 +143,11 @@ export async function endSession(req: Request, res: Response) {
           data: {
             endedAt: endedAt ? new Date(endedAt) : existing.endedAt ?? new Date(),
             durationSec: durationSec ?? existing.durationSec,
-            ...(!existing.endedAt ? requeuePaceReconciliationData() : {}),
+            ...(!existing.endedAt ? {
+              ...requeuePaceReconciliationData(),
+              deliveryAlignmentStatus: 'pending',
+              deliveryAlignmentNextAt: new Date(Date.now() + 15_000),
+            } : {}),
           },
           include: {
             user: {
@@ -448,7 +452,6 @@ export async function deleteSession(req: Request, res: Response) {
     res.status(500).json({ error: 'Failed to delete session' })
   }
 }
-
 
 
 

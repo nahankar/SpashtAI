@@ -1,7 +1,7 @@
 export type PaceSource = 'word_timestamps' | 'validated_turn_audio'
 export type PaceStatus = 'available' | 'insufficient_evidence'
 export type PaceConfidence = 'high' | 'medium' | 'low'
-export type PaceOrigin = 'live_logical_turns' | 'reconciled_committed_turns'
+export type PaceOrigin = 'live_logical_turns' | 'reconciled_committed_turns' | 'post_session_alignment'
 
 export interface PaceEvidence {
   origin: PaceOrigin | null
@@ -100,7 +100,7 @@ export function assessPaceEvidence(
       ? value.source
       : null
   const origin: PaceOrigin | null =
-    value.origin === 'reconciled_committed_turns'
+    value.origin === 'post_session_alignment' ? 'post_session_alignment' : value.origin === 'reconciled_committed_turns'
       ? 'reconciled_committed_turns'
       : value.origin === 'live_logical_turns' || source != null
         ? 'live_logical_turns'

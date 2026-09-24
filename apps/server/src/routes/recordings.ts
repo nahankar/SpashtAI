@@ -14,6 +14,7 @@ import {
 } from '../lib/userExportFlags'
 import { resolveElevateSessionAudio } from '../analytics/insightProviders/resolveSessionAudio'
 import { scheduleElevateSessionAudioEnrichmentIfAnalyzed } from '../analytics/audioEnrichment'
+import { requestDeliveryAlignment } from '../lib/deliveryAlignmentWorker'
 import {
   activeSegmentDurationSec,
   recordingPayloadMatches,
@@ -98,6 +99,7 @@ export async function reconcileSegmentRecordingMetadata(
         },
       })
     }
+    await requestDeliveryAlignment(tx, sessionId)
     return 'accepted'
   })
 }
@@ -268,6 +270,7 @@ export async function uploadSessionRecording(req: Request, res: Response) {
             data: { recordingStartedAt: session.recordingStartedAt ?? recordingStartedAt },
           })
         }
+        await requestDeliveryAlignment(tx, sessionId)
         return created
       })
       promotedPath = null

@@ -1,4 +1,5 @@
 import { createHash } from 'crypto'
+import { applyAlignedDelivery } from './alignedDelivery'
 import {
   resolveElevateSessionAudio,
   type ResolvedAudioSegment,
@@ -73,6 +74,8 @@ export interface DeliveryMomentStatus {
     | 'complete_recording_unavailable'
     | 'committed_user_turns_required'
     | 'validated_word_alignment_required'
+    | 'alignment_processing'
+    | 'alignment_unavailable'
     | 'no_notable_pause'
     | null
   inputSignature: string | null
@@ -616,7 +619,7 @@ export async function inspectDeliveryMoments(sessionId: string): Promise<Deliver
     }
   }
 
-  const [resolved, turns, segments] = await Promise.all([
+  const [resolved, turns, segments, alignment] = await Promise.all([
     resolveElevateSessionAudio(sessionId, { requireCompleteSegments: true }),
     prisma.sessionTurn.findMany({
       where: { sessionId, role: 'user' },
@@ -636,15 +639,19 @@ export async function inspectDeliveryMoments(sessionId: string): Promise<Deliver
       where: { sessionId },
       select: { id: true, audioStatus: true, captureSettings: true },
     }),
+    prisma.session.findUnique({ where: { id: sessionId }, select: {
+      deliveryAlignmentStatus: true, deliveryAlignmentResult: true,
+    } }),
   ])
 
   if (!resolved) {
-    const state = unresolvedAudioState(segments)
+    const exhausted = alignment?.deliveryAlignmentStatus === 'unavailable'
+    const state = exhausted ? 'suppressed' : unresolvedAudioState(segments)
     return {
       status: {
         enabled: true,
         state,
-        reason:
+        reason: exhausted ? 'alignment_unavailable' :
           state === 'pending'
             ? 'complete_recording_required'
             : 'complete_recording_unavailable',
@@ -659,8 +666,8 @@ export async function inspectDeliveryMoments(sessionId: string): Promise<Deliver
     return {
       status: {
         enabled: true,
-        state: 'pending',
-        reason: 'committed_user_turns_required',
+        state: alignment?.deliveryAlignmentStatus === 'unavailable' ? 'suppressed' : 'pending',
+        reason: alignment?.deliveryAlignmentStatus === 'unavailable' ? 'alignment_unavailable' : 'committed_user_turns_required',
         inputSignature: resolved.inputSignature,
         validTurnCount: 0,
         momentCount: 0,
@@ -669,14 +676,18 @@ export async function inspectDeliveryMoments(sessionId: string): Promise<Deliver
     }
   }
 
-  const typedTurns = turns as CandidateTurn[]
+  const typedTurns = applyAlignedDelivery(turns as CandidateTurn[], alignment?.deliveryAlignmentResult,
+    resolved.inputSignature, resolved.segments)
   const validTurnCount = typedTurns.filter((turn) => validateTurnWordTiming(turn)).length
   if (!validTurnCount) {
     return {
       status: {
         enabled: true,
-        state: 'suppressed',
-        reason: 'validated_word_alignment_required',
+        state: ['pending', 'processing', 'retry'].includes(alignment?.deliveryAlignmentStatus ?? '') ? 'pending' : 'suppressed',
+        reason: ['pending', 'processing', 'retry'].includes(alignment?.deliveryAlignmentStatus ?? '')
+          ? 'alignment_processing'
+          : alignment?.deliveryAlignmentStatus === 'unavailable'
+            ? 'alignment_unavailable' : 'validated_word_alignment_required',
         inputSignature: resolved.inputSignature,
         validTurnCount: 0,
         momentCount: 0,

@@ -57,6 +57,7 @@ import {
   type TurnMetrics,
 } from '@/components/session/UserTurnMetrics'
 import type { SessionTurnRecord } from '@/hooks/useSessionMetrics'
+import { AutomaticDeliveryStatus } from '@/components/analytics/AutomaticDeliveryStatus'
 import { getPreparation, linkPreparationPractice } from '@/lib/prepare-api'
 import { COACH_BUBBLE, USER_BUBBLE } from '@/lib/conversation'
 import { isUsableProsody } from '@/lib/prosody'
@@ -2171,6 +2172,7 @@ export function Elevate() {
               }}
               className="space-y-4"
             >
+              <AutomaticDeliveryStatus sessionId={viewSessionId} />
               {viewFocusArea === 'snapshot' && inboundFullReport && viewSessionId && (
                 <Button
                   variant="ghost"

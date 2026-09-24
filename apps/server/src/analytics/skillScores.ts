@@ -34,7 +34,7 @@ export interface TextSignals {
     source?: 'word_timestamps' | 'validated_turn_audio' | null
     confidence?: 'high' | 'medium' | 'low'
     evidence?: {
-      origin: 'live_logical_turns' | 'reconciled_committed_turns' | null
+      origin: 'live_logical_turns' | 'reconciled_committed_turns' | 'post_session_alignment' | null
       sourceComposition: {
         wordTimestampSamples: number
         validatedTurnAudioSamples: number

@@ -40,15 +40,14 @@ import {
 import { lockWritableSession, SessionDiscardedError } from '../lib/sessionDiscard'
 import {
   assessPaceEvidence,
-  measuredTurnVariability,
   readPersistedPaceEvidence,
-  selectBestPaceEvidence,
 } from '../analytics/pace'
 import {
   queuePaceReconciliation,
   requeuePaceReconciliationData,
 } from '../lib/paceReconciliationWorker'
 import { guardPaceClaims, isPersistedPaceAvailable } from '../analytics/paceClaims'
+import { resolveCanonicalDeliveryPace } from '../analytics/alignedDelivery'
 
 const SIGNAL_API_URL = process.env.SIGNAL_API_URL || 'http://localhost:4001'
 const INTERNAL_AGENT_TOKEN =
@@ -75,7 +74,7 @@ export async function analyzeSession(req: Request, res: Response) {
       include: {
         transcript: true,
         segments: true,
-        turns: { select: { role: true, metrics: true } },
+        turns: { orderBy: { sequenceNo: 'asc' } },
       },
     })
 
@@ -194,18 +193,16 @@ export async function analyzeSession(req: Request, res: Response) {
     // The old aggregate silence detector merged every sub-3-second pause into
     // one giant "speech" span. Accept only persisted, source-labelled timing
     // evidence from STT timestamps or measured utterances.
-    const pace = selectBestPaceEvidence(
-      readPersistedPaceEvidence(existingMetrics?.processingStatus),
-      session.turns,
-      signals.speechRate.totalWords,
-    )
+    const { pace, variability } = resolveCanonicalDeliveryPace({
+      turns: session.turns, result: session.deliveryAlignmentResult,
+      inputSignature: audioResolved?.inputSignature ?? null, segments: audioResolved?.segments ?? [],
+      transcript: session.transcript?.conversationData, processingStatus: existingMetrics?.processingStatus,
+      expectedWords: signals.speechRate.totalWords,
+    })
     signals.speechRate = {
       ...signals.speechRate,
       wpm: pace.wpm ?? 0,
-      variability:
-        pace.status === 'available'
-          ? measuredTurnVariability(session.turns)
-          : null,
+      variability,
       status: pace.status,
       source: pace.source,
       confidence: pace.confidence,
@@ -249,6 +246,7 @@ export async function analyzeSession(req: Request, res: Response) {
     )
     let persistedScores = scores
     let persistedComponents = components
+    let persistedWpm = pace.wpm ?? 0
     const audioStatus = resolveAudioStatus({
       hasReadableRecording: Boolean(audioResolved?.audioPath),
       capture: typeof audioCapture === 'string' ? audioCapture : null,
@@ -287,12 +285,19 @@ export async function analyzeSession(req: Request, res: Response) {
         sessionId,
         tx,
       )
-      const finalPace = selectBestPaceEvidence(
-        readPersistedPaceEvidence(latestMetrics?.processingStatus),
-        session.turns,
-        signals.speechRate.totalWords,
-      )
+      // The background worker or late turns can finish during signal/LLM work.
+      // Recompute both rate and variability from the same fresh evidence.
+      const latestSession = await tx.session.findUnique({ where: { id: sessionId }, include: {
+        turns: { orderBy: { sequenceNo: 'asc' } }, transcript: true,
+      } })
+      const { pace: finalPace, variability: finalVariability } = resolveCanonicalDeliveryPace({
+        turns: latestSession?.turns ?? [], result: latestSession?.deliveryAlignmentResult,
+        inputSignature: audioResolved?.inputSignature === currentAudioInputSignature ? currentAudioInputSignature : null,
+        segments: audioResolved?.segments ?? [], transcript: latestSession?.transcript?.conversationData,
+        processingStatus: latestMetrics?.processingStatus, expectedWords: signals.speechRate.totalWords,
+      })
       finalPaceAvailable = isPersistedPaceAvailable({ pace: finalPace })
+      persistedWpm = finalPace.wpm ?? 0
       const finalIncomingSignals: Record<string, unknown> = {
         ...(signals as unknown as Record<string, unknown>),
         speechRate: {
@@ -301,6 +306,7 @@ export async function analyzeSession(req: Request, res: Response) {
           status: finalPace.status,
           source: finalPace.source,
           confidence: finalPace.confidence,
+          variability: finalVariability,
           evidence: {
             origin: finalPace.origin,
             sourceComposition: finalPace.sourceComposition,
@@ -454,7 +460,7 @@ export async function analyzeSession(req: Request, res: Response) {
       components: persistedComponents,
       coachingInsights: guardPaceClaims(insights, finalPaceAvailable),
       signalsSummary: {
-        wpm: signals.speechRate.wpm,
+        wpm: persistedWpm,
         fillerRate: signals.fillers.rate,
         hedgingCount: signals.hedging.count,
         readability: signals.sentenceComplexity.readability,

@@ -1,5 +1,5 @@
 export interface PaceContract {
-  origin?: 'live_logical_turns' | 'reconciled_committed_turns' | null
+  origin?: 'live_logical_turns' | 'reconciled_committed_turns' | 'post_session_alignment' | null
   source?: 'word_timestamps' | 'validated_turn_audio' | null
   status?: 'available' | 'insufficient_evidence'
   confidence?: 'high' | 'medium' | 'low'

@@ -3,7 +3,7 @@ import { getAuthHeaders } from '@/lib/api-client'
 import type { DeliveryEvidenceState } from './delivery'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
-const MAX_PENDING_POLLS = 15
+const MAX_PENDING_POLLS = 120
 
 export interface DeliveryMoment {
   id: string
@@ -24,6 +24,8 @@ export type DeliveryMomentReason =
   | 'complete_recording_unavailable'
   | 'committed_user_turns_required'
   | 'validated_word_alignment_required'
+  | 'alignment_processing'
+  | 'alignment_unavailable'
   | 'no_notable_pause'
   | null
 
@@ -50,6 +52,10 @@ export const MEASUREMENT_CONFIDENCE_NOTE =
 
 /** One-line notice for Playback, where an empty result must stay compact. */
 export function playbackNoticeCopy(data: DeliveryMomentResponse, pendingTimedOut: boolean): string {
+  if (data.status.reason === 'alignment_processing') return pendingTimedOut
+    ? 'Delivery analysis is continuing in the background. Reopen this session later to see the results.'
+    : 'Preparing delivery moments from your recording. This can take a few minutes; you can leave this page.'
+  if (data.status.reason === 'alignment_unavailable') return 'We could not verify word timing for this recording. Playback and other feedback remain available.'
   if (data.status.state === 'pending') {
     return pendingTimedOut
       ? 'Delivery moments are still being prepared — reload after the recording has finished saving.'
@@ -72,6 +78,9 @@ export function playbackNoticeCopy(data: DeliveryMomentResponse, pendingTimedOut
 
 /** Sentence for the Session Analytics summary explaining why no moments are listed. */
 export function overviewReasonCopy(data: DeliveryMomentResponse, pendingTimedOut: boolean): string {
+  if (data.status.reason === 'alignment_processing' || data.status.reason === 'alignment_unavailable') {
+    return playbackNoticeCopy(data, pendingTimedOut)
+  }
   if (data.status.state === 'pending') {
     return pendingTimedOut
       ? 'Verified delivery moments are still being prepared. Reload after the recording has finished saving.'
@@ -123,7 +132,7 @@ export function useDeliveryMoments(sessionId: string | undefined) {
           // cap the client loop so a broken upload cannot spin indefinitely.
           if (next.status.state === 'pending') {
             pendingPolls += 1
-            if (pendingPolls < MAX_PENDING_POLLS) retry = window.setTimeout(load, 4_000)
+            if (pendingPolls < MAX_PENDING_POLLS) retry = window.setTimeout(load, 10_000)
             else setPendingTimedOut(true)
           }
         })

@@ -106,6 +106,7 @@ import { prisma } from './lib/prisma'
 import { discardedSessionGuard } from './lib/sessionDiscard'
 import { startSessionDeletionWorker } from './lib/sessionDeletionWorker'
 import { startPaceReconciliationWorker } from './lib/paceReconciliationWorker'
+import { startDeliveryAlignmentWorker } from './lib/deliveryAlignmentWorker'
 import { startAudioEnrichmentRetryWorker } from './analytics/audioEnrichment'
 
 const app = express()
@@ -435,6 +436,7 @@ async function startServer() {
 
   startSessionDeletionWorker()
   startPaceReconciliationWorker()
+  startDeliveryAlignmentWorker()
   startAudioEnrichmentRetryWorker()
 
   // During `tsx watch` hot-reloads the previous process can still hold the port

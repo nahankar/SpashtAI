@@ -18,6 +18,8 @@ import {
   selectPreferredPaceAssessment,
 } from '../analytics/pace'
 import { resolveAgentPython } from '../lib/agentPython'
+import { queueDeliveryAlignment, requestDeliveryAlignment } from '../lib/deliveryAlignmentWorker'
+import { fullUserTranscriptTokens } from '../analytics/alignedDelivery'
 import { getReprocessJob, startReprocessJob } from '../lib/reprocessJobs'
 import {
   queuePaceReconciliation,
@@ -262,7 +264,8 @@ export async function saveSessionTranscript(req: Request, res: Response) {
     // Save or update transcript
     const transcript = await prisma.$transaction(async (tx) => {
       await lockWritableSession(tx, sessionId)
-      return tx.sessionTranscript.upsert({
+      const previous = await tx.sessionTranscript.findUnique({ where: { sessionId } })
+      const saved = await tx.sessionTranscript.upsert({
         where: { sessionId },
         update: {
           conversationData: transcriptData
@@ -272,6 +275,13 @@ export async function saveSessionTranscript(req: Request, res: Response) {
           conversationData: transcriptData
         }
       })
+      if (JSON.stringify(fullUserTranscriptTokens(previous?.conversationData)) !==
+          JSON.stringify(fullUserTranscriptTokens(transcriptData))) {
+        // A final transcript can arrive after the turn rows or an exhausted
+        // retry. Wake the job and invalidate evidence for the prior text.
+        await requestDeliveryAlignment(tx, sessionId, true)
+      }
+      return saved
     })
 
     res.json({ success: true, transcript })
@@ -296,6 +306,7 @@ export async function getSessionMetrics(req: Request, res: Response) {
         module: true,
         startedAt: true,
         endedAt: true,
+        deliveryAlignmentStatus: true,
         user: {
           select: {
             id: true,
@@ -361,10 +372,10 @@ export async function getSessionMetrics(req: Request, res: Response) {
         createdAt: new Date().toISOString(),
         session
       }
-      return res.json(defaultMetrics)
+      return res.json({ ...defaultMetrics, deliveryAlignmentStatus: session.deliveryAlignmentStatus })
     }
 
-    res.json(metrics)
+    res.json({ ...metrics, deliveryAlignmentStatus: session.deliveryAlignmentStatus })
   } catch (error) {
     console.error('Error fetching session metrics:', error)
     res.status(500).json({ error: 'Failed to fetch metrics' })
@@ -941,6 +952,8 @@ export async function reprocessSessionMetrics(req: Request, res: Response) {
     }
 
     // Call Python reprocessing script against the merged Replay timeline.
+    // Explicit reprocessing also opts older sessions into verified turn alignment.
+    queueDeliveryAlignment(sessionId)
     const localAudioPath = resolvedAudio.audioPath
     const pythonScript = join(__dirname, '../../../agent/reprocess_session.py')
     const pythonEnv = resolveAgentPython()

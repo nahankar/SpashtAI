@@ -61,6 +61,8 @@ describe('segment recording capture provenance', () => {
     mocks.transaction.mockImplementation(async (callback) => callback({
       $queryRaw: vi.fn().mockResolvedValue([{ discardedAt: null }]),
       sessionSegment: { findUnique: mocks.txSegmentFind, update: mocks.segmentUpdate },
+      session: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      sessionMetrics: { findUnique: vi.fn().mockResolvedValue(null) },
     }))
   })
 

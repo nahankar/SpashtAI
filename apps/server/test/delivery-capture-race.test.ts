@@ -85,6 +85,8 @@ describe('concurrent recording upload recovery', () => {
       $queryRaw: vi.fn().mockResolvedValue([{ discardedAt: null }]),
       sessionRecording: { create },
       sessionSegment: { findUnique: mocks.txSegmentFind, update: mocks.segmentUpdate },
+      session: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      sessionMetrics: { findUnique: vi.fn().mockResolvedValue(null) },
     }))
 
     const response = await request(app)

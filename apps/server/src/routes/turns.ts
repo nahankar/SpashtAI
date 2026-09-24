@@ -1,5 +1,7 @@
 import type { Request, Response } from 'express'
 import { prisma } from '../lib/prisma'
+import { applyAlignedDelivery } from '../analytics/alignedDelivery'
+import { requestDeliveryAlignment } from '../lib/deliveryAlignmentWorker'
 import {
   exportDenied,
   getElevateSessionOwnerId,
@@ -96,6 +98,7 @@ export async function getSessionTurns(req: Request, res: Response) {
         startedAt: true,
         endedAt: true,
         durationSec: true,
+        deliveryAlignmentResult: true,
       },
     })
 
@@ -111,6 +114,10 @@ export async function getSessionTurns(req: Request, res: Response) {
     const resolvedAudio = await resolveElevateSessionAudio(sessionId, {
       requireCompleteSegments: true,
     }).catch(() => null)
+    if (resolvedAudio) {
+      turns = applyAlignedDelivery(turns, session?.deliveryAlignmentResult,
+        resolvedAudio.inputSignature, resolvedAudio.segments)
+    }
     // This is the one canonical segment list for both the merged stream and
     // replay offsets. Unreadable files are absent, so later words cannot drift.
     const segmentOffsets = new Map(
@@ -466,6 +473,7 @@ export async function saveSessionTurnsForAgent(req: Request, res: Response) {
         select: { endedAt: true },
       })
       if (lifecycle?.endedAt) {
+        await requestDeliveryAlignment(tx, sessionId)
         await tx.session.update({
           where: { id: sessionId },
           data: requeuePaceReconciliationData(),

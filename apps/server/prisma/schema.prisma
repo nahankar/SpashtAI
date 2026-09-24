@@ -371,6 +371,13 @@ model Session {
   paceReconciliationLeaseId    String?
   paceReconciliationLeaseUntil DateTime?
 
+  // Durable automatic alignment. Existing sessions are not bulk backfilled.
+  deliveryAlignmentStatus     String?   @default("pending")
+  deliveryAlignmentAttempts   Int       @default(0)
+  deliveryAlignmentNextAt     DateTime?
+  deliveryAlignmentError      String?
+  deliveryAlignmentResult     Json?
+
   // Terminal discard tombstone. Tombstoned sessions are hidden and return
   // 410 to every read/write path while storage cleanup retries durably.
   discardedAt                 DateTime?
@@ -400,6 +407,15 @@ model Session {
   @@index([discardedAt, deletionLeaseUntil, nextDeletionAttemptAt])
   @@index([paceReconciliationStatus, nextPaceReconciliationAt])
   @@index([paceReconciliationStatus, paceReconciliationLeaseUntil])
+  @@index([deliveryAlignmentStatus, deliveryAlignmentNextAt])
+}
+
+// One CPU-heavy alignment at a time across API processes. The owner token
+// fences stale workers; expiry recovers jobs after process termination.
+model DeliveryAlignmentLease {
+  id         String   @id
+  owner      String?
+  expiresAt  DateTime?
 }
 
 // Per-turn record powering the "conversation as replay" UX (per-message audio
