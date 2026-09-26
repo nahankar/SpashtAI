@@ -1,6 +1,8 @@
 import { Router, type Request, type Response } from 'express'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/prisma'
+import { replayResultView } from '../lib/replay-result-view'
+import type { ReplaySelection } from '../lib/replay-evidence'
 import { generateCoachResponse, interpretCoachResult } from '../coach/service'
 import type { CoachHistoryTurn, CompletedSessionSummary } from '../coach/prompt'
 import { mergeCoachTurnPayload } from '../coach/turn-sync'
@@ -421,7 +423,7 @@ function numberOrNull(value: unknown): number | null {
 }
 
 function readSkillScores(
-  raw: Prisma.JsonValue | null,
+  raw: unknown,
   includePacing = true,
 ): Array<{ skill: string; score: number }> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return []
@@ -433,7 +435,7 @@ function readSkillScores(
     .filter((entry): entry is { skill: string; score: number } => entry.score != null)
 }
 
-function readCoachingText(raw: Prisma.JsonValue | null, key: string): string | null {
+function readCoachingText(raw: unknown, key: string): string | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
   const value = (raw as Record<string, unknown>)[key]
   return typeof value === 'string' && value.trim() ? value.trim() : null
@@ -478,17 +480,18 @@ async function summariseReplaySession(
     where: { id: sessionId, userId: ownerId },
     include: { result: true },
   })
-  if (!replay?.result) return null
+  if (!replay?.result || replay.status !== 'completed') return null
+  const safe = replayResultView(replay.result, replay.learnerSelection as unknown as ReplaySelection | null)
   return {
     module: 'replay',
     focusArea: replay.focusAreas[0] ?? null,
     durationSec: null,
-    wpm: numberOrNull(replay.result.wordsPerMinute),
-    fillerRate: numberOrNull(replay.result.fillerWordRate),
-    skillScores: readSkillScores(replay.result.skillScores ?? null),
-    topStrength: readCoachingText(replay.result.coachingInsights ?? null, 'topStrength'),
+    wpm: numberOrNull(safe.result.wordsPerMinute),
+    fillerRate: numberOrNull(safe.result.fillerWordRate),
+    skillScores: readSkillScores(safe.skillScores),
+    topStrength: readCoachingText(safe.coachingInsights, 'topStrength'),
     primaryImprovement: readCoachingText(
-      replay.result.coachingInsights ?? null,
+      safe.coachingInsights,
       'primaryImprovement',
     ),
   }

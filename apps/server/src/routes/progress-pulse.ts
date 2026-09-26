@@ -3,6 +3,10 @@ import { prisma } from '../lib/prisma'
 import { Prisma } from '@prisma/client'
 import { getEnabledFeatures, isFeatureEnabled, type PlatformFeature } from '../lib/featureFlags'
 import { buildPrepareJourneyContext } from '../lib/prepareCoachingContext'
+import { eligiblePulseSql, eligiblePulseWhere } from '../analytics/pulseEligibility'
+import { replayResultView } from '../lib/replay-result-view'
+import type { ReplaySelection } from '../lib/replay-evidence'
+import { guardPaceClaims, isPersistedPaceAvailable } from '../analytics/paceClaims'
 
 function enabledSources(): Promise<PlatformFeature[]> {
   return getEnabledFeatures()
@@ -15,7 +19,7 @@ export async function getProgressPulse(req: Request, res: Response) {
     const take = Math.min(Number(rawLimit) || 50, 200)
     const sources = await enabledSources()
 
-    const where: Prisma.ProgressPulseWhereInput = { userId, source: { in: sources } }
+    const where: Prisma.ProgressPulseWhereInput = { userId, source: { in: sources }, AND: [eligiblePulseWhere()] }
     if (skill && typeof skill === 'string') {
       where.skill = skill
     }
@@ -64,6 +68,7 @@ export async function getProgressPulseSummary(req: Request, res: Response) {
         FROM "ProgressPulse"
         WHERE "userId" = ${userId}
           AND source IN (${Prisma.join(sources)})
+          AND ${eligiblePulseSql}
       )
       SELECT
         r1.skill,
@@ -85,7 +90,7 @@ export async function getProgressPulseSummary(req: Request, res: Response) {
 
     const historyRows = skills.length > 0
       ? await prisma.progressPulse.findMany({
-          where: { userId, skill: { in: skills }, source: { in: sources } },
+          where: { userId, skill: { in: skills }, source: { in: sources }, AND: [eligiblePulseWhere()] },
           orderBy: { recordedAt: 'asc' },
           select: { skill: true, score: true, recordedAt: true },
           take: skills.length * 10,
@@ -131,8 +136,16 @@ export async function recordProgressPulse(req: Request, res: Response) {
     if (!Array.isArray(entries) || entries.length === 0) {
       return res.status(400).json({ error: 'entries array is required' })
     }
+    if (entries.some(e => (source || e?.source || 'replay') === 'replay')) {
+      return res.status(409).json({
+        code: 'REPLAY_SERVER_ASSESSMENT_REQUIRED',
+        error: 'Track Replay using its confirmed-speaker assessment, not client-supplied scores.',
+        endpoint: '/api/replay/sessions/:id/track-progress',
+      })
+    }
 
     const pulseSource = (source || entries[0]?.source || 'replay') as PlatformFeature
+    if (typeof pulseSource !== 'string') return res.status(400).json({ error: 'source must be a string' })
     if (!(await isFeatureEnabled(pulseSource))) {
       return res.status(403).json({
         error: 'Feature is not available',
@@ -141,75 +154,38 @@ export async function recordProgressPulse(req: Request, res: Response) {
       })
     }
 
-    let replayMeetingDate: Date | null = null
-    if (source === 'replay' && sessionId) {
-      const replay = await prisma.replaySession.findUnique({
-        where: { id: sessionId },
-        select: { meetingDate: true },
-      })
-      if (!replay) {
-        return res.status(404).json({ error: 'Replay session not found' })
+    const data: Prisma.ProgressPulseCreateManyInput[] = []
+    for (const entry of entries) {
+      const rowSessionId = sessionId || entry?.sessionId
+      const rowSource = source || entry?.source || 'replay'
+      const score = Number(entry?.score)
+      if (typeof rowSessionId !== 'string' || !rowSessionId || typeof rowSource !== 'string' ||
+          typeof entry?.skill !== 'string' || !entry.skill.trim() ||
+          !(typeof entry.score === 'number' || (typeof entry.score === 'string' && entry.score.trim())) ||
+          !Number.isFinite(score) || score < 0 || score > 10) {
+        return res.status(400).json({ error: 'Each entry requires a session, source, skill and finite score from 0 to 10' })
       }
-      replayMeetingDate = replay.meetingDate
-      const hasRecordedAt =
-        (recordedAt != null && recordedAt !== '') ||
-        entries.some((e: any) => e.recordedAt != null && e.recordedAt !== '')
-      if (!replay.meetingDate && !hasRecordedAt) {
-        return res.status(400).json({
-          error:
-            'Set a meeting date on this replay session before tracking — Progress Pulse uses it to order trends chronologically.',
-        })
+      if (!(await isFeatureEnabled(rowSource as PlatformFeature))) {
+        return res.status(403).json({ error: 'Feature is not available' })
       }
+      const dateValue = entry.recordedAt || recordedAt
+      const date = dateValue ? new Date(dateValue) : undefined
+      if (date && Number.isNaN(date.getTime())) return res.status(400).json({ error: 'recordedAt must be a valid ISO date' })
+      data.push({ userId, sessionId: rowSessionId, source: rowSource, skill: entry.skill,
+        score, metadata: entry.metadata ?? undefined, ...(date ? { recordedAt: date } : {}) })
     }
-
-    let recordedAtDate: Date | undefined
-    if (recordedAt != null && recordedAt !== '') {
-      recordedAtDate = new Date(recordedAt)
-      if (Number.isNaN(recordedAtDate.getTime())) {
-        return res.status(400).json({ error: 'recordedAt must be a valid ISO date' })
+    const records = await prisma.$transaction(async tx => {
+      for (const id of [...new Set(data.map(row => row.sessionId!))].sort()) {
+        await tx.$queryRaw`SELECT id FROM "Session" WHERE id = ${id} AND "userId" = ${userId} FOR UPDATE`
+        const session = await tx.session.findFirst({ where: { id, userId, discardedAt: null }, select: { module: true } })
+        if (!session || data.some(row => row.sessionId === id && row.source !== session.module)) return null
       }
-    } else if (replayMeetingDate) {
-      recordedAtDate = replayMeetingDate
-    }
-
-    const records = await prisma.progressPulse.createMany({
-      data: entries.map((e: any) => {
-        const rowRecorded =
-          e.recordedAt != null && e.recordedAt !== ''
-            ? new Date(e.recordedAt)
-            : recordedAtDate
-        const validRowRecorded =
-          rowRecorded && !Number.isNaN(rowRecorded.getTime()) ? rowRecorded : undefined
-        return {
-          userId,
-          skill: e.skill,
-          score: Number(e.score),
-          source: source || e.source || 'replay',
-          sessionId: sessionId || e.sessionId || null,
-          metadata: e.metadata || null,
-          ...(validRowRecorded ? { recordedAt: validRowRecorded } : {}),
-        }
-      }),
+      const created = await tx.progressPulse.createMany({ data })
+      await tx.session.updateMany({ where: { userId, id: { in: data.map(row => row.sessionId!) } },
+        data: { progressPulseStatus: 'tracked' } })
+      return created
     })
-
-    // Mark the session as tracked
-    if (sessionId && source) {
-      try {
-        if (source === 'replay') {
-          await prisma.replaySession.update({
-            where: { id: sessionId },
-            data: { progressPulseStatus: 'tracked' },
-          })
-        } else if (source === 'elevate') {
-          await prisma.session.update({
-            where: { id: sessionId },
-            data: { progressPulseStatus: 'tracked' },
-          })
-        }
-      } catch {
-        // non-critical
-      }
-    }
+    if (!records) return res.status(404).json({ error: 'Session not found for this owner and source' })
 
     res.status(201).json({ success: true, count: records.count })
   } catch (error) {
@@ -222,21 +198,24 @@ export async function skipProgressPulse(req: Request, res: Response) {
   try {
     const { sessionId, source } = req.body
 
-    if (!sessionId || !source) {
+    if (typeof sessionId !== 'string' || !sessionId || !['replay', 'elevate'].includes(source)) {
       return res.status(400).json({ error: 'sessionId and source are required' })
     }
-
-    if (source === 'replay') {
-      await prisma.replaySession.update({
-        where: { id: sessionId },
-        data: { progressPulseStatus: 'skipped' },
-      })
-    } else if (source === 'elevate') {
-      await prisma.session.update({
-        where: { id: sessionId },
-        data: { progressPulseStatus: 'skipped' },
-      })
-    }
+    const userId = req.user!.userId
+    const skipped = await prisma.$transaction(async tx => {
+      if (source === 'replay') {
+        await tx.$queryRaw`SELECT id FROM "ReplaySession" WHERE id = ${sessionId} AND "userId" = ${userId} FOR UPDATE`
+        if (!await tx.replaySession.findFirst({ where: { id: sessionId, userId } })) return false
+        await tx.progressPulse.deleteMany({ where: { sessionId, userId, source: 'replay' } })
+        await tx.replaySession.update({ where: { id: sessionId }, data: { progressPulseStatus: 'skipped' } })
+      } else {
+        await tx.$queryRaw`SELECT id FROM "Session" WHERE id = ${sessionId} AND "userId" = ${userId} FOR UPDATE`
+        if (!await tx.session.findFirst({ where: { id: sessionId, userId, discardedAt: null } })) return false
+        await tx.session.update({ where: { id: sessionId }, data: { progressPulseStatus: 'skipped' } })
+      }
+      return true
+    })
+    if (!skipped) return res.status(404).json({ error: 'Session not found' })
 
     res.json({ success: true })
   } catch (error) {
@@ -268,7 +247,7 @@ async function buildCoachingContext(
 
     for (const skill of allSkills) {
       const records = await prisma.progressPulse.findMany({
-        where: { userId, skill, source: { in: enabled } },
+        where: { userId, skill, source: { in: enabled }, AND: [eligiblePulseWhere()] },
         orderBy: { recordedAt: 'desc' },
         take: 5,
         select: { score: true },
@@ -311,18 +290,22 @@ async function buildCoachingContext(
             strengths: true,
             annotatedTranscript: true,
             communicationSignals: true,
+            structuredTranscript: true,
+            transcriptionSource: true,
+            deliveryEvidence: true,
           },
         },
       },
     })
 
     if (latestReplay?.result) {
-      const r = latestReplay.result
-      const skills = r.skillScores as any
-      const coaching = r.coachingInsights as any
-      const improvements = r.improvements as any[]
-      const strengths = r.strengths as any[]
-      const signals = r.communicationSignals as any
+      const safe = replayResultView(latestReplay.result, latestReplay.learnerSelection as unknown as ReplaySelection | null)
+      const r = safe.result
+      const skills = safe.skillScores
+      const coaching = safe.coachingInsights as Record<string, any> | null
+      const improvements = (skills ? r.improvements : []) as any[]
+      const strengths = (skills ? r.strengths : []) as any[]
+      const signals = skills ? latestReplay.result.communicationSignals as Record<string, any> | null : null
 
       // Extract focus-specific improvement suggestions
       const focusImprovements = improvements?.filter((imp: any) => {
@@ -392,6 +375,7 @@ async function buildCoachingContext(
             userFillerRate: true,
             userAvgSentenceLength: true,
             userSpeakingTime: true,
+            processingStatus: true,
             coachingInsights: true,
             skillScores: true,
           },
@@ -404,9 +388,10 @@ async function buildCoachingContext(
 
     // Build compact last-practice summary
     if (lastElevateSession?.metrics) {
-      const insights = lastElevateSession.metrics.coachingInsights as any
+      const paceAvailable = isPersistedPaceAvailable(lastElevateSession.metrics.processingStatus)
+      const insights = guardPaceClaims(lastElevateSession.metrics.coachingInsights, paceAvailable) as any
       const practiceSkills = lastElevateSession.metrics.skillScores as any
-      const practiceScore = practiceSkills?.scores?.[focusArea] ?? null
+      const practiceScore = focusArea === 'pacing' && !paceAvailable ? null : practiceSkills?.scores?.[focusArea] ?? null
       const replayScore = replayInsights?.skillScores?.[focusArea] ?? null
 
       // Extract one substantive user quote from the practice transcript

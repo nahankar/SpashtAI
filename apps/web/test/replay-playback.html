@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Replay synthetic clip acceptance</title>
+<h1>Replay synthetic clip acceptance</h1>
+<p>No server, account, microphone, or uploaded recording is used. A generated four-second WAV contains a one-second silent gap.</p>
+<button id="run">Run exact clip test (keyboard or click)</button>
+<pre id="result" role="status">Ready</pre>
+<audio id="media" preload="auto"></audio>
+<script type="module">
+import { playReplayClip } from '/src/components/replay/clip-playback.ts'
+const rate = 16000, count = rate * 4
+const buffer = new ArrayBuffer(44 + count * 2), view = new DataView(buffer)
+function str(offset, text) { [...text].forEach((c, i) => view.setUint8(offset + i, c.charCodeAt(0))) }
+str(0, 'RIFF'); view.setUint32(4, 36 + count * 2, true); str(8, 'WAVE'); str(12, 'fmt ')
+view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true)
+view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true)
+str(36, 'data'); view.setUint32(40, count * 2, true)
+for (let i = 0; i < count; i++) view.setInt16(44 + i * 2, i >= rate && i < 2 * rate ? 0 : Math.sin(2 * Math.PI * 220 * i / rate) * 100, true)
+const media = document.querySelector('#media'), output = document.querySelector('#result')
+const url = URL.createObjectURL(new Blob([buffer], { type: 'audio/wav' }))
+media.src = url
+let abort
+window.addEventListener('pagehide', () => { abort?.abort(); URL.revokeObjectURL(url) })
+document.querySelector('#run').addEventListener('click', async () => {
+  abort?.abort(); abort = new AbortController()
+  const seekPositions = [], samples = [], clip = { start: .5, end: 2.5 }
+  const sought = () => seekPositions.push(media.currentTime)
+  media.addEventListener('seeked', sought)
+  const timer = setInterval(() => { if (!media.paused) samples.push(media.currentTime) }, 10)
+  output.textContent = 'Running…'
+  try {
+    await playReplayClip(media, clip, abort.signal, () => {
+      const observedEnd = media.currentTime
+      clearInterval(timer); media.removeEventListener('seeked', sought)
+      const exactStart = Math.abs((seekPositions[0] ?? -1) - .5) < .03
+      const heardGap = samples.some(t => t > 1.2 && t < 1.8)
+      const bounded = observedEnd >= 2.5 && observedEnd <= 2.75
+      output.textContent = JSON.stringify({ passed: exactStart && heardGap && bounded && media.paused,
+        seekPositions, heardGap, observedEnd, overshootMs: (observedEnd - clip.end) * 1000, paused: media.paused }, null, 2)
+    })
+  } catch (error) { clearInterval(timer); media.removeEventListener('seeked', sought); output.textContent = String(error) }
+})
+</script>
+</html>

@@ -8,6 +8,7 @@
 import type { SkillScores } from './skillScores'
 import { prisma } from '../lib/prisma'
 import { lockWritableSession } from '../lib/sessionDiscard'
+import { eligiblePulseWhere } from './pulseEligibility'
 
 const TREND_CURRENT_WEIGHT = 0.7
 const TREND_HISTORY_WEIGHT = 0.3
@@ -62,7 +63,7 @@ export async function getSmoothedScore(
   currentScore: number,
 ): Promise<number> {
   const history = await prisma.progressPulse.findMany({
-    where: { userId, skill },
+    where: { userId, skill, AND: [eligiblePulseWhere()] },
     orderBy: { recordedAt: 'desc' },
     take: 5,
     select: { score: true },
@@ -86,6 +87,7 @@ export async function saveSkillScoresToPulse(
   scores: SkillScores,
   components?: Record<string, Record<string, number>>,
 ): Promise<number> {
+  if (source === 'replay') throw new Error('Replay progress requires the confirmed-speaker assessment endpoint')
   const entries = skillScoresToPulseEntries(scores, components)
   if (entries.length === 0) return 0
 

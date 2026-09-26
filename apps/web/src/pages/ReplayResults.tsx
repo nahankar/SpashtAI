@@ -9,7 +9,6 @@ import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
   Dialog,
@@ -31,17 +30,18 @@ import {
   ArrowLeft,
   RefreshCw,
   Loader2,
-  User,
   Mic,
   ArrowRight,
   CalendarDays,
 } from 'lucide-react'
 import type { ReplayResultData } from '@/hooks/useReplaySession'
 import { inferFocusArea, EXERCISE_PREVIEWS, getFocusAreaLabel } from '@/lib/focus-areas'
-import { generateSessionPdf, type SessionReport } from '@/lib/generate-session-pdf'
-import { buildReportExtras } from '@/lib/report-extras'
+import { generateSessionPdf } from '@/lib/generate-session-pdf'
 import { markCoachHomeResultSeen } from '@/lib/coach-api'
 import { FileText } from 'lucide-react'
+import { ReplayEvidencePanel } from '@/components/replay/ReplayEvidencePanel'
+import { ReplayAssessmentAction } from '@/components/replay/ReplayAssessmentAction'
+import { replayEvidenceReport } from '@/components/replay/evidence-report'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 
@@ -86,7 +86,8 @@ function getScoreTheme(score: number) {
   return { ring: '#ef4444', gap: '#fecaca', micro: 'Needs focus', target: 7 }
 }
 
-function ScoreRing({ score, label, size = 80 }: { score: number; label: string; size?: number }) {
+function ScoreRing({ score, label, size = 80 }: { score: number | null; label: string; size?: number }) {
+  if (score == null) return <div className="text-center"><p>{label}</p><p className="text-muted-foreground">Not available</p></div>
   const strokeW = size >= 90 ? 7 : 6
   const r = (size - strokeW * 2) / 2
   const circ = 2 * Math.PI * r
@@ -142,7 +143,8 @@ const RATING_STYLES: Record<NonNullable<MetricRating>, { bg: string; text: strin
   bad:     { bg: 'bg-red-50 border-red-200',     text: 'text-red-700',   label: 'Needs Work' },
 }
 
-function rateMetric(key: string, raw: number): MetricRating {
+function rateMetric(key: string, raw: number | null): MetricRating {
+  if (raw == null || !Number.isFinite(raw)) return null
   switch (key) {
     case 'wpm':
       if (raw >= 120 && raw <= 180) return 'good'
@@ -268,7 +270,7 @@ function getMetricTip(key: string, rating: MetricRating): string | null {
 type ConfidenceLevel = 'high' | 'medium' | 'low'
 
 const CONFIDENCE_STYLES: Record<ConfidenceLevel, { icon: string; label: string; className: string }> = {
-  high: { icon: '●', label: 'High confidence', className: 'text-green-500' },
+  high: { icon: '●', label: 'Transcript-derived; depends on transcription accuracy', className: 'text-muted-foreground' },
   medium: { icon: '◐', label: 'Estimated from text', className: 'text-amber-500' },
   low: { icon: '○', label: 'Low confidence — audio needed', className: 'text-muted-foreground/50' },
 }
@@ -298,14 +300,14 @@ function MetricCard({
 }: {
   metricKey?: string
   label: string
-  value: string | number
+  value: string | number | null
   unit?: string
   optimal?: string
   rating?: MetricRating
 }) {
   const style = rating ? RATING_STYLES[rating] : null
   const tip = metricKey ? getMetricTip(metricKey, rating ?? null) : null
-  const confidence = metricKey ? METRIC_CONFIDENCE[metricKey] : undefined
+  const confidence = value != null && !String(value).includes('N/A') && value !== '—' && metricKey ? METRIC_CONFIDENCE[metricKey] : undefined
   const confStyle = confidence ? CONFIDENCE_STYLES[confidence] : null
   return (
     <div className={`rounded-lg border p-3 ${style?.bg || ''}`}>
@@ -318,12 +320,12 @@ function MetricCard({
         )}
       </div>
       <p className="mt-1 text-lg font-semibold">
-        {value}
+        {value ?? 'Not available'}
         {unit && <span className="text-sm font-normal text-muted-foreground"> {unit}</span>}
       </p>
-      {optimal && <p className="mt-0.5 text-[11px] text-muted-foreground">Optimal: {optimal}</p>}
+      {optimal && value != null && !String(value).includes('N/A') && value !== '—' && <p className="mt-0.5 text-[11px] text-muted-foreground">Reference: {optimal}</p>}
       {value === 'N/A' && metricKey === 'interruptionCount' && (
-        <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground/80 italic">Requires audio upload for reliable detection. Text transcripts have imprecise timestamps.</p>
+        <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground/80 italic">Overlap detection is unavailable. Timestamps alone cannot establish who interrupted whom.</p>
       )}
       {tip && <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground/80 italic">{tip}</p>}
       {confStyle && (
@@ -393,28 +395,6 @@ function RadarChart({ skills, size = 260 }: { skills: { label: string; score: nu
   )
 }
 
-function PacingInsight({ wpm }: { wpm: number }) {
-  const idealMin = 120
-  const idealMax = 160
-  const idealMid = 140
-  if (wpm >= idealMin && wpm <= idealMax) return null
-  const diff = Math.abs(wpm - idealMid)
-  const pctDiff = Math.round((diff / idealMid) * 100)
-  const direction = wpm < idealMin ? 'slower' : 'faster'
-  return (
-    <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm">
-      <p className="font-medium text-amber-900">
-        Speech speed: {wpm} WPM &middot; Recommended: {idealMin}\u2013{idealMax} WPM
-      </p>
-      <p className="mt-1 text-xs text-amber-700">
-        Your speech was ~{pctDiff}% {direction} than ideal.
-        {direction === 'slower'
-          ? ' This can make meetings feel slow or hesitant. Try increasing your pace slightly on straightforward points.'
-          : ' This can make it hard for listeners to follow. Try pausing between key points.'}
-      </p>
-    </div>
-  )
-}
 
 function MeetingSummaryCard({ summary }: { summary: { topicsDiscussed?: string[]; keyOutcomes?: string[]; openQuestions?: string[] } }) {
   const hasTopics = summary.topicsDiscussed && summary.topicsDiscussed.length > 0
@@ -557,28 +537,15 @@ function TopCoachingActions({ result, coachingInsights }: { result: ReplayResult
     })
   }
 
-  if (result.fillerWordRate > 2 && actions.length < 3) {
+  if (result.fillerWordRate != null && result.fillerWordCount != null && result.fillerWordRate > 2 && actions.length < 3) {
     const targetCount = Math.max(0, Math.round(result.fillerWordCount * 0.3))
     actions.push({
       text: `Reduce filler words from ${result.fillerWordCount} to ~${targetCount}`,
-      detail: `Currently ${result.fillerWordRate.toFixed(1)}% of your words are fillers. Try pausing silently instead of saying "um", "like", or "you know".`,
+      detail: `Currently ${result.fillerWordRate?.toFixed(1) ?? 'N/A'}% of your words are fillers. Try pausing silently instead of saying "um", "like", or "you know".`,
       metric: `${result.fillerWordCount} \u2192 ${targetCount}`,
     })
   }
 
-  if (result.wordsPerMinute < 80 && actions.length < 3) {
-    actions.push({
-      text: `Increase speaking speed from ${result.wordsPerMinute} to 120+ WPM`,
-      detail: `Your speech is ${Math.round(((120 - result.wordsPerMinute) / 120) * 100)}% slower than the ideal 120\u2013160 WPM range. This can make meetings feel hesitant.`,
-      metric: `${result.wordsPerMinute} \u2192 120 WPM`,
-    })
-  } else if (result.wordsPerMinute > 180 && actions.length < 3) {
-    actions.push({
-      text: `Slow down from ${result.wordsPerMinute} to ~150 WPM`,
-      detail: 'Aim for 120\u2013160 WPM. Pause after key points to let ideas land.',
-      metric: `${result.wordsPerMinute} \u2192 150 WPM`,
-    })
-  }
 
   const hedging = result.hedgingRate ?? 0
   if (hedging > 2 && actions.length < 3) {
@@ -591,7 +558,7 @@ function TopCoachingActions({ result, coachingInsights }: { result: ReplayResult
     })
   }
 
-  if (result.questionsAsked < 3 && actions.length < 3) {
+  if (result.questionsAsked != null && result.questionsAsked < 3 && actions.length < 3) {
     actions.push({
       text: `Ask more questions (${result.questionsAsked} \u2192 5+ per session)`,
       detail: `You asked only ${result.questionsAsked} question${result.questionsAsked !== 1 ? 's' : ''}. Try "What do you think?" or clarifying questions to boost engagement.`,
@@ -803,25 +770,25 @@ function useReanalyze(sessionId: string | undefined, onComplete: () => void) {
   useEffect(() => () => stopPolling(), [stopPolling])
 
   const startReanalyze = useCallback(
-    async (participantName: string | null, meetingDate: string | null) => {
+    async (meetingDate: string | null, selection: { selectionRevision: string; transcriptRevision: string } | null) => {
       if (!sessionId) return
       setReanalyzeError(null)
       setReanalyzing('transcribing')
       setDialogOpen(false)
 
       try {
-        const patchBody: Record<string, string> = { participantName: participantName || '' }
-        if (meetingDate) patchBody.meetingDate = meetingDate
-
-        await fetch(`${API_BASE_URL}/api/replay/sessions/${sessionId}`, {
-          method: 'PATCH',
-          headers: getAuthHeaders(),
-          body: JSON.stringify(patchBody),
-        })
+        if (meetingDate) {
+          const patched = await fetch(`${API_BASE_URL}/api/replay/sessions/${sessionId}`, {
+            method: 'PATCH',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ meetingDate }),
+          })
+          if (!patched.ok) throw new Error('Could not save the meeting date')
+        }
 
         const processRes = await fetch(
           `${API_BASE_URL}/api/replay/sessions/${sessionId}/process`,
-          { method: 'POST', headers: getAuthHeaders() }
+          { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(selection ?? {}) }
         )
         if (!processRes.ok) {
           const body = await processRes.json()
@@ -866,27 +833,23 @@ function useReanalyze(sessionId: string | undefined, onComplete: () => void) {
 function ReanalyzeDialog({
   open,
   onOpenChange,
-  currentParticipant,
+  confirmedSpeaker,
   currentMeetingDate,
-  detectedSpeakers,
   onConfirm,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  currentParticipant: string
+  confirmedSpeaker: string | null
   currentMeetingDate: string
-  detectedSpeakers: string[]
-  onConfirm: (name: string | null, meetingDate: string | null) => void
+  onConfirm: (meetingDate: string | null) => void
 }) {
-  const [name, setName] = useState(currentParticipant)
   const [meetingDate, setMeetingDate] = useState(currentMeetingDate)
 
   useEffect(() => {
     if (open) {
-      setName(currentParticipant)
       setMeetingDate(currentMeetingDate)
     }
-  }, [open, currentParticipant, currentMeetingDate])
+  }, [open, currentMeetingDate])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -894,19 +857,14 @@ function ReanalyzeDialog({
         <DialogHeader>
           <DialogTitle>Re-analyze Transcript</DialogTitle>
           <DialogDescription>
-            Re-run the AI analysis on the same transcript. You can change the participant or keep the current one.
+            Re-run analysis using the confirmed speaker below. To change who is analyzed, first confirm a different speaker in Delivery evidence.
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
           <div className="grid gap-2">
-            <Label htmlFor="participant-name">Participant Name</Label>
-            <Input
-              id="participant-name"
-              placeholder="Enter participant name (optional)"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
+            <Label>Confirmed speaker</Label>
+            <p>{confirmedSpeaker ?? 'No speaker confirmed; only meeting-level feedback will be available.'}</p>
           </div>
 
           {!currentMeetingDate && (
@@ -927,26 +885,6 @@ function ReanalyzeDialog({
             </div>
           )}
 
-          {detectedSpeakers.length > 0 && (
-            <div className="grid gap-2">
-              <Label className="text-muted-foreground">Detected speakers in transcript</Label>
-              <div className="flex flex-wrap gap-2">
-                {detectedSpeakers.map((speaker) => (
-                  <button
-                    key={speaker}
-                    type="button"
-                    onClick={() => setName(speaker)}
-                    className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition-colors hover:border-primary hover:bg-primary/5 ${
-                      name === speaker ? 'border-primary bg-primary/10 font-medium' : ''
-                    }`}
-                  >
-                    <User className="h-3.5 w-3.5 text-muted-foreground" />
-                    {speaker}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
         <DialogFooter>
@@ -955,7 +893,7 @@ function ReanalyzeDialog({
           </Button>
           <Button
             disabled={!currentMeetingDate && !meetingDate.trim()}
-            onClick={() => onConfirm(name.trim() || null, meetingDate.trim() || null)}
+            onClick={() => onConfirm(meetingDate.trim() || null)}
           >
             <RefreshCw className="mr-2 h-4 w-4" />
             Re-analyze
@@ -1051,23 +989,30 @@ export function ReplayResults() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const seenResultRef = useRef<string | null>(null)
+  const resultsRequestRef = useRef<AbortController | null>(null)
 
   const loadResults = useCallback(() => {
     if (!id) return
+    resultsRequestRef.current?.abort()
+    const request = new AbortController()
+    resultsRequestRef.current = request
+    setData(null)
+    setError(null)
     setLoading(true)
     fetch(`${API_BASE_URL}/api/replay/sessions/${id}/results`, {
       headers: getAuthHeaders(),
+      signal: request.signal,
     })
       .then(async (r) => {
         if (!r.ok) throw new Error((await r.json()).error || 'Failed to load')
         return r.json()
       })
-      .then(setData)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false))
+      .then(next => { if (!request.signal.aborted) setData(next) })
+      .catch((e) => { if (!request.signal.aborted) setError(e.message) })
+      .finally(() => { if (!request.signal.aborted) setLoading(false) })
   }, [id])
 
-  useEffect(() => { loadResults() }, [loadResults])
+  useEffect(() => { loadResults(); return () => resultsRequestRef.current?.abort() }, [loadResults])
 
   useEffect(() => {
     if (!data || !id || seenResultRef.current === id) return
@@ -1111,9 +1056,7 @@ export function ReplayResults() {
   }
 
   useEffect(() => {
-    if (data?.session?.progressPulseStatus) {
-      setPulseStatus(data.session.progressPulseStatus)
-    }
+    setPulseStatus(data?.session?.progressPulseStatus ?? null)
   }, [data])
 
   useEffect(() => {
@@ -1128,7 +1071,11 @@ export function ReplayResults() {
 
   const handleTrackPulse = async () => {
     if (!data || !id) return
-    const { session, result } = data
+    if (!data.skillScores || data.evidence.identity.state !== 'confirmed') {
+      toast.info('No current learner-attributed scores are available to track.')
+      return
+    }
+    const { session } = data
     setPulseLoading(true)
     try {
       let recordedAt = recordedAtFromSessionMeetingDate(session.meetingDate)
@@ -1159,37 +1106,15 @@ export function ReplayResults() {
         return
       }
 
-      const entries: { skill: string; score: number }[] = []
-
-      // Use new skill-based scores when available; fall back to legacy Bedrock scores
-      const skillScores = data.skillScores?.scores
-      if (skillScores) {
-        if (skillScores.clarity != null) entries.push({ skill: 'clarity', score: skillScores.clarity })
-        if (skillScores.conciseness != null) entries.push({ skill: 'conciseness', score: skillScores.conciseness })
-        if (skillScores.confidence != null) entries.push({ skill: 'confidence', score: skillScores.confidence })
-        if (skillScores.structure != null) entries.push({ skill: 'structure', score: skillScores.structure })
-        if (skillScores.engagement != null) entries.push({ skill: 'engagement', score: skillScores.engagement })
-        if (skillScores.pacing != null) entries.push({ skill: 'pacing', score: skillScores.pacing })
-        if (skillScores.delivery != null) entries.push({ skill: 'delivery', score: skillScores.delivery })
-        if (skillScores.emotionalControl != null) entries.push({ skill: 'emotional_control', score: skillScores.emotionalControl })
-      } else {
-        if (result.clarityScore > 0) entries.push({ skill: 'clarity', score: result.clarityScore })
-        if (result.confidenceScore > 0) entries.push({ skill: 'confidence', score: result.confidenceScore })
-        if (result.engagementScore > 0) entries.push({ skill: 'engagement', score: result.engagementScore })
-        if (result.fillerWordRate != null) {
-          entries.push({ skill: 'filler_words', score: Math.max(0, Math.min(10, 10 - result.fillerWordRate * 2)) })
-        }
-        if (result.wordsPerMinute) {
-          const wpm = result.wordsPerMinute
-          entries.push({ skill: 'pacing', score: wpm >= 120 && wpm <= 180 ? 9 : wpm >= 100 && wpm <= 200 ? 7 : 5 })
-        }
-      }
-
-      await fetch(`${API_BASE_URL}/api/progress-pulse`, {
+      const response = await fetch(`${API_BASE_URL}/api/replay/sessions/${id}/track-progress`, {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ entries, sessionId: id, source: 'replay', recordedAt }),
+        body: JSON.stringify({ selectionRevision: data.evidence.identity.revision, transcriptRevision: data.evidence.transcriptRevision }),
       })
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}))
+        throw new Error(error.error || 'Unable to track current scores')
+      }
       setPulseStatus('tracked')
       toast.success('Session tracked in Progress Pulse')
     } catch (e: unknown) {
@@ -1203,11 +1128,12 @@ export function ReplayResults() {
     if (!id) return
     setPulseLoading(true)
     try {
-      await fetch(`${API_BASE_URL}/api/progress-pulse/skip`, {
+      const response = await fetch(`${API_BASE_URL}/api/progress-pulse/skip`, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({ sessionId: id, source: 'replay' }),
       })
+      if (!response.ok) throw new Error('Unable to skip progress tracking')
       setPulseStatus('skipped')
       toast.info('Session skipped from progress tracking')
     } catch {
@@ -1244,9 +1170,9 @@ export function ReplayResults() {
   const { session, result } = data
   const hedgingPhrases = data.skillScores?.signals?.hedging?.phrases ?? []
 
-  const detectedSpeakers: string[] = Array.isArray(result.structuredTranscript)
-    ? [...new Set(result.structuredTranscript.map((s) => s.speaker))]
-    : []
+  const assessmentSelection = data.evidence.identity.state === 'confirmed' && data.evidence.identity.revision
+    ? { selectionRevision: data.evidence.identity.revision, transcriptRevision: data.evidence.transcriptRevision }
+    : null
 
   const handleDownload = () => {
     const report = {
@@ -1266,6 +1192,7 @@ export function ReplayResults() {
         collaborationInteraction: {
           totalTurns: result.totalTurns,
           speakingPercentage: result.speakingPercentage,
+          wordShare: result.wordShare,
           interruptionCount: result.interruptionCount,
           questionsAsked: result.questionsAsked,
           avgResponseTimeSec: result.avgResponseTimeSec,
@@ -1291,7 +1218,8 @@ export function ReplayResults() {
       transcript: result.transcriptText,
       structuredTranscript: result.structuredTranscript ?? null,
       annotatedTranscript: result.annotatedTranscript ?? null,
-      meetingImpact: computeMeetingImpact(result, data.coachingInsights),
+      meetingImpact: data.skillScores && result.speakingPercentage != null ? computeMeetingImpact(result, data.coachingInsights) : null,
+      deliveryEvidence: data.evidence,
       processingInfo: {
         modelUsed: result.modelUsed ?? null,
         promptTokens: result.promptTokens,
@@ -1314,73 +1242,7 @@ export function ReplayResults() {
     if (!data) return
     setPdfLoading(true)
     try {
-      const { session: s, result: r } = data
-
-      // Standardized report extras (summary + Progress Pulse + Next Steps),
-      // shared verbatim with the Elevate PDF so both reports stay consistent.
-      const extras = await buildReportExtras({
-        apiBase: API_BASE_URL,
-        headers: getAuthHeaders(),
-        scores: data.skillScores?.scores ?? {},
-        overallScore: r.overallScore,
-        coaching: data.coachingInsights ?? null,
-      })
-
-      const pdfReport: SessionReport = {
-        title: s.sessionName || s.meetingType,
-        subtitle: `${s.meetingType} — ${s.userRole}`,
-        source: 'replay',
-        metadata: [
-          ...(s.participantName ? [{ label: 'Participant', value: s.participantName }] : []),
-          ...(s.meetingDate ? [{ label: 'Meeting Date', value: new Date(s.meetingDate).toLocaleDateString() }] : []),
-          { label: 'Role', value: s.userRole },
-          { label: 'Status', value: s.status },
-          { label: 'Generated', value: new Date().toLocaleString() },
-        ],
-        summary: extras.summary,
-        overallScore: r.overallScore,
-        skillScores: data.skillScores ?? null,
-        coachingInsights: data.coachingInsights ?? null,
-        legacyScores: [
-          { label: 'Clarity', score: r.clarityScore },
-          { label: 'Confidence', score: r.confidenceScore },
-          { label: 'Engagement', score: r.engagementScore },
-        ],
-        metrics: [
-          {
-            section: 'Delivery Quality',
-            description: 'Your pace, fillers and fluency across this meeting',
-            items: [
-              { label: 'Words Per Minute', value: String(r.wordsPerMinute), unit: 'WPM' },
-              { label: 'Filler Words', value: String(r.fillerWordCount) },
-              { label: 'Filler Rate', value: `${r.fillerWordRate.toFixed(1)}`, unit: '%' },
-              { label: 'Hedging Language', value: `${(r.hedgingRate ?? 0).toFixed(1)}`, unit: '%' },
-              { label: 'Avg Sentence Length', value: String(r.avgSentenceLength), unit: 'words' },
-              { label: 'Vocabulary Diversity', value: `${r.vocabularyDiversity.toFixed(1)}`, unit: '%' },
-            ],
-          },
-          {
-            section: 'Collaboration & Interaction',
-            description: 'How you shared the floor and engaged others',
-            items: [
-              { label: 'Speaking Share', value: `${r.speakingPercentage.toFixed(0)}`, unit: '%' },
-              { label: 'Questions Asked', value: String(r.questionsAsked) },
-              { label: 'Interruptions', value: String(r.interruptionCount) },
-              ...(r.avgResponseTimeSec != null ? [{ label: 'Avg Response Time', value: `${r.avgResponseTimeSec.toFixed(1)}`, unit: 's' }] : []),
-              ...(r.longestMonologueSec ? [{ label: 'Longest Monologue', value: `${Math.floor(r.longestMonologueSec / 60)}m ${r.longestMonologueSec % 60}s` }] : []),
-              { label: 'Repetition Requests', value: String(r.repetitionRequests) },
-            ],
-          },
-        ],
-        contextSpecificFeedback: (r.contextSpecificFeedback as { label: string; detail: string; rating?: string }[]) ?? [],
-        keyMoments: (r.keyMoments as { text: string; type: string }[]) ?? [],
-        strengths: r.strengths,
-        improvements: r.improvements,
-        recommendations: r.recommendations,
-        progressPulse: extras.progressPulse.length ? extras.progressPulse : null,
-        nextSteps: extras.nextSteps.length ? extras.nextSteps : null,
-        meetingImpact: computeMeetingImpact(r, data.coachingInsights),
-      }
+      const pdfReport = replayEvidenceReport(data)
       await generateSessionPdf(pdfReport)
     } catch (e) {
       toast.error('Failed to generate PDF')
@@ -1399,10 +1261,9 @@ export function ReplayResults() {
       <ReanalyzeDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        currentParticipant={session.participantName || ''}
+        confirmedSpeaker={data.evidence.identity.speaker}
         currentMeetingDate={session.meetingDate ? new Date(session.meetingDate).toISOString().slice(0, 10) : ''}
-        detectedSpeakers={detectedSpeakers}
-        onConfirm={startReanalyze}
+        onConfirm={date => void startReanalyze(date, assessmentSelection)}
       />
 
       {/* Header */}
@@ -1413,8 +1274,8 @@ export function ReplayResults() {
           </Link>
           <h1 className="text-2xl font-bold">{session.sessionName || 'Replay Results'}</h1>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-            {session.participantName && (
-              <span className="font-medium text-primary">Analysis for {session.participantName}</span>
+            {data.evidence.identity.speaker && (
+              <span className="font-medium text-primary">Confirmed speaker: {data.evidence.identity.speaker}</span>
             )}
             <Badge variant="secondary">{session.meetingType}</Badge>
             <span>{session.userRole}</span>
@@ -1445,7 +1306,7 @@ export function ReplayResults() {
               variant="outline"
               size="sm"
               onClick={handleTrackPulse}
-              disabled={!session.meetingDate}
+              disabled={!session.meetingDate || !data.skillScores || data.evidence.identity.state !== 'confirmed'}
               title={!session.meetingDate ? 'Set a meeting date first' : 'Track this session in Progress Pulse'}
             >
               <TrendingUp className="mr-2 h-4 w-4" /> {pulseStatus === 'skipped' ? 'Track in Pulse' : 'Track in Pulse'}
@@ -1495,6 +1356,14 @@ export function ReplayResults() {
         </div>
       )}
 
+      <ReplayEvidencePanel key={`${id}:${data.evidence.recording?.signature}:${data.evidence.identity.revision}`} sessionId={id!} evidence={data.evidence} audioDisabled={!!data.audioDownloadDisabled || exportFlags.hideAudioDownload} onConfirmed={loadResults} />
+      <ReplayAssessmentAction evidence={data.evidence} hasAssessment={!!data.skillScores}
+        busy={reanalyzing === 'transcribing' || reanalyzing === 'analyzing'}
+        onAnalyze={() => {
+          if (!session.meetingDate) setDialogOpen(true)
+          else void startReanalyze(null, assessmentSelection)
+        }} />
+      <p className="my-4 text-sm text-muted-foreground">{result.feedbackScope}</p>
       <Tabs defaultValue="overview">
         <TabsList className="mb-4 w-full justify-start">
           <TabsTrigger value="overview">Overview</TabsTrigger>
@@ -1681,7 +1550,7 @@ export function ReplayResults() {
             </Card>
 
             {/* Top 3 Coaching Actions */}
-            <TopCoachingActions result={result} coachingInsights={data.coachingInsights} />
+            {data.skillScores && <TopCoachingActions result={result} coachingInsights={data.coachingInsights} />}
 
             {/* Strengths, Improvements & Recommendations */}
             <div className="grid gap-4 md:grid-cols-3">
@@ -1794,18 +1663,18 @@ export function ReplayResults() {
                   <div className="h-2.5 w-2.5 rounded-full bg-green-500" />
                   <CardTitle className="text-base">Delivery Quality</CardTitle>
                 </div>
-                <CardDescription>How you speak — pace, clarity, vocabulary, and confidence signals</CardDescription>
+                <CardDescription>Model-timed pace where eligible; other measurements describe the selected label’s transcript, not vocal quality.</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-                  <MetricCard metricKey="wpm" label="Words Per Minute" value={result.wordsPerMinute} unit="WPM" optimal="120-180" rating={rateMetric('wpm', result.wordsPerMinute)} />
-                  <MetricCard metricKey="fillerRate" label="Filler Rate" value={`${result.fillerWordRate.toFixed(1)}%`} optimal="< 2%" rating={rateMetric('fillerRate', result.fillerWordRate)} />
-                  <MetricCard metricKey="hedgingRate" label="Hedging Language" value={`${(result.hedgingRate ?? 0).toFixed(1)}%`} optimal="< 1.5%" rating={rateMetric('hedgingRate', result.hedgingRate ?? 0)} />
-                  <MetricCard metricKey="avgSentenceLength" label="Avg Sentence Length" value={result.avgSentenceLength.toFixed(1)} unit="words" optimal="12-20" rating={rateMetric('avgSentenceLength', result.avgSentenceLength)} />
-                  <MetricCard metricKey="vocabularyDiversity" label="Vocabulary Diversity" value={`${result.vocabularyDiversity.toFixed(1)}%`} optimal="> 30%" rating={rateMetric('vocabularyDiversity', result.vocabularyDiversity)} />
+                  <MetricCard label="Speaking pace (model-timed)" value={result.wordsPerMinute ?? 'Not available'} unit={result.wordsPerMinute == null ? undefined : 'WPM'} />
+                  <MetricCard metricKey="fillerRate" label="Filler Rate" value={`${result.fillerWordRate?.toFixed(1) ?? 'N/A'}%`} optimal="< 2%" rating={rateMetric('fillerRate', result.fillerWordRate)} />
+                  <MetricCard metricKey="hedgingRate" label="Hedging Language" value={result.hedgingRate == null ? 'N/A' : `${result.hedgingRate.toFixed(1)}%`} optimal="< 1.5%" rating={rateMetric('hedgingRate', result.hedgingRate)} />
+                  <MetricCard metricKey="avgSentenceLength" label="Avg Sentence Length" value={result.avgSentenceLength?.toFixed(1) ?? 'N/A'} unit="words" optimal="12-20" rating={rateMetric('avgSentenceLength', result.avgSentenceLength)} />
+                  <MetricCard metricKey="vocabularyDiversity" label="Vocabulary Diversity" value={`${result.vocabularyDiversity?.toFixed(1) ?? 'N/A'}%`} optimal="> 30%" rating={rateMetric('vocabularyDiversity', result.vocabularyDiversity)} />
                   <MetricCard metricKey="fillerWordCount" label="Filler Words" value={result.fillerWordCount} optimal="< 10" rating={rateMetric('fillerWordCount', result.fillerWordCount)} />
                 </div>
-                <PacingInsight wpm={result.wordsPerMinute} />
+                {result.wordsPerMinute != null && <p className="text-sm text-muted-foreground">Pace includes internal gaps in eligible learner stretches; it is not articulation rate or a quality rating.</p>}
                 {(result.hedgingRate ?? 0) > 1.5 && hedgingPhrases.length > 0 && (
                   <div className="mt-3 rounded-md border border-orange-200 bg-orange-50 p-3 text-sm">
                     <p className="font-medium text-orange-900">Hedging phrases detected ({result.hedgingCount} total):</p>
@@ -1826,22 +1695,22 @@ export function ReplayResults() {
                   <div className="h-2.5 w-2.5 rounded-full bg-amber-500" />
                   <CardTitle className="text-base">Collaboration & Interaction</CardTitle>
                 </div>
-                <CardDescription>How you behave in conversation — listening, turn-taking, and engagement</CardDescription>
+                <CardDescription>Transcript participation. Word share is not speaking time; unavailable observations are not zero.</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-                  <MetricCard metricKey="speakingPercentage" label="Speaking Share" value={`${result.speakingPercentage.toFixed(1)}%`} optimal="25-60%" rating={rateMetric('speakingPercentage', result.speakingPercentage)} />
+                  <MetricCard label="Word share—not speaking-time share" value={result.wordShare == null ? 'Not available' : `${result.wordShare.toFixed(1)}%`} />
                   <MetricCard
                     metricKey="interruptionCount"
                     label="Interruptions"
-                    value={result.transcriptionSource === 'aws_transcribe' ? (result.interruptionCount ?? 0) : 'N/A'}
-                    optimal={result.transcriptionSource === 'aws_transcribe' ? '0' : undefined}
-                    rating={result.transcriptionSource === 'aws_transcribe' ? rateMetric('interruptionCount', result.interruptionCount ?? 0) : null}
+                    value="N/A"
+                    optimal={undefined}
+                    rating={null}
                   />
-                  <MetricCard metricKey="questionsAsked" label="Questions Asked" value={result.questionsAsked ?? 0} optimal="3+" rating={rateMetric('questionsAsked', result.questionsAsked ?? 0)} />
+                  <MetricCard metricKey="questionsAsked" label="Questions Asked" value={result.questionsAsked} optimal="3+" rating={rateMetric('questionsAsked', result.questionsAsked)} />
                   <MetricCard metricKey="avgResponseTimeSec" label="Avg Response Time" value={result.avgResponseTimeSec != null ? `${result.avgResponseTimeSec.toFixed(1)}s` : '—'} optimal="< 2s" rating={result.avgResponseTimeSec != null ? rateMetric('avgResponseTimeSec', result.avgResponseTimeSec) : null} />
-                  <MetricCard metricKey="longestMonologueSec" label="Longest Monologue" value={result.longestMonologueSec ? `${Math.floor(result.longestMonologueSec / 60)}m ${result.longestMonologueSec % 60}s` : '—'} optimal="< 1 min" rating={rateMetric('longestMonologueSec', result.longestMonologueSec ?? 0)} />
-                  <MetricCard metricKey="repetitionRequests" label="Repetition Requests" value={result.repetitionRequests ?? 0} optimal="0" rating={rateMetric('repetitionRequests', result.repetitionRequests ?? 0)} />
+                  <MetricCard label="Longest monologue" value={result.longestMonologueSec == null ? 'Not available' : `${result.longestMonologueSec}s`} />
+                  <MetricCard label="Repetition requests" value={result.repetitionRequests} />
                 </div>
               </CardContent>
             </Card>
@@ -1942,7 +1811,7 @@ export function ReplayResults() {
                     }}
                   />
                   <p className="text-xs text-muted-foreground italic">
-                    Showing the most notable segments from {session.participantName || 'the participant'}. The full conversation is analyzed for scores and insights above.
+                    Showing content annotations for {data.evidence.identity.speaker || 'the unconfirmed speaker'}. Delivery observations are available separately in Delivery evidence.
                   </p>
                   {result.annotatedTranscript.map((seg, i) => {
                     const colorMap: Record<string, string> = {
@@ -2002,7 +1871,7 @@ export function ReplayResults() {
             )}
 
             {/* Meeting Impact Score */}
-            <MeetingImpactCard result={result} coachingInsights={data.coachingInsights} />
+            {data.skillScores && result.speakingPercentage != null ? <MeetingImpactCard result={result} coachingInsights={data.coachingInsights} /> : <p>Personal impact scores are unavailable: word share alone does not measure participation quality. Meeting content remains below.</p>}
 
             {/* Decision Clarity */}
             {data.coachingInsights?.decisionClarity && (

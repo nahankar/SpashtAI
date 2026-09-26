@@ -1,3 +1,8 @@
+import { Prisma } from '@prisma/client'
+import { randomUUID } from 'node:crypto'
+import { buildReplayEvidence, legacyInput, transcriptRevision, digest, selectionMatches, replaySegments, type ReplayEvidenceInput, type ReplaySelection } from '../lib/replay-evidence'
+import { identifyReplayRecording, replayCacheKey, isReusableReplayCache } from '../lib/replay-recording'
+import { replayResultView, meetingOnlyInsights } from '../lib/replay-result-view'
 import { Router, Request, Response } from 'express'
 import multer from 'multer'
 import { readFile, writeFile, mkdir, unlink } from 'fs/promises'
@@ -11,7 +16,6 @@ import {
   getReplaySessionOwnerId,
   isPrivilegedRole,
   resolveRequestExportFlags,
-  stripReplayTranscriptFields,
 } from '../lib/userExportFlags'
 import { trackFeatureUsage } from '../middleware/tracking'
 import { replaySessionAccessWhere } from '../lib/replay-access'
@@ -33,15 +37,15 @@ import {
   filterParticipantAnnotations,
   extractMeetingDateFromTranscript,
 } from '../lib/transcript-parser'
-import { calculateReplayMetrics, findMatchingSpeaker } from '../lib/replay-metrics'
+import { calculateReplayMetrics } from '../lib/replay-metrics'
 import { analyzeTranscript } from '../lib/aws-bedrock'
 import { getReplayModelId } from '../lib/analysisConfig'
 import { calculateSkillScores, calculateWeightedOverallScore, type TextSignals } from '../analytics/skillScores'
 import {
   generateCoachingInsights,
-  resolveReplayUploadAudio,
 } from '../analytics/insightGenerator'
-import { saveSkillScoresToPulse } from '../analytics/progressPulse'
+import { skillScoresToPulseEntries } from '../analytics/progressPulse'
+import { REPLAY_PULSE_ORIGIN } from '../analytics/pulseEligibility'
 import {
   uploadToS3,
   startTranscriptionJob,
@@ -108,10 +112,6 @@ function buildFallbackSignals(
   const words = userText.split(/\s+/).filter(Boolean)
   const totalWords = words.length
 
-  // Estimate user speaking time (~2.5 words/sec for natural speech)
-  const estimatedSpeakingSec = Math.max(totalWords / 2.5, 1)
-  const speakingMin = estimatedSpeakingSec / 60
-
   const fillerRegex = /\b(um|uh|like|you know|basically|actually|literally|so|well|right|i mean|kind of|sort of)\b/gi
   const fillerMatches = userText.match(fillerRegex) || []
   const hedgingRegex = /\b(i think|maybe|probably|perhaps|kind of|sort of|i guess|not sure|might|could be)\b/gi
@@ -123,7 +123,7 @@ function buildFallbackSignals(
   const uniqueWords = new Set(words.map((w) => w.toLowerCase()).filter((w) => w.length > 2))
 
   return {
-    speechRate: { wpm: Math.round(Math.min(250, totalWords / speakingMin)), variability: 0.2, totalWords },
+    speechRate: { wpm: 0, variability: null, totalWords, status: 'insufficient_evidence' },
     fillers: { count: fillerMatches.length, rate: totalWords > 0 ? fillerMatches.length / totalWords : 0, byType: {} },
     hedging: { count: hedgingMatches.length, rate: totalWords > 0 ? hedgingMatches.length / totalWords : 0, phrases: [...new Set(hedgingMatches.map((m) => m.toLowerCase()))] },
     sentenceComplexity: { avgLength: Math.round(avgSentLen * 10) / 10, subordinateRatio: 0.25, readability: 60, fleschKincaid: 8, gunningFog: 10 },
@@ -142,12 +142,13 @@ function transcriptionCachePath(sessionId: string): string {
   return path.join(UPLOAD_DIR, `${sessionId}_transcription.json`)
 }
 
-async function loadCachedTranscription(sessionId: string): Promise<TranscriptionResult | null> {
+async function loadCachedTranscription(sessionId: string, cacheKey: string): Promise<TranscriptionResult | null> {
   const cachePath = transcriptionCachePath(sessionId)
   if (!existsSync(cachePath)) return null
   try {
     const raw = await readFile(cachePath, 'utf-8')
-    const cached = JSON.parse(raw) as TranscriptionResult & { source?: string }
+    const cached = JSON.parse(raw) as TranscriptionResult & { source?: string; cacheKey?: string }
+    if (!isReusableReplayCache(cached, cacheKey)) return null
     console.log(`[cache] Loaded cached transcription for session ${sessionId}: ${cached.segments.length} segments, ${cached.speakerCount} speakers`)
     return cached
   } catch (err: any) {
@@ -159,36 +160,21 @@ async function loadCachedTranscription(sessionId: string): Promise<Transcription
 async function saveTranscriptionCache(
   sessionId: string,
   result: TranscriptionResult,
-  source: string
+  source: string,
+  cacheKey: string
 ): Promise<void> {
   const cachePath = transcriptionCachePath(sessionId)
   try {
-    await writeFile(cachePath, JSON.stringify({ ...result, source }, null, 2), 'utf-8')
-    console.log(`[cache] Saved transcription to ${cachePath}`)
+    await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM "ReplaySession" WHERE id = ${sessionId} FOR UPDATE`
+      if (!await tx.replaySession.findUnique({ where: { id: sessionId } })) return
+      await writeFile(cachePath, JSON.stringify({ ...result, source, cacheKey }, null, 2), 'utf-8')
+    })
   } catch (err: any) {
     console.warn(`[cache] Failed to save transcription cache: ${err.message}`)
   }
 }
 
-function countWords(text: string): number {
-  return text.trim().split(/\s+/).filter(Boolean).length
-}
-
-function getDominantSpeaker(segments: { speaker: string; text: string }[]): string {
-  const bySpeaker = new Map<string, number>()
-  for (const seg of segments) {
-    bySpeaker.set(seg.speaker, (bySpeaker.get(seg.speaker) || 0) + countWords(seg.text))
-  }
-  let topSpeaker = 'Speaker'
-  let topWords = -1
-  for (const [speaker, words] of bySpeaker.entries()) {
-    if (words > topWords) {
-      topWords = words
-      topSpeaker = speaker
-    }
-  }
-  return topSpeaker
-}
 
 // Dev: store under the spashtai project folder.  Prod: configurable via env.
 const UPLOAD_DIR = path.resolve(
@@ -218,6 +204,93 @@ const upload = multer({
 })
 
 const router = Router()
+
+// New Replay endpoints use the existing authentication middleware and owner scope.
+router.put('/sessions/:id/learner', async (req: Request, res: Response) => {
+  const { speaker, transcriptRevision: expectedRevision } = req.body ?? {}
+  if (typeof speaker !== 'string' || typeof expectedRevision !== 'string') {
+    return res.status(400).json({ error: 'speaker and transcriptRevision are required' })
+  }
+  try {
+    const outcome = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM "ReplaySession" WHERE id = ${req.params.id} FOR UPDATE`
+      const session = await tx.replaySession.findFirst({ where: ownedReplayWhere(req, req.params.id), include: { result: true } })
+      if (!session) return { code: 404, error: 'Replay session not found' }
+      if (session.status !== 'completed' || !session.result) return { code: 409, error: 'Wait for analysis to finish' }
+      const segments = replaySegments(session.result.structuredTranscript)
+      const input = session.result.deliveryEvidence as unknown as ReplayEvidenceInput | null
+      const current = input?.version === 'replay-delivery-v1' ? input : legacyInput(segments ?? [], session.result.transcriptionSource)
+      if (current.transcriptRevision !== expectedRevision || current.transcriptRevision !== transcriptRevision(segments)) return { code: 409, error: 'Transcript changed; refresh analysis before confirming' }
+      if (req.body.recordingSignature !== (current.recording?.signature ?? null)) return { code: 409, error: 'Recording changed; reload before confirming' }
+      if (!Array.isArray(segments) || !segments.some(s => s.speaker === speaker) || speaker === 'Unassigned speaker') return { code: 400, error: 'Unknown speaker' }
+      const previous = session.learnerSelection as unknown as ReplaySelection | null
+      const previousRevision = buildReplayEvidence(current, previous, segments).identity.revision
+      if ((req.body.selectionRevision ?? null) !== previousRevision) return { code: 409, error: 'Speaker selection changed; reload before confirming' }
+      if (previous?.speaker === speaker && selectionMatches(previous, current)) return { code: 200, selection: previous }
+      const selection: ReplaySelection = { speaker, transcriptRevision: current.transcriptRevision,
+        recordingSignature: current.recording?.signature ?? null, provenance: 'user_confirmed',
+        revision: digest([speaker, current.transcriptRevision, previous?.revision ?? '', Date.now()]) }
+      await tx.replaySession.update({ where: { id: session.id }, data: { learnerSelection: selection as any, progressPulseStatus: null } })
+      // Replay-owned removal; shared historical aggregation is intentionally untouched.
+      await tx.progressPulse.deleteMany({ where: { sessionId: session.id, source: 'replay' } })
+      await tx.replayResult.update({ where: { replaySessionId: session.id }, data: { skillScores: Prisma.DbNull,
+        coachingInsights: (meetingOnlyInsights(session.result.coachingInsights) as Prisma.InputJsonValue | null) ?? Prisma.DbNull, communicationSignals: Prisma.DbNull } })
+      return { code: 200, selection }
+    })
+    res.status(outcome.code).json(outcome)
+  } catch { res.status(500).json({ error: 'Unable to confirm speaker' }) }
+})
+
+// The browser submits only evidence revisions, never scores. Selection changes and
+// progress writes serialize on the same session lock.
+router.post('/sessions/:id/track-progress', async (req: Request, res: Response) => {
+  try {
+    const outcome = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM "ReplaySession" WHERE id = ${req.params.id} FOR UPDATE`
+      const session = await tx.replaySession.findFirst({ where: ownedReplayWhere(req, req.params.id), include: { result: true } })
+      if (!session) return { code: 404, error: 'Replay session not found' }
+      if (session.status !== 'completed' || !session.result) return { code: 409, error: 'Wait for analysis to finish' }
+      const view = replayResultView(session.result, session.learnerSelection as unknown as ReplaySelection | null)
+      if (view.evidence.identity.state !== 'confirmed' || !view.skillScores ||
+          req.body?.selectionRevision !== view.evidence.identity.revision ||
+          req.body?.transcriptRevision !== view.evidence.transcriptRevision) {
+        return { code: 409, error: 'Current learner-attributed scores are required; reload the results' }
+      }
+      if (!session.meetingDate) return { code: 400, error: 'Meeting date is required' }
+      const entries = skillScoresToPulseEntries(view.skillScores.scores).filter(e => Number.isFinite(e.score) && e.score >= 0 && e.score <= 10)
+      if (!entries.length) return { code: 409, error: 'No eligible scores to track' }
+      await tx.progressPulse.deleteMany({ where: { sessionId: session.id, source: 'replay' } })
+      await tx.progressPulse.createMany({ data: entries.map(e => ({ userId: session.userId, sessionId: session.id,
+        source: 'replay', skill: e.skill, score: e.score, recordedAt: session.meetingDate!,
+        metadata: { evidenceOrigin: REPLAY_PULSE_ORIGIN,
+          selectionRevision: view.evidence.identity.revision, transcriptRevision: view.evidence.transcriptRevision } })) })
+      await tx.replaySession.update({ where: { id: session.id }, data: { progressPulseStatus: 'tracked' } })
+      return { code: 200, tracked: entries.length }
+    })
+    res.status(outcome.code).json(outcome)
+  } catch { res.status(500).json({ error: 'Unable to track Replay scores' }) }
+})
+
+router.get('/sessions/:id/media/:uploadId', async (req: Request, res: Response) => {
+  try {
+    const session = await prisma.replaySession.findFirst({ where: ownedReplayWhere(req, req.params.id), include: { result: true, uploadedFiles: true } })
+    if (!session) return res.status(404).json({ error: 'Replay session not found' })
+    const { flags, accessDenied } = await resolveRequestExportFlags(req, session.userId)
+    if (accessDenied || flags.hideAudioDownload) return exportDenied(res, 'Recording access is disabled')
+    const input = session.result?.deliveryEvidence as unknown as ReplayEvidenceInput | null
+    const file = session.uploadedFiles.find(f => f.id === req.params.uploadId && (f.fileType === 'audio' || f.fileType === 'video'))
+    if (!file || input?.recording?.uploadId !== file.id) return res.status(404).json({ error: 'Recording evidence unavailable' })
+    if (!isPrivilegedRole(req.user?.role)) {
+      const user = await prisma.user.findUnique({ where: { id: req.user!.userId }, select: { enablePro: true, enableUltra: true } })
+      if (!(file.fileType === 'video' ? user?.enableUltra : user?.enablePro || user?.enableUltra)) return exportDenied(res, 'Your plan does not include this recording')
+    }
+    const current = await identifyReplayRecording(file)
+    if (current.signature !== input.recording.signature) return res.status(409).json({ error: 'Recording changed; evidence is stale' })
+    res.setHeader('Cache-Control', 'private, no-store')
+    res.type(file.mimeType)
+    res.sendFile(path.resolve(file.storedPath), err => { if (err && !res.headersSent) res.status(404).end() })
+  } catch { if (!res.headersSent) res.status(503).json({ error: 'Recording temporarily unavailable' }) }
+})
 
 // ── POST /api/replay/sessions ──
 
@@ -262,152 +335,72 @@ router.post('/sessions', trackFeatureUsage('replay', 'session_create'), async (r
 
 router.post(
   '/sessions/:id/upload',
-  upload.fields([
-    { name: 'audio', maxCount: 1 },
-    { name: 'transcript', maxCount: 1 },
-  ]),
+  async (req, res, next) => {
+    try {
+      const session = await prisma.replaySession.findFirst({ where: ownedReplayWhere(req, req.params.id) })
+      if (!session) return res.status(404).json({ error: 'Replay session not found' })
+      next()
+    } catch { res.status(500).json({ error: 'Unable to authorize upload' }) }
+  },
+  upload.fields([{ name: 'audio', maxCount: 1 }, { name: 'transcript', maxCount: 1 }]),
   async (req: Request, res: Response) => {
+    const files = req.files as Record<string, Express.Multer.File[]> | undefined
+    const cleanupPaths = Object.values(files ?? {}).flat().map(f => f.path)
+    let persisted = false
     try {
       const { id } = req.params
-      const session = await prisma.replaySession.findFirst({
-        where: ownedReplayWhere(req, id),
+      const pastedText = typeof req.body.text === 'string' ? req.body.text.trim() : ''
+      const media = files?.audio?.[0]
+      if (media && !isPrivilegedRole(req.user?.role)) {
+        const u = await prisma.user.findUnique({ where: { id: req.user!.userId }, select: { enablePro: true, enableUltra: true } })
+        const video = media.mimetype.startsWith('video/')
+        if (!(video ? u?.enableUltra : u?.enablePro || u?.enableUltra)) {
+          return res.status(403).json({ error: video ? 'Video uploads require Ultra.' : 'Audio uploads require Pro.', code: video ? 'ULTRA_REQUIRED' : 'PRO_REQUIRED' })
+        }
+      }
+      const prepared: Array<{ fileType: string; originalName: string; storedPath: string; fileSize: number; mimeType: string }> = []
+      for (const [field, list] of Object.entries(files ?? {})) {
+        for (const f of list) prepared.push({ fileType: field === 'audio' ? f.mimetype.startsWith('video/') ? 'video' : 'audio' : 'transcript',
+          originalName: f.originalname, storedPath: f.path, fileSize: f.size, mimeType: f.mimetype })
+      }
+      if (pastedText) {
+        await mkdir(UPLOAD_DIR, { recursive: true })
+        const textPath = path.join(UPLOAD_DIR, `${id}_${randomUUID()}_pasted.txt`)
+        cleanupPaths.push(textPath)
+        await writeFile(textPath, pastedText, 'utf8')
+        prepared.push({ fileType: 'text', originalName: 'pasted_text.txt', storedPath: textPath, fileSize: Buffer.byteLength(pastedText), mimeType: 'text/plain' })
+      }
+      if (!prepared.length) return res.status(400).json({ error: 'No files or text provided' })
+      let inferred: Date | null = null
+      const transcript = prepared.find(f => f.fileType === 'transcript')
+      if (transcript) {
+        try { inferred = extractMeetingDateFromTranscript(await readFile(transcript.storedPath, 'utf8'), transcript.originalName) } catch { /* not a text format */ }
+      }
+      if (!inferred && pastedText) inferred = extractMeetingDateFromTranscript(pastedText, 'pasted-transcript.vtt')
+      const outcome = await prisma.$transaction(async tx => {
+        await tx.$queryRaw`SELECT id FROM "ReplaySession" WHERE id = ${id} FOR UPDATE`
+        const session = await tx.replaySession.findFirst({ where: ownedReplayWhere(req, id) })
+        if (!session) return { code: 404, error: 'Replay session not found' }
+        if (!['pending', 'completed', 'failed'].includes(session.status)) return { code: 409, error: 'Wait for the current analysis before changing uploads' }
+        const uploads = []
+        for (const file of prepared) uploads.push(await tx.replayUpload.create({ data: { replaySessionId: id, ...file } }))
+        await tx.replayResult.deleteMany({ where: { replaySessionId: id } })
+        await tx.progressPulse.deleteMany({ where: { sessionId: id, source: 'replay' } })
+        await tx.replaySession.update({ where: { id }, data: { status: 'pending', learnerSelection: Prisma.DbNull, progressPulseStatus: null,
+          ...(session.meetingDate ? {} : { meetingDate: inferred }) } })
+        const meetingDate = session.meetingDate ?? inferred
+        return { code: 200, uploads: uploads.map(({ storedPath, ...safe }) => safe), meetingDateMissing: !meetingDate,
+          meetingDateAutoFilled: !session.meetingDate && !!inferred, meetingDate: meetingDate?.toISOString().slice(0, 10) ?? null }
       })
-      if (!session) return res.status(404).json({ error: 'Replay session not found' })
-
-      const files = req.files as Record<string, Express.Multer.File[]> | undefined
-      const pastedText: string | undefined = req.body.text
-
-      // Media uploads are plan-gated: audio requires Pro, video requires Ultra
-      // (Ultra is a superset of Pro). Admins are always allowed. Transcript/text
-      // remain free for everyone.
-      const audioUpload = files?.audio?.[0]
-      if (audioUpload) {
-        const isVideo = audioUpload.mimetype.startsWith('video/')
-        let allowed = isPrivilegedRole(req.user?.role)
-        if (!allowed && req.user) {
-          const u = await prisma.user.findUnique({
-            where: { id: req.user.userId },
-            select: { enablePro: true, enableUltra: true },
-          })
-          allowed = isVideo ? !!u?.enableUltra : (!!u?.enablePro || !!u?.enableUltra)
-        }
-        if (!allowed) {
-          // Clean up the temp file(s) multer already wrote to disk.
-          await unlink(audioUpload.path).catch(() => {})
-          if (files?.transcript?.[0]) await unlink(files.transcript[0].path).catch(() => {})
-          return res.status(403).json(
-            isVideo
-              ? {
-                  error: 'Video uploads require the Ultra plan. Upload audio or a transcript instead.',
-                  code: 'ULTRA_REQUIRED',
-                }
-              : {
-                  error: 'Audio uploads require the Pro plan. Upload a transcript or paste text instead.',
-                  code: 'PRO_REQUIRED',
-                },
-          )
-        }
-      }
-
-      const uploads: any[] = []
-
-      // Audio file
-      if (files?.audio?.[0]) {
-        const f = files.audio[0]
-        const record = await prisma.replayUpload.create({
-          data: {
-            replaySessionId: id,
-            fileType: f.mimetype.startsWith('video/') ? 'video' : 'audio',
-            originalName: f.originalname,
-            storedPath: f.path,
-            fileSize: f.size,
-            mimeType: f.mimetype,
-          },
-        })
-        uploads.push(record)
-      }
-
-      // Transcript file
-      if (files?.transcript?.[0]) {
-        const f = files.transcript[0]
-        const record = await prisma.replayUpload.create({
-          data: {
-            replaySessionId: id,
-            fileType: 'transcript',
-            originalName: f.originalname,
-            storedPath: f.path,
-            fileSize: f.size,
-            mimeType: f.mimetype,
-          },
-        })
-        uploads.push(record)
-      }
-
-      // Pasted text
-      if (pastedText && pastedText.trim()) {
-        const textPath = path.join(UPLOAD_DIR, `${id}_pasted.txt`)
-        const { writeFile } = await import('fs/promises')
-        await writeFile(textPath, pastedText, 'utf-8')
-        const record = await prisma.replayUpload.create({
-          data: {
-            replaySessionId: id,
-            fileType: 'text',
-            originalName: 'pasted_text.txt',
-            storedPath: textPath,
-            fileSize: Buffer.byteLength(pastedText, 'utf-8'),
-            mimeType: 'text/plain',
-          },
-        })
-        uploads.push(record)
-      }
-
-      if (uploads.length === 0) {
-        return res.status(400).json({ error: 'No files or text provided' })
-      }
-
-      const hadMeetingDate = !!session.meetingDate
-      let meetingDateAutoFilled = false
-
-      // Calendar date from VTT/SRT header or filename (e.g. Zoom GMT20240315-…). Cue timestamps are ignored.
-      if (!session.meetingDate) {
-        let inferred: Date | null = null
-        if (files?.transcript?.[0]) {
-          const f = files.transcript[0]
-          try {
-            const txt = await readFile(f.path, 'utf-8')
-            inferred = extractMeetingDateFromTranscript(txt, f.originalname)
-          } catch {
-            /* ignore read errors */
-          }
-        }
-        if (!inferred && pastedText?.trim()) {
-          inferred = extractMeetingDateFromTranscript(pastedText.trim(), 'pasted-transcript.vtt')
-        }
-        if (inferred) {
-          await prisma.replaySession.update({
-            where: { id },
-            data: { meetingDate: inferred },
-          })
-          meetingDateAutoFilled = true
-        }
-      }
-
-      const fresh = await prisma.replaySession.findUnique({
-        where: { id },
-        select: { meetingDate: true },
-      })
-
-      res.json({
-        uploads,
-        meetingDateMissing: !fresh?.meetingDate,
-        meetingDateAutoFilled: meetingDateAutoFilled && !hadMeetingDate,
-        meetingDate: fresh?.meetingDate ? fresh.meetingDate.toISOString().slice(0, 10) : null,
-      })
+      persisted = outcome.code === 200
+      res.status(outcome.code).json(outcome)
     } catch (error) {
-      logger.error({ err: error }, 'Error uploading files:')
+      logger.error({ err: error }, 'Replay upload failed')
       res.status(500).json({ error: 'Failed to upload files' })
+    } finally {
+      if (!persisted) await Promise.all(cleanupPaths.map(file => unlink(file).catch(() => {})))
     }
-  }
+  },
 )
 
 // ── POST /api/replay/sessions/:id/process ──
@@ -415,9 +408,14 @@ router.post(
 router.post('/sessions/:id/process', trackFeatureUsage('replay', 'analyze'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params
+    const { selectionRevision, transcriptRevision: expectedTranscript } = req.body ?? {}
+    const boundAssessment = selectionRevision !== undefined || expectedTranscript !== undefined
+    if (boundAssessment && (typeof selectionRevision !== 'string' || typeof expectedTranscript !== 'string')) {
+      return res.status(400).json({ error: 'selectionRevision and transcriptRevision are required together' })
+    }
     const session = await prisma.replaySession.findFirst({
       where: ownedReplayWhere(req, id),
-      include: { uploadedFiles: true },
+      include: { uploadedFiles: { orderBy: { createdAt: 'desc' } } },
     })
     if (!session) return res.status(404).json({ error: 'Replay session not found' })
 
@@ -429,37 +427,32 @@ router.post('/sessions/:id/process', trackFeatureUsage('replay', 'analyze'), asy
       })
     }
 
-    if (session.status === 'transcribing' || session.status === 'analyzing') {
+    if (!['pending', 'completed', 'failed'].includes(session.status)) {
       return res.status(400).json({
         error: `Session is currently ${session.status}`,
         status: session.status,
       })
     }
 
-    // Clean up previous result before re-processing
-    if (session.status === 'failed' || session.status === 'completed') {
-      await Promise.all([
-        prisma.replayResult.deleteMany({ where: { replaySessionId: id } }),
-        prisma.coachHomeResultReceipt.deleteMany({
-          where: { userId: session.userId, module: 'replay', targetId: id },
-        }),
-      ])
-    }
-
-    // Reset Progress Pulse for this session so user gets prompted again with new scores
-    if (session.progressPulseStatus === 'tracked') {
-      await prisma.progressPulse.deleteMany({ where: { sessionId: id, source: 'replay' } })
-    }
-
-    // Mark as processing (clear any previous error, reset pulse status)
-    await prisma.replaySession.update({
-      where: { id },
-      data: {
-        status: 'transcribing',
-        errorMessage: null,
-        progressPulseStatus: null,
-      },
+    const claimed = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM "ReplaySession" WHERE id = ${id} FOR UPDATE`
+      const fresh = await tx.replaySession.findFirst({ where: ownedReplayWhere(req, id), include: { result: true } })
+      if (!fresh || !['pending', 'completed', 'failed'].includes(fresh.status)) return 'busy'
+      if (boundAssessment) {
+        const view = fresh.result ? replayResultView(fresh.result, fresh.learnerSelection as unknown as ReplaySelection | null) : null
+        if (view?.evidence.identity.state !== 'confirmed' || view.evidence.identity.revision !== selectionRevision ||
+            view.evidence.transcriptRevision !== expectedTranscript) return 'selection_changed'
+      }
+      // Claim, invalidation, and reset are atomic with upload/selection/progress.
+      await tx.replayResult.deleteMany({ where: { replaySessionId: id } })
+      await tx.coachHomeResultReceipt.deleteMany({ where: { userId: fresh.userId, module: 'replay', targetId: id } })
+      await tx.progressPulse.deleteMany({ where: { sessionId: id, source: 'replay' } })
+      await tx.replaySession.update({ where: { id }, data: { status: 'transcribing', errorMessage: null, progressPulseStatus: null } })
+      return 'claimed'
     })
+    if (claimed !== 'claimed') return res.status(409).json({ error: claimed === 'selection_changed'
+      ? 'The confirmed speaker or transcript changed. Reload before starting the assessment.'
+      : 'Replay session is busy or no longer available' })
 
     // Fire-and-forget processing — respond immediately
     res.json({ message: 'Processing started', status: 'transcribing' })
@@ -486,7 +479,7 @@ router.post('/sessions/:id/process', trackFeatureUsage('replay', 'analyze'), asy
 async function processReplaySession(sessionId: string): Promise<void> {
   const session = await prisma.replaySession.findUnique({
     where: { id: sessionId },
-    include: { uploadedFiles: true },
+    include: { uploadedFiles: { orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] } },
   })
   if (!session) throw new Error('Session not found')
 
@@ -501,18 +494,22 @@ async function processReplaySession(sessionId: string): Promise<void> {
   let speakerCount = 1
   let transcriptionSource = 'uploaded'
   let durationSec: number | undefined
+  let retainedTranscription: TranscriptionResult | null = null
+  const recording = audioFile ? await identifyReplayRecording(audioFile).catch(() => null) : null
+  const cacheKey = recording ? replayCacheKey(recording, isDev ? 'aws_streaming:en-US:speakers' : 'aws_batch:en-US:max10') : ''
 
   // ── Step 1: Get transcript text (check cache first) ──
 
-  if (audioFile) {
+  if (audioFile && recording) {
     await prisma.replaySession.update({
       where: { id: sessionId },
       data: { status: 'transcribing' },
     })
 
     // Check for cached transcription from a previous run
-    const cached = await loadCachedTranscription(sessionId)
+    const cached = await loadCachedTranscription(sessionId, cacheKey)
     if (cached) {
+      retainedTranscription = cached
       fullText = cached.fullText
       structuredTranscript = cached.segments
       speakerCount = cached.speakerCount
@@ -527,6 +524,7 @@ async function processReplaySession(sessionId: string): Promise<void> {
           audioFile.storedPath,
           audioFile.mimeType
         )
+        retainedTranscription = result
         fullText = result.fullText
         structuredTranscript = result.segments
         speakerCount = result.speakerCount
@@ -534,7 +532,7 @@ async function processReplaySession(sessionId: string): Promise<void> {
           ? Math.max(...result.segments.map((s) => s.endTime))
           : undefined
         transcriptionSource = 'aws_transcribe_streaming'
-        await saveTranscriptionCache(sessionId, result, transcriptionSource)
+        await saveTranscriptionCache(sessionId, result, transcriptionSource, cacheKey)
       } catch (streamingError: any) {
         console.error('[dev] Streaming transcription failed, falling back to text:', streamingError.message)
       }
@@ -550,6 +548,7 @@ async function processReplaySession(sessionId: string): Promise<void> {
         const transcriptUri = await pollTranscriptionJob(jobName)
         const result = await fetchTranscriptionResult(transcriptUri)
 
+        retainedTranscription = result
         fullText = result.fullText
         structuredTranscript = result.segments
         speakerCount = result.speakerCount
@@ -557,7 +556,7 @@ async function processReplaySession(sessionId: string): Promise<void> {
           ? Math.max(...result.segments.map((s) => s.endTime))
           : undefined
         transcriptionSource = 'aws_transcribe'
-        await saveTranscriptionCache(sessionId, result, transcriptionSource)
+        await saveTranscriptionCache(sessionId, result, transcriptionSource, cacheKey)
       } catch (transcribeError: any) {
         console.error('AWS Transcribe failed, checking for text fallback:', transcribeError.message)
       }
@@ -575,17 +574,6 @@ async function processReplaySession(sessionId: string): Promise<void> {
     transcriptionSource = file.fileType === 'text' ? 'pasted' : 'uploaded'
   }
 
-  // Also merge uploaded transcript if audio was primary
-  if (audioFile && (transcriptFile || textFile) && (transcriptionSource === 'aws_transcribe' || transcriptionSource === 'aws_transcribe_streaming')) {
-    // Audio transcription succeeded; merge uploaded text as supplementary context
-    const file = transcriptFile || textFile!
-    const content = await readFile(file.storedPath, 'utf-8')
-    const parsed = detectFormatAndParse(content, file.mimeType, file.originalName)
-    if (parsed.speakerCount > speakerCount) {
-      speakerCount = parsed.speakerCount
-    }
-  }
-
   if (!fullText.trim()) {
     throw new Error('No transcript text could be extracted from the uploaded files')
   }
@@ -596,22 +584,29 @@ async function processReplaySession(sessionId: string): Promise<void> {
     ? structuredTranscript
     : [{ speaker: 'Speaker', text: fullText }]
 
+  // A name or dominant label is only a suggestion. Confirmation happens in the evidence API.
   let resolvedParticipantSpeaker: string | undefined
-  if (session.participantName?.trim()) {
-    const matched = findMatchingSpeaker(segments, session.participantName)
-    if (matched) {
-      resolvedParticipantSpeaker = matched
-    } else {
-      resolvedParticipantSpeaker = getDominantSpeaker(segments)
-      console.log(
-        `[replay] Participant "${session.participantName}" not found. Falling back to dominant speaker "${resolvedParticipantSpeaker}".`
-      )
+  const deliveryEvidence: ReplayEvidenceInput = {
+    version: 'replay-delivery-v1', recording, transcriptRevision: transcriptRevision(segments),
+    transcriptSource: transcriptionSource, words: retainedTranscription?.wordEvidence ?? null,
+    supplementaryTranscript: null,
+  }
+  const learner = session.learnerSelection as unknown as ReplaySelection | null
+  if (selectionMatches(learner, deliveryEvidence) && segments.some((s: { speaker: string }) => s.speaker === learner?.speaker)) {
+    resolvedParticipantSpeaker = learner!.speaker
+    deliveryEvidence.analysisSelectionRevision = learner!.revision
+  }
+  if (audioFile && (transcriptFile || textFile) && retainedTranscription) {
+    const supplement = transcriptFile || textFile!
+    try {
+      const text = await readFile(supplement.storedPath, 'utf8')
+      const parsed = detectFormatAndParse(text, supplement.mimeType, supplement.originalName)
+      deliveryEvidence.supplementaryTranscript = { revision: transcriptRevision(parsed.segments),
+        status: parsed.fullText.trim() === fullText.trim() ? 'matches' : 'different_not_aligned' }
+    } catch {
+      logger.warn({ sessionId }, 'Replay supplemental transcript unavailable; retaining audio-derived analysis')
+      deliveryEvidence.supplementaryTranscript = { revision: null, status: 'unavailable' }
     }
-  } else {
-    resolvedParticipantSpeaker = getDominantSpeaker(segments)
-    console.log(
-      `[replay] No participant provided. Using dominant speaker "${resolvedParticipantSpeaker}".`
-    )
   }
 
   // ── Step 2: Calculate metrics ──
@@ -659,13 +654,15 @@ async function processReplaySession(sessionId: string): Promise<void> {
     console.log(`[replay] Python signal API unavailable for ${sessionId}, using fallback`)
     signals = buildFallbackSignals(analyticsMessages, effectiveDurationSec)
   }
+  const measured = buildReplayEvidence(deliveryEvidence, learner, segments)
+  signals.speechRate = { ...signals.speechRate, wpm: measured.pace.wpm ?? 0, variability: null,
+    status: measured.pace.wpm == null ? 'insufficient_evidence' : 'available', source: measured.pace.wpm == null ? null : 'word_timestamps', confidence: 'medium' }
 
   const { scores: skillScores, components: skillComponents } = calculateSkillScores(signals, analyticsMessages.length)
 
   let coachingInsights: any = null
-  const replayAudio = audioFile
-    ? resolveReplayUploadAudio(audioFile.storedPath, audioFile.mimeType)
-    : null
+  // Mixed recording must never be supplied as isolated learner audio.
+  const replayAudio = null as { audioPath: string; audioMime: string } | null
   try {
     coachingInsights = await generateCoachingInsights({
       skillScores,
@@ -682,21 +679,25 @@ async function processReplaySession(sessionId: string): Promise<void> {
     console.error(`[replay] Coaching insight generation failed for ${sessionId}:`, err.message)
   }
 
-  const skillScoresJson = JSON.parse(JSON.stringify({ scores: skillScores, components: skillComponents }))
-  const signalsJson = JSON.parse(JSON.stringify(signals))
-  const coachingJson = coachingInsights ? JSON.parse(JSON.stringify(coachingInsights)) : null
+  const skillScoresJson = resolvedParticipantSpeaker ? JSON.parse(JSON.stringify({ scores: skillScores, components: skillComponents })) : Prisma.DbNull
+  const signalsJson = resolvedParticipantSpeaker ? JSON.parse(JSON.stringify(signals)) : Prisma.DbNull
+  const attributableCoaching = resolvedParticipantSpeaker ? coachingInsights : meetingOnlyInsights(coachingInsights)
+  const coachingJson = attributableCoaching ? JSON.parse(JSON.stringify(attributableCoaching)) : null
 
   // ── Step 5: Save results ──
 
   await prisma.replayResult.create({
     data: {
       replaySessionId: sessionId,
+      deliveryEvidence: JSON.parse(JSON.stringify(deliveryEvidence)),
       transcriptText: fullText,
       structuredTranscript: structuredTranscript ?? undefined,
       speakerCount,
       transcriptionSource,
 
-      wordsPerMinute: metrics.wordsPerMinute,
+      // Legacy columns are non-nullable; public Replay reads use deliveryEvidence,
+      // never the zero sentinel. Shared historical readers require coordinator work.
+      wordsPerMinute: measured.pace.wpm ?? 0,
       fillerWordCount: metrics.fillerWordCount,
       fillerWordRate: metrics.fillerWordRate,
       hedgingCount: metrics.hedgingCount,
@@ -705,16 +706,16 @@ async function processReplaySession(sessionId: string): Promise<void> {
       vocabularyDiversity: metrics.vocabularyDiversity,
       totalTurns: metrics.totalTurns,
       speakingPercentage: metrics.speakingPercentage,
-      interruptionCount: metrics.interruptionCount,
+      interruptionCount: metrics.interruptionCount ?? 0,
       longestMonologueSec: metrics.longestMonologueSec,
       questionsAsked: metrics.questionsAsked,
       repetitionRequests: metrics.repetitionRequests,
       avgResponseTimeSec: metrics.avgResponseTimeSec,
 
-      overallScore: calculateWeightedOverallScore(skillScores),
-      clarityScore: aiResult.clarityScore,
-      confidenceScore: aiResult.confidenceScore,
-      engagementScore: aiResult.engagementScore,
+      overallScore: resolvedParticipantSpeaker ? calculateWeightedOverallScore(skillScores) : 0,
+      clarityScore: resolvedParticipantSpeaker ? aiResult.clarityScore : 0,
+      confidenceScore: resolvedParticipantSpeaker ? aiResult.confidenceScore : 0,
+      engagementScore: resolvedParticipantSpeaker ? aiResult.engagementScore : 0,
 
       strengths: aiResult.strengths,
       improvements: aiResult.improvements,
@@ -738,26 +739,7 @@ async function processReplaySession(sessionId: string): Promise<void> {
     },
   })
 
-  // ── Step 6: Auto-track Progress Pulse ──
-
-  if (session.meetingDate) {
-    try {
-      await saveSkillScoresToPulse(
-        session.userId,
-        sessionId,
-        'replay',
-        skillScores,
-        skillComponents,
-      )
-      await prisma.replaySession.update({
-        where: { id: sessionId },
-        data: { progressPulseStatus: 'tracked' },
-      })
-      console.log(`[replay] Progress Pulse auto-tracked for ${sessionId}`)
-    } catch (pulseErr: any) {
-      console.error(`[replay] Progress Pulse save failed for ${sessionId}:`, pulseErr.message)
-    }
-  }
+  // Learner attribution and evidence are not yet confirmed: never auto-submit inferred scores.
 
   await prisma.replaySession.update({
     where: { id: sessionId },
@@ -775,12 +757,10 @@ async function processReplaySession(sessionId: string): Promise<void> {
 router.patch('/sessions/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params
-    const { participantName, meetingDate, sessionName } = req.body
-
-    const session = await prisma.replaySession.findFirst({
-      where: ownedReplayWhere(req, id),
-    })
-    if (!session) return res.status(404).json({ error: 'Replay session not found' })
+    const { participantName, meetingDate, sessionName } = req.body ?? {}
+    if ([participantName, sessionName, meetingDate].some(value => value != null && typeof value !== 'string')) {
+      return res.status(400).json({ error: 'Metadata values must be strings or null' })
+    }
 
     const data: { participantName?: string | null; meetingDate?: Date | null; sessionName?: string | null } = {}
     if (sessionName !== undefined) {
@@ -805,12 +785,23 @@ router.patch('/sessions/:id', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Send sessionName, participantName and/or meetingDate to update' })
     }
 
-    const updated = await prisma.replaySession.update({
-      where: { id },
-      data,
-      select: { id: true, sessionName: true, participantName: true, meetingDate: true, status: true },
+    const updated = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM "ReplaySession" WHERE id = ${id} FOR UPDATE`
+      const session = await tx.replaySession.findFirst({ where: ownedReplayWhere(req, id) })
+      if (!session) return null
+      // Date edits and tracking use the same lock; Pulse must retain the
+      // session's current date regardless of which request arrives first.
+      if (data.meetingDate !== undefined) {
+        if (data.meetingDate) await tx.progressPulse.updateMany({ where: { sessionId: id, source: 'replay' }, data: { recordedAt: data.meetingDate } })
+        else await tx.progressPulse.deleteMany({ where: { sessionId: id, source: 'replay' } })
+      }
+      return tx.replaySession.update({
+        where: { id },
+        data: { ...data, ...(data.meetingDate === null ? { progressPulseStatus: null } : {}) },
+        select: { id: true, sessionName: true, participantName: true, meetingDate: true, status: true },
+      })
     })
-
+    if (!updated) return res.status(404).json({ error: 'Replay session not found' })
     res.json(updated)
   } catch (error) {
     logger.error({ err: error }, 'Error updating replay session:')
@@ -869,20 +860,19 @@ router.get('/sessions/:id/results', async (req: Request, res: Response) => {
       })
     }
 
-    const resultPayload = session.result
-      ? flags.hideTranscriptText
-        ? stripReplayTranscriptFields(session.result as Record<string, unknown>)
-        : session.result
-      : null
-    const rawSkillScores = session.result.skillScores
-    const skillScoresPayload =
-      rawSkillScores && typeof rawSkillScores === 'object' && !Array.isArray(rawSkillScores)
-        ? {
-            ...(rawSkillScores as Record<string, unknown>),
-            signals: session.result.communicationSignals ?? undefined,
-          }
-        : rawSkillScores
-
+    const safe = replayResultView(session.result, session.learnerSelection as unknown as ReplaySelection | null)
+    if (flags.hideTranscriptText) {
+      safe.result.transcriptText = ''
+      safe.result.structuredTranscript = []
+      safe.result.strengths = []
+      safe.result.improvements = []
+      safe.result.recommendations = []
+      safe.result.contextSpecificFeedback = []
+      safe.result.annotatedTranscript = []
+      safe.result.keyMoments = []
+      safe.result.coachingInsights = null
+      safe.evidence.speakers = safe.evidence.speakers.map(speaker => ({ ...speaker, excerpt: '' }))
+    }
     res.json({
       session: {
         id: session.id,
@@ -898,12 +888,13 @@ router.get('/sessions/:id/results', async (req: Request, res: Response) => {
         createdAt: session.createdAt,
       },
       uploads: session.uploadedFiles,
-      result: resultPayload,
+      result: safe.result,
+      evidence: safe.evidence,
       transcriptHidden: flags.hideTranscriptText,
       transcriptJsonExportDisabled: flags.hideTranscriptJsonExport,
       audioDownloadDisabled: flags.hideAudioDownload,
-      skillScores: skillScoresPayload ?? null,
-      coachingInsights: session.result?.coachingInsights ?? null,
+      skillScores: safe.skillScores,
+      coachingInsights: flags.hideTranscriptText ? null : safe.coachingInsights,
     })
   } catch (error) {
     logger.error({ err: error }, 'Error fetching replay results:')
@@ -923,6 +914,9 @@ router.get('/sessions', async (req: Request, res: Response) => {
           select: {
             overallScore: true,
             transcriptionSource: true,
+            deliveryEvidence: true,
+            structuredTranscript: true,
+            skillScores: true,
           },
         },
         uploadedFiles: {
@@ -932,7 +926,10 @@ router.get('/sessions', async (req: Request, res: Response) => {
       orderBy: { createdAt: 'desc' },
     })
 
-    res.json({ sessions })
+    res.json({ sessions: sessions.map(s => ({ ...s, learnerSelection: undefined, result: s.result ? {
+      transcriptionSource: s.result.transcriptionSource,
+      overallScore: replayResultView(s.result, s.learnerSelection as unknown as ReplaySelection | null).result.overallScore,
+    } : null })) })
   } catch (error) {
     logger.error({ err: error }, 'Error listing replay sessions:')
     res.status(500).json({ error: 'Failed to list replay sessions' })
@@ -982,32 +979,22 @@ router.get('/sessions/:id/download/:fileId', async (req: Request, res: Response)
 router.delete('/sessions/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params
-    const session = await prisma.replaySession.findFirst({
-      where: ownedReplayWhere(req, id),
-      include: { uploadedFiles: true },
-    })
-    if (!session) return res.status(404).json({ error: 'Replay session not found' })
-
-    // Delete uploaded files and transcription cache from disk
-    for (const file of session.uploadedFiles) {
-      try {
-        await unlink(file.storedPath)
-      } catch {
-        // file may already be gone
+    const deleted = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM "ReplaySession" WHERE id = ${id} FOR UPDATE`
+      const session = await tx.replaySession.findFirst({ where: ownedReplayWhere(req, id), include: { uploadedFiles: true } })
+      if (!session) return false
+      // Serialize with cache writes so an in-flight transcript cannot recreate a
+      // derived cache after deletion. Missing files are harmless; other errors retry.
+      for (const storedPath of [...session.uploadedFiles.map(f => f.storedPath), transcriptionCachePath(id)]) {
+        try { await unlink(storedPath) } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        }
       }
-    }
-    try {
-      await unlink(transcriptionCachePath(id))
-    } catch {
-      // cache file may not exist
-    }
-
-    // Remove associated Progress Pulse entries
-    await prisma.progressPulse.deleteMany({
-      where: { sessionId: id, source: 'replay' },
+      await tx.progressPulse.deleteMany({ where: { sessionId: id, source: 'replay' } })
+      await tx.replaySession.delete({ where: { id } })
+      return true
     })
-
-    await prisma.replaySession.delete({ where: { id } })
+    if (!deleted) return res.status(404).json({ error: 'Replay session not found' })
     res.json({ message: 'Replay session deleted' })
   } catch (error) {
     logger.error({ err: error }, 'Error deleting replay session:')

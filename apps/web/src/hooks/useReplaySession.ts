@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { getAuthHeaders } from '@/lib/api-client'
+import type { ReplayEvidence } from '@/components/replay/evidence-contract'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 
@@ -50,6 +51,10 @@ function errorMessage(error: unknown): string {
 }
 
 export interface ReplayResultData {
+  evidence: ReplayEvidence
+  transcriptHidden?: boolean
+  transcriptJsonExportDisabled?: boolean
+  audioDownloadDisabled?: boolean
   session: {
     id: string
     sessionName?: string | null
@@ -69,24 +74,26 @@ export interface ReplayResultData {
     structuredTranscript: StructuredTranscriptSegment[]
     speakerCount: number
     transcriptionSource: string
-    wordsPerMinute: number
-    fillerWordCount: number
-    fillerWordRate: number
-    avgSentenceLength: number
-    vocabularyDiversity: number
-    totalTurns: number
-    speakingPercentage: number
-    hedgingCount: number
-    hedgingRate: number
-    interruptionCount: number
-    longestMonologueSec: number
-    questionsAsked: number
-    repetitionRequests: number
+    wordsPerMinute: number | null
+    wordShare: number | null
+    feedbackScope: string
+    fillerWordCount: number | null
+    fillerWordRate: number | null
+    avgSentenceLength: number | null
+    vocabularyDiversity: number | null
+    totalTurns: number | null
+    speakingPercentage: number | null
+    hedgingCount: number | null
+    hedgingRate: number | null
+    interruptionCount: number | null
+    longestMonologueSec: number | null
+    questionsAsked: number | null
+    repetitionRequests: number | null
     avgResponseTimeSec: number | null
-    overallScore: number
-    clarityScore: number
-    confidenceScore: number
-    engagementScore: number
+    overallScore: number | null
+    clarityScore: number | null
+    confidenceScore: number | null
+    engagementScore: number | null
     strengths: { point: string; example?: string }[]
     improvements: { point: string; example?: string; suggestion?: string }[]
     recommendations: string[]
@@ -105,7 +112,7 @@ export interface ReplayResultData {
       confidence: number
       structure: number
       engagement: number
-      pacing: number
+      pacing: number | null
       delivery: number | null
       emotionalControl: number | null
     }

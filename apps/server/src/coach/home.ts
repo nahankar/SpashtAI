@@ -1,5 +1,8 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/prisma'
+import { eligiblePulseWhere } from '../analytics/pulseEligibility'
+import { replayResultView } from '../lib/replay-result-view'
+import type { ReplaySelection } from '../lib/replay-evidence'
 import { getEnabledFeatures } from '../lib/featureFlags'
 import { isCoachFocusArea, type CoachFocusArea } from './focusAreas'
 
@@ -115,7 +118,7 @@ export function selectCoachHomeRecommendation(
   }
 }
 
-function jsonText(value: Prisma.JsonValue | null, key: string): string | null {
+function jsonText(value: unknown, key: string): string | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const candidate = (value as Record<string, unknown>)[key]
   return typeof candidate === 'string' && candidate.trim()
@@ -301,11 +304,16 @@ export async function loadCoachHome(userId: string): Promise<{
               id: true,
               sessionName: true,
               meetingType: true,
+              learnerSelection: true,
               result: {
                 select: {
                   overallScore: true,
                   coachingInsights: true,
                   createdAt: true,
+                  structuredTranscript: true,
+                  transcriptionSource: true,
+                  deliveryEvidence: true,
+                  skillScores: true,
                 },
               },
             },
@@ -368,6 +376,7 @@ export async function loadCoachHome(userId: string): Promise<{
               source: { in: pulseSources },
               recordedAt: { gte: pulseSince },
               sessionId: { not: null },
+              AND: [eligiblePulseWhere()],
             },
             orderBy: { recordedAt: 'desc' },
             select: { skill: true, score: true, sessionId: true, recordedAt: true },
@@ -396,20 +405,20 @@ export async function loadCoachHome(userId: string): Promise<{
           }]
         : [],
     ),
-    ...replayRows.flatMap((row) =>
-      row.result
-        ? [{
+    ...replayRows.flatMap((row) => {
+      if (!row.result) return []
+      const safe = replayResultView(row.result, row.learnerSelection as unknown as ReplaySelection | null)
+      return [{
             kind: 'result' as const,
             module: 'replay' as const,
             targetId: row.id,
             threadId: null,
             title: 'Your Replay analysis is ready',
-            reason: `${row.sessionName || row.meetingType} · ${row.result.overallScore.toFixed(1)}/10`,
-            insight: jsonText(row.result.coachingInsights ?? null, 'topStrength'),
+            reason: `${row.sessionName || row.meetingType}${safe.result.overallScore == null ? '' : ` · ${safe.result.overallScore.toFixed(1)}/10`}`,
+            insight: jsonText(safe.coachingInsights, 'topStrength'),
             completedAt: row.result.createdAt.toISOString(),
           }]
-        : [],
-    ),
+    }),
   ]
 
   const receipts = results.length > 0
