@@ -7,6 +7,7 @@ import {
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
 import { readFile } from 'fs/promises'
 import { awsCredentialsConfig } from './awsCredentials'
+import { normalizeBatchWords, wordSegments, type ReplayWordEvidence } from './replay-word-evidence'
 
 const region = process.env.AWS_REGION || 'us-east-1'
 const isDev = process.env.NODE_ENV !== 'production'
@@ -30,13 +31,14 @@ export interface TranscribedSegment {
   text: string
   startTime: number
   endTime: number
-  confidence: number
+  confidence: number | null
 }
 
 export interface TranscriptionResult {
   fullText: string
   segments: TranscribedSegment[]
   speakerCount: number
+  wordEvidence?: ReplayWordEvidence
 }
 
 export async function uploadToS3(
@@ -103,32 +105,10 @@ export async function fetchTranscriptionResult(
   transcriptUri: string
 ): Promise<TranscriptionResult> {
   const resp = await fetch(transcriptUri)
+  if (!resp.ok) throw new Error('Transcription result could not be retrieved')
   const data = await resp.json()
-
-  const items: any[] = data.results?.items ?? []
-  const speakerLabels: any =
-    data.results?.speaker_labels ?? {}
-  const segments: any[] = speakerLabels.segments ?? []
-
-  const transcribedSegments: TranscribedSegment[] = segments.map((seg: any) => ({
-    speaker: seg.speaker_label ?? 'spk_0',
-    text: seg.items
-      ?.map((i: any) => {
-        const matching = items.find(
-          (it: any) => it.start_time === i.start_time && it.end_time === i.end_time
-        )
-        return matching?.alternatives?.[0]?.content ?? ''
-      })
-      .join(' ') ?? '',
-    startTime: parseFloat(seg.start_time ?? '0'),
-    endTime: parseFloat(seg.end_time ?? '0'),
-    confidence:
-      seg.items?.reduce(
-        (sum: number, i: any) =>
-          sum + parseFloat(i.alternatives?.[0]?.confidence ?? '0'),
-        0
-      ) / (seg.items?.length || 1),
-  }))
+  const wordEvidence = normalizeBatchWords(data)
+  const transcribedSegments = wordSegments(wordEvidence)
 
   const fullText = data.results?.transcripts?.[0]?.transcript ?? ''
   const speakerSet = new Set(transcribedSegments.map((s) => s.speaker))
@@ -137,6 +117,7 @@ export async function fetchTranscriptionResult(
     fullText,
     segments: transcribedSegments,
     speakerCount: speakerSet.size || 1,
+    wordEvidence,
   }
 }
 

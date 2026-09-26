@@ -1,5 +1,9 @@
 import { prisma } from '../lib/prisma'
 import { PULSE_EVIDENCE_WINDOW_DAYS } from './pulseEvidence'
+import { eligiblePulseWhere } from '../analytics/pulseEligibility'
+import { replayResultView } from '../lib/replay-result-view'
+import type { ReplaySelection } from '../lib/replay-evidence'
+import { isPersistedPaceAvailable } from '../analytics/paceClaims'
 
 /**
  * The cross-module picture Coach reasons over. Deliberately small and already
@@ -68,7 +72,7 @@ async function loadPulse(userId: string): Promise<CoachPulseSnapshot> {
   const windowDays = PULSE_EVIDENCE_WINDOW_DAYS
   const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000)
   const rows = await prisma.progressPulse.findMany({
-    where: { userId, recordedAt: { gte: since }, sessionId: { not: null } },
+    where: { userId, recordedAt: { gte: since }, sessionId: { not: null }, AND: [eligiblePulseWhere()] },
     orderBy: { recordedAt: 'desc' },
     select: { skill: true, score: true, sessionId: true },
     take: PULSE_MAX_ROWS,
@@ -148,7 +152,7 @@ async function loadLastElevate(userId: string): Promise<ElevateContext | null> {
     focusArea: session.focusArea,
     endedAt: session.endedAt?.toISOString() ?? null,
     durationSec: session.durationSec,
-    wpm: round(session.metrics?.userWpm),
+    wpm: isPersistedPaceAvailable(session.metrics?.processingStatus) ? round(session.metrics?.userWpm) : null,
     fillerRate: round(session.metrics?.userFillerRate),
   }
 }
@@ -161,14 +165,17 @@ async function loadLastReplay(userId: string): Promise<ReplayContext | null> {
   })
   if (!replay) return null
 
+  const safe = replay.result
+    ? replayResultView(replay.result, replay.learnerSelection as unknown as ReplaySelection | null)
+    : null
   return {
     sessionId: replay.id,
     name: replay.sessionName,
     meetingType: replay.meetingType,
     createdAt: replay.createdAt.toISOString(),
-    wpm: round(replay.result?.wordsPerMinute),
-    fillerRate: round(replay.result?.fillerWordRate),
-    longestMonologueSec: replay.result?.longestMonologueSec ?? null,
+    wpm: round(safe?.result.wordsPerMinute),
+    fillerRate: round(safe?.result.fillerWordRate),
+    longestMonologueSec: safe?.result.longestMonologueSec ?? null,
   }
 }
 

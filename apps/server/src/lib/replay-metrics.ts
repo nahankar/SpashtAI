@@ -1,7 +1,7 @@
 import type { TranscriptSegment } from './transcript-parser'
 
 export interface ReplayMetrics {
-  wordsPerMinute: number
+  wordsPerMinute: number | null
   fillerWordCount: number
   fillerWordRate: number
   hedgingCount: number
@@ -10,7 +10,7 @@ export interface ReplayMetrics {
   vocabularyDiversity: number
   totalTurns: number
   speakingPercentage: number
-  interruptionCount: number
+  interruptionCount: number | null
   longestMonologueSec: number
   questionsAsked: number
   repetitionRequests: number
@@ -88,6 +88,7 @@ function uniqueWords(text: string): Set<string> {
 
 export function findMatchingSpeaker(segments: TranscriptSegment[], name: string): string | null {
   const needle = name.toLowerCase().trim()
+  if (!needle) return null
   const speakers = [...new Set(segments.map((s) => s.speaker))]
 
   // Exact case-insensitive match
@@ -112,28 +113,7 @@ export function calculateReplayMetrics(
   durationSec?: number,
   transcriptionSource?: string
 ): ReplayMetrics {
-  // Resolve primary speaker via case-insensitive matching when a name is provided
-  if (primarySpeaker) {
-    const matched = findMatchingSpeaker(segments, primarySpeaker)
-    primarySpeaker = matched || undefined
-  }
-
-  if (!primarySpeaker) {
-    const speakerWordCounts = new Map<string, number>()
-    for (const seg of segments) {
-      const wc = countWords(seg.text)
-      speakerWordCounts.set(seg.speaker, (speakerWordCounts.get(seg.speaker) || 0) + wc)
-    }
-    let maxWords = 0
-    for (const [speaker, wc] of speakerWordCounts) {
-      if (wc > maxWords) {
-        maxWords = wc
-        primarySpeaker = speaker
-      }
-    }
-    primarySpeaker = primarySpeaker || 'Speaker'
-  }
-
+  // Only an exact, explicitly confirmed label is accepted. No dominant-speaker fallback.
   const primarySegments = segments.filter((s) => s.speaker === primarySpeaker)
   const allText = segments.map((s) => s.text).join(' ')
   const primaryText = primarySegments.map((s) => s.text).join(' ')
@@ -148,35 +128,8 @@ export function calculateReplayMetrics(
   const primaryHedgingCount = countHedging(primaryText)
   const primaryUnique = uniqueWords(primaryText)
 
-  // Meeting duration (wall-clock) for non-WPM metrics
-  let meetingDuration = durationSec
-  if (!meetingDuration) {
-    const lastEnd = Math.max(
-      ...segments.filter((s) => s.endTime != null).map((s) => s.endTime!),
-      0
-    )
-    if (lastEnd > 0) {
-      meetingDuration = lastEnd
-    } else {
-      meetingDuration = (totalWordCount / 150) * 60
-    }
-  }
-  meetingDuration = Math.max(meetingDuration, 1)
-
-  // WPM: use primary speaker's cumulative speaking time when timestamps exist
-  let primarySpeakingSec = 0
-  for (const seg of primarySegments) {
-    if (seg.startTime != null && seg.endTime != null && seg.endTime > seg.startTime) {
-      primarySpeakingSec += seg.endTime - seg.startTime
-    }
-  }
-  // Fallback: estimate speaking time from word count (~2.5 words/sec for natural speech)
-  if (primarySpeakingSec <= 0) {
-    primarySpeakingSec = primaryWordCount / 2.5
-  }
-  primarySpeakingSec = Math.max(primarySpeakingSec, 1)
-
-  const wpm = Math.min(Math.round((primaryWordCount / primarySpeakingSec) * 60), 250)
+  // Segment/cue timing alone cannot support measured pace. The evidence adapter owns WPM.
+  const wpm = null
   const fillerRate = primaryWordCount > 0
     ? (primaryFillerCount / primaryWordCount) * 100
     : 0
@@ -198,35 +151,12 @@ export function calculateReplayMetrics(
   let lastSpeaker = ''
   for (const seg of segments) {
     if (seg.speaker !== lastSpeaker) {
-      turns++
+      if (seg.speaker === primarySpeaker) turns++
       lastSpeaker = seg.speaker
     }
   }
 
-  // Interruptions: only reliable when we have audio-level timestamps (AWS Transcribe).
-  // Uploaded VTT/text transcripts have imprecise, overlapping timestamps from the
-  // transcription tool — not actual interruptions. Skip for non-audio sources.
-  let interruptionCount = 0
-  const hasReliableTimestamps = transcriptionSource === 'aws_transcribe'
-  if (hasReliableTimestamps) {
-    const INTERRUPTION_OVERLAP_THRESHOLD = 1.5
-    for (let i = 1; i < segments.length; i++) {
-      const curr = segments[i]
-      const prev = segments[i - 1]
-      if (
-        curr.speaker !== prev.speaker &&
-        (curr.speaker === primarySpeaker || prev.speaker === primarySpeaker) &&
-        curr.startTime != null &&
-        prev.endTime != null
-      ) {
-        const overlap = prev.endTime - curr.startTime
-        if (overlap > INTERRUPTION_OVERLAP_THRESHOLD) {
-          interruptionCount++
-        }
-      }
-    }
-  }
-
+  const interruptionCount = null
   // Longest monologue: longest contiguous block (by time or word count) from primary speaker
   let longestMonologueSec = 0
   let monoStart: number | null = null

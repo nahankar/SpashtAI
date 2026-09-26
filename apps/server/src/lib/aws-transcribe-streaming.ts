@@ -10,9 +10,10 @@ import {
   type StartStreamTranscriptionCommandOutput,
 } from '@aws-sdk/client-transcribe-streaming'
 import { readFileSync, existsSync, unlinkSync } from 'fs'
-import { execSync } from 'child_process'
+import { execFileSync } from 'child_process'
 import type { TranscriptionResult, TranscribedSegment } from './aws-transcribe'
 import { awsCredentialsConfig } from './awsCredentials'
+import { normalizeStreamingWords, wordSegments } from './replay-word-evidence'
 
 const region = process.env.AWS_REGION || process.env.BEDROCK_REGION || 'us-east-1'
 
@@ -33,9 +34,8 @@ function cleanupTemp(tempFile?: string) {
  */
 function convertToPcm(filePath: string): { pcmPath: string; sampleRate: number } {
   const pcmPath = filePath.replace(/\.[^.]+$/, '_transcribe.pcm')
-  console.log(`[dev-streaming] Converting to PCM: ${pcmPath}`)
-  execSync(
-    `ffmpeg -y -i "${filePath}" -f s16le -acodec pcm_s16le -ar 16000 -ac 1 "${pcmPath}"`,
+  execFileSync(
+    'ffmpeg', ['-y', '-i', filePath, '-f', 's16le', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', pcmPath],
     { timeout: 120_000, stdio: 'pipe' }
   )
   return { pcmPath, sampleRate: 16000 }
@@ -78,7 +78,7 @@ export async function transcribeStreamingFromFile(
   mimeType: string,
   maxSpeakers = 10
 ): Promise<TranscriptionResult> {
-  console.log(`[dev-streaming] Starting transcription for: ${filePath} (${mimeType})`)
+  console.log(`[dev-streaming] Starting transcription (${mimeType})`)
 
   // Always convert to PCM — most reliable format for Transcribe Streaming
   let pcmPath: string
@@ -121,7 +121,9 @@ export async function transcribeStreamingFromFile(
     throw new Error('No transcript result stream received from AWS Transcribe Streaming')
   }
 
-  const allItems: { speaker: string; content: string; startTime: number; endTime: number; type: string }[] = []
+  const allItems: Record<string, any>[] = []
+  const seenResults = new Set<string>()
+  let complete = true
   let eventCount = 0
 
   try {
@@ -138,16 +140,12 @@ export async function transcribeStreamingFromFile(
       const results = transcriptEvent.Transcript?.Results || []
       for (const result of results) {
         if (result.IsPartial) continue
+        if (result.ResultId && seenResults.has(result.ResultId)) continue
+        if (result.ResultId) seenResults.add(result.ResultId)
 
         const items = result.Alternatives?.[0]?.Items || []
         for (const item of items) {
-          allItems.push({
-            speaker: item.Speaker || 'spk_0',
-            content: item.Content || '',
-            startTime: item.StartTime || 0,
-            endTime: item.EndTime || 0,
-            type: item.Type || 'pronunciation',
-          })
+          allItems.push(item)
         }
       }
 
@@ -156,6 +154,7 @@ export async function transcribeStreamingFromFile(
       }
     }
   } catch (streamErr: any) {
+    complete = false
     console.error(`[dev-streaming] Stream iteration error: ${streamErr.name}: ${streamErr.message}`)
     // Continue with whatever items we collected
   }
@@ -171,32 +170,8 @@ export async function transcribeStreamingFromFile(
   }
 
   // Group items into speaker segments (merge consecutive items from same speaker)
-  const segments: TranscribedSegment[] = []
-  let currentSeg: TranscribedSegment | null = null
-
-  for (const item of allItems) {
-    if (item.type === 'punctuation') {
-      if (currentSeg) {
-        currentSeg.text += item.content
-      }
-      continue
-    }
-
-    if (currentSeg && currentSeg.speaker === item.speaker) {
-      currentSeg.text += ' ' + item.content
-      currentSeg.endTime = item.endTime
-    } else {
-      if (currentSeg) segments.push(currentSeg)
-      currentSeg = {
-        speaker: item.speaker,
-        text: item.content,
-        startTime: item.startTime,
-        endTime: item.endTime,
-        confidence: 0.9,
-      }
-    }
-  }
-  if (currentSeg) segments.push(currentSeg)
+  const wordEvidence = normalizeStreamingWords(allItems, complete)
+  const segments = wordSegments(wordEvidence)
 
   const fullText = segments.map((s) => s.text).join(' ')
   const speakerSet = new Set(segments.map((s) => s.speaker))
@@ -207,5 +182,6 @@ export async function transcribeStreamingFromFile(
     fullText,
     segments,
     speakerCount: speakerSet.size || 1,
+    wordEvidence,
   }
 }

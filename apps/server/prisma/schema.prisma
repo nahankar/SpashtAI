@@ -574,6 +574,7 @@ model ReplaySession {
   meetingGoal     String?
   meetingDate     DateTime?
   participantName String?
+  learnerSelection Json? // replay-delivery-v1: explicit user confirmation, source-bound
 
   // pending | transcribing | analyzing | completed | failed
   status       String  @default("pending")
@@ -619,6 +620,7 @@ model ReplayResult {
   structuredTranscript Json?
   speakerCount         Int    @default(1)
   transcriptionSource  String // aws_transcribe | uploaded | pasted
+  deliveryEvidence     Json? // replay-delivery-v1: raw normalized words, recording and transcript provenance
 
   // Computed metrics
   wordsPerMinute      Float @default(0)
