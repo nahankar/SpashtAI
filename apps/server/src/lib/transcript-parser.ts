@@ -11,8 +11,104 @@ export interface ParsedTranscript {
   speakerCount: number
 }
 
+const METADATA_LABELS = new Set([
+  'meeting',
+  'transcript',
+  'recording',
+  'note',
+  'notes',
+  'metadata',
+  'speaker',
+  'caption',
+  'captions',
+  'subtitle',
+  'subtitles',
+  'date',
+  'time',
+  'title',
+])
+
+function isTimestampLikeLabel(label: string): boolean {
+  const value = label.trim()
+  return (
+    /^\d{1,2}$/.test(value) ||
+    /^\d{1,2}:\d{2}(?::\d{2})?$/.test(value) ||
+    /^\d{1,2}\s*(am|pm)$/i.test(value)
+  )
+}
+
+const HEADING_WORDS = new Set([
+  'agenda', 'summary', 'action', 'actions', 'topic', 'overview', 'introduction',
+  'conclusion', 'decision', 'decisions', 'owner', 'status', 'update', 'discussion',
+  'objective', 'objectives', 'attendees', 'participants', 'next',
+])
+
+function isDiarizationLabel(label: string): boolean {
+  return /^(?:speaker\s+(?:\d+|[a-z])|spk[_-]?\d+)$/i.test(label.trim())
+}
+
+function isMultiWordName(label: string): boolean {
+  const parts = label.trim().split(/\s+/).filter(Boolean)
+  return parts.length >= 2 && parts.length <= 4 && parts.every(part => /^[\p{Lu}][\p{L}'’.-]*$/u.test(part))
+}
+
+function isRejectedSpeakerToken(label: string): boolean {
+  const trimmed = label.trim()
+  return !trimmed || !/[A-Za-z]/.test(trimmed) || isTimestampLikeLabel(trimmed) || METADATA_LABELS.has(trimmed.toLowerCase())
+}
+
+/**
+ * A colon prefix is a speaker only with positive evidence: a diarization tag,
+ * a multi-word name, a repeated single name, or several distinct names in one
+ * transcript. A one-off heading such as "Agenda:" stays transcript text.
+ */
+export function acceptedSpeakerLabels(labels: string[]): Set<string> {
+  const counts = new Map<string, number>()
+  for (const label of labels) {
+    if (isRejectedSpeakerToken(label)) continue
+    counts.set(label, (counts.get(label) ?? 0) + 1)
+  }
+  const distinctSingleNames = [...counts.keys()].filter(label => {
+    const parts = label.trim().split(/\s+/)
+    return parts.length === 1 && /^[\p{Lu}][\p{L}'’.-]*$/u.test(parts[0]) && !HEADING_WORDS.has(parts[0].toLowerCase())
+  })
+  const dialogue = distinctSingleNames.length >= 2
+  const accepted = new Set<string>()
+  for (const [label, count] of counts) {
+    const trimmed = label.trim()
+    if (isDiarizationLabel(trimmed) || isMultiWordName(trimmed)) {
+      accepted.add(label)
+      continue
+    }
+    const parts = trimmed.split(/\s+/)
+    const singleName = parts.length === 1 && /^[\p{Lu}][\p{L}'’.-]*$/u.test(parts[0]) && !HEADING_WORDS.has(parts[0].toLowerCase())
+    if (singleName && (count >= 2 || dialogue)) accepted.add(label)
+  }
+  return accepted
+}
+
+function colonLabel(line: string): { label: string; rest: string } | null {
+  const match = line.trim().match(/^\[?([A-Za-z0-9 _-]+?)\]?\s*:\s*(.*)$/)
+  if (!match || isRejectedSpeakerToken(match[1])) return null
+  return { label: match[1].trim(), rest: match[2].trim() }
+}
+
+function normalizeSpeakerLabel(raw: string): string | null {
+  const label = raw.trim().replace(/^<+|>+$/g, '')
+  if (isRejectedSpeakerToken(label)) return null
+  if (isDiarizationLabel(label) || isMultiWordName(label)) return label
+  const parts = label.split(/\s+/)
+  if (parts.length === 1 && /^[\p{Lu}][\p{L}'’.-]*$/u.test(parts[0]) && !HEADING_WORDS.has(parts[0].toLowerCase())) return label
+  return null
+}
+
 export function parseSRT(content: string): ParsedTranscript {
   const blocks = content.trim().split(/\n\n+/)
+  const cueTexts = blocks.map(block => {
+    const lines = block.split('\n')
+    return lines.length < 3 ? '' : lines.slice(2).join(' ').trim()
+  }).filter(Boolean)
+  const accepted = acceptedSpeakerLabels(cueTexts.map(text => colonLabel(text)?.label).filter((label): label is string => !!label))
   const segments: TranscriptSegment[] = []
 
   for (const block of blocks) {
@@ -42,9 +138,9 @@ export function parseSRT(content: string): ParsedTranscript {
         parseInt(timeMatch[8]) / 1000
     }
 
-    const speakerMatch = text.match(/^<?([^>:]+?)>?:\s*(.+)/)
-    const speaker = speakerMatch ? speakerMatch[1].trim() : 'Speaker'
-    const cleanText = speakerMatch ? speakerMatch[2].trim() : text
+    const labelled = colonLabel(text)
+    const speaker = labelled && accepted.has(labelled.label) ? labelled.label : 'Speaker'
+    const cleanText = speaker === 'Speaker' ? text : labelled!.rest
 
     segments.push({ speaker, text: cleanText, startTime, endTime })
   }
@@ -54,6 +150,19 @@ export function parseSRT(content: string): ParsedTranscript {
 
 export function parseVTT(content: string): ParsedTranscript {
   const lines = content.split('\n')
+  const cueTexts: string[] = []
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!lines[index].includes('-->')) continue
+    const textLines: string[] = []
+    let cursor = index + 1
+    while (cursor < lines.length && lines[cursor].trim() !== '' && !lines[cursor].includes('-->')) {
+      textLines.push(lines[cursor].trim())
+      cursor += 1
+    }
+    const text = textLines.join(' ')
+    if (text) cueTexts.push(text)
+  }
+  const accepted = acceptedSpeakerLabels(cueTexts.map(text => colonLabel(text)?.label).filter((label): label is string => !!label))
   const segments: TranscriptSegment[] = []
   let i = 0
 
@@ -95,26 +204,26 @@ export function parseVTT(content: string): ParsedTranscript {
     const text = textLines.join(' ')
     if (!text) continue
 
-    const { speaker, text: cleanText } = extractSpeakerFromVTTText(text)
+    const { speaker, text: cleanText } = extractSpeakerFromVTTText(text, accepted)
     segments.push({ speaker, text: cleanText, startTime, endTime })
   }
 
   return finalize(segments)
 }
 
-function extractSpeakerFromVTTText(raw: string): { speaker: string; text: string } {
+function extractSpeakerFromVTTText(raw: string, accepted: Set<string>): { speaker: string; text: string } {
   // WebVTT voice span: <v Speaker Name>text here</v>
   const voiceMatch = raw.match(/^<v\s+([^>]+)>(.+)$/s)
   if (voiceMatch) {
-    const speaker = voiceMatch[1].trim()
+    const speaker = normalizeSpeakerLabel(voiceMatch[1])
     const text = voiceMatch[2].replace(/<\/v>/g, '').trim()
-    return { speaker, text }
+    if (speaker) return { speaker, text }
   }
 
   // Standard "Speaker: text" or "<Speaker>: text"
-  const colonMatch = raw.match(/^<?([^>:]+?)>?:\s*(.+)/s)
-  if (colonMatch) {
-    return { speaker: colonMatch[1].trim(), text: colonMatch[2].trim() }
+  const labelled = colonLabel(raw)
+  if (labelled && accepted.has(labelled.label) && labelled.rest) {
+    return { speaker: labelled.label, text: labelled.rest }
   }
 
   return { speaker: 'Speaker', text: raw }
@@ -395,29 +504,22 @@ export function parseTeamsDocx(content: string): ParsedTranscript {
 
 export function parsePlainText(content: string): ParsedTranscript {
   const lines = content.split('\n').filter((l) => l.trim())
+  const accepted = acceptedSpeakerLabels(lines.map(line => colonLabel(line.trim())?.label).filter((label): label is string => !!label))
   const segments: TranscriptSegment[] = []
   let currentSpeaker = 'Speaker'
 
   for (const line of lines) {
     const trimmed = line.trim()
+    const labelled = colonLabel(trimmed)
 
-    // "Speaker:" on its own line (label only, text follows on next lines)
-    const labelOnly = trimmed.match(/^\[?([A-Za-z0-9 _-]+?)\]?\s*:\s*$/)
-    if (labelOnly) {
-      currentSpeaker = labelOnly[1].trim()
+    if (labelled && accepted.has(labelled.label) && !labelled.rest) {
+      currentSpeaker = labelled.label
       continue
     }
 
-    // "Speaker: some text" on the same line
-    const speakerMatch = trimmed.match(
-      /^\[?([A-Za-z0-9 _-]+?)\]?\s*:\s*(.+)/
-    )
-    if (speakerMatch) {
-      currentSpeaker = speakerMatch[1].trim()
-      segments.push({
-        speaker: currentSpeaker,
-        text: speakerMatch[2].trim(),
-      })
+    if (labelled && accepted.has(labelled.label) && labelled.rest) {
+      currentSpeaker = labelled.label
+      segments.push({ speaker: currentSpeaker, text: labelled.rest })
     } else {
       segments.push({ speaker: currentSpeaker, text: trimmed })
     }

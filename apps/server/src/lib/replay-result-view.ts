@@ -34,6 +34,10 @@ export function replayResultView(row: Record<string, any>, selection: ReplaySele
   }))
   const skills = Object.values(scores).some(v => v != null) ? { scores, components } : null
   const coaching = sameAssessment ? neutralContent(guardPaceClaims(row.coachingInsights, evidence.pace.wpm != null)) : meetingOnlyInsights(row.coachingInsights)
+  const strengths = sameAssessment ? (neutralContent(row.strengths, true) ?? []) as unknown[] : []
+  const improvements = sameAssessment ? (neutralContent(row.improvements, true) ?? []) as unknown[] : []
+  const recommendations = sameAssessment ? (neutralContent(row.recommendations, true) ?? []) as unknown[] : []
+  const contextSpecificFeedback = sameAssessment ? (neutralContent(row.contextSpecificFeedback, true) ?? []) as unknown[] : []
   return { evidence, skillScores: skills, coachingInsights: coaching, result: {
     transcriptText: row.transcriptText ?? '', structuredTranscript: segments,
     speakerCount: row.speakerCount, transcriptionSource: row.transcriptionSource,
@@ -46,8 +50,8 @@ export function replayResultView(row: Record<string, any>, selection: ReplaySele
     questionsAsked: text?.questionsAsked ?? null, repetitionRequests: null,
     overallScore: skills ? calculateWeightedOverallScore(skills.scores as SkillScores) : null,
     clarityScore: skills?.scores.clarity ?? null, confidenceScore: skills?.scores.confidence ?? null, engagementScore: skills?.scores.engagement ?? null,
-    strengths: (neutralContent(row.strengths, sameAssessment) ?? []) as unknown[], improvements: (neutralContent(row.improvements, sameAssessment) ?? []) as unknown[],
-    recommendations: (neutralContent(row.recommendations, sameAssessment) ?? []) as unknown[], contextSpecificFeedback: (neutralContent(row.contextSpecificFeedback, sameAssessment) ?? []) as unknown[],
+    strengths, improvements,
+    recommendations, contextSpecificFeedback,
     keyMoments: sameAssessment ? neutralContent(row.keyMoments) : [],
     annotatedTranscript: sameAssessment && Array.isArray(row.annotatedTranscript) ? row.annotatedTranscript.filter((s: TranscriptSegment) => s && s.speaker === selection?.speaker && typeof s.text === 'string') : [],
     skillScores: skills, coachingInsights: coaching,

@@ -1,8 +1,8 @@
 import { Prisma } from '@prisma/client'
 import { randomUUID } from 'node:crypto'
-import { buildReplayEvidence, legacyInput, transcriptRevision, digest, selectionMatches, replaySegments, type ReplayEvidenceInput, type ReplaySelection } from '../lib/replay-evidence'
+import { buildReplayEvidence, legacyInput, transcriptRevision, digest, selectionMatches, replaySegments, replaySpeakerCandidates, speakerMeetsAssessment, type ReplayEvidenceInput, type ReplaySelection } from '../lib/replay-evidence'
 import { identifyReplayRecording, replayCacheKey, isReusableReplayCache } from '../lib/replay-recording'
-import { replayResultView, meetingOnlyInsights } from '../lib/replay-result-view'
+import { replayResultView } from '../lib/replay-result-view'
 import { Router, Request, Response } from 'express'
 import multer from 'multer'
 import { readFile, writeFile, mkdir, unlink } from 'fs/promises'
@@ -222,7 +222,8 @@ router.put('/sessions/:id/learner', async (req: Request, res: Response) => {
       const current = input?.version === 'replay-delivery-v1' ? input : legacyInput(segments ?? [], session.result.transcriptionSource)
       if (current.transcriptRevision !== expectedRevision || current.transcriptRevision !== transcriptRevision(segments)) return { code: 409, error: 'Transcript changed; refresh analysis before confirming' }
       if (req.body.recordingSignature !== (current.recording?.signature ?? null)) return { code: 409, error: 'Recording changed; reload before confirming' }
-      if (!Array.isArray(segments) || !segments.some(s => s.speaker === speaker) || speaker === 'Unassigned speaker') return { code: 400, error: 'Unknown speaker' }
+      const candidates = replaySpeakerCandidates(segments)
+      if (!Array.isArray(segments) || !candidates.includes(speaker)) return { code: 400, error: 'Unknown speaker' }
       const previous = session.learnerSelection as unknown as ReplaySelection | null
       const previousRevision = buildReplayEvidence(current, previous, segments).identity.revision
       if ((req.body.selectionRevision ?? null) !== previousRevision) return { code: 409, error: 'Speaker selection changed; reload before confirming' }
@@ -233,8 +234,6 @@ router.put('/sessions/:id/learner', async (req: Request, res: Response) => {
       await tx.replaySession.update({ where: { id: session.id }, data: { learnerSelection: selection as any, progressPulseStatus: null } })
       // Replay-owned removal; shared historical aggregation is intentionally untouched.
       await tx.progressPulse.deleteMany({ where: { sessionId: session.id, source: 'replay' } })
-      await tx.replayResult.update({ where: { replaySessionId: session.id }, data: { skillScores: Prisma.DbNull,
-        coachingInsights: (meetingOnlyInsights(session.result.coachingInsights) as Prisma.InputJsonValue | null) ?? Prisma.DbNull, communicationSignals: Prisma.DbNull } })
       return { code: 200, selection }
     })
     res.status(outcome.code).json(outcome)
@@ -443,10 +442,7 @@ router.post('/sessions/:id/process', trackFeatureUsage('replay', 'analyze'), asy
         if (view?.evidence.identity.state !== 'confirmed' || view.evidence.identity.revision !== selectionRevision ||
             view.evidence.transcriptRevision !== expectedTranscript) return 'selection_changed'
       }
-      // Claim, invalidation, and reset are atomic with upload/selection/progress.
-      await tx.replayResult.deleteMany({ where: { replaySessionId: id } })
-      await tx.coachHomeResultReceipt.deleteMany({ where: { userId: fresh.userId, module: 'replay', targetId: id } })
-      await tx.progressPulse.deleteMany({ where: { sessionId: id, source: 'replay' } })
+      // Claim runs under lock; previous successful results stay visible until replacement succeeds.
       await tx.replaySession.update({ where: { id }, data: { status: 'transcribing', errorMessage: null, progressPulseStatus: null } })
       return 'claimed'
     })
@@ -477,6 +473,7 @@ router.post('/sessions/:id/process', trackFeatureUsage('replay', 'analyze'), asy
 // ── The actual processing pipeline ──
 
 async function processReplaySession(sessionId: string): Promise<void> {
+  const pipelineStartMs = Date.now()
   const session = await prisma.replaySession.findUnique({
     where: { id: sessionId },
     include: { uploadedFiles: { orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] } },
@@ -578,23 +575,26 @@ async function processReplaySession(sessionId: string): Promise<void> {
     throw new Error('No transcript text could be extracted from the uploaded files')
   }
 
-  // ── Step 1b: Resolve participant speaker ──
+  // ── Step 1b: Resolve confirmed learner speaker ──
 
   const segments = Array.isArray(structuredTranscript)
     ? structuredTranscript
     : [{ speaker: 'Speaker', text: fullText }]
 
-  // A name or dominant label is only a suggestion. Confirmation happens in the evidence API.
-  let resolvedParticipantSpeaker: string | undefined
   const deliveryEvidence: ReplayEvidenceInput = {
     version: 'replay-delivery-v1', recording, transcriptRevision: transcriptRevision(segments),
     transcriptSource: transcriptionSource, words: retainedTranscription?.wordEvidence ?? null,
     supplementaryTranscript: null,
   }
   const learner = session.learnerSelection as unknown as ReplaySelection | null
-  if (selectionMatches(learner, deliveryEvidence) && segments.some((s: { speaker: string }) => s.speaker === learner?.speaker)) {
-    resolvedParticipantSpeaker = learner!.speaker
-    deliveryEvidence.analysisSelectionRevision = learner!.revision
+  const candidates = replaySpeakerCandidates(segments)
+  const resolvedParticipantSpeaker = selectionMatches(learner, deliveryEvidence) && candidates.includes(learner?.speaker ?? '')
+    ? learner!.speaker
+    : null
+  const assessmentReady = !!resolvedParticipantSpeaker && speakerMeetsAssessment(segments, resolvedParticipantSpeaker)
+  if (resolvedParticipantSpeaker && learner) {
+    deliveryEvidence.analysisSelectionRevision = learner.revision
+    if (!assessmentReady) deliveryEvidence.assessmentGate = 'insufficient_speech'
   }
   if (audioFile && (transcriptFile || textFile) && retainedTranscription) {
     const supplement = transcriptFile || textFile!
@@ -609,24 +609,72 @@ async function processReplaySession(sessionId: string): Promise<void> {
     }
   }
 
-  // ── Step 2: Calculate metrics ──
+  const measured = buildReplayEvidence(deliveryEvidence, learner, segments)
+  const metrics = calculateReplayMetrics(segments, resolvedParticipantSpeaker ?? undefined, durationSec, transcriptionSource)
+
+  if (!assessmentReady) {
+    const processingTimeMs = Date.now() - pipelineStartMs
+    await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM "ReplaySession" WHERE id = ${sessionId} FOR UPDATE`
+      await tx.replayResult.deleteMany({ where: { replaySessionId: sessionId } })
+      await tx.replayResult.create({
+        data: {
+          replaySessionId: sessionId,
+          deliveryEvidence: JSON.parse(JSON.stringify(deliveryEvidence)),
+          transcriptText: fullText,
+          structuredTranscript: structuredTranscript ?? undefined,
+          speakerCount,
+          transcriptionSource,
+          wordsPerMinute: measured.pace.wpm ?? 0,
+          fillerWordCount: metrics.fillerWordCount,
+          fillerWordRate: metrics.fillerWordRate,
+          hedgingCount: metrics.hedgingCount,
+          hedgingRate: metrics.hedgingRate,
+          avgSentenceLength: metrics.avgSentenceLength,
+          vocabularyDiversity: metrics.vocabularyDiversity,
+          totalTurns: metrics.totalTurns,
+          speakingPercentage: metrics.speakingPercentage,
+          interruptionCount: metrics.interruptionCount ?? 0,
+          longestMonologueSec: metrics.longestMonologueSec,
+          questionsAsked: metrics.questionsAsked,
+          repetitionRequests: metrics.repetitionRequests,
+          avgResponseTimeSec: metrics.avgResponseTimeSec,
+          overallScore: 0,
+          clarityScore: 0,
+          confidenceScore: 0,
+          engagementScore: 0,
+          strengths: [],
+          improvements: [],
+          recommendations: [],
+          contextSpecificFeedback: [],
+          keyMoments: [],
+          annotatedTranscript: [],
+          skillScores: Prisma.DbNull,
+          communicationSignals: Prisma.DbNull,
+          coachingInsights: Prisma.DbNull,
+          modelUsed: null,
+          promptTokens: 0,
+          completionTokens: 0,
+          processingTimeMs,
+        },
+      })
+      await tx.coachHomeResultReceipt.deleteMany({ where: { userId: session.userId, module: 'replay', targetId: sessionId } })
+      await tx.progressPulse.deleteMany({ where: { sessionId, source: 'replay' } })
+      await tx.replaySession.update({ where: { id: sessionId }, data: { status: 'completed' } })
+    })
+    logger.info(
+      { event: 'replay.process_completed', sessionId, phase: resolvedParticipantSpeaker ? 'insufficient_speech' : 'confirmation_required', processingTimeMs },
+      'replay processing completed',
+    )
+    return
+  }
 
   await prisma.replaySession.update({
     where: { id: sessionId },
     data: { status: 'analyzing' },
   })
 
-  const metrics = calculateReplayMetrics(
-    segments,
-    resolvedParticipantSpeaker,
-    durationSec,
-    transcriptionSource
-  )
-
-  // ── Step 3: AI analysis via Bedrock ──
-
   const startMs = Date.now()
-  // Admin-selectable Replay LLM (falls back to BEDROCK_REPLAY_MODEL_ID env default).
   const replayModelId = await getReplayModelId()
   const speakerLabeledText = buildSpeakerLabeledText(segments)
   const aiResult = await analyzeTranscript(
@@ -644,9 +692,7 @@ async function processReplaySession(sessionId: string): Promise<void> {
   )
   const processingTimeMs = Date.now() - startMs
 
-  // ── Step 4: Run shared analytics engine (signal extraction → skill scores → coaching) ──
-
-  const analyticsMessages = normalizeSegmentsForAnalytics(segments, resolvedParticipantSpeaker!)
+  const analyticsMessages = normalizeSegmentsForAnalytics(segments, resolvedParticipantSpeaker)
   const effectiveDurationSec = durationSec || processingTimeMs / 1000
 
   let signals: TextSignals | null = await fetchSignals(sessionId, analyticsMessages, effectiveDurationSec)
@@ -654,14 +700,12 @@ async function processReplaySession(sessionId: string): Promise<void> {
     console.log(`[replay] Python signal API unavailable for ${sessionId}, using fallback`)
     signals = buildFallbackSignals(analyticsMessages, effectiveDurationSec)
   }
-  const measured = buildReplayEvidence(deliveryEvidence, learner, segments)
   signals.speechRate = { ...signals.speechRate, wpm: measured.pace.wpm ?? 0, variability: null,
     status: measured.pace.wpm == null ? 'insufficient_evidence' : 'available', source: measured.pace.wpm == null ? null : 'word_timestamps', confidence: 'medium' }
 
   const { scores: skillScores, components: skillComponents } = calculateSkillScores(signals, analyticsMessages.length)
 
   let coachingInsights: any = null
-  // Mixed recording must never be supplied as isolated learner audio.
   const replayAudio = null as { audioPath: string; audioMime: string } | null
   try {
     coachingInsights = await generateCoachingInsights({
@@ -679,75 +723,68 @@ async function processReplaySession(sessionId: string): Promise<void> {
     console.error(`[replay] Coaching insight generation failed for ${sessionId}:`, err.message)
   }
 
-  const skillScoresJson = resolvedParticipantSpeaker ? JSON.parse(JSON.stringify({ scores: skillScores, components: skillComponents })) : Prisma.DbNull
-  const signalsJson = resolvedParticipantSpeaker ? JSON.parse(JSON.stringify(signals)) : Prisma.DbNull
-  const attributableCoaching = resolvedParticipantSpeaker ? coachingInsights : meetingOnlyInsights(coachingInsights)
-  const coachingJson = attributableCoaching ? JSON.parse(JSON.stringify(attributableCoaching)) : null
+  const skillScoresJson = JSON.parse(JSON.stringify({ scores: skillScores, components: skillComponents }))
+  const signalsJson = JSON.parse(JSON.stringify(signals))
+  const coachingJson = coachingInsights ? JSON.parse(JSON.stringify(coachingInsights)) : null
 
-  // ── Step 5: Save results ──
-
-  await prisma.replayResult.create({
-    data: {
-      replaySessionId: sessionId,
-      deliveryEvidence: JSON.parse(JSON.stringify(deliveryEvidence)),
-      transcriptText: fullText,
-      structuredTranscript: structuredTranscript ?? undefined,
-      speakerCount,
-      transcriptionSource,
-
-      // Legacy columns are non-nullable; public Replay reads use deliveryEvidence,
-      // never the zero sentinel. Shared historical readers require coordinator work.
-      wordsPerMinute: measured.pace.wpm ?? 0,
-      fillerWordCount: metrics.fillerWordCount,
-      fillerWordRate: metrics.fillerWordRate,
-      hedgingCount: metrics.hedgingCount,
-      hedgingRate: metrics.hedgingRate,
-      avgSentenceLength: metrics.avgSentenceLength,
-      vocabularyDiversity: metrics.vocabularyDiversity,
-      totalTurns: metrics.totalTurns,
-      speakingPercentage: metrics.speakingPercentage,
-      interruptionCount: metrics.interruptionCount ?? 0,
-      longestMonologueSec: metrics.longestMonologueSec,
-      questionsAsked: metrics.questionsAsked,
-      repetitionRequests: metrics.repetitionRequests,
-      avgResponseTimeSec: metrics.avgResponseTimeSec,
-
-      overallScore: resolvedParticipantSpeaker ? calculateWeightedOverallScore(skillScores) : 0,
-      clarityScore: resolvedParticipantSpeaker ? aiResult.clarityScore : 0,
-      confidenceScore: resolvedParticipantSpeaker ? aiResult.confidenceScore : 0,
-      engagementScore: resolvedParticipantSpeaker ? aiResult.engagementScore : 0,
-
-      strengths: aiResult.strengths,
-      improvements: aiResult.improvements,
-      recommendations: aiResult.recommendations,
-      contextSpecificFeedback: aiResult.contextSpecificFeedback,
-      keyMoments: aiResult.keyMoments,
-      annotatedTranscript: filterParticipantAnnotations(
-        correctAnnotatedSpeakers(aiResult.annotatedTranscript, segments),
-        segments,
-        resolvedParticipantSpeaker
-      ),
-
-      skillScores: skillScoresJson,
-      communicationSignals: signalsJson,
-      coachingInsights: coachingJson,
-
-      modelUsed: replayModelId,
-      promptTokens: aiResult.promptTokens,
-      completionTokens: aiResult.completionTokens,
-      processingTimeMs,
-    },
-  })
-
-  // Learner attribution and evidence are not yet confirmed: never auto-submit inferred scores.
-
-  await prisma.replaySession.update({
-    where: { id: sessionId },
-    data: { status: 'completed' },
+  await prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM "ReplaySession" WHERE id = ${sessionId} FOR UPDATE`
+    await tx.replayResult.deleteMany({ where: { replaySessionId: sessionId } })
+    await tx.replayResult.create({
+      data: {
+        replaySessionId: sessionId,
+        deliveryEvidence: JSON.parse(JSON.stringify(deliveryEvidence)),
+        transcriptText: fullText,
+        structuredTranscript: structuredTranscript ?? undefined,
+        speakerCount,
+        transcriptionSource,
+        wordsPerMinute: measured.pace.wpm ?? 0,
+        fillerWordCount: metrics.fillerWordCount,
+        fillerWordRate: metrics.fillerWordRate,
+        hedgingCount: metrics.hedgingCount,
+        hedgingRate: metrics.hedgingRate,
+        avgSentenceLength: metrics.avgSentenceLength,
+        vocabularyDiversity: metrics.vocabularyDiversity,
+        totalTurns: metrics.totalTurns,
+        speakingPercentage: metrics.speakingPercentage,
+        interruptionCount: metrics.interruptionCount ?? 0,
+        longestMonologueSec: metrics.longestMonologueSec,
+        questionsAsked: metrics.questionsAsked,
+        repetitionRequests: metrics.repetitionRequests,
+        avgResponseTimeSec: metrics.avgResponseTimeSec,
+        overallScore: calculateWeightedOverallScore(skillScores),
+        clarityScore: aiResult.clarityScore,
+        confidenceScore: aiResult.confidenceScore,
+        engagementScore: aiResult.engagementScore,
+        strengths: aiResult.strengths,
+        improvements: aiResult.improvements,
+        recommendations: aiResult.recommendations,
+        contextSpecificFeedback: aiResult.contextSpecificFeedback,
+        keyMoments: aiResult.keyMoments,
+        annotatedTranscript: filterParticipantAnnotations(
+          correctAnnotatedSpeakers(aiResult.annotatedTranscript, segments),
+          segments,
+          resolvedParticipantSpeaker
+        ),
+        skillScores: skillScoresJson,
+        communicationSignals: signalsJson,
+        coachingInsights: coachingJson,
+        modelUsed: replayModelId,
+        promptTokens: aiResult.promptTokens,
+        completionTokens: aiResult.completionTokens,
+        processingTimeMs,
+      },
+    })
+    await tx.coachHomeResultReceipt.deleteMany({ where: { userId: session.userId, module: 'replay', targetId: sessionId } })
+    await tx.progressPulse.deleteMany({ where: { sessionId, source: 'replay' } })
+    await tx.replaySession.update({
+      where: { id: sessionId },
+      data: { status: 'completed' },
+    })
   })
 
   logger.info(
-    { event: 'replay.process_completed', sessionId, processingTimeMs },
+    { event: 'replay.process_completed', sessionId, phase: 'personalized', processingTimeMs },
     'replay processing completed',
   )
 }

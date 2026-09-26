@@ -3,6 +3,7 @@ import { getAuthHeaders } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import type { Clip, ReplayEvidence } from './evidence-contract'
 import { playReplayClip } from './clip-playback'
+import { hintedSpeaker, rankSpeakerChoices } from '@/lib/replayResultsView'
 
 const API = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 const time = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`
@@ -15,8 +16,8 @@ const reasons: Record<string, string> = {
   word_transcript_mismatch: 'The word evidence does not match the displayed transcript. Delivery is unavailable for this analysis.',
   word_evidence_malformed: 'The stored word evidence could not be validated. Delivery is unavailable for this analysis.',
 }
-export function ReplayEvidencePanel({ sessionId, evidence, audioDisabled, onConfirmed }: {
-  sessionId: string; evidence: ReplayEvidence; audioDisabled: boolean; onConfirmed: () => void
+export function ReplayEvidencePanel({ sessionId, evidence, audioDisabled, speakerHint, onConfirmed }: {
+  sessionId: string; evidence: ReplayEvidence; audioDisabled: boolean; speakerHint?: string | null; onConfirmed: () => void
 }) {
   const audio = useRef<HTMLAudioElement>(null)
   const operation = useRef<AbortController | null>(null)
@@ -24,7 +25,8 @@ export function ReplayEvidencePanel({ sessionId, evidence, audioDisabled, onConf
   const blobUrl = useRef<string | null>(null)
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
-  const [speaker, setSpeaker] = useState(evidence.identity.speaker ?? '')
+  const speakers = rankSpeakerChoices(evidence.speakers, speakerHint)
+  const [speaker, setSpeaker] = useState(evidence.identity.speaker ?? hintedSpeaker(evidence.speakers, speakerHint) ?? (evidence.speakerChoice === 'single_unlabelled' ? evidence.speakers[0]?.speaker ?? '' : ''))
   const [saving, setSaving] = useState(false)
   useEffect(() => () => {
     operation.current?.abort()
@@ -76,19 +78,24 @@ export function ReplayEvidencePanel({ sessionId, evidence, audioDisabled, onConf
     finally { if (!abort.signal.aborted) setSaving(false) }
   }
   const playable = !!evidence.recording && !audioDisabled
+  const singleUnlabelled = evidence.speakerChoice === 'single_unlabelled'
+  const optionLabel = (label: string) => singleUnlabelled ? 'This recording is only my speech' : label
   return <section className="rounded-xl border p-6 space-y-5" aria-labelledby="replay-evidence-heading">
     <h2 id="replay-evidence-heading" className="text-xl font-semibold">Delivery evidence</h2>
-    <p>{evidence.identity.state === 'confirmed' ? `Confirmed speaker: ${evidence.identity.speaker}` : 'Which speaker are you?'}</p>
-    <p className="text-sm text-muted-foreground">Speaker labels are anonymous—not identity or isolated audio. Confirm one label; if your voice was split across labels, this view covers only the selected label.</p>
+    <p>{evidence.identity.state === 'confirmed' ? `Confirmed speaker: ${singleUnlabelled ? 'your speech' : evidence.identity.speaker}` : singleUnlabelled ? 'No named speakers were found.' : 'Which speaker are you?'}</p>
+    <p className="text-sm text-muted-foreground">{singleUnlabelled
+      ? 'If this recording contains only your speech, confirm that below. This does not identify you from the audio.'
+      : 'Speaker labels are anonymous—not identity or isolated audio. Confirm one label; if your voice was split across labels, this view covers only the selected label.'}</p>
+    {evidence.speakerChoice === 'insufficient_labels' && <p role="status">This transcript does not include a usable speaker label, and there is not enough unlabelled speech to confirm a single speaker. Personalized insights stay unavailable until the transcript names speakers or contains enough of one speaker’s speech.</p>}
     <fieldset className="space-y-3" disabled={saving}>
       <legend className="font-medium">Confirm your speaker</legend>
-      {evidence.speakers.map(item => <div key={item.speaker} className="border rounded-lg p-3 space-y-2">
-        <label className="flex gap-2"><input type="radio" name="learner-speaker" value={item.speaker} checked={speaker === item.speaker} onChange={() => setSpeaker(item.speaker)} />{item.speaker}</label>
+      {speakers.map(item => <div key={item.speaker} className="border rounded-lg p-3 space-y-2">
+        <label className="flex gap-2"><input type="radio" name="learner-speaker" value={item.speaker} checked={speaker === item.speaker} onChange={() => setSpeaker(item.speaker)} />{optionLabel(item.speaker)}</label>
         {item.excerpt && <p className="text-sm">“{item.excerpt}”</p>}
         {playable && item.preview && <Button variant="outline" size="sm" onClick={() => void play(item.preview!)}>Preview {item.speaker}</Button>}
         {playable && !item.preview && <p className="text-sm text-muted-foreground">No suitable continuous audio excerpt for this speaker. Use the transcript excerpt to help identify them.</p>}
       </div>)}
-      <Button disabled={!speaker || saving} onClick={() => void confirm()}>{saving ? 'Saving…' : 'This speaker is me'}</Button>
+      <Button disabled={!speaker || saving || evidence.speakerChoice === 'insufficient_labels'} onClick={() => void confirm()}>{saving ? 'Saving…' : singleUnlabelled ? 'This recording is only my speech' : 'This speaker is me'}</Button>
     </fieldset>
     <div role="status" className="space-y-2">
       <p>{evidence.reason ? reasons[evidence.reason] ?? evidence.reason : evidence.state === 'empty' ? 'No notable word gaps met the evidence rules.' : `${evidence.moments.length} model-timed moments · ${Math.round(evidence.coverage * 100)}% eligible selected-speaker word coverage`}</p>

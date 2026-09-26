@@ -8,7 +8,7 @@ export interface ReplayContext {
   sessionName?: string
   /** Optional here if we infer from VTT/filename on upload; required before analysis runs. */
   meetingDate?: string
-  participantName: string
+  participantName?: string
   meetingGoal?: string
   focusAreas?: string[]
 }

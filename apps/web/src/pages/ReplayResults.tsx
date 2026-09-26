@@ -42,6 +42,7 @@ import { FileText } from 'lucide-react'
 import { ReplayEvidencePanel } from '@/components/replay/ReplayEvidencePanel'
 import { ReplayAssessmentAction } from '@/components/replay/ReplayAssessmentAction'
 import { replayEvidenceReport } from '@/components/replay/evidence-report'
+import { hasInsightItems, replayInsightsState, replayTranscriptMode } from '@/lib/replayResultsView'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 
@@ -759,6 +760,7 @@ function useReanalyze(sessionId: string | undefined, onComplete: () => void) {
   const [reanalyzing, setReanalyzing] = useState<ReanalyzeStatus>('idle')
   const [reanalyzeError, setReanalyzeError] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const lastRequest = useRef<{ meetingDate: string | null; selection: { selectionRevision: string; transcriptRevision: string } | null } | null>(null)
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -772,6 +774,7 @@ function useReanalyze(sessionId: string | undefined, onComplete: () => void) {
   const startReanalyze = useCallback(
     async (meetingDate: string | null, selection: { selectionRevision: string; transcriptRevision: string } | null) => {
       if (!sessionId) return
+      lastRequest.current = { meetingDate, selection }
       setReanalyzeError(null)
       setReanalyzing('transcribing')
       setDialogOpen(false)
@@ -827,7 +830,19 @@ function useReanalyze(sessionId: string | undefined, onComplete: () => void) {
     [sessionId, stopPolling, onComplete]
   )
 
-  return { dialogOpen, setDialogOpen, reanalyzing, reanalyzeError, startReanalyze }
+  const dismissReanalyze = useCallback(() => {
+    stopPolling()
+    setReanalyzing('idle')
+    setReanalyzeError(null)
+  }, [stopPolling])
+
+  const retryReanalyze = useCallback(() => {
+    const last = lastRequest.current
+    if (!last) return
+    void startReanalyze(last.meetingDate, last.selection)
+  }, [startReanalyze])
+
+  return { dialogOpen, setDialogOpen, reanalyzing, reanalyzeError, startReanalyze, dismissReanalyze, retryReanalyze }
 }
 
 function ReanalyzeDialog({
@@ -905,14 +920,23 @@ function ReanalyzeDialog({
 }
 
 const REANALYZE_STEPS = [
-  { key: 'transcribing', label: 'Processing transcript', pct: 33 },
-  { key: 'analyzing', label: 'Analyzing content with AI', pct: 66 },
+  { key: 'transcribing', label: 'Checking the saved transcript', pct: 33 },
+  { key: 'analyzing', label: 'Analyzing your speech', pct: 66 },
   { key: 'completed', label: 'Analysis complete', pct: 100 },
 ]
 
-function ReanalyzeOverlay({ status, error }: { status: ReanalyzeStatus; error: string | null }) {
+function ReanalyzeOverlay({ status, error, hasPriorAssessment, onDismiss, onRetry }: {
+  status: ReanalyzeStatus
+  error: string | null
+  hasPriorAssessment: boolean
+  onDismiss: () => void
+  onRetry: () => void
+}) {
   const step = REANALYZE_STEPS.find((s) => s.key === status)
   const pct = status === 'failed' ? 0 : (step?.pct ?? 10)
+  const title = status === 'failed'
+    ? (hasPriorAssessment ? 'Re-analysis failed' : 'Analysis failed')
+    : (hasPriorAssessment ? 'Re-analyzing...' : 'Analyzing your speech')
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
@@ -924,7 +948,7 @@ function ReanalyzeOverlay({ status, error }: { status: ReanalyzeStatus; error: s
             ) : (
               <Loader2 className="h-5 w-5 animate-spin text-primary" />
             )}
-            {status === 'failed' ? 'Re-analysis Failed' : 'Re-analyzing...'}
+            {title}
           </CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4">
@@ -955,6 +979,12 @@ function ReanalyzeOverlay({ status, error }: { status: ReanalyzeStatus; error: s
           {error && (
             <div className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {error}
+            </div>
+          )}
+          {status === 'failed' && (
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={onDismiss}>Return to results</Button>
+              <Button onClick={onRetry}>Try again</Button>
             </div>
           )}
         </CardContent>
@@ -1022,7 +1052,7 @@ export function ReplayResults() {
     )
   }, [data, id])
 
-  const { dialogOpen, setDialogOpen, reanalyzing, reanalyzeError, startReanalyze } =
+  const { dialogOpen, setDialogOpen, reanalyzing, reanalyzeError, startReanalyze, dismissReanalyze, retryReanalyze } =
     useReanalyze(id, loadResults)
 
   const [pulseStatus, setPulseStatus] = useState<string | null>(null)
@@ -1169,6 +1199,14 @@ export function ReplayResults() {
 
   const { session, result } = data
   const hedgingPhrases = data.skillScores?.signals?.hedging?.phrases ?? []
+  const confirmedSpeaker = data.evidence.speakers.find(item => item.speaker === data.evidence.identity.speaker)
+  const insightsState = replayInsightsState(data.evidence.identity.state, !!data.skillScores, {
+    assessmentGate: data.evidence.assessmentGate,
+    assessmentEligible: confirmedSpeaker?.assessmentEligible,
+    hasFeedback: hasInsightItems(result.contextSpecificFeedback as unknown[]),
+    hasMoments: hasInsightItems(result.keyMoments as unknown[]),
+  })
+  const transcriptMode = replayTranscriptMode(result.annotatedTranscript?.length ?? 0, result.structuredTranscript?.length ?? 0)
 
   const assessmentSelection = data.evidence.identity.state === 'confirmed' && data.evidence.identity.revision
     ? { selectionRevision: data.evidence.identity.revision, transcriptRevision: data.evidence.transcriptRevision }
@@ -1255,7 +1293,13 @@ export function ReplayResults() {
   return (
     <div>
       {reanalyzing !== 'idle' && reanalyzing !== 'completed' && (
-        <ReanalyzeOverlay status={reanalyzing} error={reanalyzeError} />
+        <ReanalyzeOverlay
+          status={reanalyzing}
+          error={reanalyzeError}
+          hasPriorAssessment={!!data.skillScores}
+          onDismiss={dismissReanalyze}
+          onRetry={retryReanalyze}
+        />
       )}
 
       <ReanalyzeDialog
@@ -1356,7 +1400,7 @@ export function ReplayResults() {
         </div>
       )}
 
-      <ReplayEvidencePanel key={`${id}:${data.evidence.recording?.signature}:${data.evidence.identity.revision}`} sessionId={id!} evidence={data.evidence} audioDisabled={!!data.audioDownloadDisabled || exportFlags.hideAudioDownload} onConfirmed={loadResults} />
+      <ReplayEvidencePanel key={`${id}:${data.evidence.recording?.signature}:${data.evidence.identity.revision}`} sessionId={id!} evidence={data.evidence} audioDisabled={!!data.audioDownloadDisabled || exportFlags.hideAudioDownload} speakerHint={session.participantName} onConfirmed={loadResults} />
       <ReplayAssessmentAction evidence={data.evidence} hasAssessment={!!data.skillScores}
         busy={reanalyzing === 'transcribing' || reanalyzing === 'analyzing'}
         onAnalyze={() => {
@@ -1720,7 +1764,36 @@ export function ReplayResults() {
         {/* AI Insights */}
         <TabsContent value="insights">
           <div className="grid gap-4">
+            {insightsState === 'confirm_speaker' && (
+              <Card className="border-dashed">
+                <CardContent className="py-5">
+                  <p className="font-medium">Confirm your speaker to generate personalized AI Insights.</p>
+                </CardContent>
+              </Card>
+            )}
+            {insightsState === 'ready_to_analyze' && (
+              <Card className="border-dashed">
+                <CardContent className="py-5">
+                  <p className="font-medium">Ready to analyze your selected speech.</p>
+                </CardContent>
+              </Card>
+            )}
+            {insightsState === 'insufficient_speech' && (
+              <Card className="border-dashed">
+                <CardContent className="py-5">
+                  <p className="font-medium">There is not enough of this speaker’s speech to score communication or generate coaching.</p>
+                </CardContent>
+              </Card>
+            )}
+            {insightsState === 'insights_empty' && (
+              <Card className="border-dashed">
+                <CardContent className="py-5">
+                  <p className="font-medium">No reliable personalized moments were generated from this speaker’s available transcript.</p>
+                </CardContent>
+              </Card>
+            )}
             {/* Context-specific feedback */}
+            {hasInsightItems(result.contextSpecificFeedback as unknown[]) && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Context-Specific Feedback</CardTitle>
@@ -1752,8 +1825,10 @@ export function ReplayResults() {
                 })}
               </CardContent>
             </Card>
+            )}
 
             {/* Key Moments */}
+            {hasInsightItems(result.keyMoments as unknown[]) && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Key Moments</CardTitle>
@@ -1773,6 +1848,7 @@ export function ReplayResults() {
                 ))}
               </CardContent>
             </Card>
+            )}
 
             {/* Elevate CTA */}
             <div className="flex items-center justify-between rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
@@ -1794,13 +1870,13 @@ export function ReplayResults() {
         <TabsContent value="transcript">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Annotated Transcript</CardTitle>
+              <CardTitle className="text-base">{transcriptMode === 'annotated' ? 'Annotated Transcript' : 'Full transcript — not annotated yet'}</CardTitle>
               <CardDescription>
-                AI-highlighted segments from the conversation
+                {transcriptMode === 'annotated' ? 'AI-highlighted segments from the conversation' : 'Speaker-labeled turns from the uploaded or transcribed conversation'}
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {result.annotatedTranscript?.length > 0 ? (
+              {transcriptMode === 'annotated' ? (
                 <div className="grid gap-3">
                   <CommunicationTimeline
                     segments={result.annotatedTranscript}
@@ -1853,8 +1929,17 @@ export function ReplayResults() {
                   })}
                 </div>
               ) : (
-                <div className="rounded-md border p-4">
-                  <p className="whitespace-pre-wrap text-sm">{result.transcriptText}</p>
+                <div className="grid gap-2">
+                  {transcriptMode === 'turn_blocks' ? result.structuredTranscript.map((seg, i) => (
+                    <div key={`${seg.speaker}-${i}`} className="rounded-md border p-3">
+                      <p className="text-xs font-semibold text-muted-foreground">{seg.speaker || 'Speaker'}</p>
+                      <p className="mt-1 whitespace-pre-wrap text-sm">{seg.text || ''}</p>
+                    </div>
+                  )) : (
+                    <div className="rounded-md border p-4">
+                      <p className="whitespace-pre-wrap text-sm">{result.transcriptText}</p>
+                    </div>
+                  )}
                 </div>
               )}
             </CardContent>

@@ -9,7 +9,9 @@ export interface ReplayEvidence {
   excludedWords: number
   recording: { uploadId: string; signature: string; duration: number | null } | null
   identity: { state: string; speaker: string | null; revision: string | null }
-  speakers: { speaker: string; excerpt: string; preview: Clip | null }[]
+  speakerChoice?: 'named' | 'single_unlabelled' | 'insufficient_labels'
+  assessmentGate?: 'insufficient_speech' | null
+  speakers: { speaker: string; excerpt: string; preview: Clip | null; assessmentEligible?: boolean }[]
   source: string
   accuracy: string
   measurement: string
