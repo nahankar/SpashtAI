@@ -101,4 +101,17 @@ describe('delivery alignment route integration', () => {
     expect((await request(app).post('/sessions/session/transcript').send(conversationData)).status).toBe(200)
     expect(mocks.session.updateMany).not.toHaveBeenCalled()
   })
+
+  it('does not promote legacy actual offsets without recording-bound alignment', async () => {
+    mocks.session.findUnique.mockResolvedValue({ ...session, deliveryAlignmentResult: null })
+    mocks.sessionTurn.findMany.mockResolvedValue(turns.map((turn, i) => ({
+      ...turn, turnIndex: i, audioStart: 0, audioEnd: 25,
+      words: result.turns[i].words.map(word => ({ ...word, timingOrigin: 'actual' })),
+    })))
+    const response = await inspectDeliveryMoments('session')
+    expect(response.status).toMatchObject({
+      state: 'suppressed', reason: 'validated_word_alignment_required', validTurnCount: 0,
+    })
+    expect(response.moments).toEqual([])
+  })
 })

@@ -10,6 +10,7 @@ import { resolveElevateAudioInputSignature, resolveElevateSessionAudio } from '.
 import { ALIGNMENT_VERSION, committedTranscriptMatches, resolveCanonicalDeliveryPace, timelineSignature, transcriptSignature, validateAlignmentResult } from '../analytics/alignedDelivery'
 import { calculateSkillScores, type TextSignals } from '../analytics/skillScores'
 import { assessPaceEvidence } from '../analytics/pace'
+import { liveEvidenceSummary } from '../analytics/liveDeliveryEvidence'
 
 const LEASE_MS = 20 * 60_000
 const JOB_TIMEOUT_MS = 15 * 60_000
@@ -40,6 +41,12 @@ export async function requestDeliveryAlignment(tx: Prisma.TransactionClient, ses
   if (!scheduled.count) return
   const metrics = await tx.sessionMetrics.findUnique({ where: { sessionId } })
   const status = object(metrics?.processingStatus)
+  const { deliveryTiming: _previousTiming, ...currentStatus } = status
+  if (_previousTiming && object(status.pace).origin !== 'post_session_alignment') {
+    await tx.sessionMetrics.update({ where: { sessionId }, data: {
+      processingStatus: json(currentStatus),
+    } })
+  }
   if (object(status.pace).origin === 'post_session_alignment') {
     const pace = assessPaceEvidence(null, 0)
     const signals = object(metrics?.communicationSignals)
@@ -50,7 +57,7 @@ export async function requestDeliveryAlignment(tx: Prisma.TransactionClient, ses
     const oldScores = object(metrics?.skillScores)
     await tx.sessionMetrics.update({ where: { sessionId }, data: {
       userWpm: 0, userSpeakingTime: 0,
-      processingStatus: json({ ...status, pace }),
+      processingStatus: json({ ...currentStatus, pace }),
       ...(metrics?.communicationSignals ? { communicationSignals: json(communicationSignals) } : {}),
       ...(metrics?.skillScores ? { skillScores: json({ ...oldScores,
         scores: { ...object(oldScores.scores), pacing: null },
@@ -128,8 +135,18 @@ async function processSession(sessionId: string, owner: string): Promise<void> {
   const stored = object(snapshot.deliveryAlignmentResult)
   const reusable = stored.version === ALIGNMENT_VERSION && stored.inputSignature === resolved.inputSignature &&
     stored.transcriptSignature === signature && stored.timelineSignature === timelineSignature(resolved.segments)
-  const raw = reusable ? stored : await runAlignmentProcess(payload)
-  const result = validateAlignmentResult(raw, snapshot.turns, resolved.segments, resolved.inputSignature)
+  let result
+  if (reusable) {
+    try {
+      result = validateAlignmentResult(stored, snapshot.turns, resolved.segments, resolved.inputSignature)
+    } catch {
+      console.warn(`[delivery-alignment] ${sessionId}: stored alignment failed validation; recomputing`)
+    }
+  }
+  if (!result) {
+    const raw = await runAlignmentProcess(payload)
+    result = validateAlignmentResult(raw, snapshot.turns, resolved.segments, resolved.inputSignature)
+  }
   if (!result.turns.length) throw new Error('alignment_coverage_insufficient')
 
   await prisma.$transaction(async tx => {
@@ -166,7 +183,13 @@ async function processSession(sessionId: string, owner: string): Promise<void> {
       scores = calculateSkillScores(communicationSignals as unknown as TextSignals, latest.metrics?.totalTurns ?? latest.turns.length)
     }
     const data = {
-      processingStatus: json({ ...currentStatus, pace }),
+      processingStatus: json({ ...currentStatus, pace, deliveryTiming: {
+        state: result.turns.length === latest.turns.length ? 'complete' : 'partial',
+        source: 'forced_alignment',
+        acceptedTurnCount: result.turns.length,
+        totalTurnCount: latest.turns.length,
+        liveSource: liveEvidenceSummary(latest.turns),
+      } }),
       ...(pace.wpm != null ? { userWpm: pace.wpm, userSpeakingTime: pace.speakingSeconds } : {}),
       ...(latest.metrics?.communicationSignals ? { communicationSignals: json(communicationSignals) } : {}),
       ...(scores ? { skillScores: json(scores) } : {}),

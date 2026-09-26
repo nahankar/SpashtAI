@@ -1,5 +1,6 @@
 import { createHash } from 'crypto'
 import { applyAlignedDelivery } from './alignedDelivery'
+import { withApproximatePlaybackTiming } from './liveDeliveryEvidence'
 import {
   resolveElevateSessionAudio,
   type ResolvedAudioSegment,
@@ -676,7 +677,7 @@ export async function inspectDeliveryMoments(sessionId: string): Promise<Deliver
     }
   }
 
-  const typedTurns = applyAlignedDelivery(turns as CandidateTurn[], alignment?.deliveryAlignmentResult,
+  const typedTurns = applyAlignedDelivery(withApproximatePlaybackTiming(turns as CandidateTurn[]), alignment?.deliveryAlignmentResult,
     resolved.inputSignature, resolved.segments)
   const validTurnCount = typedTurns.filter((turn) => validateTurnWordTiming(turn)).length
   if (!validTurnCount) {

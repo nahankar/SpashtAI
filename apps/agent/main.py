@@ -43,6 +43,8 @@ from echo_guard import is_likely_echo, record_assistant_speech
 from text_sanitize import StreamingThinkingStripper, is_thinking_only, strip_thinking_blocks
 from voice_backends import VoiceBackendConfig, apply_turn_detection_update, build_session, metadata_label
 from backend_profiles import BackendProfile, SttMode, profile_for
+from elevate_live_words import LiveWordEvidenceCollector
+from elevate_turn_upload import build_turn_upload_batches
 from live_pacing import LivePacingTracker
 from pace_timestamps import validate_timestamp_evidence
 
@@ -100,11 +102,6 @@ logger.setLevel(logging.INFO)
 SERVER_URL = os.getenv("SERVER_URL", "http://localhost:4000")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 INTERNAL_AGENT_TOKEN = os.getenv("INTERNAL_AGENT_TOKEN", "dev-internal-agent-token")
-
-# Empirical AWS Transcribe finalize/transcription lag (seconds): a FINAL
-# transcript is delivered roughly this long after the audio it covers. Used to
-# pin the STT timeline's t0 to wall-clock for replay/karaoke alignment.
-_STT_FINALIZE_LAG_SEC = 1.1
 
 # Timezone configuration - Indian Standard Time
 IST = pytz.timezone('Asia/Kolkata')
@@ -397,6 +394,7 @@ class CoachingAgent(Agent):
         focus_area: str | None = None,
         session_name: str | None = None,
         voice_backend: str = "nova-sonic",
+        stt_provider: str | None = None,
         focus_score: float | None = None,
         monologue_guard: "MonologueGuard | None" = None,
         is_resume: bool = False,
@@ -421,30 +419,13 @@ class CoachingAgent(Agent):
         self._monologue_guard = monologue_guard
         self._last_greeting_text: str | None = None
         self._is_resume = is_resume
-        # Accumulated STT word/segment timings (stream-relative seconds), used to
-        # build per-turn replay records (SessionTurn) with audio offsets + karaoke
-        # word timings at session end. Empty for backends without timestamps.
-        self._stt_words: list[dict] = []
-        self._stt_segments: list[dict] = []
-        # Wall-clock epoch (seconds) corresponding to STT timeline t=0. AWS
-        # Transcribe word/segment times are relative to when audio starts
-        # flowing (≈ the user's first word, AFTER the greeting), whereas the
-        # browser recording starts at room-connect. Persisting this anchor lets
-        # the server realign per-turn offsets to the recording timeline so
-        # karaoke matches the audio (the lead-in gap is variable per session).
-        self._stt_t0_epoch: float | None = None
+        self._live_word_evidence = LiveWordEvidenceCollector(
+            provider=stt_provider or voice_backend
+        )
 
     async def stt_node(self, audio, model_settings: ModelSettings):
-        """Tap the STT stream for real word/segment timestamps.
-
-        AWS Transcribe streaming returns per-segment start/end times and
-        word-level timestamps, but the high-level `user_input_transcribed`
-        event drops them. We intercept FINAL_TRANSCRIPT events here and feed
-        the measured speech duration to the pacing tracker so WPM is computed
-        from real timing instead of the VAD-paired 150-WPM estimate fallback.
-        Backends without timing (e.g. Whisper) simply never trigger this and
-        keep using the VAD path.
-        """
+        """Retain source evidence without assuming the browser recording clock."""
+        self._live_word_evidence.begin_stream()
         async for ev in Agent.default.stt_node(self, audio, model_settings):
             try:
                 if (
@@ -453,8 +434,9 @@ class CoachingAgent(Agent):
                     and ev.alternatives
                 ):
                     self._ingest_stt_word_timing(ev.alternatives[0])
+                    self._live_word_evidence.ingest(ev)
             except Exception as e:  # never let metrics break transcription
-                logger.debug("stt word-timing ingest failed: %s", e)
+                logger.warning("Live timing capture unavailable: %s", type(e).__name__)
             yield ev
 
     def _ingest_stt_word_timing(self, alt) -> None:
@@ -479,63 +461,6 @@ class CoachingAgent(Agent):
             invalid_timestamp_count=evidence.invalid_timestamp_count,
             out_of_order_timestamp_count=evidence.out_of_order_timestamp_count,
         )
-        # Persist raw word/segment timings (stream-relative seconds) for the
-        # replay timeline. Best-effort: never let capture break transcription.
-        try:
-            if start is not None and end is not None:
-                # Anchor the STT timeline to wall-clock on the first timed
-                # segment so the server can realign offsets to the recording
-                # start. A FINAL transcript is delivered ~(end + finalize lag)
-                # after the stream's t0, so subtract `end` (NOT `start`):
-                # using start overshoots t0 by the whole first-utterance duration
-                # (seconds), landing karaoke that much late. The residual ~1s
-                # finalize/transcription lag is removed by a small constant.
-                if self._stt_t0_epoch is None:
-                    self._stt_t0_epoch = time.time() - float(end) - _STT_FINALIZE_LAG_SEC
-                self._stt_segments.append(
-                    {"text": text, "start": float(start), "end": float(end)}
-                )
-            appended = 0
-            if words:
-                for w in words:
-                    wtext = (
-                        getattr(w, "word", None) or getattr(w, "text", "") or ""
-                    ).strip()
-                    ws = getattr(w, "start_time", None)
-                    we = getattr(w, "end_time", None)
-                    if wtext and ws is not None and we is not None:
-                        self._stt_words.append(
-                            {
-                                "w": wtext,
-                                "start": float(ws),
-                                "end": float(we),
-                                "timingOrigin": "actual",
-                            }
-                        )
-                        appended += 1
-            # AWS Transcribe via the LiveKit plugin exposes segment-level
-            # start/end but drops the per-word Items list, so `words` is usually
-            # empty. When we have a segment span but no real word timings,
-            # synthesize them by distributing the span evenly across tokens.
-            # Segments are short (a few words), so this approximation tracks the
-            # audio closely enough for karaoke highlighting + per-word seek.
-            if appended == 0 and start is not None and end is not None:
-                toks = text.split()
-                seg_start = float(start)
-                seg_span = max(float(end) - seg_start, 0.0)
-                per = (seg_span / len(toks)) if (toks and seg_span > 0) else 0.0
-                for i, tok in enumerate(toks):
-                    ws = seg_start + i * per
-                    self._stt_words.append(
-                        {
-                            "w": tok,
-                            "start": ws,
-                            "end": ws + per,
-                            "timingOrigin": "synthetic",
-                        }
-                    )
-        except Exception as e:
-            logger.debug("stt word capture failed: %s", e)
 
     def opening_greeting_text(self) -> str:
         """Spoken greeting via TTS — no LLM round-trip (reliable on pipeline-bedrock)."""
@@ -1943,6 +1868,11 @@ async def entrypoint(ctx: JobContext):
             focus_area=focus_area,
             session_name=session_name,
             voice_backend=voice_cfg.backend,
+            stt_provider=(
+                "nova-sonic" if voice_cfg.backend == "nova-sonic"
+                else "whisper" if voice_cfg.backend == "pipeline-premium"
+                else voice_cfg.stt_provider
+            ),
             focus_score=None if booth_demo else focus_score,
             monologue_guard=monologue_guard,
             is_resume=bool(history_messages),
@@ -2730,17 +2660,14 @@ async def entrypoint(ctx: JobContext):
         # ── Persist per-turn replay records (SessionTurn) ──────────────────
         # Runs independently of audio/analytics success so the replay always has
         # data. Build per-turn rows from committed turns + captured STT word
-        # timings. User words are sliced greedily by word count (both streams are
-        # chronological); assistant turns carry text only.
+        # timings. Source evidence is lexically matched, never greedily assigned
+        # by word count or promoted onto the browser recording clock.
         if cleanup_persistence_enabled and advanced_metrics:
             try:
-                stt_words = list(getattr(agent, "_stt_words", []) or [])
-                stt_segments = list(getattr(agent, "_stt_segments", []) or [])
                 committed_turns = advanced_metrics.basic_collector.session_metrics.turns or []
                 committed_user_meta = locals().get("committed_user_turns", {}) or {}
                 turns_payload: list[dict] = []
                 user_seq = 0
-                word_cursor = 0
                 for idx, t in enumerate(committed_turns):
                     text = (t.text or "").strip()
                     if not text:
@@ -2751,76 +2678,30 @@ async def entrypoint(ctx: JobContext):
                         meta = committed_user_meta.get(user_seq)
                         if meta and meta.get("metrics"):
                             entry["metrics"] = dict(meta["metrics"])
-                        n = t.word_count or len(text.split())
-                        slice_words = stt_words[word_cursor : word_cursor + n]
-                        word_cursor += n
-                        if slice_words:
-                            entry["audioStart"] = slice_words[0]["start"]
-                            entry["audioEnd"] = slice_words[-1]["end"]
-                            entry["words"] = slice_words
-                        origins = [
-                            str(word.get("timingOrigin") or "unknown")
-                            for word in slice_words
-                        ]
-                        invalid_intervals = sum(
-                            1
-                            for word in slice_words
-                            if not isinstance(word.get("start"), (int, float))
-                            or not isinstance(word.get("end"), (int, float))
-                            or float(word["end"]) < float(word["start"])
-                        )
-                        out_of_order = sum(
-                            1
-                            for previous, current in zip(slice_words, slice_words[1:])
-                            if isinstance(previous.get("start"), (int, float))
-                            and isinstance(current.get("start"), (int, float))
-                            and current["start"] < previous["start"]
-                        )
-                        metrics = entry.setdefault("metrics", {})
-                        metrics["timing_validation"] = {
-                            "expectedWordCount": n,
-                            "capturedWordCount": len(slice_words),
-                            "actualWordCount": origins.count("actual"),
-                            "syntheticWordCount": origins.count("synthetic"),
-                            "unknownOriginCount": origins.count("unknown"),
-                            "invalidIntervalCount": invalid_intervals,
-                            "outOfOrderCount": out_of_order,
-                            "eligibleForDeliveryEvidence": (
-                                len(slice_words) == n
-                                and n > 0
-                                and origins.count("actual") == n
-                                and invalid_intervals == 0
-                                and out_of_order == 0
-                            ),
-                        }
                     turns_payload.append(entry)
 
                 if turns_payload:
+                    source_evidence = agent._live_word_evidence.for_turns(turns_payload)
+                    for entry, evidence in zip(turns_payload, source_evidence):
+                        if entry["role"] == "user":
+                            entry.setdefault("metrics", {})["live_word_evidence"] = evidence
+                    upload_batches = build_turn_upload_batches(turns_payload, segment_id)
                     import aiohttp
                     async with aiohttp.ClientSession() as _ts:
                         turns_url = f"{SERVER_URL}/internal/sessions/{session_id}/turns"
-                        post_body: dict = {"turns": turns_payload}
-                        if segment_id:
-                            post_body["segmentId"] = segment_id
-                        # STT timeline t0 (epoch ms). The server shifts all
-                        # offsets onto the recording timeline using this anchor
-                        # vs Session.recordingStartedAt, cancelling the variable
-                        # greeting/lead-in gap so karaoke matches the audio.
-                        if agent._stt_t0_epoch is not None:
-                            post_body["sttEpochMs"] = int(agent._stt_t0_epoch * 1000)
-                        async with _ts.post(
-                            turns_url,
-                            json=post_body,
-                            headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
-                            timeout=aiohttp.ClientTimeout(total=10.0),
-                        ) as resp:
-                            if resp.status in (200, 201):
-                                logger.info(
-                                    f"✅ Persisted {len(turns_payload)} SessionTurn rows "
-                                    f"({len(stt_words)} STT words from {len(stt_segments)} segments)"
-                                )
-                            else:
-                                logger.warning(f"⚠️ SessionTurn persist returned {resp.status}")
+                        for post_body in upload_batches:
+                            async with _ts.post(
+                                turns_url,
+                                json=post_body,
+                                headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
+                                timeout=aiohttp.ClientTimeout(total=10.0),
+                            ) as resp:
+                                if resp.status not in (200, 201):
+                                    raise RuntimeError(f"SessionTurn batch persist returned {resp.status}")
+                        logger.info(
+                            "Persisted %s SessionTurn rows in %s bounded requests",
+                            len(turns_payload), len(upload_batches),
+                        )
             except Exception as turns_error:
                 logger.error(f"❌ Error persisting session turns: {turns_error}")
 
