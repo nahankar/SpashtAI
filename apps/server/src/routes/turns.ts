@@ -1,6 +1,12 @@
 import type { Request, Response } from 'express'
 import { prisma } from '../lib/prisma'
 import { applyAlignedDelivery } from '../analytics/alignedDelivery'
+import {
+  approximatePlaybackWords,
+  incomingTimingMetrics,
+  publicTurnMetrics,
+  withApproximatePlaybackTiming,
+} from '../analytics/liveDeliveryEvidence'
 import { requestDeliveryAlignment } from '../lib/deliveryAlignmentWorker'
 import {
   exportDenied,
@@ -45,11 +51,7 @@ interface IncomingTurn {
   coachNote?: string | null
 }
 
-/**
- * Real word boundaries are delivery evidence.  The ffmpeg turn-region fallback
- * is valuable for Replay, but it redistributes words and must never replace a
- * complete observed timing stream just to improve karaoke positioning.
- */
+/** Source-shape check only; it does not establish the recording clock. */
 export function hasObservedWordTiming(words: unknown): boolean {
   return (
     Array.isArray(words) &&
@@ -106,6 +108,7 @@ export async function getSessionTurns(req: Request, res: Response) {
       where: { sessionId },
       orderBy: { sequenceNo: 'asc' },
     })
+    turns = withApproximatePlaybackTiming(turns)
     const segments = await prisma.sessionSegment.findMany({
       where: { sessionId },
       orderBy: { segmentIndex: 'asc' },
@@ -186,9 +189,11 @@ export async function getSessionTurns(req: Request, res: Response) {
 
     // Respect per-user transcript-text restriction: blank the text + words but
     // keep the numeric metrics/scores so the analytics still render.
-    const sanitized = flags.hideTranscriptText
-      ? turns.map((t) => ({ ...t, text: '', words: null }))
-      : turns
+    const sanitized = turns.map(t => ({
+      ...t,
+      metrics: publicTurnMetrics(t.metrics),
+      ...(flags.hideTranscriptText ? { text: '', words: null } : {}),
+    }))
 
     // Prefer per-word STT clusters (matches what the user actually said per turn);
     // fall back to ffmpeg speech blips when words are unavailable.
@@ -282,11 +287,8 @@ export async function saveSessionTurnsForAgent(req: Request, res: Response) {
       return res.status(404).json({ error: 'Session segment not found' })
     }
 
-    // Primary alignment: derive per-turn timings straight from the recording.
-    // The user's mic track is the ground truth — ffmpeg silencedetect finds the
-    // exact speech regions, which we snap each user turn onto. This is immune to
-    // the STT word-clock's blind spots (it strips greeting lead-in and the
-    // coach's speaking gaps, so a single shift can't align later turns).
+    // Speech-region matching is approximate playback positioning, not word
+    // evidence. The signature-bound server alignment overlay supplies that.
     let alignmentInfo = 'audio: none'
     let alignedById: Map<number, IncomingTurn> | null = null
     try {
@@ -308,10 +310,8 @@ export async function saveSessionTurnsForAgent(req: Request, res: Response) {
       alignmentInfo = `audio: error ${String((err as Error)?.message ?? err)}`
     }
 
-    // Fallback: realign the STT timeline onto the recording timeline with a
-    // single per-session shift = (sttT0 − recordingStartedAt). Only used when
-    // audio-onset alignment is unavailable (no recording yet / ffmpeg missing /
-    // region count didn't match the user-turn count).
+    // Legacy agents send a callback-derived epoch. Preserve its approximate
+    // playback fallback, but never promote it to observed recording timing.
     const sttEpochMs = Number(req.body?.sttEpochMs)
     let shiftSec = 0
     const recordingStartedAt = segment?.recordingStartedAt ?? session.recordingStartedAt
@@ -329,8 +329,9 @@ export async function saveSessionTurnsForAgent(req: Request, res: Response) {
     const shiftTime = (v: number | null | undefined): number | null =>
       v == null ? null : Math.max(0, v + shiftSec)
     const shiftWords = (words: unknown): unknown => {
-      if (!Array.isArray(words) || shiftSec === 0) return words ?? undefined
-      return words.map((w: any) =>
+      const approximate = approximatePlaybackWords(words)
+      if (!Array.isArray(approximate) || shiftSec === 0) return approximate ?? undefined
+      return approximate.map((w: any) =>
         w && typeof w === 'object'
           ? { ...w, start: Math.max(0, (w.start ?? 0) + shiftSec), end: Math.max(0, (w.end ?? 0) + shiftSec) }
           : w,
@@ -354,28 +355,16 @@ export async function saveSessionTurnsForAgent(req: Request, res: Response) {
 
       for (const t of validTurns) {
         const a = alignedById?.get(t.turnIndex)
-        // Preserve observed word timing after its explicit STT-to-recording
-        // clock shift.  `a.words` contains a synthetic redistribution over
-        // ffmpeg speech regions and is therefore replay-only fallback data.
-        const data = hasObservedWordTiming(t.words)
-          ? {
-              role: t.role,
-              text: t.text,
-              audioStart: shiftTime(t.audioStart),
-              audioEnd: shiftTime(t.audioEnd),
-              words: shiftWords(t.words) as any,
-              metrics: (t.metrics ?? undefined) as any,
-              score: (t.score ?? undefined) as any,
-              coachNote: t.coachNote ?? null,
-            }
-          : a
+        const timingMetrics = t.metrics == null
+          ? undefined : incomingTimingMetrics(t.metrics, `${sessionId}/${t.turnIndex}`)
+        const data = a
           ? {
               role: t.role,
               text: t.text,
               audioStart: a.audioStart ?? null,
               audioEnd: a.audioEnd ?? null,
-              words: (a.words ?? undefined) as any,
-              metrics: (t.metrics ?? undefined) as any,
+              words: (approximatePlaybackWords(a.words) ?? undefined) as any,
+              metrics: timingMetrics as any,
               score: (t.score ?? undefined) as any,
               coachNote: t.coachNote ?? null,
             }
@@ -385,7 +374,7 @@ export async function saveSessionTurnsForAgent(req: Request, res: Response) {
               audioStart: shiftTime(t.audioStart),
               audioEnd: shiftTime(t.audioEnd),
               words: shiftWords(t.words) as any,
-              metrics: (t.metrics ?? undefined) as any,
+              metrics: timingMetrics as any,
               score: (t.score ?? undefined) as any,
               coachNote: t.coachNote ?? null,
             }

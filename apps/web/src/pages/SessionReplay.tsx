@@ -26,6 +26,7 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { getAuthHeaders, getAuthenticatedMediaUrl } from '@/lib/api-client'
 import { COACH_BUBBLE, USER_BUBBLE } from '@/lib/conversation'
+import { ElevateDeliveryClip, isElevateRecordingReady, watchElevateRecordingDuration } from '@/lib/elevateDeliveryClip'
 import { useIsPro } from '@/hooks/useIsPro'
 import { toast } from 'sonner'
 import { UserTurnBubble, normalizeTurnMetricsFromApi } from '@/components/session/UserTurnMetrics'
@@ -416,13 +417,64 @@ export function SessionReplay({
   const [trackBox, setTrackBox] = useState<{ left: number; width: number } | null>(null)
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const durationProbeRef = useRef<(() => void) | null>(null)
   const skipSeekingRef = useRef(false)
-  // A selected delivery clip may contain a pause, so this ref temporarily
-  // suspends the convenience "Skip gaps" feature until the clip finishes.
-  const deliveryClipEndRef = useRef<number | null>(null)
+  const skipSeekAbortRef = useRef<AbortController | null>(null)
+  const playbackCommandRef = useRef(0)
+  const [deliveryClip] = useState(() => new ElevateDeliveryClip(setCurrentTime))
   const turnRefs = useRef<Record<number, HTMLDivElement | null>>({})
   const handledFocusRef = useRef<number | null>(null)
+  const requestScopeRef = useRef<{ sessionId?: string; nonce: number | null } | null>(null)
+  const [audioSessionId, setAudioSessionId] = useState<string | null>(null)
   const effectiveAutoPlayNonce = clipRequest?.nonce ?? autoPlayNonce ?? focusRequest?.nonce ?? null
+  const recordingReady = isElevateRecordingReady({
+    sessionId, audioSessionId, audioUrl, audioAvailable, audioLoading, duration,
+  })
+
+  const cancelPendingPlayback = useCallback(() => {
+    playbackCommandRef.current += 1
+    skipSeekAbortRef.current?.abort()
+    skipSeekAbortRef.current = null
+    skipSeekingRef.current = false
+    return playbackCommandRef.current
+  }, [])
+
+  const setAudioElement = useCallback((audio: HTMLAudioElement | null) => {
+    const previous = audioRef.current
+    if (previous && previous !== audio) {
+      durationProbeRef.current?.()
+      durationProbeRef.current = null
+      cancelPendingPlayback()
+      previous.pause()
+      deliveryClip.cancel()
+    }
+    audioRef.current = audio
+  }, [cancelPendingPlayback, deliveryClip])
+
+  useLayoutEffect(() => {
+    const audio = audioRef.current
+    cancelPendingPlayback()
+    deliveryClip.cancel()
+    setCurrentTime(0)
+    setDuration(0)
+    setIsPlaying(false)
+    return () => {
+      durationProbeRef.current?.()
+      durationProbeRef.current = null
+      cancelPendingPlayback()
+      audio?.pause()
+      deliveryClip.cancel()
+    }
+  }, [sessionId, audioUrl, deliveryClip, cancelPendingPlayback])
+
+  useEffect(() => {
+    const previous = requestScopeRef.current
+    if (previous?.sessionId !== sessionId) {
+      handledFocusRef.current = previous?.nonce === effectiveAutoPlayNonce
+        ? effectiveAutoPlayNonce : null
+    }
+    requestScopeRef.current = { sessionId, nonce: effectiveAutoPlayNonce }
+  }, [sessionId, effectiveAutoPlayNonce])
 
   // ── Data: per-turn records ───────────────────────────────────────────
   useEffect(() => {
@@ -491,6 +543,8 @@ export function SessionReplay({
     if (!sessionId) return
     let cancelled = false
     let found = false
+    setAudioUrl(null)
+    setAudioSessionId(null)
     setAudioLoading(true)
     const url = getAuthenticatedMediaUrl(`/sessions/${sessionId}/recording/stream`)
     if (!url) {
@@ -507,6 +561,7 @@ export function SessionReplay({
           if (res.ok || res.status === 206) {
             found = true
             setAudioUrl(url)
+            setAudioSessionId(sessionId)
             setAudioAvailable(true)
           } else if (!silent) {
             setAudioUrl(null)
@@ -653,26 +708,16 @@ export function SessionReplay({
   )
 
   const applySkipGapsSeek = useCallback(
-    (audio: HTMLAudioElement): Promise<void> =>
+    (audio: HTMLAudioElement): Promise<boolean> =>
       new Promise((resolve) => {
-        const finish = () => {
-          skipSeekingRef.current = false
-          resolve()
-        }
-
-        if (skipSeekingRef.current) {
-          const wait = window.setInterval(() => {
-            if (!skipSeekingRef.current) {
-              window.clearInterval(wait)
-              void applySkipGapsSeek(audio).then(resolve)
-            }
-          }, 20)
+        if (deliveryClip.sync(audio) || skipSeekingRef.current) {
+          resolve(false)
           return
         }
 
         const resolved = resolveSkipGapsTime(audio.currentTime)
         if (resolved === null) {
-          resolve()
+          resolve(true)
           return
         }
         if (resolved === 'stop') {
@@ -681,101 +726,131 @@ export function SessionReplay({
           audio.pause()
           audio.currentTime = end
           setCurrentTime(end)
-          resolve()
+          resolve(false)
           return
         }
         if (Math.abs(audio.currentTime - resolved) < 0.05) {
-          resolve()
+          resolve(true)
           return
         }
 
         skipSeekingRef.current = true
+        const controller = new AbortController()
+        skipSeekAbortRef.current = controller
         audio.pause()
-        const onSeeked = () => {
+        const finish = (resume: boolean) => {
+          window.clearTimeout(timer)
           audio.removeEventListener('seeked', onSeeked)
-          finish()
+          controller.signal.removeEventListener('abort', onAbort)
+          if (skipSeekAbortRef.current === controller) {
+            skipSeekAbortRef.current = null
+            skipSeekingRef.current = false
+          }
+          resolve(resume)
         }
+        const onSeeked = () => finish(true)
+        const onAbort = () => finish(false)
+        const timer = window.setTimeout(onSeeked, 150)
         audio.addEventListener('seeked', onSeeked)
+        controller.signal.addEventListener('abort', onAbort, { once: true })
         audio.currentTime = resolved
         setCurrentTime(resolved)
-        window.setTimeout(() => {
-          if (skipSeekingRef.current) onSeeked()
-        }, 150)
       }),
-    [resolveSkipGapsTime, timelineEnd],
+    [resolveSkipGapsTime, timelineEnd, deliveryClip],
   )
+
+  const startPlayback = useCallback(async (audio: HTMLAudioElement, command: number) => {
+    if (command !== playbackCommandRef.current || audio !== audioRef.current) return
+    try {
+      await audio.play()
+    } catch (error) {
+      if (command !== playbackCommandRef.current || audio !== audioRef.current) return
+      console.warn('Recording playback failed:', error)
+      toast.error(deliveryClip.hasSelection(audio)
+        ? 'Audio playback was blocked. Press Play to retry the selected clip.'
+        : 'Audio playback was blocked. Press Play to retry.')
+    }
+  }, [deliveryClip])
 
   const syncSkipGapsDuringPlay = useCallback(
     async (audio: HTMLAudioElement) => {
+      const command = playbackCommandRef.current
       const wasPlaying = !audio.paused
-      await applySkipGapsSeek(audio)
-      if (wasPlaying && audio.paused) void audio.play()
+      const resume = await applySkipGapsSeek(audio)
+      if (resume && wasPlaying && audio.paused) await startPlayback(audio, command)
     },
-    [applySkipGapsSeek],
+    [applySkipGapsSeek, startPlayback],
   )
 
   const togglePlay = useCallback(async () => {
     const a = audioRef.current
     if (!a) return
+    const command = cancelPendingPlayback()
     if (a.paused) {
-      const clipEnd = deliveryClipEndRef.current
-      if (clipEnd != null && a.currentTime < clipEnd) {
-        try {
-          await a.play()
-        } catch (error) {
-          console.warn('Delivery evidence playback failed:', error)
-          toast.error('Audio playback was blocked. Press Play to retry the selected clip.')
-        }
+      if (deliveryClip.sync(a)) {
+        if (deliveryClip.hasSelection(a)) await startPlayback(a, command)
         return
       }
-      deliveryClipEndRef.current = null
       const end =
         timelineEnd && Number.isFinite(timelineEnd) ? timelineEnd : duration
       if (end && Number.isFinite(end) && a.currentTime >= end - 0.15) {
         a.currentTime = 0
         setCurrentTime(0)
       }
-      await applySkipGapsSeek(a)
-      void a.play()
+      if (await applySkipGapsSeek(a)) await startPlayback(a, command)
     } else {
-      deliveryClipEndRef.current = null
       a.pause()
+      deliveryClip.stopWatching()
     }
-  }, [applySkipGapsSeek, timelineEnd, duration])
+  }, [applySkipGapsSeek, timelineEnd, duration, deliveryClip, cancelPendingPlayback, startPlayback])
 
   const seekTo = useCallback(
     async (t: number) => {
       const a = audioRef.current
       if (!a || !Number.isFinite(t)) return
-      deliveryClipEndRef.current = null
+      cancelPendingPlayback()
+      if (deliveryClip.hasSelection(a) && a.paused) a.pause()
+      deliveryClip.cancel()
+      handledFocusRef.current = effectiveAutoPlayNonce
       a.currentTime = Math.max(0, t)
       if (skipGaps) await applySkipGapsSeek(a)
+      if (a !== audioRef.current) return
       setCurrentTime(a.currentTime)
     },
-    [skipGaps, applySkipGapsSeek],
+    [skipGaps, applySkipGapsSeek, deliveryClip, cancelPendingPlayback, effectiveAutoPlayNonce],
   )
 
   const playFrom = useCallback(
     async (t: number, includeGaps = false, clipEndSec?: number) => {
       const a = audioRef.current
-      if (!a || !Number.isFinite(t)) return
-      deliveryClipEndRef.current =
-        includeGaps && Number.isFinite(clipEndSec) && (clipEndSec as number) > t
-          ? (clipEndSec as number)
-          : null
-      a.currentTime = Math.max(0, t)
+      if (!a || !recordingReady) {
+        toast.error(audioAvailable
+          ? 'The recording is still loading. Please try playback again when it is ready.'
+          : 'The recording is unavailable for playback.')
+        return
+      }
+      if (!Number.isFinite(t) || (includeGaps &&
+        (clipEndSec == null || !Number.isFinite(clipEndSec) || t < 0 || clipEndSec <= t))) {
+        toast.error('This delivery clip is unavailable. Choose another moment or use the playback controls.')
+        return
+      }
+      const command = cancelPendingPlayback()
+      handledFocusRef.current = effectiveAutoPlayNonce
+      if (includeGaps && clipEndSec != null) {
+        deliveryClip.select(a, t, clipEndSec)
+      } else {
+        deliveryClip.cancel()
+        a.currentTime = Math.max(0, t)
+      }
       // A delivery moment can itself be a pause. Do not let the regular
       // convenience setting jump across the very evidence the user selected.
-      if (skipGaps && !includeGaps) await applySkipGapsSeek(a)
+      if (skipGaps && !includeGaps && !await applySkipGapsSeek(a)) return
+      if (command !== playbackCommandRef.current || a !== audioRef.current) return
       setCurrentTime(a.currentTime)
-      try {
-        await a.play()
-      } catch (error) {
-        console.warn('Delivery evidence playback failed:', error)
-        toast.error('Audio playback was blocked. Press Play to hear the selected clip.')
-      }
+      await startPlayback(a, command)
     },
-    [skipGaps, applySkipGapsSeek],
+    [skipGaps, applySkipGapsSeek, deliveryClip, cancelPendingPlayback, startPlayback,
+      effectiveAutoPlayNonce, recordingReady, audioAvailable],
   )
 
   const onScrubberClick = useCallback(
@@ -999,8 +1074,10 @@ export function SessionReplay({
 
   // "Hear it" / Elevate deep link: land on Playback and press Play (skip gaps on).
   useEffect(() => {
-    if (!effectiveAutoPlayNonce) return
+    if (effectiveAutoPlayNonce == null) return
     if (handledFocusRef.current === effectiveAutoPlayNonce) return
+    if (!recordingReady) return
+    if (audioSessionId !== sessionId) return
     if (turns.length === 0) return
     if (audioAvailable && !audioUrl) return
     const audio = audioRef.current
@@ -1024,6 +1101,9 @@ export function SessionReplay({
     }
   }, [
     effectiveAutoPlayNonce,
+    recordingReady,
+    audioSessionId,
+    sessionId,
     clipRequest,
     turns,
     audioUrl,
@@ -1063,25 +1143,22 @@ export function SessionReplay({
   useEffect(() => {
     if (!skipGaps) return
     const a = audioRef.current
-    const clipEnd = deliveryClipEndRef.current
-    if (clipEnd != null && a && a.currentTime < clipEnd - 0.01) return
+    if (a && deliveryClip.sync(a)) return
     if (a) void applySkipGapsSeek(a)
-  }, [skipGaps, applySkipGapsSeek])
+  }, [skipGaps, applySkipGapsSeek, deliveryClip])
 
   // timeupdate fires ~4×/s — poll faster while playing so gaps are not audible.
   useEffect(() => {
-    if (!skipGaps || !isPlaying || skipIntervals.length === 0) return
+    if (!isPlaying) return
     let raf = 0
     const tick = () => {
       const a = audioRef.current
-      if (a && !a.paused && !skipSeekingRef.current) {
-        const clipEnd = deliveryClipEndRef.current
-        if (clipEnd != null && a.currentTime < clipEnd - 0.01) {
+      if (a && !a.paused) {
+        if (deliveryClip.sync(a)) {
           raf = requestAnimationFrame(tick)
           return
         }
-        if (clipEnd != null) deliveryClipEndRef.current = null
-        const resolved = resolveSkipGapsTime(a.currentTime)
+        const resolved = skipSeekingRef.current ? null : resolveSkipGapsTime(a.currentTime)
         if (
           resolved !== null &&
           (resolved === 'stop' || Math.abs(a.currentTime - resolved) >= 0.05)
@@ -1093,23 +1170,15 @@ export function SessionReplay({
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [skipGaps, isPlaying, skipIntervals.length, resolveSkipGapsTime, syncSkipGapsDuringPlay])
+  }, [isPlaying, resolveSkipGapsTime, syncSkipGapsDuringPlay, deliveryClip])
 
   const handleTimeUpdate = useCallback(
     (e: React.SyntheticEvent<HTMLAudioElement>) => {
       const a = e.currentTarget
+      if (a !== audioRef.current) return
       const t = a.currentTime
-      const clipEnd = deliveryClipEndRef.current
-      if (clipEnd != null) {
-        if (t < clipEnd - 0.01) {
-          setCurrentTime(t)
-          return
-        }
-        // Keep the "Hear evidence" action scoped to the selected clip. This
-        // prevents Skip gaps from jumping over the pause after playback resumes.
-        deliveryClipEndRef.current = null
-        if (!a.paused) a.pause()
-        setCurrentTime(clipEnd)
+      if (deliveryClip.sync(a)) {
+        setCurrentTime(a.currentTime)
         return
       }
       // Stop at the user's last turn — ignore trailing coach audio / silence.
@@ -1131,7 +1200,7 @@ export function SessionReplay({
       }
       setCurrentTime(t)
     },
-    [skipGaps, skipIntervals.length, timelineEnd, resolveSkipGapsTime, syncSkipGapsDuringPlay],
+    [skipGaps, skipIntervals.length, timelineEnd, resolveSkipGapsTime, syncSkipGapsDuringPlay, deliveryClip],
   )
 
   // ── Render ───────────────────────────────────────────────────────────
@@ -1358,13 +1427,18 @@ export function SessionReplay({
       )}
 
       {audioAvailable && sessionId && (
-        <DeliveryMoments
-          sessionId={sessionId}
-          onMomentsChange={setDeliveryMarkers}
-          onPlayMoment={(startSeconds, endSeconds) =>
-            playFrom(startSeconds, true, endSeconds)
-          }
-        />
+        <>
+          {!recordingReady && <p role="status" className="mb-2 text-xs text-muted-foreground">
+            Loading the recording for evidence playback…
+          </p>}
+          <DeliveryMoments
+            sessionId={sessionId}
+            onMomentsChange={setDeliveryMarkers}
+            onPlayMoment={recordingReady
+              ? (startSeconds, endSeconds) => playFrom(startSeconds, true, endSeconds)
+              : undefined}
+          />
+        </>
       )}
 
       {/* Transcript */}
@@ -1510,6 +1584,7 @@ export function SessionReplay({
                       event.stopPropagation()
                       void playFrom(moment.clipStartSec, true, moment.clipEndSec)
                     }}
+                    disabled={!recordingReady}
                   />
                 )
               })}
@@ -1559,39 +1634,56 @@ export function SessionReplay({
         </div>
       )}
 
-      {audioUrl && (
+      {audioUrl && audioSessionId === sessionId && (
         <audio
-          ref={audioRef}
+          key={`${sessionId}:${audioUrl}`}
+          ref={setAudioElement}
           src={audioUrl}
+          muted={muted}
           onLoadedMetadata={(e) => {
             const a = e.currentTarget
-            setAudioLoading(false)
-            const d = a.duration
-            if (Number.isFinite(d) && d > 0) {
-              setDuration(d)
-              return
-            }
-            // Some WebM files report duration=Infinity until the browser seeks to the end.
-            const resolve = () => {
-              a.removeEventListener('timeupdate', resolve)
-              setDuration(Number.isFinite(a.duration) ? a.duration : 0)
-              a.currentTime = 0
-            }
-            a.addEventListener('timeupdate', resolve)
-            try {
-              a.currentTime = 1e7
-            } catch {
-              a.removeEventListener('timeupdate', resolve)
-            }
+            if (a !== audioRef.current) return
+            a.playbackRate = rate
+            durationProbeRef.current?.()
+            setAudioLoading(true)
+            durationProbeRef.current = watchElevateRecordingDuration(a, (value) => {
+              if (a !== audioRef.current) return
+              setDuration(value)
+              setAudioLoading(false)
+            }, () => {
+              if (a !== audioRef.current) return
+              setAudioLoading(false)
+              setAudioAvailable(false)
+              toast.error('The recording duration could not be read. Reload to retry playback.')
+            })
           }}
-          onError={() => {
+          onError={(e) => {
+            if (e.currentTarget !== audioRef.current) return
+            cancelPendingPlayback()
+            durationProbeRef.current?.()
+            durationProbeRef.current = null
+            e.currentTarget.pause()
+            deliveryClip.cancel()
             setAudioLoading(false)
             setAudioAvailable(false)
+            setIsPlaying(false)
           }}
           onTimeUpdate={handleTimeUpdate}
-          onPlay={() => setIsPlaying(true)}
-          onPause={() => setIsPlaying(false)}
-          onEnded={() => setIsPlaying(false)}
+          onPlay={(e) => {
+            if (e.currentTarget !== audioRef.current) return
+            deliveryClip.watch(e.currentTarget)
+            setIsPlaying(true)
+          }}
+          onPause={(e) => {
+            if (e.currentTarget !== audioRef.current) return
+            deliveryClip.stopWatching()
+            setIsPlaying(false)
+          }}
+          onEnded={(e) => {
+            if (e.currentTarget !== audioRef.current) return
+            deliveryClip.cancel()
+            setIsPlaying(false)
+          }}
           className="hidden"
         />
       )}

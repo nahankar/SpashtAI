@@ -43,9 +43,127 @@ alignment under the session lock so a job completing during analysis is retained
 
 Results show background progress independently of manual Reprocess access.
 Completion offers “View updated results” without interrupting current playback.
-Polling stops after 20 minutes; the server continues independently.
+Polling stops after 20 minutes of elapsed time; each request, including its
+response body, has a 15-second timeout. The server continues independently.
 When retries are exhausted, missing audio or transcript evidence is reported as
 unavailable consistently in both the progress banner and Delivery Moments.
+
+## Live timing is source evidence, not a recording clock
+
+The agent retains supported final word evidence under
+`SessionTurn.metrics.live_word_evidence` with version `elevate-live-words-v1`.
+It includes the configured provider, words and source times, genuine recognition
+confidence when supplied, and an explicit `source_only` or `unavailable` state.
+`clock` is `stt_stream` and `mapping` is null. Missing capability, incomplete
+lexical matches and ambiguous source fragments are not filled by interpolation.
+
+The pinned LiveKit agents/AWS 1.5.8 SDK already exposes timed words as
+`SpeechData.words` containing `TimedString` instances. Their text is `str(word)`,
+not a `word` or `text` attribute, and the SDK has already applied
+`start_time_offset` to the endpoints. The collector reads the public fields and
+does not apply that offset twice or replace the provider. The high-level
+`UserInputTranscribedEvent` does not carry those words.
+
+AWS result/stream identities are not propagated through the pinned plugin's
+`SpeechEvent`; the collector does not invent them. Each new agent STT-node
+invocation starts an anonymous source epoch. Offset changes and regressing times
+also separate epochs. The plugin can hide a reconnect with identical content and
+clock values; that ambiguity is another reason not to certify recording timing.
+The SDK turns missing recognition confidence into zero. That ambiguous
+`TimedString` zero is omitted; an explicitly supplied dictionary confidence of
+zero is retained as source data.
+
+Backend behavior:
+
+| Configured backend | Source-word capability | Recording evidence |
+| --- | --- | --- |
+| Transcribe pipeline | Public timed words retained; exact lexical matching | Source-only until recording alignment |
+| Whisper pipeline | Retain timed words only if supplied; text/chunk-only timing is unavailable | Automatic alignment fallback |
+| Nova Sonic | No STT-node word events in the current speech-to-speech path | Automatic alignment fallback |
+
+Source extraction runs alongside the existing live pace ingestion and yields
+the original events unchanged. Its failure must not drop a coach transcript or
+change the voice backend.
+
+Example internal per-turn source metadata (not returned in public turn metrics):
+
+```json
+{
+  "version": "elevate-live-words-v1",
+  "provider": "transcribe",
+  "state": "source_only",
+  "reason": "unanchored_stt_stream",
+  "clock": "stt_stream",
+  "words": [
+    {"w": "hello", "start": 10, "end": 10.4, "recognitionConfidence": 0.95}
+  ],
+  "mapping": null
+}
+```
+
+Partial source words can be retained with a reason such as
+`incomplete_word_timestamps`; they are still not recording evidence. A turn
+crossing source epochs, an ambiguous repeated phrase, or missing word data is
+reported explicitly rather than attaching the next available words to it.
+
+Turn uploads are split into idempotent requests of at most 96 KiB, measured
+with the same JSON serialization as the HTTP client, beneath the API's 100 KiB
+body limit. Stable local turn indexes and committed text are preserved. If one
+turn's optional word metadata is too large, it is withheld with reason
+`source_payload_limit` and a warning instead of causing the entire upload to
+fail. A single committed turn that still exceeds the limit without source words
+raises an explicit error; its text is never silently truncated. Alignment waits
+for the complete committed transcript while batches arrive.
+
+The old callback-time-minus-finalization-lag estimate is no longer emitted by
+the agent. It cannot establish correspondence between the STT stream and the
+browser's independently encoded recording, especially after reconnects. Legacy
+agent offsets remain approximate playback data only. The server does not accept
+a caller-provided "verified" mapping or the `actual` word-origin label as proof
+of recording-clock accuracy.
+
+Public turn responses strip the internal source-word metadata (including when
+transcript text is restricted). Stored words are treated as approximate before
+the signature-bound alignment overlay is applied. The same rule covers Delivery
+Moments and the word input to manual Reprocess. No source-only words are used
+to create exact evidence clips.
+
+This release does **not** establish a sample-level live-to-browser clock anchor,
+so it does not bypass Gentle for live words. Existing live duration-based pace
+remains governed by the existing pace policy; it is not evidence for where a
+word occurs in a saved recording. A validated, current cached alignment is reused
+without another subprocess; corrupt cached results are explicitly rejected and
+recomputed rather than repeatedly retried as if they were valid.
+
+After automatic alignment, `processingStatus.deliveryTiming` reports:
+
+```json
+{
+  "state": "partial",
+  "source": "forced_alignment",
+  "acceptedTurnCount": 2,
+  "totalTurnCount": 3,
+  "liveSource": {
+    "sourceOnlyTurns": 2,
+    "unavailableTurns": 1,
+    "recordingClockMapped": false
+  }
+}
+```
+
+`complete` here means that every committed user turn passed the alignment
+checks, not that a human certified every boundary. A partial result can provide
+eligible moments while failing the stricter aggregate pace requirements.
+Requeueing removes this summary until current inputs have been processed.
+The metrics endpoint also returns a sanitized `deliveryAlignmentError` reason
+for user-facing status; filesystem paths and arbitrary subprocess errors are
+not exposed through that field.
+
+Before live timing can replace alignment, implement and evaluate an actual
+sample-clock correlation with the retained recording. Provider clocks, callback
+timestamps, shared wall-clock estimates and diarization labels are not a
+substitute. This requires capture/protocol work beyond retaining STT word items;
+no new schema, speech provider or default batch transcription is introduced here.
 
 ## Acceptance before release
 
@@ -64,3 +182,40 @@ unavailable consistently in both the progress banner and Delivery Moments.
 Automated tests validate the mapping, job lifecycle and API handoff using test
 alignment output. They do not establish real-world alignment accuracy or coaching
 calibration. Human-labelled holdout evaluation remains an independent requirement.
+
+## Implementation handoff
+
+This work is isolated on `feature/elevate-live-delivery-evidence`, based on
+`04aa9f2`. It does not change schema/migrations, dependencies, feature flags,
+Replay product files, shared score/Progress Pulse logic, or the shared PDF
+renderer. Existing report inputs continue to use the canonical pace path.
+No batch transcription, new speech provider, calibrated acoustic claims, or
+production feature enablement is added.
+
+Validation:
+
+- 61 Python tests: source collector, real pinned SDK objects, actual
+  `CoachingAgent.stt_node` wiring, bounded turn uploads, source epoch changes
+  and live pacing.
+- 139 affected server tests across 19 suites: provenance/clock gating, private
+  source metadata, word alignment, pace, recording resolution, retries,
+  stale-input rejection, manual reprocess and discard behavior.
+- All 78 web tests, web typecheck, ESLint and production build passed.
+- Server TypeScript build passed.
+
+Python integration tests disable the in-process signal service and use mocked
+provider streams with actual public SDK event objects; they do not contact AWS.
+Playback-controller tests use controlled media clocks, including the skip-gap
+race at the selected clip end. The controller clamps the media clock before
+clearing the clip and uses a 50 ms watcher; browser scheduling can still be
+throttled, so this is not a real-browser latency guarantee.
+Evidence buttons, timeline markers and automatic clip requests wait for usable
+metadata from the current session's recording. Indefinite WebM duration probes
+are cancellable, time out after ten seconds, and cannot reset a later evidence
+seek. Polling tests cover hung requests/bodies, elapsed deadlines and cancellation.
+
+The remaining release gate is an authorized end-to-end recording acceptance
+pass, including resumed segments and human-checked clip boundaries. Removing
+Gentle is separately gated on a defensible live-to-retained-audio sample-clock
+mapping. Neither synthetic fixtures nor the SDK's word confidence establishes
+that mapping.

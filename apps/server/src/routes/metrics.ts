@@ -19,7 +19,8 @@ import {
 } from '../analytics/pace'
 import { resolveAgentPython } from '../lib/agentPython'
 import { queueDeliveryAlignment, requestDeliveryAlignment } from '../lib/deliveryAlignmentWorker'
-import { fullUserTranscriptTokens } from '../analytics/alignedDelivery'
+import { applyAlignedDelivery, fullUserTranscriptTokens } from '../analytics/alignedDelivery'
+import { publicAlignmentReason, withApproximatePlaybackTiming } from '../analytics/liveDeliveryEvidence'
 import { getReprocessJob, startReprocessJob } from '../lib/reprocessJobs'
 import {
   queuePaceReconciliation,
@@ -307,6 +308,7 @@ export async function getSessionMetrics(req: Request, res: Response) {
         startedAt: true,
         endedAt: true,
         deliveryAlignmentStatus: true,
+        deliveryAlignmentError: true,
         user: {
           select: {
             id: true,
@@ -372,10 +374,12 @@ export async function getSessionMetrics(req: Request, res: Response) {
         createdAt: new Date().toISOString(),
         session
       }
-      return res.json({ ...defaultMetrics, deliveryAlignmentStatus: session.deliveryAlignmentStatus })
+      return res.json({ ...defaultMetrics, deliveryAlignmentStatus: session.deliveryAlignmentStatus,
+        deliveryAlignmentError: publicAlignmentReason(session.deliveryAlignmentError) })
     }
 
-    res.json({ ...metrics, deliveryAlignmentStatus: session.deliveryAlignmentStatus })
+    res.json({ ...metrics, deliveryAlignmentStatus: session.deliveryAlignmentStatus,
+      deliveryAlignmentError: publicAlignmentReason(session.deliveryAlignmentError) })
   } catch (error) {
     console.error('Error fetching session metrics:', error)
     res.status(500).json({ error: 'Failed to fetch metrics' })
@@ -861,7 +865,7 @@ export async function reprocessSessionMetrics(req: Request, res: Response) {
         turns: {
           where: { role: 'user' },
           orderBy: { sequenceNo: 'asc' },
-          select: { id: true, segmentId: true, text: true, words: true },
+          select: { id: true, segmentId: true, role: true, text: true, words: true },
         },
       }
     })
@@ -959,8 +963,9 @@ export async function reprocessSessionMetrics(req: Request, res: Response) {
     const pythonEnv = resolveAgentPython()
     const persistedWords = buildReprocessTimelineWords(
       resolvedAudio.segments,
-      session.turns,
-    )
+      applyAlignedDelivery(withApproximatePlaybackTiming(session.turns),
+        session.deliveryAlignmentResult, resolvedAudio.inputSignature, resolvedAudio.segments),
+    ).filter(word => word.timingOrigin === 'forced_alignment')
 
     // Audio analysis runs for minutes, so hand it to a background job and let
     // the client poll /reprocess-status instead of holding the connection open

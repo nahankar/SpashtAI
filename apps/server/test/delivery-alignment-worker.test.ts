@@ -23,6 +23,7 @@ vi.mock('../src/lib/prisma', () => {
 })
 
 import { alignmentRetry, requestDeliveryAlignment, sweepDeliveryAlignment } from '../src/lib/deliveryAlignmentWorker'
+import { validateAlignmentResult } from '../src/analytics/alignedDelivery'
 
 const text = 'First we make one clear point. Then explain the whole plan.'
 const turns = [0, 1].map(i => ({ id: `t${i}`, role: 'user', text, segmentId: 'seg', metrics: {} }))
@@ -69,10 +70,49 @@ describe('durable automatic delivery alignment', () => {
     expect(mocks.upsert).toHaveBeenCalledOnce()
     expect(mocks.upsert.mock.calls[0][0].update.processingStatus).toMatchObject({
       content_processed: true, pace: { status: 'available', source: 'word_timestamps', samples: 2 },
+      deliveryTiming: { state: 'complete', source: 'forced_alignment', acceptedTurnCount: 2,
+        totalTurnCount: 2, liveSource: { recordingClockMapped: false } },
     })
+
     expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
       deliveryAlignmentStatus: 'completed', deliveryAlignmentResult: expect.objectContaining({ inputSignature: 'audio-v1' }),
     }) }))
+  })
+
+  it('reuses accepted recording-bound alignment instead of spawning another alignment job', async () => {
+    const timeline = [{ segmentId: 'seg', segmentIndex: 0, durationSec: 25, replayOffsetSec: 0 }]
+    const stored = validateAlignmentResult(result, turns, timeline, 'audio-v1')
+    mocks.findSession.mockResolvedValue({ ...snapshot(), deliveryAlignmentResult: stored })
+    await sweepDeliveryAlignment()
+    expect(mocks.spawn).not.toHaveBeenCalled()
+    expect(mocks.upsert).toHaveBeenCalledOnce()
+  })
+
+  it('recomputes corrupt cached alignment rather than retrying that cache indefinitely', async () => {
+    const timeline = [{ segmentId: 'seg', segmentIndex: 0, durationSec: 25, replayOffsetSec: 0 }]
+    const stored = validateAlignmentResult(result, turns, timeline, 'audio-v1')
+    stored.turns[0].words[0].end = -1
+    mocks.findSession.mockResolvedValue({ ...snapshot(), deliveryAlignmentResult: stored })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await sweepDeliveryAlignment()
+    expect(mocks.spawn).toHaveBeenCalledOnce()
+    expect(mocks.upsert).toHaveBeenCalledOnce()
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('stored alignment failed validation'))
+    warn.mockRestore()
+  })
+
+  it('does not bypass Gentle for source-only words without a recording-clock anchor', async () => {
+    const sample = snapshot()
+    sample.turns = turns.map(t => ({ ...t, metrics: { live_word_evidence: {
+      version: 'elevate-live-words-v1', provider: 'aws-transcribe', state: 'source_only',
+      reason: 'recording_clock_unmapped', clock: 'stt_stream', mapping: null,
+      words: [{ w: 'First', start: 0, end: 0.5, recognitionConfidence: 1 }],
+    } } }))
+    mocks.findSession.mockResolvedValue(sample)
+    await sweepDeliveryAlignment()
+    expect(mocks.spawn).toHaveBeenCalledOnce()
+    expect(mocks.upsert.mock.calls[0][0].update.processingStatus.deliveryTiming.liveSource)
+      .toMatchObject({ sourceOnlyTurns: 2, recordingClockMapped: false })
   })
 
   it('leaves a running replica alone and recovers processing jobs through the durable selector', async () => {
@@ -145,7 +185,9 @@ describe('durable automatic delivery alignment', () => {
   })
 
   it('requeues late evidence and invalidates earlier alignment-derived pace', async () => {
-    mocks.metrics.mockResolvedValue({ processingStatus: { content_processed: true, pace: { origin: 'post_session_alignment' } },
+    mocks.metrics.mockResolvedValue({ processingStatus: { content_processed: true,
+      deliveryTiming: { state: 'complete', acceptedTurnCount: 2 },
+      pace: { origin: 'post_session_alignment' } },
       communicationSignals: { speechRate: { wpm: 120 } }, skillScores: { scores: { clarity: 8, pacing: 9 } } })
     const tx: any = { session: { updateMany: mocks.updateMany }, sessionMetrics: { findUnique: mocks.metrics, update: mocks.metricUpdate } }
     await requestDeliveryAlignment(tx, 'session')
@@ -153,6 +195,20 @@ describe('durable automatic delivery alignment', () => {
       processingStatus: { content_processed: true, pace: { status: 'insufficient_evidence' } },
       skillScores: { scores: { clarity: 8, pacing: null } },
     })
+    expect(mocks.metricUpdate.mock.calls[0][0].data.processingStatus).not.toHaveProperty('deliveryTiming')
     expect(alignmentRetry(5, 'unreachable')).toMatchObject({ deliveryAlignmentStatus: 'unavailable', deliveryAlignmentNextAt: null })
+  })
+
+  it('invalidates stale coverage even when the selected pace came from live durations', async () => {
+    mocks.metrics.mockResolvedValue({ processingStatus: {
+      deliveryTiming: { state: 'partial', acceptedTurnCount: 1 },
+      pace: { origin: 'live_logical_turns', status: 'available' },
+    } })
+    const tx: any = { session: { updateMany: mocks.updateMany },
+      sessionMetrics: { findUnique: mocks.metrics, update: mocks.metricUpdate } }
+    await requestDeliveryAlignment(tx, 'session')
+    expect(mocks.metricUpdate.mock.calls[0][0].data.processingStatus).toEqual({
+      pace: { origin: 'live_logical_turns', status: 'available' },
+    })
   })
 })
