@@ -22,6 +22,7 @@ export interface ReplayEvidenceInput {
   words: ReplayWordEvidence | null
   supplementaryTranscript: { revision: string | null; status: 'matches' | 'different_not_aligned' | 'unavailable' } | null
   analysisSelectionRevision?: string | null
+  assessmentGate?: 'insufficient_speech' | null
 }
 export interface ReplaySelection {
   speaker: string
@@ -43,6 +44,94 @@ export function transcriptRevision(segments: TranscriptSegment[]): string { retu
 export function legacyInput(segments: TranscriptSegment[], source: string): ReplayEvidenceInput {
   return { version: REPLAY_EVIDENCE_VERSION, recording: null, transcriptRevision: transcriptRevision(segments), transcriptSource: source, words: null, supplementaryTranscript: null }
 }
+
+const SPEAKER_METADATA_LABELS = new Set([
+  'meeting',
+  'transcript',
+  'recording',
+  'note',
+  'notes',
+  'metadata',
+  'speaker',
+  'caption',
+  'captions',
+  'subtitle',
+  'subtitles',
+  'date',
+  'time',
+  'title',
+])
+
+function isTimestampLikeSpeaker(label: string): boolean {
+  const trimmed = label.trim()
+  return (
+    /^\d{1,2}$/.test(trimmed) ||
+    /^\d{1,2}:\d{2}(?::\d{2})?$/.test(trimmed) ||
+    /^\d{1,2}\s*(am|pm)$/i.test(trimmed)
+  )
+}
+
+function looksLikeSpeakerLabel(label: string): boolean {
+  const trimmed = label.trim()
+  if (!trimmed || trimmed === 'Unassigned speaker') return false
+  if (!/[A-Za-z]/.test(trimmed)) return false
+  if (isTimestampLikeSpeaker(trimmed)) return false
+  if (SPEAKER_METADATA_LABELS.has(trimmed.toLowerCase())) return false
+  return true
+}
+
+function wordCount(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length
+}
+
+const GENERIC_SPEAKER_LABELS = new Set(['speaker', 'unassigned speaker'])
+const CONFIRM_MIN_WORDS = 8
+const CONFIRM_MIN_TURNS = 2
+const CONFIRM_MIN_TURN_WORDS = 5
+const ASSESS_MIN_WORDS = 40
+
+export type ReplaySpeakerChoice = 'named' | 'single_unlabelled' | 'insufficient_labels'
+
+function isGenericSpeaker(label: string): boolean {
+  return GENERIC_SPEAKER_LABELS.has(label.trim().toLowerCase())
+}
+
+function speakerStats(segments: TranscriptSegment[]): Map<string, { turns: number; words: number }> {
+  const bySpeaker = new Map<string, { turns: number; words: number }>()
+  for (const segment of segments) {
+    const speaker = segment.speaker?.trim()
+    if (!speaker) continue
+    const current = bySpeaker.get(speaker) ?? { turns: 0, words: 0 }
+    current.turns += 1
+    current.words += wordCount(segment.text)
+    bySpeaker.set(speaker, current)
+  }
+  return bySpeaker
+}
+
+function meetsConfirmation(stats: { turns: number; words: number }): boolean {
+  return stats.words >= CONFIRM_MIN_WORDS || (stats.turns >= CONFIRM_MIN_TURNS && stats.words >= CONFIRM_MIN_TURN_WORDS)
+}
+
+export function speakerMeetsAssessment(segments: TranscriptSegment[], speaker: string): boolean {
+  const stats = speakerStats(segments).get(speaker.trim())
+  return !!stats && stats.words >= ASSESS_MIN_WORDS
+}
+
+export function replaySpeakerResolution(segments: TranscriptSegment[]): { candidates: string[]; speakerChoice: ReplaySpeakerChoice } {
+  const stats = speakerStats(segments)
+  const named = [...stats.entries()]
+    .filter(([speaker, counts]) => looksLikeSpeakerLabel(speaker) && meetsConfirmation(counts))
+    .map(([speaker]) => speaker)
+  if (named.length) return { candidates: named, speakerChoice: 'named' }
+  const generic = [...stats.entries()].filter(([speaker, counts]) => isGenericSpeaker(speaker) && meetsConfirmation(counts))
+  if (generic.length === 1) return { candidates: [generic[0][0]], speakerChoice: 'single_unlabelled' }
+  return { candidates: [], speakerChoice: 'insufficient_labels' }
+}
+
+export function replaySpeakerCandidates(segments: TranscriptSegment[]): string[] {
+  return replaySpeakerResolution(segments).candidates
+}
 export interface ReplayMoment {
   id: string
   kind: 'word_gap'
@@ -55,7 +144,9 @@ export interface ReplayMoment {
 }
 export function buildReplayEvidence(input: ReplayEvidenceInput, selection: ReplaySelection | null, segments: TranscriptSegment[]) {
   const revisionMatches = input.transcriptRevision === transcriptRevision(segments)
-  const confirmed = revisionMatches && selectionMatches(selection, input) && segments.some(s => s.speaker === selection?.speaker)
+  const resolution = replaySpeakerResolution(segments)
+  const candidates = resolution.candidates
+  const confirmed = revisionMatches && selectionMatches(selection, input) && candidates.includes(selection?.speaker ?? '')
   const raw = input.words
   const recording = input.recording && typeof input.recording.uploadId === 'string' && !!input.recording.uploadId &&
     typeof input.recording.signature === 'string' && !!input.recording.signature && input.recording.timelineOrigin === 'retained_media_seconds'
@@ -65,11 +156,14 @@ export function buildReplayEvidence(input: ReplayEvidenceInput, selection: Repla
     version: REPLAY_EVIDENCE_VERSION, transcriptRevision: input.transcriptRevision,
     recording, supplementaryTranscript: input.supplementaryTranscript,
     identity: { state: confirmed ? 'confirmed' : 'confirmation_required', speaker: confirmed ? selection!.speaker : null, revision: confirmed ? selection!.revision : null },
+    speakerChoice: resolution.speakerChoice,
+    assessmentGate: input.assessmentGate === 'insufficient_speech' ? 'insufficient_speech' as const : null,
     source: raw?.provider ?? input.transcriptSource, accuracy: 'not_human_validated', acousticIsolation: 'unknown', overlapDetection: 'unknown',
     measurement: 'eligible learner stretches, including internal gaps; excluding other speakers and gaps of 2 seconds or more',
-    speakers: [...new Set(segments.map(s => s.speaker))].filter(s => s !== 'Unassigned speaker').map(speaker => ({
+    speakers: candidates.map(speaker => ({
       speaker, excerpt: segments.find(s => s.speaker === speaker)?.text.slice(0, 200) ?? '',
       preview: null as { start: number; end: number } | null,
+      assessmentEligible: speakerMeetsAssessment(segments, speaker),
     })),
     limitations: ['Model-estimated word boundaries are not a timing-accuracy certification.', 'One confirmed label may cover only part of your speech if diarization split your identity.', 'Mixed meeting audio is not isolated learner speech.'],
   }

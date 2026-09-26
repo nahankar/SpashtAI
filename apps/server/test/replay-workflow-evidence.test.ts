@@ -81,7 +81,7 @@ describe('Replay upload, cached analysis and deletion workflow (mocked providers
     const results = await request(app).get(`${path()}/results`)
     expect(results.status).toBe(200)
     expect(results.body.result.wordsPerMinute).toBeNull()
-    expect(results.body.result.strengths).toEqual([{ point: 'Clear next step' }])
+    expect(results.body.result.strengths).toEqual([])
     expect(state.stream).not.toHaveBeenCalled()
     expect((await request(app).delete(path())).status).toBe(200)
     await expect(readFile(stored)).rejects.toMatchObject({ code: 'ENOENT' })
@@ -89,6 +89,7 @@ describe('Replay upload, cached analysis and deletion workflow (mocked providers
   it('reuses audio word cache after confirming a speaker and keeps conflicting uploaded text separate', async () => {
     expect((await request(app).post(`${path()}/upload`).attach('audio', Buffer.from('synthetic test bytes'), 'test.wav').field('text', 'Alice: Different supplied wording.')).status).toBe(200)
     await processSession()
+    expect(state.analyze).not.toHaveBeenCalled()
     const first = (await request(app).get(`${path()}/results`)).body
     expect(first.evidence.identity.state).toBe('confirmation_required')
     expect(first.evidence.supplementaryTranscript.status).toBe('different_not_aligned')
@@ -106,6 +107,7 @@ describe('Replay upload, cached analysis and deletion workflow (mocked providers
       selectionRevision: state.session.learnerSelection.revision,
       transcriptRevision: first.evidence.transcriptRevision,
     })
+    expect(state.analyze).toHaveBeenCalledTimes(1)
     expect(state.stream).toHaveBeenCalledTimes(1)
     const next = (await request(app).get(`${path()}/results`)).body
     expect(next.evidence.pace.wpm).toBe(120)
@@ -116,6 +118,55 @@ describe('Replay upload, cached analysis and deletion workflow (mocked providers
     expect((JSON.parse(await readFile(cache, 'utf8'))).wordEvidence.words).toHaveLength(40)
     expect((await request(app).delete(path())).status).toBe(200)
     await expect(readFile(cache)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+  it('does not generate scores from one short confirmed utterance', async () => {
+    const text = 'Alice: one two three four five six seven eight\nAlice: nine ten eleven'
+    expect((await request(app).post(`${path()}/upload`).send({ text })).status).toBe(200)
+    await processSession()
+    const first = (await request(app).get(`${path()}/results`)).body
+    expect(first.evidence.speakers.map((item: { speaker: string }) => item.speaker)).toEqual(['Alice'])
+    expect(first.evidence.speakers[0].assessmentEligible).toBe(false)
+    expect((await request(app).put(`${path()}/learner`).send({
+      speaker: 'Alice',
+      transcriptRevision: first.evidence.transcriptRevision,
+      recordingSignature: null,
+      selectionRevision: null,
+    })).status).toBe(200)
+    await processSession({
+      selectionRevision: state.session.learnerSelection.revision,
+      transcriptRevision: first.evidence.transcriptRevision,
+    })
+    expect(state.analyze).not.toHaveBeenCalled()
+    const next = (await request(app).get(`${path()}/results`)).body
+    expect(next.skillScores).toBeNull()
+    expect(next.evidence.assessmentGate).toBe('insufficient_speech')
+    expect(next.evidence.identity.speaker).toBe('Alice')
+  })
+  it('retains the previous successful result when a replacement analysis fails', async () => {
+    expect((await request(app).post(`${path()}/upload`).attach('audio', Buffer.from('synthetic test bytes'), 'test.wav')).status).toBe(200)
+    await processSession()
+    const unconfirmed = (await request(app).get(`${path()}/results`)).body
+    expect((await request(app).put(`${path()}/learner`).send({
+      speaker: 'spk_1',
+      transcriptRevision: unconfirmed.evidence.transcriptRevision,
+      recordingSignature: unconfirmed.evidence.recording.signature,
+      selectionRevision: null,
+    })).status).toBe(200)
+    await processSession({
+      selectionRevision: state.session.learnerSelection.revision,
+      transcriptRevision: unconfirmed.evidence.transcriptRevision,
+    })
+    const successful = state.session.result
+    state.analyze.mockRejectedValueOnce(new Error('bedrock unavailable'))
+    expect((await request(app).post(`${path()}/process`).send({
+      selectionRevision: state.session.learnerSelection.revision,
+      transcriptRevision: unconfirmed.evidence.transcriptRevision,
+    })).status).toBe(200)
+    await vi.waitFor(() => expect(state.session.status).toBe('failed'))
+    expect(state.session.result).toBe(successful)
+    const afterFailure = await request(app).get(`${path()}/results`)
+    expect(afterFailure.status).toBe(200)
+    expect(afterFailure.body.skillScores).not.toBeNull()
   })
   it('cleans rejected uploads when analysis owns the session', async () => {
     state.session.status = 'analyzing'

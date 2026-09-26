@@ -49,12 +49,12 @@ describe('Replay evidence route access and identity invalidation', () => {
     expect((await request(app).put('/api/replay/sessions/session/learner').send({ ...confirmation, recordingSignature: 'old' })).status).toBe(409)
     expect(mocks.update).not.toHaveBeenCalled()
   })
-  it('confirms without transcription, clears personal scores but preserves the meeting summary', async () => {
+  it('confirms speaker without mutating existing stored result payloads', async () => {
     const response = await request(app).put('/api/replay/sessions/session/learner').send(confirmation)
     expect(response.status).toBe(200)
     expect(row.learnerSelection.provenance).toBe('user_confirmed')
     expect(row.result.coachingInsights.meetingSummary.topicsDiscussed).toEqual(['Project plan'])
-    expect(row.result.coachingInsights.primaryImprovement).toBeUndefined()
+    expect(row.result.coachingInsights.primaryImprovement).toBe('Old learner advice')
     expect(mocks.pulseDelete).toHaveBeenCalledWith({ where: { sessionId: 'session', source: 'replay' } })
     const repeated = await request(app).put('/api/replay/sessions/session/learner').send({ ...confirmation, selectionRevision: row.learnerSelection.revision })
     expect(repeated.body.selection.revision).toBe(response.body.selection.revision)

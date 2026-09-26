@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { normalizeBatchWords, normalizeStreamingWords, wordSegments, type ReplayWord } from '../src/lib/replay-word-evidence'
-import { buildReplayEvidence, transcriptRevision, legacyInput, selectionMatches, neutralContent, type ReplayEvidenceInput, type ReplaySelection } from '../src/lib/replay-evidence'
+import { buildReplayEvidence, transcriptRevision, legacyInput, replaySpeakerCandidates, replaySpeakerResolution, speakerMeetsAssessment, selectionMatches, neutralContent, type ReplayEvidenceInput, type ReplaySelection } from '../src/lib/replay-evidence'
 import { replayResultView } from '../src/lib/replay-result-view'
 import { calculateReplayMetrics, findMatchingSpeaker } from '../src/lib/replay-metrics'
 import { replayCacheKey, isReusableReplayCache } from '../src/lib/replay-recording'
@@ -55,7 +55,7 @@ describe('Replay learner evidence', () => {
       ...utterance('spk_1', .2, 10),
     ])
     const evidence = buildReplayEvidence(f.input, null, f.segments)
-    expect(evidence.speakers.find(s => s.speaker === 'spk_0')?.preview).toBeNull()
+    expect(evidence.speakers.find(s => s.speaker === 'spk_0')).toBeUndefined()
     expect(evidence.speakers.find(s => s.speaker === 'spk_1')?.preview).toEqual({ start: .2, end: 5.2 })
     expect(evidence.speakers.find(s => s.speaker === 'spk_1')?.excerpt).toBe('word0 word1 word2 word3 word4 word5 word6 word7 word8 word9')
   })
@@ -148,8 +148,58 @@ describe('Replay learner evidence', () => {
     const v = replayResultView({ structuredTranscript: f.segments, wordsPerMinute: 150, speakingPercentage: 99, interruptionCount: 0, overallScore: 10,
       transcriptionSource: 'uploaded', strengths: [{ point: 'Clear agenda. Your pace is slow.' }], coachingInsights: { primaryImprovement: 'Slow down' } }, null)
     expect(v.result.wordsPerMinute).toBeNull(); expect(v.result.interruptionCount).toBeNull(); expect(v.result.overallScore).toBeNull()
-    expect(v.result.strengths).toEqual([{ point: 'Clear agenda.' }])
+    expect(v.result.strengths).toEqual([])
     expect(v.result.coachingInsights).toBeNull()
+  })
+  it('excludes timestamp or metadata labels and requires meaningful candidate evidence', () => {
+    const segments = [
+      { speaker: '00', text: 'Hello there' },
+      { speaker: 'Meeting', text: 'Kickoff started now' },
+      { speaker: 'Alice', text: 'We should align on goals today.' },
+      { speaker: 'Alice', text: 'I can send a recap right after this call.' },
+      { speaker: 'Bob', text: 'Yes' },
+    ]
+    expect(replaySpeakerCandidates(segments)).toEqual(['Alice'])
+  })
+  it('offers one unlabelled speaker when that is the only usable speech', () => {
+    const enough = 'This recording has enough words to confirm a single speaker today.'
+    const labelled = replaySpeakerResolution([{ speaker: 'Speaker', text: enough }])
+    expect(labelled).toEqual({ candidates: ['Speaker'], speakerChoice: 'single_unlabelled' })
+    const thin = replaySpeakerResolution([{ speaker: 'Speaker', text: 'Too short' }])
+    expect(thin).toEqual({ candidates: [], speakerChoice: 'insufficient_labels' })
+    expect(replaySpeakerResolution([
+      { speaker: 'Alice', text: 'We should align on the delivery timeline today.' },
+      { speaker: 'Speaker', text: enough },
+    ]).speakerChoice).toBe('named')
+  })
+  it('keeps speaker confirmation below the assessment threshold', () => {
+    const short = [
+      { speaker: 'Alice', text: 'We should align on goals today.' },
+      { speaker: 'Alice', text: 'I can send a recap.' },
+    ]
+    expect(replaySpeakerCandidates(short)).toEqual(['Alice'])
+    expect(speakerMeetsAssessment(short, 'Alice')).toBe(false)
+    const enough = [{ speaker: 'Alice', text: Array.from({ length: 40 }, (_, index) => `word${index}`).join(' ') }]
+    expect(speakerMeetsAssessment(enough, 'Alice')).toBe(true)
+  })
+  it('omits personalized fields structurally while learner identity is unconfirmed', () => {
+    const segments = [{ speaker: 'Alice', text: 'I will share it tomorrow.' }]
+    const row = {
+      structuredTranscript: segments,
+      transcriptionSource: 'uploaded',
+      strengths: [{ point: 'Alice gave a clear summary.' }],
+      improvements: [{ point: 'Ask Bob for confirmation.' }],
+      recommendations: ['Have Alice close with owners.'],
+      contextSpecificFeedback: [{ label: 'Ownership', detail: 'Alice owned next steps.' }],
+      keyMoments: [{ text: 'Alice summarized outcomes', type: 'strength' }],
+    }
+    const view = replayResultView(row, null)
+    expect(view.evidence.identity.state).toBe('confirmation_required')
+    expect(view.result.strengths).toEqual([])
+    expect(view.result.improvements).toEqual([])
+    expect(view.result.recommendations).toEqual([])
+    expect(view.result.contextSpecificFeedback).toEqual([])
+    expect(view.result.keyMoments).toEqual([])
   })
   it('word share is words, never duration; competing uploaded words are not aligned', () => {
     const f = fixture(); f.input.supplementaryTranscript = { revision: 'vtt', status: 'different_not_aligned' }

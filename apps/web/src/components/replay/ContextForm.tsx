@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label'
 interface ContextFormProps {
   onSubmit: (data: {
     sessionName?: string
-    participantName: string
+    participantName?: string
   }) => void
   loading?: boolean
 }
@@ -15,7 +15,7 @@ export function ContextForm({ onSubmit, loading }: ContextFormProps) {
   const [sessionName, setSessionName] = useState('')
   const [participantName, setParticipantName] = useState('')
 
-  const canSubmit = sessionName.trim() && participantName.trim()
+  const canSubmit = sessionName.trim()
 
   return (
     <Card>
@@ -42,7 +42,7 @@ export function ContextForm({ onSubmit, loading }: ContextFormProps) {
         </div>
 
         <div className="grid gap-2">
-          <Label htmlFor="participantName">Your Name in Transcript *</Label>
+          <Label htmlFor="participantName">Transcript speaker hint (optional)</Label>
           <input
             id="participantName"
             type="text"
@@ -52,8 +52,7 @@ export function ContextForm({ onSubmit, loading }: ContextFormProps) {
             className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
           <p className="text-xs text-muted-foreground">
-            Enter your name exactly as it appears in the transcript. If this name is not found during analysis,
-            SpashtAI automatically falls back to the dominant speaker.
+            Optional: this helps you spot your label faster in confirmation. Final speaker identity is chosen only when you confirm it on results.
           </p>
         </div>
 
@@ -64,7 +63,7 @@ export function ContextForm({ onSubmit, loading }: ContextFormProps) {
           onClick={() =>
             onSubmit({
               sessionName: sessionName.trim() || undefined,
-              participantName: participantName.trim(),
+              participantName: participantName.trim() || undefined,
             })
           }
         >

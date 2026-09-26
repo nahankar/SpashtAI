@@ -467,7 +467,7 @@ export function Replay() {
 
   const handleContextSubmit = async (data: {
     sessionName?: string
-    participantName: string
+    participantName?: string
   }) => {
     const coachContext = searchParams.get('context')?.trim()
     const coachFocus = searchParams.get('focus')?.trim()
