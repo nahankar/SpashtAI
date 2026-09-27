@@ -17,6 +17,21 @@ from pathlib import Path
 import aiohttp
 
 VERSION = "delivery-alignment-v1"
+# Gentle often places the next word a few tens of milliseconds inside the
+# previous word. That is a boundary touch, not a timeline that runs backwards.
+BOUNDARY_SLACK_SEC = 0.05
+# One or two unmatched words must not erase the words Gentle did place.
+MAX_UNMATCHED_WORDS = 2
+MIN_WORD_COVERAGE = 0.90
+# Gentle answered, but its output failed validation. Retrying the same audio and
+# transcript reproduces the result, so the caller must not treat this as an outage.
+REJECTED_EXIT_CODE = 3
+REJECTION_CODES = frozenset({
+    "invalid_alignment_timestamps",
+    "missing_alignment_offsets",
+    "unaligned_transcript_token",
+    "alignment_transcript_mismatch",
+})
 
 
 def token(value):
@@ -38,41 +53,125 @@ def build_transcript(turns):
     return text, tokens
 
 
-def validate_result(raw, tokens, duration):
-    """Require complete word coverage within each returned turn.
+def _place_word(word, previous_end, duration):
+    start, end = word.get("start"), word.get("end")
+    if (type(start) not in (int, float) or type(end) not in (int, float)
+            or not math.isfinite(start) or not math.isfinite(end)):
+        raise ValueError("invalid_alignment_timestamps")
+    if start < previous_end:
+        if previous_end - start > BOUNDARY_SLACK_SEC or end <= previous_end:
+            raise ValueError("invalid_alignment_timestamps")
+        start = previous_end
+    if end > duration:
+        if end - duration > BOUNDARY_SLACK_SEC or end <= start:
+            raise ValueError("invalid_alignment_timestamps")
+        end = duration
+    if end <= start:
+        raise ValueError("invalid_alignment_timestamps")
+    return start, end
 
-    Missing words suppress their whole turn. Preserve transcript punctuation
-    for pause context, but never manufacture timestamps for missing words.
+
+def _token_index(word, tokens):
+    a, b = word.get("startOffset"), word.get("endOffset")
+    if type(a) is not int or type(b) is not int or b <= a:
+        raise ValueError("missing_alignment_offsets")
+    candidates = [i for i, (lo, hi, _, _) in enumerate(tokens) if lo <= a < b <= hi]
+    if len(candidates) != 1:
+        raise ValueError("unaligned_transcript_token")
+    return candidates[0]
+
+
+def _kept_turn(indexes, matched):
+    """Keep a turn when every word is placed, or only a minor interior gap remains."""
+    chosen = [index for index in indexes if index in matched]
+    if not chosen:
+        return None
+    missing = len(indexes) - len(chosen)
+    if missing == 0:
+        return chosen
+    if missing > MAX_UNMATCHED_WORDS or len(chosen) / len(indexes) < MIN_WORD_COVERAGE:
+        return None
+    # The first and last spoken words anchor the turn. A hole at either edge
+    # would invent a span, so that turn stays with the other timing source.
+    if chosen[0] != indexes[0] or chosen[-1] != indexes[-1]:
+        return None
+    return chosen
+
+
+def validate_result(raw, tokens, duration):
+    """Keep every successfully placed word.
+
+    A turn with one or two interior misses stays, and those misses are omitted
+    rather than given invented times. A hyphenated transcript word may come
+    back as several aligned pieces. Larger gaps still drop only that turn.
     """
     matched = {}
     previous_end = 0.0
     previous_index = -1
-    for word in raw.get("words", []):
+    words = raw.get("words", [])
+    i = 0
+    while i < len(words):
+        word = words[i]
         if word.get("case") != "success":
+            i += 1
             continue
-        start, end = word.get("start"), word.get("end")
-        if (type(start) not in (int, float) or type(end) not in (int, float)
-                or not math.isfinite(start) or not math.isfinite(end)
-                or start < previous_end or end <= start or end > duration):
-            raise ValueError("invalid_alignment_timestamps")
-        a, b = word.get("startOffset"), word.get("endOffset")
-        if type(a) is not int or type(b) is not int or b <= a:
-            raise ValueError("missing_alignment_offsets")
-        candidates = [i for i, (lo, hi, _, _) in enumerate(tokens)
-                      if lo <= a < b <= hi]
-        if len(candidates) != 1:
-            raise ValueError("unaligned_transcript_token")
-        index = candidates[0]
-        if index <= previous_index or token(word.get("word", "")) != token(tokens[index][3]):
+        raw_start, raw_end = word.get("start"), word.get("end")
+        if (type(raw_start) in (int, float) and type(raw_end) in (int, float)
+                and raw_end <= previous_end and raw_end - raw_start <= BOUNDARY_SLACK_SEC):
+            # A few milliseconds sitting inside the previous word is not a timeline.
+            i += 1
+            continue
+        start, end = _place_word(word, previous_end, duration)
+        index = _token_index(word, tokens)
+        if index <= previous_index:
             raise ValueError("alignment_transcript_mismatch")
+        expected = token(tokens[index][3])
+        parts = [token(word.get("word", ""))]
+        if parts[0] != expected:
+            # Gentle splits "industry-relevant" into the pieces on either side
+            # of the hyphen. Keep one transcript word, from the first start to
+            # the last end, only when those pieces rebuild the token.
+            j = i + 1
+            cursor = end
+            while j < len(words) and words[j].get("case") == "success":
+                if _token_index(words[j], tokens) != index:
+                    break
+                _, piece_end = _place_word(words[j], cursor, duration)
+                parts.append(token(words[j].get("word", "")))
+                cursor = piece_end
+                j += 1
+                if "".join(parts) == expected:
+                    end = piece_end
+                    i = j
+                    break
+            else:
+                j = None
+            if "".join(parts) != expected:
+                raise ValueError("alignment_transcript_mismatch")
+        else:
+            i += 1
         matched[index] = {"w": tokens[index][3], "start": start, "end": end,
                           "timingOrigin": "forced_alignment"}
         previous_index, previous_end = index, end
+        if parts[0] == expected:
+            continue
+        # i already points at the word after a joined split.
     turns = {}
     for i, (_, _, turn_id, _) in enumerate(tokens):
         turns.setdefault(turn_id, []).append(i)
-    return [{"id": turn_id, "words": [matched[i] for i in indexes]}
-            for turn_id, indexes in turns.items() if all(i in matched for i in indexes)]
+    results = []
+    for turn_id, indexes in turns.items():
+        chosen = _kept_turn(indexes, matched)
+        if not chosen:
+            continue
+        local = {index: position for position, index in enumerate(indexes)}
+        words = []
+        for index in chosen:
+            word = dict(matched[index])
+            word["tokenIndex"] = local[index]
+            words.append(word)
+        results.append({"id": turn_id, "words": words})
+    return results
 
 
 async def align(request):
@@ -111,6 +210,12 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, stop)
     try:
         print(json.dumps(asyncio.run(asyncio.wait_for(align(json.load(sys.stdin)), timeout=850))))
+    except ValueError as error:
+        if error.args and error.args[0] in REJECTION_CODES:
+            print(f"Delivery alignment rejected: {error.args[0]}", file=sys.stderr)
+            sys.exit(REJECTED_EXIT_CODE)
+        print(f"Delivery alignment failed: {type(error).__name__}", file=sys.stderr)
+        sys.exit(1)
     except Exception as error:
         # Do not log transcript or service response bodies.
         print(f"Delivery alignment failed: {type(error).__name__}", file=sys.stderr)

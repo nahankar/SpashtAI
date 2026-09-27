@@ -74,7 +74,7 @@ class LiveWordEvidenceTests(unittest.TestCase):
         self.assertEqual(evidence, {
             "version": "elevate-live-words-v1", "provider": "transcribe",
             "state": "source_only", "reason": "unanchored_stt_stream", "clock": "stt_stream",
-            "words": event["alternatives"][0]["words"], "mapping": None,
+            "epoch": 0, "words": event["alternatives"][0]["words"], "mapping": None,
         })
         self.assertEqual(json.loads(json.dumps(evidence, allow_nan=False)), evidence)
         self.assertEqual(turns, before)
@@ -238,6 +238,21 @@ class LiveWordEvidenceTests(unittest.TestCase):
         evidence = self.evidence("one two")
         self.assertEqual(evidence["reason"], "non_word_timing")
         self.assertEqual(evidence["words"], [])
+
+    def test_hyphenated_pronunciation_keeps_its_single_timestamp(self):
+        self.collector.ingest(final(
+            "a part-time stand-up role",
+            [word("a", 0, 0.2), word("part-time", 0.3, 0.8),
+             word("stand-up", 0.9, 1.4), word("role", 1.5, 1.9)],
+        ))
+        evidence = self.evidence("A part-time stand-up role.")
+        self.assertEqual(evidence["state"], "source_only")
+        self.assertEqual(
+            [item["w"] for item in evidence["words"]],
+            ["a", "part-time", "stand-up", "role"],
+        )
+        self.assertEqual(evidence["words"][1]["start"], 0.3)
+        self.assertEqual(evidence["words"][2]["end"], 1.4)
 
     def test_invalid_intervals_are_omitted_but_not_interpolated(self):
         for start, end in [(-1, 0), (1, 1), (2, 1), (float("nan"), 2),

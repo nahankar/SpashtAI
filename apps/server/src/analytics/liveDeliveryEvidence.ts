@@ -16,6 +16,8 @@ const sourceEvidence = z.object({
   words: z.array(sourceWord).max(10_000),
   streamId: z.string().max(256).optional(),
   resultIds: z.array(z.string().max(256)).max(10_000).optional(),
+  epoch: z.number().int().nonnegative().max(1_000_000).optional(),
+  streamOffsetSec: z.number().finite().nonnegative().optional(),
   mapping: z.null(),
 })
 
@@ -88,7 +90,10 @@ export function publicTurnMetrics(metrics: unknown): unknown {
   return publicMetrics
 }
 
-export function liveEvidenceSummary(turns: Array<{ metrics?: unknown }>) {
+export function liveEvidenceSummary(
+  turns: Array<{ metrics?: unknown }>,
+  recordingClockMapped = false,
+) {
   let sourceOnlyTurns = 0
   let unavailableTurns = 0
   for (const turn of turns) {
@@ -96,14 +101,14 @@ export function liveEvidenceSummary(turns: Array<{ metrics?: unknown }>) {
     if (evidence?.state === 'source_only') sourceOnlyTurns += 1
     else unavailableTurns += 1
   }
-  return { sourceOnlyTurns, unavailableTurns, recordingClockMapped: false as const }
+  return { sourceOnlyTurns, unavailableTurns, recordingClockMapped }
 }
 
 export function publicAlignmentReason(reason: string | null): string | null {
   if (reason == null) return null
   return [
     'waiting_for_complete_transcript', 'waiting_for_recording_or_transcript',
-    'complete_user_audio_required', 'alignment_coverage_insufficient',
+    'complete_user_audio_required', 'alignment_coverage_insufficient', 'alignment_rejected',
     'alignment_timeout', 'alignment_service_failed', 'alignment_process_unavailable',
   ].includes(reason) ? reason : 'alignment_failed'
 }

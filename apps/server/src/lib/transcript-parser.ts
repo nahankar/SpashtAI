@@ -279,7 +279,7 @@ export function extractMeetingDateFromTranscript(content: string, originalFileNa
     const d = tryYmd(isoInName[1], isoInName[2], isoInName[3])
     if (d) return d
   }
-  const compactInName = name.match(/\b(20\d{2})(\d{2})(\d{2})\b/)
+  const compactInName = name.match(/(?<!\d)(20\d{2})(\d{2})(\d{2})(?!\d)/)
   if (compactInName && compactInName[0].length === 8) {
     const d = tryYmd(compactInName[1], compactInName[2], compactInName[3])
     if (d) return d
@@ -333,8 +333,13 @@ export function suggestReplaySessionName(content: string, originalFileName?: str
   const header = content.split('\n').slice(0, 40).map(line => line.trim()).filter(Boolean)
   for (const line of header) {
     const match = line.match(/^#?\s*(?:title|meeting|topic|subject)\s*:\s*(.+)$/i)
-    const value = match?.[1]?.replace(/^\(\d+\)\s*Calendar\s*\|\s*/i, '').replace(/\s+/g, ' ').trim()
-    if (value && !/^Calendar$/i.test(value) && value.length >= 3 && value.length <= 100) return value
+    const value = match?.[1]
+      ?.replace(/^\(\d+\)\s*(?:Calendar|Chat)\s*(?:\|\s*)?/i, '')
+      .replace(/-?\d{8}_\d{6}-Meeting Recording.*$/i, '')
+      .replace(/[=]{3,}.*$/, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (value && !/^(?:Calendar|Chat)$/i.test(value) && value.length >= 3) return value.slice(0, 100)
   }
 
   const rawName = (originalFileName ?? '').replace(/\.[^.]+$/, '')
@@ -571,6 +576,29 @@ function looksStructuredSpeakerLabel(label: string): boolean {
     !isTimestampLikeLabel(value) && !METADATA_LABELS.has(value.toLocaleLowerCase())
 }
 
+const STOCK_CAPTION_RE = /^(?:\.|thanks for watching[.!]?|thank you(?: for watching)?[.!]?)$/i
+
+function unlabelledCue(line: string): { text: string; startTime: number } | null {
+  if (timestampedSpeakerLine(line)) return null
+  const match = line.trim().match(/^\[(\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?\]\s+(.+)$/)
+  if (!match) return null
+  const startTime = match[3] == null
+    ? parseInt(match[1], 10) * 60 + parseInt(match[2], 10)
+    : parseInt(match[1], 10) * 3600 + parseInt(match[2], 10) * 60 + parseInt(match[3], 10)
+  return { text: match[4].trim(), startTime }
+}
+
+export function isUnlabelledTimedCaptionFormat(content: string): boolean {
+  return content.split('\n').filter(line => unlabelledCue(line)).length >= 2
+}
+
+/** Recording exports timestamp each caption but do not name a speaker. */
+export function parseUnlabelledTimedCaptions(content: string): ParsedTranscript {
+  const segments = content.split('\n').map(unlabelledCue).filter((item): item is NonNullable<typeof item> => !!item && !STOCK_CAPTION_RE.test(item.text))
+    .map(item => ({ speaker: 'Speaker', text: item.text, startTime: item.startTime, endTime: item.startTime }))
+  return finalize(segments)
+}
+
 export function parseTimestampedSpeakerTranscript(content: string): ParsedTranscript {
   const lines = content.split('\n').map(timestampedSpeakerLine)
     .filter((item): item is NonNullable<typeof item> => !!item)
@@ -761,6 +789,10 @@ export function detectFormatAndParse(
   if (isTeamsDocxFormat(content)) return parseTeamsDocx(content)
 
   if (isTimestampedSpeakerFormat(content)) return parseTimestampedSpeakerTranscript(content)
+  if (isUnlabelledTimedCaptionFormat(content)) return parseUnlabelledTimedCaptions(content)
+  if (/^#\s*Meeting:/m.test(content) && content.split('\n').every(line => !line.trim() || line.trim().startsWith('#'))) {
+    return finalize([])
+  }
 
   return parsePlainText(content)
 }

@@ -38,8 +38,82 @@ class DeliveryAlignmentTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_result({"words": words}, self.tokens, 10)
 
+    def test_pulls_a_boundary_touch_forward_and_still_rejects_a_real_overlap(self):
+        words = [dict(w) for w in self.words]
+        words[1]["start"] = self.words[0]["end"] - 0.02
+        result = validate_result({"words": words}, self.tokens, 10)
+        self.assertEqual(result[0]["words"][1]["start"], self.words[0]["end"])
+
+        words[1]["start"] = self.words[0]["end"] - 0.2
+        with self.assertRaises(ValueError):
+            validate_result({"words": words}, self.tokens, 10)
+
+    def test_joins_a_hyphenated_word_gentle_split_in_two(self):
+        text, tokens = build_transcript([{"id": "a", "text": "An industry-relevant point."}])
+        hyphen = next(i for i, item in enumerate(tokens) if "-" in item[3])
+        lo, hi = tokens[hyphen][0], tokens[hyphen][1]
+        words = []
+        clock = 0.2
+        for i, (start, end, _, raw) in enumerate(tokens):
+            if i == hyphen:
+                words.append({
+                    "case": "success", "word": "industry",
+                    "startOffset": lo, "endOffset": lo + 8,
+                    "start": clock, "end": clock + 0.4,
+                })
+                clock += 0.4
+                words.append({
+                    "case": "success", "word": "relevant",
+                    "startOffset": lo + 9, "endOffset": hi,
+                    "start": clock, "end": clock + 0.4,
+                })
+            else:
+                words.append({
+                    "case": "success", "word": raw,
+                    "startOffset": start, "endOffset": end,
+                    "start": clock, "end": clock + 0.3,
+                })
+            clock += 0.5
+        result = validate_result({"words": words}, tokens, 10)
+        aligned = result[0]["words"][hyphen]
+        self.assertEqual(aligned["w"], "industry-relevant")
+        self.assertEqual(aligned["start"], words[hyphen]["start"])
+        self.assertGreater(aligned["end"], aligned["start"])
+
+    def test_ignores_a_blip_inside_the_previous_word(self):
+        words = [dict(w) for w in self.words]
+        words[1]["start"] = 0.05
+        words[1]["end"] = 0.06
+        result = validate_result({"words": words}, self.tokens, 10)
+        self.assertEqual([t["id"] for t in result], ["b"])
+
+        words[1]["end"] = 0.3
+        with self.assertRaises(ValueError):
+            validate_result({"words": words}, self.tokens, 10)
+
     def test_no_synthetic_word_fill_for_empty_alignment(self):
         self.assertEqual(validate_result({"words": []}, self.tokens, 10), [])
+
+    def test_one_interior_miss_keeps_the_surrounding_words(self):
+        words_text = "one two three four five six seven eight nine ten eleven twelve"
+        text, tokens = build_transcript([{"id": "long", "text": words_text}])
+        aligned = []
+        for index, (start, end, _, raw) in enumerate(tokens):
+            if raw == "six":
+                aligned.append({"case": "not-found-in-audio", "word": raw,
+                                "startOffset": start, "endOffset": end})
+                continue
+            aligned.append({"case": "success", "word": raw, "startOffset": start,
+                            "endOffset": end, "start": index * 0.5, "end": index * 0.5 + 0.4})
+        result = validate_result({"words": aligned}, tokens, 20)
+        self.assertEqual(len(result), 1)
+        kept = result[0]["words"]
+        self.assertEqual(len(kept), 11)
+        self.assertNotIn("six", [word["w"] for word in kept])
+        self.assertEqual(kept[4]["tokenIndex"], 4)
+        self.assertEqual(kept[5]["tokenIndex"], 6)
+        self.assertEqual(kept[0]["tokenIndex"], 0)
+        self.assertEqual(kept[-1]["tokenIndex"], 11)
 
 
 if __name__ == "__main__":

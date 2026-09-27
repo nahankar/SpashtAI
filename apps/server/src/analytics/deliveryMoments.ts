@@ -1,5 +1,6 @@
 import { createHash } from 'crypto'
 import { applyAlignedDelivery } from './alignedDelivery'
+import { clockSignatureFromStatus } from './recordingClockMap'
 import { withApproximatePlaybackTiming } from './liveDeliveryEvidence'
 import {
   resolveElevateSessionAudio,
@@ -89,6 +90,7 @@ interface WordTiming {
   start: number
   end: number
   timingOrigin: 'actual' | 'forced_alignment'
+  tokenIndex: number | null
 }
 
 interface CandidateTurn {
@@ -197,23 +199,30 @@ export function validateTurnWordTiming(turn: CandidateTurn): {
     const start = value.start
     const end = value.end
     const origin = timingOrigin(value)
+    const tokenIndex = typeof value.tokenIndex === 'number' && Number.isInteger(value.tokenIndex)
+      ? value.tokenIndex : null
     if (!w || !origin || !Number.isFinite(start) || !Number.isFinite(end)) return null
     if (start < 0 || end <= start || start < previousEnd) return null
     if (
       (turn.audioStart != null && start < turn.audioStart - 0.25) ||
       (turn.audioEnd != null && end > turn.audioEnd + 0.25)
     ) return null
-    words.push({ w, start, end, timingOrigin: origin })
+    words.push({ w, start, end, timingOrigin: origin, tokenIndex })
     previousEnd = end
   }
 
   const actual = words.map((word) => wordToken(word.w)).filter(Boolean)
   const coverage = expected.length ? actual.length / expected.length : 0
-  if (coverage < MIN_ALIGNMENT_COVERAGE || coverage > 1.05) return null
-  const comparable = Math.min(expected.length, actual.length)
-  const positionalMatch = comparable
-    ? actual.slice(0, comparable).filter((word, index) => word === expected[index]).length / comparable
-    : 0
+  const indexed = words.length > 0 && words.every(word => word.tokenIndex != null)
+  if (coverage < (indexed ? 0.9 : MIN_ALIGNMENT_COVERAGE) || coverage > 1.05) return null
+  const positionalMatch = indexed
+    ? words.filter(word => word.tokenIndex != null && wordToken(word.w) === expected[word.tokenIndex]).length / words.length
+    : (() => {
+      const comparable = Math.min(expected.length, actual.length)
+      return comparable
+        ? actual.slice(0, comparable).filter((word, index) => word === expected[index]).length / comparable
+        : 0
+    })()
   if (positionalMatch < 0.9) return null
   return { words, coverage }
 }
@@ -523,6 +532,10 @@ export function findDeliveryPauseMoments(
     for (let index = 0; index < validated.words.length - 1; index += 1) {
       const previous = validated.words[index]
       const next = validated.words[index + 1]
+      // A missing word sits between these timestamps. That gap is not a pause.
+      if (previous.tokenIndex != null && next.tokenIndex != null && next.tokenIndex !== previous.tokenIndex + 1) {
+        continue
+      }
       const pauseSeconds = next.start - previous.end
       const startSec = previous.end + offset
       const endSec = next.start + offset
@@ -620,7 +633,7 @@ export async function inspectDeliveryMoments(sessionId: string): Promise<Deliver
     }
   }
 
-  const [resolved, turns, segments, alignment] = await Promise.all([
+  const [resolved, turns, segments, alignment, timingMetrics] = await Promise.all([
     resolveElevateSessionAudio(sessionId, { requireCompleteSegments: true }),
     prisma.sessionTurn.findMany({
       where: { sessionId, role: 'user' },
@@ -643,6 +656,7 @@ export async function inspectDeliveryMoments(sessionId: string): Promise<Deliver
     prisma.session.findUnique({ where: { id: sessionId }, select: {
       deliveryAlignmentStatus: true, deliveryAlignmentResult: true,
     } }),
+    prisma.sessionMetrics.findUnique({ where: { sessionId }, select: { processingStatus: true } }),
   ])
 
   if (!resolved) {
@@ -678,7 +692,7 @@ export async function inspectDeliveryMoments(sessionId: string): Promise<Deliver
   }
 
   const typedTurns = applyAlignedDelivery(withApproximatePlaybackTiming(turns as CandidateTurn[]), alignment?.deliveryAlignmentResult,
-    resolved.inputSignature, resolved.segments)
+    resolved.inputSignature, resolved.segments, clockSignatureFromStatus(timingMetrics?.processingStatus))
   const validTurnCount = typedTurns.filter((turn) => validateTurnWordTiming(turn)).length
   if (!validTurnCount) {
     return {

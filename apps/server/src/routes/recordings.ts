@@ -12,7 +12,11 @@ import {
   isPrivilegedRole,
   resolveRequestExportFlags,
 } from '../lib/userExportFlags'
-import { resolveElevateSessionAudio } from '../analytics/insightProviders/resolveSessionAudio'
+import {
+  measureDecodedAudioDuration,
+  reconcileRecordingDuration,
+  resolveElevateSessionAudio,
+} from '../analytics/insightProviders/resolveSessionAudio'
 import { scheduleElevateSessionAudioEnrichmentIfAnalyzed } from '../analytics/audioEnrichment'
 import { requestDeliveryAlignment } from '../lib/deliveryAlignmentWorker'
 import {
@@ -157,7 +161,7 @@ export async function uploadSessionRecording(req: Request, res: Response) {
       return res.status(400).json({ error: error.message })
     }
 
-    const durationSec = req.body.durationSec ? Number(req.body.durationSec) : 0
+    const clientDurationSec = req.body.durationSec ? Number(req.body.durationSec) : 0
     const recordingStartedAt = req.body.recordingStartedAt
       ? new Date(req.body.recordingStartedAt)
       : null
@@ -198,6 +202,20 @@ export async function uploadSessionRecording(req: Request, res: Response) {
     const absPath = path.join(AUDIO_ROOT, filename)
     const tempPath = `${absPath}.${randomUUID()}.tmp`
     await writeFile(tempPath, file.buffer, { flag: 'wx' })
+    const decodedDurationSec = await measureDecodedAudioDuration(tempPath)
+    if (decodedDurationSec <= 0) {
+      await unlink(tempPath).catch(() => undefined)
+      console.warn(
+        `[recordings] rejecting segment ${segmentId}: uploaded file contains no decodable audio`,
+      )
+      return res.status(422).json({ error: 'Uploaded recording contains no playable audio' })
+    }
+    const durationSec = reconcileRecordingDuration(clientDurationSec, decodedDurationSec)
+    if (clientDurationSec - decodedDurationSec > 2) {
+      console.warn(
+        `[recordings] segment ${segmentId}: client reported ${clientDurationSec.toFixed(1)}s, file holds ${decodedDurationSec.toFixed(1)}s of audio`,
+      )
+    }
     try {
       try {
         // Hard-link promotion is atomic and never replaces an existing canonical file.

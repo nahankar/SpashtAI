@@ -179,5 +179,39 @@ class LivePacingEvidenceTest(unittest.TestCase):
         self.assertEqual(tracker.get_live_metrics().wpm, 0.0)
 
 
+class LiveSpeechStatsTest(unittest.TestCase):
+    def test_pending_turn_is_the_current_turn_for_filler_counts(self):
+        collector, _ = _wired_collector()
+        collector.ingest_conversation_fragment("user", "I would like to give one more example today.", 1.0)
+        collector.ingest_conversation_fragment("assistant", "Go ahead.", 2.0)
+        collector.ingest_conversation_fragment("user", "um so uh basically um I uh led the team", 3.0)
+
+        stats = collector.get_live_speech_stats()
+
+        self.assertGreater(stats["last_turn_filler_count"], 0)
+        self.assertEqual(stats["session_filler_count"], stats["last_turn_filler_count"])
+        self.assertEqual(stats["session_user_turns"], 2)
+
+    def test_explicit_current_turn_text_overrides_pending(self):
+        collector, _ = _wired_collector()
+        collector.ingest_conversation_fragment("user", "I would like to give one more example today.", 1.0)
+        collector.ingest_conversation_fragment("assistant", "Go ahead.", 2.0)
+
+        stats = collector.get_live_speech_stats("um uh um I think we shipped it")
+
+        self.assertGreaterEqual(stats["last_turn_filler_count"], 2)
+        self.assertEqual(stats["session_user_turns"], 2)
+
+    def test_no_pending_turn_reports_last_committed_turn(self):
+        collector, _ = _wired_collector()
+        collector.ingest_conversation_fragment("user", "um uh I led the launch last year", 1.0)
+        collector.ingest_conversation_fragment("assistant", "Nice.", 2.0)
+
+        stats = collector.get_live_speech_stats()
+
+        self.assertGreater(stats["last_turn_filler_count"], 0)
+        self.assertEqual(stats["session_user_turns"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

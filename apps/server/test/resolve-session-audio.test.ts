@@ -229,3 +229,26 @@ describe('resolveElevateSessionAudio path contract', () => {
     expect(isAbsolute(resolved!.audioPath)).toBe(true)
   })
 })
+
+describe('recorded duration reconciliation', () => {
+  it('reads the final decoded position from ffmpeg progress output', async () => {
+    const { parseProgressDurationSec } = await import(
+      '../src/analytics/insightProviders/resolveSessionAudio'
+    )
+    const progress = [
+      'out_time_us=5000000', 'progress=continue',
+      'out_time_us=12660000', 'progress=end', '',
+    ].join('\n')
+    expect(parseProgressDurationSec(progress)).toBeCloseTo(12.66)
+    expect(parseProgressDurationSec('progress=end\n')).toBe(0)
+  })
+
+  it('prefers the decoded audio length over the client wall-clock timer', async () => {
+    const { reconcileRecordingDuration } = await import(
+      '../src/analytics/insightProviders/resolveSessionAudio'
+    )
+    expect(reconcileRecordingDuration(459.9, 56.1)).toBe(56.1)
+    expect(reconcileRecordingDuration(37.2, 0)).toBe(37.2)
+    expect(reconcileRecordingDuration(Number.NaN, 0)).toBe(0)
+  })
+})

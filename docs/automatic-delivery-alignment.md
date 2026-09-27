@@ -77,7 +77,7 @@ Backend behavior:
 
 | Configured backend | Source-word capability | Recording evidence |
 | --- | --- | --- |
-| Transcribe pipeline | Public timed words retained; exact lexical matching | Source-only until recording alignment |
+| Transcribe pipeline | Public timed words retained; exact lexical matching | Used when the STT sample envelope correlates with the retained recording; otherwise automatic alignment |
 | Whisper pipeline | Retain timed words only if supplied; text/chunk-only timing is unavailable | Automatic alignment fallback |
 | Nova Sonic | No STT-node word events in the current speech-to-speech path | Automatic alignment fallback |
 
@@ -119,21 +119,20 @@ The old callback-time-minus-finalization-lag estimate is no longer emitted by
 the agent. It cannot establish correspondence between the STT stream and the
 browser's independently encoded recording, especially after reconnects. Legacy
 agent offsets remain approximate playback data only. The server does not accept
-a caller-provided "verified" mapping or the `actual` word-origin label as proof
-of recording-clock accuracy.
+a caller-provided "verified" mapping or a client `actual` word-origin label as
+proof of recording-clock accuracy. `actual` is applied only by the server after
+the stream envelope correlates with the retained recording.
 
 Public turn responses strip the internal source-word metadata (including when
-transcript text is restricted). Stored words are treated as approximate before
-the signature-bound alignment overlay is applied. The same rule covers Delivery
-Moments and the word input to manual Reprocess. No source-only words are used
-to create exact evidence clips.
+transcript text is restricted). Stored source words stay approximate until that
+signature-bound overlay is applied. The same rule covers Delivery Moments and
+manual Reprocess. Source-only words are not exact evidence clips.
 
-This release does **not** establish a sample-level live-to-browser clock anchor,
-so it does not bypass Gentle for live words. Existing live duration-based pace
-remains governed by the existing pace policy; it is not evidence for where a
-word occurs in a saved recording. A validated, current cached alignment is reused
-without another subprocess; corrupt cached results are explicitly rejected and
-recomputed rather than repeatedly retried as if they were valid.
+Existing live duration-based pace remains governed by the existing pace policy;
+it is not by itself evidence for where a word occurs in a saved recording. A
+validated, current cached alignment is reused without another subprocess when
+its audio, transcript, timeline and, for live results, stream-clock signatures
+still match. Corrupt cached results are explicitly rejected and recomputed.
 
 After automatic alignment, `processingStatus.deliveryTiming` reports:
 
@@ -151,6 +150,11 @@ After automatic alignment, `processingStatus.deliveryTiming` reports:
 }
 ```
 
+When the live clock is accepted for every turn, `source` is `live_recording_clock`,
+`state` is `complete`, and `recordingClockMapped` is true. A session that keeps
+live timing for some turns and alignment for the others uses `source` `mixed`.
+Partial Gentle coverage stays distinguishable from a fully live result.
+
 `complete` here means that every committed user turn passed the alignment
 checks, not that a human certified every boundary. A partial result can provide
 eligible moments while failing the stricter aggregate pace requirements.
@@ -159,11 +163,32 @@ The metrics endpoint also returns a sanitized `deliveryAlignmentError` reason
 for user-facing status; filesystem paths and arbitrary subprocess errors are
 not exposed through that field.
 
-Before live timing can replace alignment, implement and evaluate an actual
-sample-clock correlation with the retained recording. Provider clocks, callback
-timestamps, shared wall-clock estimates and diarization labels are not a
-substitute. This requires capture/protocol work beyond retaining STT word items;
-no new schema, speech provider or default batch transcription is introduced here.
+Live timing replaces Gentle only after a sample-envelope correlation. The agent
+records a 20 ms RMS envelope of the audio frames actually pushed into each STT
+stream. The server correlates that envelope with each retained recording
+segment. Word times are the provider's stream-local times (reported time minus
+the SDK `start_time_offset` that was already applied) shifted by the correlated
+lag. Callback arrival, a guessed constant lag, and wall-clock differences
+between the browser and the agent are not used.
+
+The lag is accepted only when the normalized correlation is at least 0.55 and
+beats every other alignment by at least 0.12. Each turn is then mapped on its
+own: hyphenated words may be one timed item or a few adjacent items, and one
+or two unmatched transcript words do not drop the rest of that turn. A turn
+that still fails stays with Gentle. Pause and
+resume are separate recording segments correlated against the same or a later
+stream. A new `stt_node` invocation is a new epoch and can align inside a later
+segment, including a reconnect that starts at a different point in that
+recording. An offset change inside one stream drops that envelope and keeps
+Gentle, because the restarted provider clock has no sample anchor.
+
+Accepted live results use version `elevate-recording-clock-v1`, word origin
+`actual`, and `deliveryTiming.source` `live_recording_clock`. They are bound to
+the recording, transcript, timeline and stream-clock signatures. A change to
+any of those drops the overlay. Turns the live clock does not fully time still
+go through Gentle, and the verified words from both sources are kept together.
+This correlation is not a human-labelled accuracy
+certification.
 
 ## Acceptance before release
 

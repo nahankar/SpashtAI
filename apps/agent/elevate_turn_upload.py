@@ -11,6 +11,21 @@ logger = logging.getLogger("spashtai-agent.elevate_turn_upload")
 MAX_UPLOAD_BYTES = 96 * 1024
 
 
+def attach_stream_clocks(
+    batches: list[dict[str, Any]], clocks: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Attach the full stream-clock snapshot only when the batch still fits."""
+    if not batches or not clocks:
+        return batches
+    trial = {**batches[-1], "streamClocks": clocks}
+    if len(json.dumps(trial).encode("utf-8")) > MAX_UPLOAD_BYTES:
+        logger.warning("Stream clock omitted; recording alignment required")
+        return batches
+    updated = list(batches)
+    updated[-1] = trial
+    return updated
+
+
 def build_turn_upload_batches(
     turns: list[dict[str, Any]], segment_id: str | None = None,
 ) -> list[dict[str, Any]]:

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { detectFormatAndParse, parsePlainText, parseSRT, parseVTT, suggestReplaySessionName } from '../src/lib/transcript-parser'
+import { detectFormatAndParse, extractMeetingDateFromTranscript, parsePlainText, parseSRT, parseVTT, suggestReplaySessionName } from '../src/lib/transcript-parser'
 
 describe('Replay transcript speaker parsing', () => {
   it('does not treat timestamp prefixes as speaker labels', () => {
@@ -59,6 +59,10 @@ describe('Replay transcript speaker parsing', () => {
       'Replay – 2026-08-21',
     )
     expect(suggestReplaySessionName('', '2026-09-27_Project-Retrospective_recording.vtt')).toBe('Project Retrospective')
+    expect(suggestReplaySessionName(
+      'Meeting: Walkthru of an App-20260420_144056-Meeting Recording\n============================================================',
+    )).toBe('Walkthru of an App')
+    expect(suggestReplaySessionName('# Meeting: (7) Chat | Aditya Nijap')).toBe('Aditya Nijap')
     expect(suggestReplaySessionName('Alice: We should review the invoice automation rollout tomorrow.')).toBe(
       'We should review the invoice automation rollout tomorrow.',
     )
@@ -86,5 +90,21 @@ describe('Replay transcript speaker parsing', () => {
     ])
     expect(parsed.fullText).not.toContain('# Meeting')
     expect(parsed.speakerCount).toBe(5)
+  })
+
+  it('keeps unlabelled recording captions as timed speech and drops the header', () => {
+    const parsed = detectFormatAndParse([
+      'Meeting: Call with Rahul Patil-20260417_203344-Meeting Recording',
+      '============================================================',
+      '[00:00:04.496] Yeah, please go ahead.',
+      '[00:00:06.656] The proof of concept was around a platform limitation.',
+    ].join('\n'), 'text/plain', 'call.txt')
+    expect(parsed.segments.map(segment => segment.speaker)).toEqual(['Speaker', 'Speaker'])
+    expect(parsed.fullText).not.toContain('Meeting:')
+    expect(parsed.segments[0].startTime).toBe(4)
+    expect(extractMeetingDateFromTranscript(parsed.fullText, 'Walkthru-20260420_144056-Meeting_Recording.txt')?.toISOString().slice(0, 10)).toBe('2026-04-20')
+    const stock = detectFormatAndParse('# Meeting: Spend Module\n[00:00] Thank you for watching.\n[00:30] Thank you for watching.')
+    expect(stock.segments).toEqual([])
+    expect(detectFormatAndParse('# Meeting: (6) Calendar | Empty\n# Date: 2026-06-03').segments).toEqual([])
   })
 })

@@ -3,6 +3,7 @@ import { useRoomContext } from '@livekit/components-react'
 import { ConnectionState, RoomEvent, Track } from 'livekit-client'
 import { useAudioRecording } from '@/hooks/useAudioRecording'
 import { describeAudioCapture } from '@/lib/audioCapture'
+import { createMicRecordingSource, type MicRecordingSource } from '@/lib/micRecordingSource'
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:4000'
@@ -13,10 +14,15 @@ const UPLOAD_ATTEMPT_MS = 12_000
 // must not be reported while the final retry can still succeed.
 const FINALIZE_MS = 42_000
 const MIC_ATTEMPTS = 20
+// LiveKit swaps its mic track without a single reliable event across paths
+// (device change, restart on unmute, capture failure).
+const MIC_FOLLOW_MS = 500
 
 export type AudioCaptureReport = 'uploaded' | 'pending' | 'failed' | 'unavailable'
 
 export type SessionRecorderHandle = {
+  /** Stop the recorder and keep its blob before the microphone track is stopped. */
+  seal: () => Promise<void>
   finalize: () => Promise<{ ok: boolean; audioCapture: AudioCaptureReport }>
   waitForFinalization: () => Promise<{ ok: boolean; audioCapture: AudioCaptureReport }>
   retryUpload: () => Promise<{ ok: boolean; audioCapture: AudioCaptureReport }>
@@ -80,6 +86,7 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
     stopRef.current = stopRecording
     const isRecordingRef = useRef(isRecording)
     isRecordingRef.current = isRecording
+    const recordingSourceRef = useRef<MicRecordingSource | null>(null)
 
     const micTrack = useCallback(() => {
       const pubs = Array.from(room.localParticipant.trackPublications.values())
@@ -160,7 +167,20 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
       return { ok, audioCapture: ok ? 'uploaded' : 'failed' }
     }
 
+    const rememberCapturedBlob = (blob: Blob | null) => {
+      if (!blob || blob.size === 0 || capturedBlobRef.current) return
+      if (startMsRef.current) {
+        durationSecRef.current = (Date.now() - startMsRef.current) / 1000
+      }
+      capturedBlobRef.current = blob
+    }
+
     useImperativeHandle(ref, () => ({
+      seal: async () => {
+        if (disabled || uploadedRef.current || capturedBlobRef.current) return
+        if (!isRecordingRef.current) return
+        rememberCapturedBlob(await stopRef.current())
+      },
       finalize: () => {
         if (!finalizePromiseRef.current) {
           finalizePromiseRef.current = finalizeOnce()
@@ -214,32 +234,56 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
       let cancelled = false
       let attempts = 0
 
-      const tryStart = () => {
+      const tryStart = async () => {
         if (cancelled) return
         const track = micTrack()
         if (track) {
+          startedRef.current = true
+          const source = await createMicRecordingSource()
+          if (cancelled) {
+            source?.close()
+            startedRef.current = false
+            return
+          }
           startedAtRef.current = new Date().toISOString()
           startMsRef.current = Date.now()
-          startedRef.current = true
           startOutcomeRef.current = 'started'
           captureSettingsRef.current = describeAudioCapture(track)
-          startRecording(new MediaStream([track]))
+          if (source) {
+            source.follow(micTrack() ?? track)
+            recordingSourceRef.current = source
+            startRecording(source.stream, () => {
+              source.close()
+              if (recordingSourceRef.current === source) recordingSourceRef.current = null
+            })
+          } else {
+            console.warn('Web Audio unavailable; recording the microphone track directly')
+            startRecording(new MediaStream([track]))
+          }
           console.log('🎙️ Auto session recording started', captureSettingsRef.current)
           return
         }
         attempts += 1
         if (attempts < MIC_ATTEMPTS) {
-          setTimeout(tryStart, 500)
+          setTimeout(() => void tryStart(), 500)
         } else {
           startOutcomeRef.current = 'unavailable'
         }
       }
-      tryStart()
+      void tryStart()
 
       return () => {
         cancelled = true
       }
     }, [room, room.state, sessionId, segmentId, disabled, startRecording, micTrack])
+
+    useEffect(() => {
+      if (!isRecording) return
+      const timer = setInterval(() => {
+        recordingSourceRef.current?.follow(micTrack())
+      }, MIC_FOLLOW_MS)
+      return () => clearInterval(timer)
+    }, [isRecording, micTrack])
 
     useEffect(() => {
       if (disabled) return

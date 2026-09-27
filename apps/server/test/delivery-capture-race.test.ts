@@ -5,7 +5,7 @@ import { join } from 'path'
 import express from 'express'
 import { Prisma } from '@prisma/client'
 import request from 'supertest'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   sessionFind: vi.fn(),
@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   txSegmentFind: vi.fn(),
   segmentUpdate: vi.fn(),
   transaction: vi.fn(),
+  decodedDuration: vi.fn(),
 }))
 
 vi.mock('../src/lib/prisma', () => ({
@@ -26,6 +27,11 @@ vi.mock('../src/lib/prisma', () => ({
 }))
 vi.mock('../src/analytics/audioEnrichment', () => ({
   scheduleElevateSessionAudioEnrichmentIfAnalyzed: vi.fn(),
+}))
+vi.mock('../src/analytics/insightProviders/resolveSessionAudio', () => ({
+  measureDecodedAudioDuration: mocks.decodedDuration,
+  reconcileRecordingDuration: (_client: number, decoded: number) => decoded,
+  resolveElevateSessionAudio: vi.fn(),
 }))
 
 const audio = Buffer.from('concurrent recorded audio')
@@ -50,6 +56,11 @@ describe('concurrent recording upload recovery', () => {
       recordingUpload.single('audio'),
       uploadSessionRecording,
     )
+  })
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.decodedDuration.mockResolvedValue(12)
   })
 
   afterAll(async () => {
@@ -103,5 +114,34 @@ describe('concurrent recording upload recovery', () => {
       where: { id: 'segment-1' },
       data: { audioStatus: 'available', captureSettings: capture },
     })
+  })
+
+  it('rejects an empty MediaRecorder artifact before it can win the segment race', async () => {
+    mocks.decodedDuration.mockResolvedValue(0)
+    mocks.sessionFind.mockResolvedValue({
+      id: 'session-1', userId: 'user-1', recordingStartedAt: null, discardedAt: null,
+    })
+    mocks.segmentFind.mockResolvedValue({
+      id: 'segment-empty',
+      sessionId: 'session-1',
+      segmentIndex: 0,
+      audioStatus: 'pending',
+      captureSettings: null,
+      endedAt: null,
+      recording: null,
+    })
+
+    const response = await request(app)
+      .post('/sessions/session-1/recording/upload')
+      .field('segmentId', 'segment-empty')
+      .field('durationSec', '275')
+      .attach('audio', Buffer.alloc(170), {
+        filename: 'recording.webm',
+        contentType: 'audio/webm',
+      })
+
+    expect(response.status).toBe(422)
+    expect(response.body.error).toBe('Uploaded recording contains no playable audio')
+    expect(mocks.transaction).not.toHaveBeenCalled()
   })
 })

@@ -7,7 +7,9 @@ import { prisma } from './prisma'
 import { resolveAgentPython } from './agentPython'
 import { lockWritableSession } from './sessionDiscard'
 import { resolveElevateAudioInputSignature, resolveElevateSessionAudio } from '../analytics/insightProviders/resolveSessionAudio'
-import { ALIGNMENT_VERSION, committedTranscriptMatches, resolveCanonicalDeliveryPace, timelineSignature, transcriptSignature, validateAlignmentResult } from '../analytics/alignedDelivery'
+import { ALIGNMENT_VERSION, HYBRID_ALIGNMENT_VERSION, alignmentCoverage, alignmentVersionFor, committedTranscriptMatches, fullyTimedTurnIds, resolveCanonicalDeliveryPace, selectAlignmentTurns, timelineSignature, transcriptSignature, validateAlignmentResult } from '../analytics/alignedDelivery'
+import { loadSegmentEnvelopes } from '../analytics/recordingClockAudio'
+import { LIVE_RECORDING_CLOCK_VERSION, mapLiveRecordingEvidence, readStreamClocks, streamClockSignature } from '../analytics/recordingClockMap'
 import { calculateSkillScores, type TextSignals } from '../analytics/skillScores'
 import { assessPaceEvidence } from '../analytics/pace'
 import { liveEvidenceSummary } from '../analytics/liveDeliveryEvidence'
@@ -15,6 +17,9 @@ import { liveEvidenceSummary } from '../analytics/liveDeliveryEvidence'
 const LEASE_MS = 20 * 60_000
 const JOB_TIMEOUT_MS = 15 * 60_000
 const MAX_ATTEMPTS = 5
+const REJECTED_EXIT_CODE = 3
+// Same audio and transcript reproduce these outcomes; retrying only delays the result.
+const TERMINAL_REASONS = new Set(['alignment_rejected', 'alignment_coverage_insufficient'])
 const script = join(dirname(fileURLToPath(import.meta.url)), '../../../agent/align_delivery.py')
 let running = false
 let timer: NodeJS.Timeout | null = null
@@ -23,10 +28,11 @@ const object = (value: unknown): Record<string, any> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {}
 
 export function alignmentRetry(attempts: number, reason: string) {
+  const exhausted = attempts >= MAX_ATTEMPTS || TERMINAL_REASONS.has(reason)
   return {
-    deliveryAlignmentStatus: attempts >= MAX_ATTEMPTS ? 'unavailable' : 'retry',
+    deliveryAlignmentStatus: exhausted ? 'unavailable' : 'retry',
     deliveryAlignmentError: reason,
-    deliveryAlignmentNextAt: attempts >= MAX_ATTEMPTS ? null : new Date(Date.now() + Math.min(30 * 60_000, 60_000 * 2 ** attempts)),
+    deliveryAlignmentNextAt: exhausted ? null : new Date(Date.now() + Math.min(30 * 60_000, 60_000 * 2 ** attempts)),
   }
 }
 
@@ -104,6 +110,7 @@ export function runAlignmentProcess(payload: unknown): Promise<unknown> {
     child.on('error', () => finish(new Error('alignment_process_unavailable')))
     child.on('close', code => {
       if (forceKill) clearTimeout(forceKill)
+      if (code === REJECTED_EXIT_CODE) return finish(new Error('alignment_rejected'))
       if (code !== 0) return finish(new Error('alignment_service_failed'))
       try { finish(undefined, JSON.parse(output)) } catch { finish(new Error('invalid_alignment_output')) }
     })
@@ -113,7 +120,7 @@ export function runAlignmentProcess(payload: unknown): Promise<unknown> {
 
 async function processSession(sessionId: string, owner: string): Promise<void> {
   const snapshot = await prisma.session.findUnique({ where: { id: sessionId }, include: {
-    transcript: true,
+    transcript: true, metrics: true,
     turns: { where: { role: 'user' }, orderBy: { sequenceNo: 'asc' } },
     segments: { include: { recording: true } },
   } })
@@ -132,9 +139,14 @@ async function processSession(sessionId: string, owner: string): Promise<void> {
   const signature = transcriptSignature(snapshot.turns)
   const payload = { audioPath: resolved.audioPath, segments: resolved.segments,
     turns: snapshot.turns.map(t => ({ id: t.id, segmentId: t.segmentId, text: t.text })) }
+  const clocks = readStreamClocks(object(snapshot.metrics?.processingStatus).liveStreamClocks)
+  const clockSignature = streamClockSignature(clocks)
   const stored = object(snapshot.deliveryAlignmentResult)
-  const reusable = stored.version === ALIGNMENT_VERSION && stored.inputSignature === resolved.inputSignature &&
-    stored.transcriptSignature === signature && stored.timelineSignature === timelineSignature(resolved.segments)
+  const clockBound = stored.version === LIVE_RECORDING_CLOCK_VERSION || stored.version === HYBRID_ALIGNMENT_VERSION
+  const storedVersion = stored.version === ALIGNMENT_VERSION || clockBound
+  const reusable = storedVersion && stored.inputSignature === resolved.inputSignature &&
+    stored.transcriptSignature === signature && stored.timelineSignature === timelineSignature(resolved.segments) &&
+    (!clockBound || stored.clockSignature === clockSignature)
   let result
   if (reusable) {
     try {
@@ -144,8 +156,55 @@ async function processSession(sessionId: string, owner: string): Promise<void> {
     }
   }
   if (!result) {
-    const raw = await runAlignmentProcess(payload)
-    result = validateAlignmentResult(raw, snapshot.turns, resolved.segments, resolved.inputSignature)
+    let liveResult: Awaited<ReturnType<typeof validateAlignmentResult>> | null = null
+    if (clocks.length && clockSignature) {
+      const envelopes = await loadSegmentEnvelopes(resolved.audioPath, resolved.segments)
+      if (envelopes) {
+        const mapped = mapLiveRecordingEvidence({
+          turns: snapshot.turns, segments: resolved.segments, clocks, envelopes,
+          inputSignature: resolved.inputSignature,
+        })
+        if (mapped.result) {
+          try {
+            liveResult = validateAlignmentResult(mapped.result, snapshot.turns, resolved.segments, resolved.inputSignature)
+            console.info(`[delivery-alignment] ${sessionId}: accepted live recording clock for ${liveResult.turns.length} of ${snapshot.turns.length} turns`)
+          } catch {
+            console.warn(`[delivery-alignment] ${sessionId}: live recording clock failed validation`)
+          }
+        } else {
+          console.info(`[delivery-alignment] ${sessionId}: live recording clock not used (${mapped.reason})`)
+        }
+      }
+    }
+    const covered = fullyTimedTurnIds(snapshot.turns, liveResult)
+    const pending = snapshot.turns.filter(turn => !covered.has(turn.id))
+    let gentleResult: Awaited<ReturnType<typeof validateAlignmentResult>> | null = null
+    if (pending.length) {
+      try {
+        const raw = await runAlignmentProcess({ ...payload, turns: pending.map(turn => ({
+          id: turn.id, segmentId: turn.segmentId, text: turn.text,
+        })) })
+        gentleResult = validateAlignmentResult(raw, snapshot.turns, resolved.segments, resolved.inputSignature)
+      } catch (error) {
+        if (!liveResult) throw error
+        console.warn(`[delivery-alignment] ${sessionId}: alignment fallback failed; keeping live turns`)
+      }
+    }
+    const selected = selectAlignmentTurns(snapshot.turns, liveResult, gentleResult)
+    if (!selected.length) throw new Error('alignment_coverage_insufficient')
+    const version = alignmentVersionFor(selected)
+    try {
+      result = validateAlignmentResult({
+        version, turns: selected,
+        ...(version === ALIGNMENT_VERSION ? {} : { clockSignature }),
+      }, snapshot.turns, resolved.segments, resolved.inputSignature)
+    } catch (error) {
+      const liveWords = liveResult?.turns.reduce((sum, turn) => sum + turn.words.length, 0) ?? -1
+      const gentleWords = gentleResult?.turns.reduce((sum, turn) => sum + turn.words.length, 0) ?? -1
+      if (liveResult && liveWords >= gentleWords) result = liveResult
+      else if (gentleResult) result = gentleResult
+      else throw error
+    }
   }
   if (!result.turns.length) throw new Error('alignment_coverage_insufficient')
 
@@ -182,13 +241,15 @@ async function processSession(sessionId: string, owner: string): Promise<void> {
         signals.talkListenBalance && signals.questionHandling) {
       scores = calculateSkillScores(communicationSignals as unknown as TextSignals, latest.metrics?.totalTurns ?? latest.turns.length)
     }
+    const coverage = alignmentCoverage(latest.turns, result)
     const data = {
       processingStatus: json({ ...currentStatus, pace, deliveryTiming: {
-        state: result.turns.length === latest.turns.length ? 'complete' : 'partial',
-        source: 'forced_alignment',
+        state: coverage.complete === coverage.total ? 'complete' : 'partial',
+        source: result.version === HYBRID_ALIGNMENT_VERSION ? 'mixed'
+          : result.version === LIVE_RECORDING_CLOCK_VERSION ? 'live_recording_clock' : 'forced_alignment',
         acceptedTurnCount: result.turns.length,
         totalTurnCount: latest.turns.length,
-        liveSource: liveEvidenceSummary(latest.turns),
+        liveSource: liveEvidenceSummary(latest.turns, result.version !== ALIGNMENT_VERSION),
       } }),
       ...(pace.wpm != null ? { userWpm: pace.wpm, userSpeakingTime: pace.speakingSeconds } : {}),
       ...(latest.metrics?.communicationSignals ? { communicationSignals: json(communicationSignals) } : {}),

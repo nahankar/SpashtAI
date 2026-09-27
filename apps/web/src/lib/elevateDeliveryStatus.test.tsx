@@ -52,6 +52,7 @@ describe('Elevate automatic delivery labels', () => {
     ['retry', 'alignment_timeout', 'took longer than expected.'],
     ['retry', 'alignment_service_failed', 'could not finish this attempt.'],
     ['unavailable', 'alignment_coverage_insufficient', 'Too little speech could be matched reliably'],
+    ['unavailable', 'alignment_rejected', 'Part of the recording may not have been captured.'],
   ] as const)('renders a human explanation for %s / %s', async (state, reason, expected) => {
     const update = vi.fn()
     const stop = watchElevateDeliveryStatus(
@@ -85,6 +86,37 @@ describe('Elevate automatic delivery labels', () => {
       if (state === 'partial') expect(html).toContain('Unverified turns are excluded')
       stop()
     }
+  })
+
+  it('explains a complete live-clock result without printing internal field names', async () => {
+    const update = vi.fn()
+    const stop = watchElevateDeliveryStatus(async () => response({
+      deliveryAlignmentStatus: 'completed',
+      processingStatus: { deliveryTiming: {
+        state: 'complete', source: 'live_recording_clock', acceptedTurnCount: 4, totalTurnCount: 4,
+        liveSource: { sourceOnlyTurns: 4, unavailableTurns: 0, recordingClockMapped: true },
+      } },
+    }), update)
+    await vi.waitFor(() => expect(update).toHaveBeenCalledOnce())
+    const html = renderToStaticMarkup(<AutomaticDeliveryStatusView status={update.mock.calls[0][0]} onRefresh={vi.fn()} />)
+    expect(html).toContain('Live word timing matched your recording for 4 of 4 speaking turns.')
+    expect(html).not.toMatch(/live_recording_clock|recordingClockMapped/)
+    stop()
+  })
+
+  it('explains a mixed live and alignment result', async () => {
+    const update = vi.fn()
+    const stop = watchElevateDeliveryStatus(async () => response({
+      deliveryAlignmentStatus: 'completed',
+      processingStatus: { deliveryTiming: {
+        state: 'complete', source: 'mixed', acceptedTurnCount: 8, totalTurnCount: 8,
+      } },
+    }), update)
+    await vi.waitFor(() => expect(update).toHaveBeenCalledOnce())
+    const html = renderToStaticMarkup(<AutomaticDeliveryStatusView status={update.mock.calls[0][0]} onRefresh={vi.fn()} />)
+    expect(html).toContain('Word timing verified for 8 of 8 speaking turns.')
+    expect(html).toContain('Live recording timing was kept where it matched')
+    stop()
   })
 
   it('never exposes raw machine reasons, paths, or service errors', () => {

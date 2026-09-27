@@ -4,6 +4,7 @@ export interface ElevateDeliveryTiming {
   state: 'complete' | 'partial'
   acceptedTurnCount: number
   totalTurnCount: number
+  source: 'forced_alignment' | 'live_recording_clock' | 'mixed'
 }
 
 export interface ElevateDeliveryStatus {
@@ -42,7 +43,10 @@ function parseStatus(value: unknown): ElevateDeliveryStatus {
   const timingState = timing.state
   const accepted = timing.acceptedTurnCount
   const total = timing.totalTurnCount
-  const validTiming = state === 'completed' && timing.source === 'forced_alignment'
+  const source = timing.source === 'live_recording_clock' || timing.source === 'forced_alignment'
+    || timing.source === 'mixed'
+    ? timing.source : null
+  const validTiming = state === 'completed' && source != null
     && (timingState === 'complete' || timingState === 'partial')
     && typeof accepted === 'number' && Number.isInteger(accepted) && accepted >= 0
     && typeof total === 'number' && Number.isInteger(total) && total > 0 && accepted <= total
@@ -56,6 +60,7 @@ function parseStatus(value: unknown): ElevateDeliveryStatus {
       state: timingState,
       acceptedTurnCount: accepted,
       totalTurnCount: total,
+      source,
     } : null,
   }
 }
@@ -70,6 +75,8 @@ function reasonLabel(reason: string): string {
       return 'Some parts of your recording are missing.'
     case 'alignment_coverage_insufficient':
       return 'Too little speech could be matched reliably to the recording.'
+    case 'alignment_rejected':
+      return 'Your recording does not match the transcript closely enough to time your words. Part of the recording may not have been captured.'
     case 'alignment_timeout':
       return 'Matching speech to the recording took longer than expected.'
     case 'alignment_process_unavailable':
@@ -110,9 +117,12 @@ export function elevateDeliveryStatusLabel(status: ElevateDeliveryStatus): strin
       return `Delivery analysis is unavailable.${reason || ' Word timing could not be verified for this recording.'} Playback and other feedback remain available.`
     case 'completed': {
       const timing = status.timing
-      const coverage = timing
-        ? ` Word timing verified for ${timing.acceptedTurnCount} of ${timing.totalTurnCount} speaking turns.`
-        : ''
+      const coverage = !timing ? ''
+        : timing.source === 'live_recording_clock'
+          ? ` Live word timing matched your recording for ${timing.acceptedTurnCount} of ${timing.totalTurnCount} speaking turns.`
+          : timing.source === 'mixed'
+            ? ` Word timing verified for ${timing.acceptedTurnCount} of ${timing.totalTurnCount} speaking turns. Live recording timing was kept where it matched, and alignment filled the remaining turns.`
+            : ` Word timing verified for ${timing.acceptedTurnCount} of ${timing.totalTurnCount} speaking turns.`
       return timing?.state === 'partial'
         ? `Delivery analysis finished with partial coverage.${coverage} Unverified turns are excluded from timing-based feedback.${reason} Playback and other feedback remain available.`
         : `Delivery analysis is ${status.ready ? 'ready' : 'complete'}.${coverage}${reason}`

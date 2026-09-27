@@ -44,7 +44,8 @@ from text_sanitize import StreamingThinkingStripper, is_thinking_only, strip_thi
 from voice_backends import VoiceBackendConfig, apply_turn_detection_update, build_session, metadata_label
 from backend_profiles import BackendProfile, SttMode, profile_for
 from elevate_live_words import LiveWordEvidenceCollector
-from elevate_turn_upload import build_turn_upload_batches
+from elevate_stream_clock import StreamClockTracker
+from elevate_turn_upload import attach_stream_clocks, build_turn_upload_batches
 from live_pacing import LivePacingTracker
 from pace_timestamps import validate_timestamp_evidence
 
@@ -422,11 +423,27 @@ class CoachingAgent(Agent):
         self._live_word_evidence = LiveWordEvidenceCollector(
             provider=stt_provider or voice_backend
         )
+        self._stream_clocks = StreamClockTracker()
+
+    async def _observe_stream_clock(self, audio, epoch: int):
+        """Forward every frame unchanged while measuring its sample envelope."""
+        async for frame in audio:
+            try:
+                self._stream_clocks.push(epoch, frame)
+            except Exception:
+                logger.warning("Live stream clock frame skipped")
+            yield frame
 
     async def stt_node(self, audio, model_settings: ModelSettings):
-        """Retain source evidence without assuming the browser recording clock."""
+        """Retain source evidence and the STT sample envelope, not a recording offset."""
         self._live_word_evidence.begin_stream()
-        async for ev in Agent.default.stt_node(self, audio, model_settings):
+        epoch = self._live_word_evidence.epoch
+        try:
+            self._stream_clocks.open_epoch(epoch)
+        except Exception:
+            logger.warning("Live stream clock unavailable")
+        observed = self._observe_stream_clock(audio, epoch) if audio is not None else audio
+        async for ev in Agent.default.stt_node(self, observed, model_settings):
             try:
                 if (
                     isinstance(ev, stt.SpeechEvent)
@@ -435,6 +452,9 @@ class CoachingAgent(Agent):
                 ):
                     self._ingest_stt_word_timing(ev.alternatives[0])
                     self._live_word_evidence.ingest(ev)
+                    if self._live_word_evidence.epoch != epoch:
+                        self._stream_clocks.invalidate(epoch, "stream_epoch_changed")
+                        epoch = self._live_word_evidence.epoch
             except Exception as e:  # never let metrics break transcription
                 logger.warning("Live timing capture unavailable: %s", type(e).__name__)
             yield ev
@@ -671,12 +691,13 @@ class CoachingAgent(Agent):
         # (all fragments so far) for the short-turn check — otherwise a 76-word
         # answer looks "short" and the coach gets StopResponse'd forever.
         cumulative_words = word_count
+        current_turn_text = user_text
         if self._advanced_metrics is not None:
             try:
                 pending = self._advanced_metrics.basic_collector.peek_pending_user_text()
                 if pending:
-                    combined = pending if user_text in pending else f"{pending} {user_text}"
-                    cumulative_words = len(combined.split())
+                    current_turn_text = pending if user_text in pending else f"{pending} {user_text}"
+                    cumulative_words = len(current_turn_text.split())
             except Exception:
                 pass
 
@@ -737,10 +758,10 @@ class CoachingAgent(Agent):
                 f"Last utterance ~{last_wpm} WPM ({last.qualitative}), {last.words} words."
             )
         if self._advanced_metrics is not None:
-            stats = self._advanced_metrics.basic_collector.get_live_speech_stats()
+            stats = self._advanced_metrics.basic_collector.get_live_speech_stats(current_turn_text)
             if stats.get("last_turn_word_count", 0) > 0:
                 parts.append(
-                    f"Last turn fillers {stats.get('last_turn_filler_count', 0)}, "
+                    f"Current turn fillers {stats.get('last_turn_filler_count', 0)}, "
                     f"hedging {stats.get('last_turn_hedging_count', 0)}; "
                     f"session fillers {stats.get('session_filler_count', 0)}."
                 )
@@ -2685,7 +2706,10 @@ async def entrypoint(ctx: JobContext):
                     for entry, evidence in zip(turns_payload, source_evidence):
                         if entry["role"] == "user":
                             entry.setdefault("metrics", {})["live_word_evidence"] = evidence
-                    upload_batches = build_turn_upload_batches(turns_payload, segment_id)
+                    upload_batches = attach_stream_clocks(
+                        build_turn_upload_batches(turns_payload, segment_id),
+                        agent._stream_clocks.export() if hasattr(agent, "_stream_clocks") else [],
+                    )
                     import aiohttp
                     async with aiohttp.ClientSession() as _ts:
                         turns_url = f"{SERVER_URL}/internal/sessions/{session_id}/turns"

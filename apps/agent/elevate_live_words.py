@@ -58,7 +58,6 @@ MAX_WORD_CHARS = 256
 MAX_TURNS = 512
 MAX_ALIGNMENT_CELLS = 1_000_000
 MAX_ID_CHARS = 256
-_TOKEN_RE = re.compile(r"[^\W_]+(?:'[^\W_]+)*", re.UNICODE)
 
 
 class _RequiredWord(TypedDict):
@@ -84,6 +83,8 @@ class _RequiredEvidence(TypedDict):
 class LiveWordEvidence(_RequiredEvidence, total=False):
     streamId: str
     resultIds: list[str]
+    epoch: int
+    streamOffsetSec: float
 
 
 @dataclass(frozen=True)
@@ -147,8 +148,18 @@ def _identity(value: object) -> str | None:
 
 
 def _tokens(text: str) -> tuple[str, ...]:
+    """One token per whitespace word, with hyphens collapsed inside that word.
+
+    "part-time" stays one timed token. "one two" stays two tokens, so a single
+    timestamp is never split into invented word boundaries.
+    """
     normalized = unicodedata.normalize("NFKC", text).casefold().replace("\u2019", "'")
-    return tuple(_TOKEN_RE.findall(normalized))
+    tokens = []
+    for piece in normalized.split():
+        collapsed = re.sub(r"[^\w']", "", piece, flags=re.UNICODE)
+        if collapsed:
+            tokens.append(collapsed)
+    return tuple(tokens)
 
 
 def _unique_word_positions(
@@ -215,6 +226,7 @@ def _parse(data: object) -> _Parsed:
         if not parts:
             continue  # Untimed punctuation is not a spoken word.
         if len(parts) != 1:
+            # A space-separated chunk has one interval for several words.
             reason = reason or "non_word_timing"
             continue
         lexical.append(parts[0])
@@ -345,6 +357,10 @@ class LiveWordEvidenceCollector:
         self._last_start: float | None = None
         self._token_count = 0
         self._failure: str | None = None
+
+    @property
+    def epoch(self) -> int:
+        return self._epoch
 
     def begin_stream(self, stream_id: str | None = None) -> None:
         """Partition a known reconnect; never synthesize a provider stream ID."""
@@ -486,6 +502,14 @@ class LiveWordEvidenceCollector:
             evidence["reason"] = issues[0] if issues else "unanchored_stt_stream"
             if evidence["words"]:
                 evidence["state"] = "source_only"
+                evidence["epoch"] = selected[0][0].epoch
+                offsets = {
+                    fragment.parsed.offset for fragment, _word in selected
+                }
+                if len(offsets) == 1:
+                    offset = next(iter(offsets))
+                    if offset is not None and offset >= 0:
+                        evidence["streamOffsetSec"] = offset
             else:
                 evidence["reason"] = issues[0] if issues else "word_timestamps_unavailable"
             stream_ids = {fragment.stream_id for fragment, _ in selected}

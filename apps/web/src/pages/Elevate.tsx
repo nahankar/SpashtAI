@@ -48,7 +48,7 @@ import { Trash2, CheckSquare, Square, Target, ArrowRight, Play, ChevronDown, Che
 import { generateSessionPdf, type SessionReport } from '@/lib/generate-session-pdf'
 import { CoachAudioBootstrap } from '@/components/session/CoachAudioBootstrap'
 import { SessionRecorder, type SessionRecorderHandle } from '@/components/session/SessionRecorder'
-import { settleRecordingBeforePause } from '@/lib/pauseCapture'
+import { pauseAfterSealingRecording, settleRecordingBeforePause } from '@/lib/pauseCapture'
 import { runReprocess } from '@/lib/reprocess'
 import { stripThinkingBlocks } from '@/lib/stripThinking'
 import {
@@ -2415,6 +2415,7 @@ export function Elevate() {
                     </Button>
                     <InRoomControls
                       sessionId={sessionId}
+                      onSealRecording={() => recorderRef.current?.seal() ?? Promise.resolve()}
                       onPauseSession={handlePause}
                       isPausing={isPausing}
                       inputBlocked={isPausing || pauseAudioFailure != null}
@@ -2883,12 +2884,14 @@ function LiveKitConversation({
 
 function InRoomControls({
   sessionId,
+  onSealRecording,
   onPauseSession,
   isPausing,
   inputBlocked,
   enableAudioRecord = false,
 }: {
   sessionId: string | null
+  onSealRecording: () => Promise<void>
   onPauseSession: () => Promise<void>
   isPausing: boolean
   inputBlocked: boolean
@@ -2937,16 +2940,18 @@ function InRoomControls({
   }, [isTogglingMic, micEnabled, room])
 
   const requestPause = useCallback(async () => {
-    try {
-      await room.localParticipant.setMicrophoneEnabled(false)
-      setMicEnabled(false)
-    } catch (error) {
-      console.warn('Failed to mute microphone before pause:', error)
-      toast.error('Could not mute the microphone. Pause was cancelled.')
-      return
+    const muted = await pauseAfterSealingRecording({
+      sealRecording: onSealRecording,
+      muteMicrophone: async () => {
+        await room.localParticipant.setMicrophoneEnabled(false)
+        setMicEnabled(false)
+      },
+      settlePause: onPauseSession,
+    })
+    if (!muted) {
+      toast.error('Could not mute the microphone. This recording segment is still being saved.')
     }
-    await onPauseSession()
-  }, [onPauseSession, room])
+  }, [onPauseSession, onSealRecording, room])
 
   const handleToggleRecording = useCallback(async () => {
     if (isRecording) {

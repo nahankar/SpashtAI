@@ -100,6 +100,87 @@ class LiveAgentWiringTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(evidence["state"], "unavailable")
         self.assertEqual(evidence["words"], [])
 
+    async def test_audio_frames_build_a_stream_envelope_without_dropping_events(self):
+        from array import array
+
+        def frame():
+            class Frame:
+                pass
+            item = Frame()
+            item.sample_rate = 16000
+            item.num_channels = 1
+            item.samples_per_channel = 320
+            item.data = array("h", [1000] * 320)
+            return item
+
+        frames = [frame() for _ in range(50)]
+
+        async def audio():
+            for item in frames:
+                yield item
+
+        event = final()
+
+        async def stream(_agent, source, *_args):
+            async for item in source:
+                seen.append(item)
+            yield event
+
+        seen = []
+        with patch.object(main.Agent.default, "stt_node", stream):
+            delivered = [item async for item in self.agent.stt_node(audio(), None)]
+        self.assertEqual(delivered, [event])
+        self.assertEqual(seen, frames)
+        exported = self.agent._stream_clocks.export()
+        self.assertEqual([clock["epoch"] for clock in exported], [1])
+        self.assertEqual(exported[0]["hops"], 50)
+        evidence = self.agent._live_word_evidence.for_turns([
+            {"role": "user", "text": "hello world"},
+        ])[0]
+        self.assertEqual(evidence["epoch"], 1)
+        self.assertNotIn("streamOffsetSec", evidence)
+
+    async def test_provider_offset_change_drops_the_unanchored_envelope(self):
+        from array import array
+
+        def frame():
+            class Frame:
+                pass
+            item = Frame()
+            item.sample_rate = 16000
+            item.num_channels = 1
+            item.samples_per_channel = 320
+            item.data = array("h", [1000] * 320)
+            return item
+
+        def shifted(offset):
+            return stt.SpeechEvent(
+                type=stt.SpeechEventType.FINAL_TRANSCRIPT,
+                alternatives=[stt.SpeechData(
+                    language="en-US", text="hello world", start_time=10, end_time=12,
+                    words=[
+                        TimedString("hello", 10, 11, confidence=0.9, start_time_offset=offset),
+                        TimedString("world", 11, 12, confidence=0.9, start_time_offset=offset),
+                    ],
+                )],
+            )
+
+        async def audio():
+            for _ in range(50):
+                yield frame()
+
+        events = [shifted(1), shifted(4)]
+
+        async def stream(_agent, source, *_args):
+            async for _item in source:
+                pass
+            for event in events:
+                yield event
+
+        with patch.object(main.Agent.default, "stt_node", stream):
+            self.assertEqual([item async for item in self.agent.stt_node(audio(), None)], events)
+        self.assertEqual(self.agent._stream_clocks.export(), [])
+
 
 if __name__ == "__main__":
     unittest.main()

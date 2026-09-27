@@ -694,18 +694,25 @@ class MetricsCollector:
             qual = "rapid"
         return wpm, words, secs, qual
 
-    def get_live_speech_stats(self) -> dict:
-        """Grounded filler/hedging stats for the LLM coaching tool."""
+    def get_live_speech_stats(self, current_turn_text: Optional[str] = None) -> dict:
+        """Grounded filler/hedging stats for the LLM coaching tool.
+
+        The user turn the coach is replying to is still pending in the stitcher
+        (it commits only when the assistant turn starts), so "last turn" means
+        that pending turn when present, and session totals include it.
+        """
         user_turns = [t for t in self.session_metrics.turns if t.speaker == "user"]
         assistant_turns = [t for t in self.session_metrics.turns if t.speaker == "assistant"]
-        total_words = sum(t.word_count for t in user_turns)
-        filler_count = sum(analyze_speech_text(t.text).filler_count for t in user_turns)
-        hedging_count = sum(analyze_speech_text(t.text).hedging_count for t in user_turns)
-        acknowledgment_count = sum(
-            analyze_speech_text(t.text).acknowledgment_count for t in user_turns
-        )
-        last_turn_text = user_turns[-1].text if user_turns else ""
-        last = analyze_speech_text(last_turn_text) if last_turn_text else None
+        user_texts = [t.text for t in user_turns]
+        current = (current_turn_text if current_turn_text is not None else self.peek_pending_user_text()).strip()
+        if current:
+            user_texts.append(current)
+        analyses = [analyze_speech_text(text) for text in user_texts]
+        total_words = sum(a.word_count for a in analyses)
+        filler_count = sum(a.filler_count for a in analyses)
+        hedging_count = sum(a.hedging_count for a in analyses)
+        acknowledgment_count = sum(a.acknowledgment_count for a in analyses)
+        last = analyses[-1] if analyses else None
         return {
             "session_filler_count": filler_count,
             "session_filler_rate_percent": round(
@@ -714,7 +721,7 @@ class MetricsCollector:
             "session_hedging_count": hedging_count,
             "session_acknowledgment_count": acknowledgment_count,
             "session_user_words": total_words,
-            "session_user_turns": len(user_turns),
+            "session_user_turns": len(user_texts),
             "session_exchanges": min(len(user_turns), len(assistant_turns)),
             "last_turn_filler_count": last.filler_count if last else 0,
             "last_turn_hedging_count": last.hedging_count if last else 0,

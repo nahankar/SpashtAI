@@ -20,6 +20,7 @@ import {
 import { resolveAgentPython } from '../lib/agentPython'
 import { queueDeliveryAlignment, requestDeliveryAlignment } from '../lib/deliveryAlignmentWorker'
 import { applyAlignedDelivery, fullUserTranscriptTokens } from '../analytics/alignedDelivery'
+import { clockSignatureFromStatus } from '../analytics/recordingClockMap'
 import { publicAlignmentReason, withApproximatePlaybackTiming } from '../analytics/liveDeliveryEvidence'
 import { getReprocessJob, startReprocessJob } from '../lib/reprocessJobs'
 import {
@@ -961,11 +962,15 @@ export async function reprocessSessionMetrics(req: Request, res: Response) {
     const localAudioPath = resolvedAudio.audioPath
     const pythonScript = join(__dirname, '../../../agent/reprocess_session.py')
     const pythonEnv = resolveAgentPython()
+    const timingMetrics = await prisma.sessionMetrics.findUnique({
+      where: { sessionId }, select: { processingStatus: true },
+    })
     const persistedWords = buildReprocessTimelineWords(
       resolvedAudio.segments,
       applyAlignedDelivery(withApproximatePlaybackTiming(session.turns),
-        session.deliveryAlignmentResult, resolvedAudio.inputSignature, resolvedAudio.segments),
-    ).filter(word => word.timingOrigin === 'forced_alignment')
+        session.deliveryAlignmentResult, resolvedAudio.inputSignature, resolvedAudio.segments,
+        clockSignatureFromStatus(timingMetrics?.processingStatus)),
+    ).filter(word => word.timingOrigin === 'forced_alignment' || word.timingOrigin === 'actual')
 
     // Audio analysis runs for minutes, so hand it to a background job and let
     // the client poll /reprocess-status instead of holding the connection open

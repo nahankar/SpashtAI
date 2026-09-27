@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express'
 import { prisma } from '../lib/prisma'
 import { applyAlignedDelivery } from '../analytics/alignedDelivery'
+import { clockSignatureFromStatus, readStreamClocks } from '../analytics/recordingClockMap'
 import {
   approximatePlaybackWords,
   incomingTimingMetrics,
@@ -117,9 +118,13 @@ export async function getSessionTurns(req: Request, res: Response) {
     const resolvedAudio = await resolveElevateSessionAudio(sessionId, {
       requireCompleteSegments: true,
     }).catch(() => null)
+    const timingMetrics = await prisma.sessionMetrics.findUnique({
+      where: { sessionId }, select: { processingStatus: true },
+    })
     if (resolvedAudio) {
       turns = applyAlignedDelivery(turns, session?.deliveryAlignmentResult,
-        resolvedAudio.inputSignature, resolvedAudio.segments)
+        resolvedAudio.inputSignature, resolvedAudio.segments,
+        clockSignatureFromStatus(timingMetrics?.processingStatus))
     }
     // This is the one canonical segment list for both the merged stream and
     // replay offsets. Unreadable files are absent, so later words cannot drift.
@@ -454,6 +459,25 @@ export async function saveSessionTurnsForAgent(req: Request, res: Response) {
           await tx.sessionTurn.update({
             where: { id: allTurns[index].id },
             data: { sequenceNo: index, turnIndex: index },
+          })
+        }
+      }
+      const clocks = readStreamClocks(req.body?.streamClocks)
+      if (clocks.length) {
+        const metrics = await tx.sessionMetrics.findUnique({
+          where: { sessionId }, select: { processingStatus: true },
+        })
+        const status = metrics?.processingStatus && typeof metrics.processingStatus === 'object'
+          && !Array.isArray(metrics.processingStatus)
+          ? metrics.processingStatus as Record<string, unknown> : {}
+        const processingStatus = { ...status, liveStreamClocks: req.body.streamClocks }
+        if (metrics) {
+          await tx.sessionMetrics.update({
+            where: { sessionId }, data: { processingStatus: processingStatus as any },
+          })
+        } else {
+          await tx.sessionMetrics.create({
+            data: { sessionId, processingStatus: processingStatus as any },
           })
         }
       }

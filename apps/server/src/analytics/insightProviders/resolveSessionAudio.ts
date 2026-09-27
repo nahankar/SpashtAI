@@ -119,6 +119,35 @@ async function probeMediaDuration(audioPath: string): Promise<number> {
   }
 }
 
+export function parseProgressDurationSec(progressOutput: string): number {
+  const matches = [...progressOutput.matchAll(/^out_time_us=(\d+)\s*$/gm)]
+  const micros = Number(matches.at(-1)?.[1])
+  return Number.isFinite(micros) && micros > 0 ? micros / 1_000_000 : 0
+}
+
+/**
+ * Length of the audio actually present in the file. MediaRecorder WebM has no
+ * container duration, so this decodes the stream rather than trusting headers.
+ */
+export async function measureDecodedAudioDuration(audioPath: string): Promise<number> {
+  try {
+    const { stdout } = await execFileAsync(
+      'ffmpeg',
+      ['-nostdin', '-v', 'error', '-i', audioPath, '-map', '0:a:0', '-f', 'null', '-progress', 'pipe:1', '-'],
+      { timeout: 60_000, maxBuffer: 4 * 1024 * 1024 },
+    )
+    return parseProgressDurationSec(stdout)
+  } catch {
+    return 0
+  }
+}
+
+/** Prefer the decoded media length; the client timer keeps running if capture stops. */
+export function reconcileRecordingDuration(clientSec: number, decodedSec: number): number {
+  if (Number.isFinite(decodedSec) && decodedSec > 0) return decodedSec
+  return Number.isFinite(clientSec) && clientSec > 0 ? clientSec : 0
+}
+
 async function ensureMergedRecording(outputPath: string, audioPaths: string[]): Promise<void> {
   if (existsSync(outputPath)) return
   const existing = mergeInFlight.get(outputPath)
