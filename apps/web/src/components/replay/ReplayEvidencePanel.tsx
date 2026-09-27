@@ -44,6 +44,8 @@ export function ReplayEvidencePanel({ sessionId, evidence, audioDisabled, speake
   const [date, setDate] = useState(meetingDate ? new Date(meetingDate).toISOString().slice(0, 10) : '')
   const [aliases, setAliases] = useState(initialAliases.join(', '))
   const [saving, setSaving] = useState(false)
+  const confirmed = evidence.identity.state === 'confirmed' && !!evidence.identity.speaker
+  const [editing, setEditing] = useState(!confirmed)
   useEffect(() => () => {
     operation.current?.abort()
     confirmation.current?.abort()
@@ -117,8 +119,16 @@ export function ReplayEvidencePanel({ sessionId, evidence, audioDisabled, speake
   const playable = !!evidence.recording && !audioDisabled
   const singleUnlabelled = evidence.speakerChoice === 'single_unlabelled'
   const optionLabel = (label: string) => singleUnlabelled ? 'This recording is only my speech' : label
+  const showSpeakerChoices = !confirmed || editing
   return <section className="rounded-xl border p-6 space-y-5" aria-labelledby="replay-evidence-heading">
     <h2 id="replay-evidence-heading" className="text-xl font-semibold">Delivery evidence</h2>
+    {confirmed && !editing ? <div className="space-y-2">
+      <p>Session name: {title}</p>
+      <p>Meeting date: {date || 'Not set'}</p>
+      <p>Confirmed speaker: {singleUnlabelled ? 'your speech' : evidence.identity.speaker}</p>
+      <Button variant="outline" onClick={() => setEditing(true)}>Edit speaker</Button>
+    </div> : null}
+    {showSpeakerChoices ? <>
     <div className="grid gap-4 md:grid-cols-2">
       <div className="grid gap-2">
         <Label htmlFor="replay-session-name">Session name</Label>
@@ -137,7 +147,7 @@ export function ReplayEvidencePanel({ sessionId, evidence, audioDisabled, speake
         placeholder="Neelesh Ahankari, Neelesh, N. Ahankari" />
       <p className="text-xs text-muted-foreground">Comma-separated aliases are saved to your profile and only preselect an exact speaker-label match.</p>
     </div>
-    <p>{evidence.identity.state === 'confirmed' ? `Confirmed speaker: ${singleUnlabelled ? 'your speech' : evidence.identity.speaker}` : singleUnlabelled ? 'No named speakers were found.' : 'Which speaker are you?'}</p>
+    <p>{confirmed ? `Confirmed speaker: ${singleUnlabelled ? 'your speech' : evidence.identity.speaker}` : singleUnlabelled ? 'No named speakers were found.' : 'Which speaker are you?'}</p>
     <p className="text-sm text-muted-foreground">{singleUnlabelled
       ? 'If this recording contains only your speech, confirm that below. This does not identify you from the audio.'
       : 'Speaker labels are anonymous—not identity or isolated audio. Confirm one label; if your voice was split across labels, this view covers only the selected label.'}</p>
@@ -150,8 +160,12 @@ export function ReplayEvidencePanel({ sessionId, evidence, audioDisabled, speake
         {playable && item.preview && <Button variant="outline" size="sm" onClick={() => void play(item.preview!)}>Preview {item.speaker}</Button>}
         {playable && !item.preview && <p className="text-sm text-muted-foreground">No suitable continuous audio excerpt for this speaker. Use the transcript excerpt to help identify them.</p>}
       </div>)}
-      <Button disabled={!speaker || !title.trim() || !date || saving || evidence.speakerChoice === 'insufficient_labels'} onClick={() => void confirm()}>{saving ? 'Starting analysis…' : 'Confirm details and analyze'}</Button>
+      <div className="flex gap-2">
+        <Button disabled={!speaker || !title.trim() || !date || saving || evidence.speakerChoice === 'insufficient_labels'} onClick={() => void confirm()}>{saving ? 'Starting analysis…' : 'Confirm details and analyze'}</Button>
+        {confirmed ? <Button variant="outline" onClick={() => setEditing(false)}>Cancel</Button> : null}
+      </div>
     </fieldset>
+    </> : null}
     <div role="status" className="space-y-2">
       <p>{evidence.reason ? reasons[evidence.reason] ?? evidence.reason : evidence.state === 'empty' ? 'No notable word gaps met the evidence rules.' : `${evidence.moments.length} model-timed moments · ${Math.round(evidence.coverage * 100)}% eligible selected-speaker word coverage`}</p>
       <p>Pace: {evidence.pace.wpm == null ? 'Not available' : `${Math.round(evidence.pace.wpm)} WPM · model-timed`}</p>

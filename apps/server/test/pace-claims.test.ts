@@ -112,4 +112,16 @@ describe('coaching prompt pace instructions', () => {
     expect(prompt).not.toContain('Pace was NOT verified')
     expect(prompt).toContain('Listen for delivery: pacing')
   })
+
+  it('asks meeting topics to come from the supplied transcript', () => {
+    const prompt = buildCoachingPrompt({
+      skillScores: {},
+      signals: baseSignals,
+      totalMessages: 4,
+      durationSec: 600,
+      transcript: '[Neelesh Ahankari]: Are there any numbers that we have to give on this RFP?',
+    } as never)
+    expect(prompt).toContain('Are there any numbers that we have to give on this RFP?')
+    expect(prompt).toContain('Do not invent generic stand-ins')
+  })
 })

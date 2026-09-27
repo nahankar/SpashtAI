@@ -1,0 +1,52 @@
+import { renderToStaticMarkup } from 'react-dom/server'
+import { describe, expect, it, vi } from 'vitest'
+import { ReplayEvidencePanel } from './ReplayEvidencePanel'
+import type { ReplayEvidence } from './evidence-contract'
+
+vi.mock('@/lib/api-client', () => ({ getAuthHeaders: () => ({}) }))
+
+const evidence = {
+  version: 'replay-delivery-v1',
+  transcriptRevision: 'rev',
+  state: 'unavailable',
+  reason: 'word_timing_missing_or_legacy',
+  coverage: 1,
+  eligibleWords: 40,
+  excludedWords: 0,
+  recording: null,
+  identity: { state: 'confirmed', speaker: 'Neelesh Ahankari', revision: 'sel' },
+  speakerChoice: 'named',
+  speakers: [
+    { speaker: 'Neelesh Ahankari', excerpt: 'What systems are they using today?', preview: null },
+    { speaker: 'Vasant Mugada', excerpt: 'They want a singular framework.', preview: null },
+  ],
+  source: 'test',
+  accuracy: 'not_human_validated',
+  measurement: 'Cue times are not measured delivery.',
+  limitations: [],
+  supplementaryTranscript: null,
+  pace: { wpm: null, status: 'insufficient_evidence' },
+  moments: [],
+} satisfies ReplayEvidence
+
+describe('Replay speaker confirmation after analysis', () => {
+  it('shows only the confirmed speaker until edit is requested', () => {
+    const html = renderToStaticMarkup(<ReplayEvidencePanel
+      sessionId="synthetic" evidence={evidence} audioDisabled sessionName="Vedanta - Digital as a Service"
+      meetingDate="2026-08-06" onConfirmed={vi.fn()}
+    />)
+    expect(html).toContain('Confirmed speaker: Neelesh Ahankari')
+    expect(html).toContain('Edit speaker')
+    expect(html).not.toContain('They want a singular framework.')
+    expect(html).not.toContain('Confirm details and analyze')
+  })
+
+  it('shows every speaker while confirmation is still required', () => {
+    const html = renderToStaticMarkup(<ReplayEvidencePanel
+      sessionId="synthetic" evidence={{ ...evidence, identity: { state: 'confirmation_required', speaker: null, revision: null } }}
+      audioDisabled onConfirmed={vi.fn()}
+    />)
+    expect(html).toContain('Vasant Mugada')
+    expect(html).toContain('Confirm details and analyze')
+  })
+})

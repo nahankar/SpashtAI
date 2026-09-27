@@ -599,13 +599,38 @@ export function parseUnlabelledTimedCaptions(content: string): ParsedTranscript 
   return finalize(segments)
 }
 
+function captionWordOverlap(left: string, right: string): number {
+  const words = (text: string) => new Set(text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(word => word.length > 3))
+  const a = words(left)
+  const b = words(right)
+  if (!a.size || !b.size) return 0
+  let shared = 0
+  for (const word of a) if (b.has(word)) shared += 1
+  return shared / (a.size + b.size - shared)
+}
+
+/** Teams captions often emit a rough line, then a corrected line a few seconds later. Keep the correction. */
+function preferRevisedCaptions(segments: TranscriptSegment[]): TranscriptSegment[] {
+  const kept: TranscriptSegment[] = []
+  for (const segment of segments) {
+    const previous = kept[kept.length - 1]
+    const gap = previous?.startTime != null && segment.startTime != null ? segment.startTime - previous.startTime : Number.POSITIVE_INFINITY
+    if (previous && previous.speaker === segment.speaker && gap >= 0 && gap <= 8 && captionWordOverlap(previous.text, segment.text) >= 0.7) {
+      kept[kept.length - 1] = { ...segment, startTime: previous.startTime }
+      continue
+    }
+    kept.push(segment)
+  }
+  return kept
+}
+
 export function parseTimestampedSpeakerTranscript(content: string): ParsedTranscript {
   const lines = content.split('\n').map(timestampedSpeakerLine)
     .filter((item): item is NonNullable<typeof item> => !!item)
   const segments = lines
     .filter(item => looksStructuredSpeakerLabel(item.speaker) && item.text)
     .map(item => ({ speaker: item.speaker, text: item.text, startTime: item.startTime }))
-  return finalize(segments)
+  return finalize(preferRevisedCaptions(segments))
 }
 
 // ── Generic plain-text parser (fallback) ──
@@ -644,10 +669,8 @@ function mergeConsecutiveSpeakerSegments(segments: TranscriptSegment[]): Transcr
 
   for (let i = 1; i < segments.length; i++) {
     const seg = segments[i]
-    const gap =
-      seg.startTime !== undefined && current.endTime !== undefined
-        ? seg.startTime - current.endTime
-        : 0
+    const previousMark = current.endTime ?? current.startTime
+    const gap = seg.startTime !== undefined && previousMark !== undefined ? seg.startTime - previousMark : 0
     if (seg.speaker === current.speaker && gap < 2) {
       current.text += ' ' + seg.text
       if (seg.endTime !== undefined) current.endTime = seg.endTime

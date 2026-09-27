@@ -50,6 +50,14 @@ export function buildCoachingPrompt(
       }`
     : ''
 
+  const transcript = ctx.transcript?.trim()
+  const transcriptBlock = transcript
+    ? `
+TRANSCRIPT:
+${transcript.slice(0, 12000)}
+`
+    : ''
+
   const audioBlock = includeAudio
     ? `
 AUDIO ANALYSIS (IMPORTANT):
@@ -73,6 +81,7 @@ SESSION INFO:
 - Total messages: ${ctx.totalMessages}
 ${focusLine}
 
+${transcriptBlock}
 Respond with VALID JSON ONLY using this schema:
 
 {
@@ -116,6 +125,7 @@ MEETING SUMMARY:
 - topicsDiscussed: List 3-7 main topics/themes discussed in the conversation
 - keyOutcomes: List concrete outcomes, agreements, or conclusions reached (can be empty if exploratory)
 - openQuestions: List unresolved questions or items that need follow-up
+- When a transcript is included, every topic, outcome, open question, decision, and action item must be specific to that transcript. Do not invent generic stand-ins such as "project updates", "team collaboration", or "how to improve team communication".
 
 RULES:
 - Never show raw numbers. Say "Your sentences were slightly long" not "Avg sentence length was 22.4"

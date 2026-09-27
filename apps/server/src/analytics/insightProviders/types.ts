@@ -49,6 +49,8 @@ export interface CoachingContext {
   audioMime?: string
   /** Override Bedrock model id (admin-configured Replay LLM); text provider only. */
   modelId?: string
+  /** Speaker-labeled conversation. Meeting topics and decisions must come from this text. */
+  transcript?: string
 }
 
 export function emptyCoachingInsights(error?: string): CoachingInsights {

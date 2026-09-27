@@ -732,6 +732,7 @@ async function processReplaySession(sessionId: string): Promise<void> {
       audioPath: replayAudio?.audioPath,
       audioMime: replayAudio?.audioMime,
       modelId: replayModelId,
+      transcript: speakerLabeledText,
     })
   } catch (err: any) {
     console.error(`[replay] Coaching insight generation failed for ${sessionId}:`, err.message)

@@ -83,7 +83,8 @@ describe('Replay transcript speaker parsing', () => {
     ].join('\n'), 'text/plain', 'meeting.txt')
     expect(parsed.segments).toEqual([
       { speaker: 'Vasant Mugada', text: 'We should establish a singular framework.', startTime: 1 },
-      { speaker: 'Neelesh Ahankari', text: 'What systems are they using today? I will summarize the next steps.', startTime: 49 },
+      { speaker: 'Neelesh Ahankari', text: 'What systems are they using today?', startTime: 49 },
+      { speaker: 'Neelesh Ahankari', text: 'I will summarize the next steps.', startTime: 3662 },
       { speaker: 'LC987, EXT-ID (096-Extern)', text: 'This structured label contains IDs and punctuation.', startTime: 3670 },
       { speaker: 'Klaire.Sohns1@gep.com [B2B User]', text: 'This structured label contains an email.', startTime: 3680 },
       { speaker: 'Unknown user', text: 'This is still a distinct transcript speaker label.', startTime: 3690 },
@@ -106,5 +107,17 @@ describe('Replay transcript speaker parsing', () => {
     const stock = detectFormatAndParse('# Meeting: Spend Module\n[00:00] Thank you for watching.\n[00:30] Thank you for watching.')
     expect(stock.segments).toEqual([])
     expect(detectFormatAndParse('# Meeting: (6) Calendar | Empty\n# Date: 2026-06-03').segments).toEqual([])
+  })
+
+  it('keeps the corrected Teams caption when a rough line is rewritten a few seconds later', () => {
+    const parsed = detectFormatAndParse([
+      '[00:49] Neelesh Ahankari: Currently what are the systems that they use Vasanth as as of today for tracking.',
+      '[00:54] Neelesh Ahankari: Currently, what are the systems that they use, Vasanth, as of today for tracking.',
+      '[02:04] Neelesh Ahankari: I think Shantam you raised your hand just one point.',
+    ].join('\n'))
+    expect(parsed.segments.map(segment => segment.text)).toEqual([
+      'Currently, what are the systems that they use, Vasanth, as of today for tracking.',
+      'I think Shantam you raised your hand just one point.',
+    ])
   })
 })

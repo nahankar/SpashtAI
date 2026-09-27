@@ -1504,7 +1504,7 @@ export function ReplayResults() {
                               Completing this exercise could improve your{' '}
                               <span className="font-medium text-foreground">{getFocusAreaLabel(focusId)}</span> score from{' '}
                               <span className="font-semibold text-foreground">{currentScore}</span> to{' '}
-                              <span className="font-semibold text-primary">\u2248{projectedScore}</span>
+                              <span className="font-semibold text-primary">≈{projectedScore}</span>
                             </p>
                           )}
                         </div>
