@@ -18,7 +18,7 @@ const reasons: Record<string, string> = {
   word_transcript_mismatch: 'The word evidence does not match the displayed transcript. Delivery is unavailable for this analysis.',
   word_evidence_malformed: 'The stored word evidence could not be validated. Delivery is unavailable for this analysis.',
 }
-export function ReplayEvidencePanel({ sessionId, evidence, audioDisabled, speakerHint, sessionName, meetingDate, speakerAliases, userFullName, onAliasesSaved, onConfirmed }: {
+export function ReplayEvidencePanel({ sessionId, evidence, audioDisabled, speakerHint, sessionName, meetingDate, speakerAliases, userFullName, onAliasesSaved, editing: editingProp, onEditingChange, onConfirmed }: {
   sessionId: string
   evidence: ReplayEvidence
   audioDisabled: boolean
@@ -28,6 +28,8 @@ export function ReplayEvidencePanel({ sessionId, evidence, audioDisabled, speake
   speakerAliases?: string[]
   userFullName?: string | null
   onAliasesSaved?: (aliases: string[]) => void
+  editing?: boolean
+  onEditingChange?: (editing: boolean) => void
   onConfirmed: (selection: { selectionRevision: string; transcriptRevision: string }) => void
 }) {
   const audio = useRef<HTMLAudioElement>(null)
@@ -45,7 +47,9 @@ export function ReplayEvidencePanel({ sessionId, evidence, audioDisabled, speake
   const [aliases, setAliases] = useState(initialAliases.join(', '))
   const [saving, setSaving] = useState(false)
   const confirmed = evidence.identity.state === 'confirmed' && !!evidence.identity.speaker
-  const [editing, setEditing] = useState(!confirmed)
+  const [internalEditing, setInternalEditing] = useState(false)
+  const editing = editingProp ?? internalEditing
+  const setEditing = onEditingChange ?? setInternalEditing
   useEffect(() => () => {
     operation.current?.abort()
     confirmation.current?.abort()
@@ -109,10 +113,13 @@ export function ReplayEvidencePanel({ sessionId, evidence, audioDisabled, speake
       })
       if (!response.ok) throw new Error('Could not confirm. Refresh if the analysis changed.')
       const result = await response.json()
-      if (!abort.signal.aborted) onConfirmed({
-        selectionRevision: result.selection.revision,
-        transcriptRevision: evidence.transcriptRevision,
-      })
+      if (!abort.signal.aborted) {
+        setEditing(false)
+        onConfirmed({
+          selectionRevision: result.selection.revision,
+          transcriptRevision: evidence.transcriptRevision,
+        })
+      }
     } catch (error) { if (!abort.signal.aborted) setMessage(error instanceof Error ? error.message : 'Confirmation failed') }
     finally { if (!abort.signal.aborted) setSaving(false) }
   }
@@ -120,15 +127,7 @@ export function ReplayEvidencePanel({ sessionId, evidence, audioDisabled, speake
   const singleUnlabelled = evidence.speakerChoice === 'single_unlabelled'
   const optionLabel = (label: string) => singleUnlabelled ? 'This recording is only my speech' : label
   const showSpeakerChoices = !confirmed || editing
-  return <section className="rounded-xl border p-6 space-y-5" aria-labelledby="replay-evidence-heading">
-    <h2 id="replay-evidence-heading" className="text-xl font-semibold">Delivery evidence</h2>
-    {confirmed && !editing ? <div className="space-y-2">
-      <p>Session name: {title}</p>
-      <p>Meeting date: {date || 'Not set'}</p>
-      <p>Confirmed speaker: {singleUnlabelled ? 'your speech' : evidence.identity.speaker}</p>
-      <Button variant="outline" onClick={() => setEditing(true)}>Edit speaker</Button>
-    </div> : null}
-    {showSpeakerChoices ? <>
+  const identityForm = showSpeakerChoices ? <>
     <div className="grid gap-4 md:grid-cols-2">
       <div className="grid gap-2">
         <Label htmlFor="replay-session-name">Session name</Label>
@@ -165,7 +164,11 @@ export function ReplayEvidencePanel({ sessionId, evidence, audioDisabled, speake
         {confirmed ? <Button variant="outline" onClick={() => setEditing(false)}>Cancel</Button> : null}
       </div>
     </fieldset>
-    </> : null}
+    </> : null
+  return <>
+    {identityForm ? <div className="mb-6 space-y-5">{identityForm}</div> : null}
+    <section className="rounded-xl border p-6 space-y-5" aria-labelledby="replay-evidence-heading">
+    <h2 id="replay-evidence-heading" className="text-xl font-semibold">Delivery evidence</h2>
     <div role="status" className="space-y-2">
       <p>{evidence.reason ? reasons[evidence.reason] ?? evidence.reason : evidence.state === 'empty' ? 'No notable word gaps met the evidence rules.' : `${evidence.moments.length} model-timed moments · ${Math.round(evidence.coverage * 100)}% eligible selected-speaker word coverage`}</p>
       <p>Pace: {evidence.pace.wpm == null ? 'Not available' : `${Math.round(evidence.pace.wpm)} WPM · model-timed`}</p>
@@ -188,5 +191,6 @@ export function ReplayEvidencePanel({ sessionId, evidence, audioDisabled, speake
       {evidence.supplementaryTranscript?.status === 'different_not_aligned' && <p>The uploaded text differs from the audio transcript. Its words have not been given audio timestamps; valid audio passages remain independently eligible.</p>}
       {evidence.supplementaryTranscript?.status === 'unavailable' && <p>The supplemental text could not be read. This analysis uses only the recording’s transcript.</p>}
     </div></details>
-  </section>
+    </section>
+  </>
 }

@@ -30,15 +30,19 @@ const evidence = {
 } satisfies ReplayEvidence
 
 describe('Replay speaker confirmation after analysis', () => {
-  it('shows only the confirmed speaker until edit is requested', () => {
-    const html = renderToStaticMarkup(<ReplayEvidencePanel
+  it('hides speaker choices after confirmation until edit is opened', () => {
+    const collapsed = renderToStaticMarkup(<ReplayEvidencePanel
       sessionId="synthetic" evidence={evidence} audioDisabled sessionName="Vedanta - Digital as a Service"
       meetingDate="2026-08-06" onConfirmed={vi.fn()}
     />)
-    expect(html).toContain('Confirmed speaker: Neelesh Ahankari')
-    expect(html).toContain('Edit speaker')
-    expect(html).not.toContain('They want a singular framework.')
-    expect(html).not.toContain('Confirm details and analyze')
+    expect(collapsed).not.toContain('They want a singular framework.')
+    expect(collapsed).not.toContain('Confirm details and analyze')
+    expect(collapsed).toContain('Delivery evidence')
+    const opened = renderToStaticMarkup(<ReplayEvidencePanel
+      sessionId="synthetic" evidence={evidence} audioDisabled editing onConfirmed={vi.fn()}
+    />)
+    expect(opened).toContain('They want a singular framework.')
+    expect(opened).toContain('Confirm details and analyze')
   })
 
   it('shows every speaker while confirmation is still required', () => {

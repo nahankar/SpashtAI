@@ -28,6 +28,7 @@ import {
   MessageSquare,
   Download,
   ArrowLeft,
+  Pencil,
   RefreshCw,
   Loader2,
   Mic,
@@ -1063,6 +1064,7 @@ export function ReplayResults() {
   const [nudgeSaving, setNudgeSaving] = useState(false)
   const [nudgeDismissed, setNudgeDismissed] = useState(false)
   const [pdfLoading, setPdfLoading] = useState(false)
+  const [editingSpeaker, setEditingSpeaker] = useState(false)
   const [activeSegmentIndex, setActiveSegmentIndex] = useState<number | null>(null)
   const segmentRefs = useRef<(HTMLDivElement | null)[]>([])
 
@@ -1320,7 +1322,22 @@ export function ReplayResults() {
           <h1 className="text-2xl font-bold">{session.sessionName || 'Replay Results'}</h1>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
             {data.evidence.identity.speaker && (
-              <span className="font-medium text-primary">Confirmed speaker: {data.evidence.identity.speaker}</span>
+              <span className="inline-flex items-center gap-1 font-medium text-primary">
+                Confirmed speaker: {data.evidence.identity.speaker}
+                {data.evidence.identity.state === 'confirmed' && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 text-primary"
+                    aria-label="Edit speaker"
+                    aria-expanded={editingSpeaker}
+                    onClick={() => setEditingSpeaker(open => !open)}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </span>
             )}
             <Badge variant="secondary">{session.meetingType}</Badge>
             <span>{session.userRole}</span>
@@ -1412,7 +1429,9 @@ export function ReplayResults() {
         speakerAliases={user?.speakerAliases}
         userFullName={[user?.firstName, user?.lastName].filter(Boolean).join(' ')}
         onAliasesSaved={speakerAliases => updateUser({ speakerAliases })}
-        onConfirmed={selection => void startReanalyze(null, selection)}
+        editing={editingSpeaker}
+        onEditingChange={setEditingSpeaker}
+        onConfirmed={selection => { setEditingSpeaker(false); void startReanalyze(null, selection) }}
       />
       <p className="my-4 text-sm text-muted-foreground">{result.feedbackScope}</p>
       <Tabs defaultValue="overview">
