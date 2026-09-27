@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parsePlainText, parseSRT, parseVTT, suggestReplaySessionName } from '../src/lib/transcript-parser'
+import { detectFormatAndParse, parsePlainText, parseSRT, parseVTT, suggestReplaySessionName } from '../src/lib/transcript-parser'
 
 describe('Replay transcript speaker parsing', () => {
   it('does not treat timestamp prefixes as speaker labels', () => {
@@ -56,5 +56,23 @@ describe('Replay transcript speaker parsing', () => {
     expect(suggestReplaySessionName('Alice: We should review the invoice automation rollout tomorrow.')).toBe(
       'We should review the invoice automation rollout tomorrow.',
     )
+  })
+
+  it('parses timestamp-prefixed Teams captions without treating metadata as speech', () => {
+    const parsed = detectFormatAndParse([
+      '# Meeting: Calendar | Vedanta - Digital as a Service',
+      '# Date: 2026-08-06',
+      '# Participants: Vasant Mugada, Neelesh Ahankari',
+      '',
+      '[00:01] Vasant Mugada: We should establish a singular framework.',
+      '[00:49] Neelesh Ahankari: What systems are they using today?',
+      '[61:02] Neelesh Ahankari: I will summarize the next steps.',
+    ].join('\n'), 'text/plain', 'meeting.txt')
+    expect(parsed.segments).toEqual([
+      { speaker: 'Vasant Mugada', text: 'We should establish a singular framework.', startTime: 1 },
+      { speaker: 'Neelesh Ahankari', text: 'What systems are they using today? I will summarize the next steps.', startTime: 49 },
+    ])
+    expect(parsed.fullText).not.toContain('# Meeting')
+    expect(parsed.speakerCount).toBe(2)
   })
 })

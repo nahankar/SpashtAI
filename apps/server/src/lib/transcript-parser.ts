@@ -533,6 +533,45 @@ export function parseTeamsDocx(content: string): ParsedTranscript {
   return finalize(segments)
 }
 
+// ── Timestamp-prefixed Teams captions ──
+// Pattern: "[MM:SS] Full Name: caption text"
+
+const TIMESTAMPED_SPEAKER_RE = /^\[(\d{1,2}):(\d{2})(?::(\d{2}))?\]\s+([^:]{1,80}):\s*(.+)$/
+
+function timestampedSpeakerLine(line: string) {
+  const match = line.trim().match(TIMESTAMPED_SPEAKER_RE)
+  if (!match) return null
+  const hours = match[3] == null ? 0 : parseInt(match[1], 10)
+  const minutes = match[3] == null ? parseInt(match[1], 10) : parseInt(match[2], 10)
+  const seconds = match[3] == null ? parseInt(match[2], 10) : parseInt(match[3], 10)
+  if ((match[3] != null && minutes > 59) || seconds > 59) return null
+  return {
+    speaker: match[4].trim(),
+    text: match[5].trim(),
+    startTime: hours * 3600 + minutes * 60 + seconds,
+  }
+}
+
+export function isTimestampedSpeakerFormat(content: string): boolean {
+  const labels = content.split('\n')
+    .map(timestampedSpeakerLine)
+    .filter((item): item is NonNullable<typeof item> => !!item)
+    .map(item => item.speaker)
+  if (labels.length < 2) return false
+  const accepted = acceptedSpeakerLabels(labels)
+  return labels.filter(label => accepted.has(label)).length >= 2
+}
+
+export function parseTimestampedSpeakerTranscript(content: string): ParsedTranscript {
+  const lines = content.split('\n').map(timestampedSpeakerLine)
+    .filter((item): item is NonNullable<typeof item> => !!item)
+  const accepted = acceptedSpeakerLabels(lines.map(item => item.speaker))
+  const segments = lines
+    .filter(item => accepted.has(item.speaker) && item.text)
+    .map(item => ({ speaker: item.speaker, text: item.text, startTime: item.startTime }))
+  return finalize(segments)
+}
+
 // ── Generic plain-text parser (fallback) ──
 
 export function parsePlainText(content: string): ParsedTranscript {
@@ -712,6 +751,8 @@ export function detectFormatAndParse(
 
   // Teams docx transcript (extracted text)
   if (isTeamsDocxFormat(content)) return parseTeamsDocx(content)
+
+  if (isTimestampedSpeakerFormat(content)) return parseTimestampedSpeakerTranscript(content)
 
   return parsePlainText(content)
 }
