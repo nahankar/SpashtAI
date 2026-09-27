@@ -332,9 +332,9 @@ export function extractMeetingDateFromTranscript(content: string, originalFileNa
 export function suggestReplaySessionName(content: string, originalFileName?: string): string {
   const header = content.split('\n').slice(0, 40).map(line => line.trim()).filter(Boolean)
   for (const line of header) {
-    const match = line.match(/^(?:title|meeting|topic|subject)\s*:\s*(.+)$/i)
-    const value = match?.[1]?.replace(/\s+/g, ' ').trim()
-    if (value && value.length >= 3 && value.length <= 100) return value
+    const match = line.match(/^#?\s*(?:title|meeting|topic|subject)\s*:\s*(.+)$/i)
+    const value = match?.[1]?.replace(/^\(\d+\)\s*Calendar\s*\|\s*/i, '').replace(/\s+/g, ' ').trim()
+    if (value && !/^Calendar$/i.test(value) && value.length >= 3 && value.length <= 100) return value
   }
 
   const rawName = (originalFileName ?? '').replace(/\.[^.]+$/, '')
@@ -342,12 +342,16 @@ export function suggestReplaySessionName(content: string, originalFileName?: str
     .replace(/GMT\d{8}-\d{6}/gi, ' ')
     .replace(/[_-]+/g, ' ')
     .replace(/\b20\d{2}\s?\d{2}\s?\d{2}\b/g, ' ')
-    .replace(/\b(transcript|recording|audio|video|meeting|captions?)\b/gi, ' ')
+    .replace(/\b\d{4}\b/g, ' ')
+    .replace(/\b(transcript|recording|audio|video|meeting|calendar|captions?)\b/gi, ' ')
+    .replace(/^\s*\d+\s+/, ' ')
     .replace(/\s+/g, ' ')
     .trim()
   if (cleanedName.length >= 3) return cleanedName.slice(0, 100)
 
   const firstContentLine = header.find(line =>
+    !line.startsWith('#') &&
+    !/^\[\d{1,2}:\d{2}/.test(line) &&
     !/^WEBVTT$/i.test(line) &&
     !/^\d+$/.test(line) &&
     !/-->/.test(line) &&
@@ -358,6 +362,8 @@ export function suggestReplaySessionName(content: string, originalFileName?: str
     const words = withoutSpeaker.split(/\s+/).filter(Boolean).slice(0, 8).join(' ')
     if (words.length >= 3) return words.length < withoutSpeaker.length ? `${words}…` : words
   }
+  const inferredDate = extractMeetingDateFromTranscript(content, originalFileName)
+  if (inferredDate) return `Replay – ${inferredDate.toISOString().slice(0, 10)}`
   return 'Replay session'
 }
 
@@ -553,21 +559,23 @@ function timestampedSpeakerLine(line: string) {
 }
 
 export function isTimestampedSpeakerFormat(content: string): boolean {
-  const labels = content.split('\n')
+  const lines = content.split('\n')
     .map(timestampedSpeakerLine)
     .filter((item): item is NonNullable<typeof item> => !!item)
-    .map(item => item.speaker)
-  if (labels.length < 2) return false
-  const accepted = acceptedSpeakerLabels(labels)
-  return labels.filter(label => accepted.has(label)).length >= 2
+  return lines.filter(item => looksStructuredSpeakerLabel(item.speaker)).length >= 2
+}
+
+function looksStructuredSpeakerLabel(label: string): boolean {
+  const value = label.trim()
+  return value.length > 0 && value.length <= 80 && /[\p{L}\p{N}]/u.test(value) &&
+    !isTimestampLikeLabel(value) && !METADATA_LABELS.has(value.toLocaleLowerCase())
 }
 
 export function parseTimestampedSpeakerTranscript(content: string): ParsedTranscript {
   const lines = content.split('\n').map(timestampedSpeakerLine)
     .filter((item): item is NonNullable<typeof item> => !!item)
-  const accepted = acceptedSpeakerLabels(lines.map(item => item.speaker))
   const segments = lines
-    .filter(item => accepted.has(item.speaker) && item.text)
+    .filter(item => looksStructuredSpeakerLabel(item.speaker) && item.text)
     .map(item => ({ speaker: item.speaker, text: item.text, startTime: item.startTime }))
   return finalize(segments)
 }

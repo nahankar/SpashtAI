@@ -52,6 +52,12 @@ describe('Replay transcript speaker parsing', () => {
 
   it('suggests an editable title from metadata, filename, then transcript content', () => {
     expect(suggestReplaySessionName('Title: Q3 Customer Review\nAlice: Hello')).toBe('Q3 Customer Review')
+    expect(suggestReplaySessionName('# Meeting: (4) Calendar | Vedanta - Digital as a Service\n# Date: 2026-08-06')).toBe(
+      'Vedanta - Digital as a Service',
+    )
+    expect(suggestReplaySessionName('# Meeting: Calendar\n# Date: 2026-08-21', '2026-08-21_1457_Calendar.txt')).toBe(
+      'Replay – 2026-08-21',
+    )
     expect(suggestReplaySessionName('', '2026-09-27_Project-Retrospective_recording.vtt')).toBe('Project Retrospective')
     expect(suggestReplaySessionName('Alice: We should review the invoice automation rollout tomorrow.')).toBe(
       'We should review the invoice automation rollout tomorrow.',
@@ -67,12 +73,18 @@ describe('Replay transcript speaker parsing', () => {
       '[00:01] Vasant Mugada: We should establish a singular framework.',
       '[00:49] Neelesh Ahankari: What systems are they using today?',
       '[61:02] Neelesh Ahankari: I will summarize the next steps.',
+      '[61:10] LC987, EXT-ID (096-Extern): This structured label contains IDs and punctuation.',
+      '[61:20] Klaire.Sohns1@gep.com [B2B User]: This structured label contains an email.',
+      '[61:30] Unknown user: This is still a distinct transcript speaker label.',
     ].join('\n'), 'text/plain', 'meeting.txt')
     expect(parsed.segments).toEqual([
       { speaker: 'Vasant Mugada', text: 'We should establish a singular framework.', startTime: 1 },
       { speaker: 'Neelesh Ahankari', text: 'What systems are they using today? I will summarize the next steps.', startTime: 49 },
+      { speaker: 'LC987, EXT-ID (096-Extern)', text: 'This structured label contains IDs and punctuation.', startTime: 3670 },
+      { speaker: 'Klaire.Sohns1@gep.com [B2B User]', text: 'This structured label contains an email.', startTime: 3680 },
+      { speaker: 'Unknown user', text: 'This is still a distinct transcript speaker label.', startTime: 3690 },
     ])
     expect(parsed.fullText).not.toContain('# Meeting')
-    expect(parsed.speakerCount).toBe(2)
+    expect(parsed.speakerCount).toBe(5)
   })
 })
