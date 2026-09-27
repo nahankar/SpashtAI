@@ -7,9 +7,10 @@ import { paceTrendTurns, MIN_PACE_TREND_TURNS } from '@/lib/pace'
 import {
   DeliveryEvidenceOverviewView,
   DeliveryMomentsPlaybackView,
+  VoiceMomentCard,
 } from './DeliveryMoments'
 import type { DeliveryMomentResponse } from './deliveryMomentsData'
-import { experimentalMoment } from './delivery/fixtures'
+import { audioLevelMoment, experimentalMoment, pitchMoment } from './delivery/fixtures'
 
 const noAlignment: DeliveryMomentResponse = {
   status: {
@@ -38,7 +39,7 @@ const withMoment: DeliveryMomentResponse = {
       retry: 'Keep a short pause after your key point.',
     },
   ],
-  deliveryEvidence: { state: 'ready', moments: [experimentalMoment] },
+  deliveryEvidence: { state: 'ready', moments: [experimentalMoment, pitchMoment, audioLevelMoment] },
 }
 
 function findButtons(node: ReactNode, found: ReactElement<ButtonProps>[] = []) {
@@ -67,8 +68,12 @@ describe('Playback delivery moments', () => {
     const html = renderToStaticMarkup(
       <DeliveryMomentsPlaybackView data={withMoment} onPlayMoment={() => {}} />,
     )
-    expect(html).toContain('Verified · word-aligned')
+    expect(html).toContain('Verified recording evidence')
     expect(html).toContain('aria-label="Hear this moment at 1:23"')
+    expect(html).toContain('Pitch measurement')
+    expect(html).toContain('Highest recorded level')
+    expect(html).toContain('aria-label="Hear pitch moment at 2:00"')
+    expect(html).toContain('aria-label="Hear loudness moment at 2:20"')
     expect(html).toContain('<details')
     expect(html).not.toContain('<details open')
     expect(html).toContain('Experimental recording measurements')
@@ -84,6 +89,23 @@ describe('Playback delivery moments', () => {
     expect(hear).toBeDefined()
     hear!.props.onClick?.({} as never)
     expect(onPlayMoment).toHaveBeenCalledWith(83.2, 88.4, true)
+  })
+
+  it('plays the exact acoustic evidence clip', () => {
+    const onPlayMoment = vi.fn()
+    const tree = VoiceMomentCard({
+      item: {
+        kind: 'pitch',
+        label: 'Pitch measurement',
+        value: '184.3 Hz',
+        description: 'Verified pitch measurement.',
+        moment: pitchMoment,
+      },
+      onPlayMoment,
+    })
+    const pitch = findButtons(tree)[0]
+    pitch!.props.onClick?.({} as never)
+    expect(onPlayMoment).toHaveBeenCalledWith(120, 124, true)
   })
 
   it('renders nothing when the feature is disabled', () => {

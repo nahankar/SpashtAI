@@ -17,6 +17,7 @@ const MAX_ENVELOPE_CHARS = 80_000
 const streamClock = z.object({
   version: z.literal(STREAM_CLOCK_VERSION),
   epoch: z.number().int().nonnegative().max(1_000_000),
+  segmentId: z.string().min(1).max(200).optional(),
   sampleRate: z.number().int().min(8_000).max(96_000),
   hopSec: z.literal(RECORDING_CLOCK_HOP_SEC),
   encoding: z.enum(['uint8', 'zlib']),
@@ -26,6 +27,7 @@ const streamClock = z.object({
 
 export interface DecodedStreamClock {
   epoch: number
+  segmentId: string | null
   sampleRate: number
   hopSec: number
   envelope: Uint8Array
@@ -68,20 +70,24 @@ export function decodeStreamEnvelope(encoding: 'uint8' | 'zlib', envelope: strin
 export function readStreamClocks(value: unknown): DecodedStreamClock[] {
   if (!Array.isArray(value)) return []
   const clocks: DecodedStreamClock[] = []
-  const seen = new Set<number>()
+  const seen = new Set<string>()
   for (const item of value) {
     const parsed = streamClock.safeParse(item)
-    if (!parsed.success || seen.has(parsed.data.epoch)) return []
+    if (!parsed.success) return []
+    const key = `${parsed.data.segmentId ?? ''}:${parsed.data.epoch}`
+    if (seen.has(key)) return []
     const envelope = decodeStreamEnvelope(parsed.data.encoding, parsed.data.envelope, parsed.data.hops)
     if (!envelope) return []
-    seen.add(parsed.data.epoch)
+    seen.add(key)
     clocks.push({
       epoch: parsed.data.epoch,
+      segmentId: parsed.data.segmentId ?? null,
       sampleRate: parsed.data.sampleRate,
       hopSec: parsed.data.hopSec,
       envelope,
       signaturePart: JSON.stringify([
-        parsed.data.epoch, parsed.data.hopSec, parsed.data.sampleRate, parsed.data.envelope,
+        parsed.data.segmentId ?? null, parsed.data.epoch,
+        parsed.data.hopSec, parsed.data.sampleRate, parsed.data.envelope,
       ]),
     })
   }
@@ -90,7 +96,36 @@ export function readStreamClocks(value: unknown): DecodedStreamClock[] {
 
 export function streamClockSignature(clocks: DecodedStreamClock[]): string | null {
   if (!clocks.length) return null
-  return createHash('sha256').update(clocks.map(clock => clock.signaturePart).join('|')).digest('hex')
+  return createHash('sha256').update(clocks.map(clock => clock.signaturePart).sort().join('|')).digest('hex')
+}
+
+/**
+ * Scope each agent clock to its recording segment and retain clocks uploaded
+ * by earlier segments. Agent instances restart their epoch counter on resume,
+ * so epoch alone is not a session-wide identifier.
+ */
+export function mergeStreamClockSnapshots(
+  current: unknown,
+  incoming: unknown,
+  segmentId: string | null,
+): Array<Record<string, unknown>> {
+  const existingItems = Array.isArray(current) ? current : []
+  const incomingItems = Array.isArray(incoming) ? incoming : []
+  const merged = new Map<string, Record<string, unknown>>()
+  const add = (item: unknown, scope: string | null) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return
+    const candidate = {
+      ...(item as Record<string, unknown>),
+      ...(scope ? { segmentId: scope } : {}),
+    }
+    const parsed = streamClock.safeParse(candidate)
+    if (!parsed.success) return
+    const key = `${parsed.data.segmentId ?? ''}:${parsed.data.epoch}`
+    merged.set(key, candidate)
+  }
+  existingItems.forEach(item => add(item, null))
+  incomingItems.forEach(item => add(item, segmentId))
+  return [...merged.values()]
 }
 
 export function clockSignatureFromStatus(processingStatus: unknown): string | null {
@@ -318,7 +353,14 @@ export function mapLiveRecordingEvidence(input: {
 }): { result: Record<string, unknown>, unmappedTurnIds: string[] } | { result: null, reason: string, unmappedTurnIds: string[] } {
   const userTurns = input.turns.filter(turn => turn.role === 'user' && spokenTokens(turn.text).length)
   if (!userTurns.length) return { result: null, reason: 'no_user_turns', unmappedTurnIds: [] }
-  const byEpoch = new Map(input.clocks.map(clock => [clock.epoch, clock]))
+  const scopedClocks = new Map(
+    input.clocks
+      .filter(clock => clock.segmentId)
+      .map(clock => [`${clock.segmentId}:${clock.epoch}`, clock]),
+  )
+  const legacyByEpoch = new Map(
+    input.clocks.filter(clock => !clock.segmentId).map(clock => [clock.epoch, clock]),
+  )
   const lagBySegmentEpoch = new Map<string, number>()
   const failedPairs = new Map<string, string>()
   const pairs = new Map<string, { segmentId: string, epoch: number }>()
@@ -330,7 +372,7 @@ export function mapLiveRecordingEvidence(input: {
   for (const pair of pairs.values()) {
     const key = `${pair.segmentId}:${pair.epoch}`
     const envelope = input.envelopes.get(pair.segmentId)
-    const clock = byEpoch.get(pair.epoch)
+    const clock = scopedClocks.get(key) ?? legacyByEpoch.get(pair.epoch)
     if (!envelope || !clock) {
       failedPairs.set(key, envelope ? 'missing_stream_clock' : 'recording_envelope_unavailable')
       continue

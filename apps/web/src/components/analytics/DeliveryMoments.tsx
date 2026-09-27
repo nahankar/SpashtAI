@@ -1,8 +1,22 @@
 import { useEffect } from 'react'
-import { CheckCircle2, ChevronRight, CircleDashed, Info, PauseCircle, Play } from 'lucide-react'
+import {
+  AudioWaveform,
+  CheckCircle2,
+  ChevronRight,
+  CircleDashed,
+  Info,
+  PauseCircle,
+  Play,
+  Volume2,
+} from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { DeliveryEvidenceSummary, type DeliveryEvidenceState } from './delivery'
+import {
+  DeliveryEvidenceSummary,
+  getMomentDataError,
+  type DeliveryEvidenceState,
+  type DeliveryMoment as AcousticDeliveryMoment,
+} from './delivery'
 import {
   hasVerifiedObservations,
   MEASUREMENT_CONFIDENCE_NOTE,
@@ -19,6 +33,103 @@ export type { DeliveryMoment, DeliveryMomentResponse, PlayDeliveryMoment } from 
 function formatTime(seconds: number) {
   const value = Math.max(0, Math.floor(seconds))
   return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, '0')}`
+}
+
+export interface FeaturedVoiceMoment {
+  kind: 'pitch' | 'loudness'
+  label: string
+  value: string
+  description: string
+  moment: AcousticDeliveryMoment
+}
+
+function featuredVoiceMoments(evidence: DeliveryEvidenceState | undefined): FeaturedVoiceMoment[] {
+  if (evidence?.state !== 'ready') return []
+  const verified = evidence.moments.filter(
+    (moment) =>
+      getMomentDataError(moment) === null &&
+      moment.evidence.quality === 'verified' &&
+      moment.clip.availability === 'available',
+  )
+  const highest = (metric: 'f0_spread' | 'mean_f0' | 'intensity') =>
+    verified
+      .filter(
+        (moment) =>
+          moment.evidence.quality === 'verified' &&
+          moment.evidence.measurement.metric === metric,
+      )
+      .sort((left, right) => {
+        const leftValue = left.evidence.quality === 'verified' ? left.evidence.measurement.value : 0
+        const rightValue = right.evidence.quality === 'verified' ? right.evidence.measurement.value : 0
+        return rightValue - leftValue
+      })[0]
+
+  const pitch = highest('f0_spread') ?? highest('mean_f0')
+  const loudness = highest('intensity')
+  const items: FeaturedVoiceMoment[] = []
+  if (pitch?.evidence.quality === 'verified') {
+    const spread = pitch.evidence.measurement.metric === 'f0_spread'
+    items.push({
+      kind: 'pitch',
+      label: spread ? 'Largest measured pitch range' : 'Pitch measurement',
+      value: `${pitch.evidence.measurement.value.toFixed(1)} Hz`,
+      description: spread
+        ? 'This clip had the widest fundamental-frequency spread in this recording.'
+        : 'This clip contains a verified fundamental-frequency measurement.',
+      moment: pitch,
+    })
+  }
+  if (loudness?.evidence.quality === 'verified') {
+    items.push({
+      kind: 'loudness',
+      label: 'Highest recorded level',
+      value: `${loudness.evidence.measurement.value.toFixed(1)} dB`,
+      description: 'This clip had the highest measured intensity in this recording.',
+      moment: loudness,
+    })
+  }
+  return items
+}
+
+export function VoiceMomentCard({
+  item,
+  onPlayMoment,
+}: {
+  item: FeaturedVoiceMoment
+  onPlayMoment?: PlayDeliveryMoment
+}) {
+  const Icon = item.kind === 'pitch' ? AudioWaveform : Volume2
+  const start = item.moment.clip.startSeconds
+  const end = start + item.moment.clip.durationSeconds
+  const time = formatTime(start)
+  return (
+    <li className="rounded-lg border border-sky-200 bg-sky-50/60 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <Badge className="bg-sky-700">
+          <Icon className="mr-1 h-3.5 w-3.5" aria-hidden="true" />
+          {item.kind === 'pitch' ? 'Pitch' : 'Loudness'}
+        </Badge>
+        <span className="text-xs tabular-nums text-muted-foreground">{time} · {item.value}</span>
+      </div>
+      <p className="mt-2 text-sm font-medium">{item.label}</p>
+      <p className="mt-1 text-sm text-muted-foreground">{item.description}</p>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Experimental recording measurement; microphone processing can affect comparisons.
+      </p>
+      {onPlayMoment && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-3 h-8"
+          aria-label={`Hear ${item.kind} moment at ${time}`}
+          onClick={() => onPlayMoment(start, end, true)}
+        >
+          <Play className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+          Hear this moment · {time}
+        </Button>
+      )}
+    </li>
+  )
 }
 
 function ExperimentalObservations({
@@ -61,8 +172,9 @@ export function DeliveryMomentsPlaybackView({
   if (!data.status.enabled) return null
   const evidence = data.deliveryEvidence
   const showObservations = evidence?.state === 'ready' && evidence.moments.length > 0
+  const voiceMoments = featuredVoiceMoments(evidence)
 
-  if (data.moments.length === 0) {
+  if (data.moments.length === 0 && voiceMoments.length === 0) {
     return (
       <section className="mb-4" aria-label="Delivery moments">
         <p role="status" className="flex items-start gap-1.5 text-xs text-muted-foreground">
@@ -77,13 +189,15 @@ export function DeliveryMomentsPlaybackView({
   return (
     <section className="mb-4 space-y-2" aria-label="Delivery moments">
       <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
-        <PauseCircle className="h-3.5 w-3.5" aria-hidden="true" />
+        <AudioWaveform className="h-3.5 w-3.5" aria-hidden="true" />
         <span>Delivery moments</span>
         <Badge variant="outline" className="border-emerald-300 text-emerald-800">
-          Verified · word-aligned
+          Verified recording evidence
         </Badge>
         <span>
-          {data.moments.length} moment{data.moments.length === 1 ? '' : 's'} — also marked on the timeline
+          {data.moments.length} pause{data.moments.length === 1 ? '' : 's'}
+          {voiceMoments.length > 0 && ` · ${voiceMoments.length} voice moment${voiceMoments.length === 1 ? '' : 's'}`}
+          {data.moments.length > 0 && ' — pauses are also marked on the timeline'}
         </span>
       </div>
       <ul className="grid gap-3 md:grid-cols-2">
@@ -122,6 +236,9 @@ export function DeliveryMomentsPlaybackView({
             </li>
           )
         })}
+        {voiceMoments.map((item) => (
+          <VoiceMomentCard key={`${item.kind}:${item.moment.id}`} item={item} onPlayMoment={onPlayMoment} />
+        ))}
       </ul>
       {showObservations && <ExperimentalObservations evidence={evidence} onPlayMoment={onPlayMoment} />}
     </section>

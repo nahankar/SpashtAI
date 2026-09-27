@@ -2,8 +2,8 @@ import { deflateSync } from 'zlib'
 import { describe, expect, it } from 'vitest'
 import { applyAlignedDelivery, validateAlignmentResult } from '../src/analytics/alignedDelivery'
 import {
-  correlateStreamLag, envelopeFromPcm16, mapLiveRecordingEvidence, readStreamClocks,
-  streamClockSignature,
+  correlateStreamLag, envelopeFromPcm16, mapLiveRecordingEvidence, mergeStreamClockSnapshots,
+  readStreamClocks, streamClockSignature,
 } from '../src/analytics/recordingClockMap'
 
 function pattern(length: number, seed: number): Uint8Array {
@@ -91,6 +91,38 @@ describe('live recording clock', () => {
     const changed = turns.map(item => ({ ...item, text: 'hello friend' }))
     expect(applyAlignedDelivery(changed, validated, 'audio-v1', segments, streamClockSignature(clocks))[0].words)
       .toBeUndefined()
+  })
+
+  it('keeps same-numbered epochs separate across pause and resume segments', () => {
+    const first = pattern(260, 31)
+    const second = pattern(260, 47)
+    const stored = mergeStreamClockSnapshots([], [clock(1, first)], 'segment-a')
+    const merged = mergeStreamClockSnapshots(stored, [clock(1, second)], 'segment-b')
+    const clocks = readStreamClocks(merged)
+    expect(clocks.map(item => [item.segmentId, item.epoch])).toEqual([
+      ['segment-a', 1],
+      ['segment-b', 1],
+    ])
+
+    const segments = [
+      { segmentId: 'segment-a', segmentIndex: 0, replayOffsetSec: 0, durationSec: 4 },
+      { segmentId: 'segment-b', segmentIndex: 1, replayOffsetSec: 4, durationSec: 4 },
+    ]
+    const turn = (id: string, segmentId: string) => ({
+      id, role: 'user', segmentId, text: 'hello there',
+      metrics: { live_word_evidence: evidence(1, 0, [
+        { w: 'hello', start: 0.2, end: 0.5 },
+        { w: 'there', start: 0.6, end: 0.9 },
+      ]) },
+    })
+    const mapped = mapLiveRecordingEvidence({
+      turns: [turn('before', 'segment-a'), turn('after', 'segment-b')],
+      segments,
+      clocks,
+      envelopes: new Map([['segment-a', first], ['segment-b', second]]),
+      inputSignature: 'audio',
+    })
+    expect(mapped.result?.turns.map(item => item.id)).toEqual(['before', 'after'])
   })
 
   it('rejects an unmapped, mismatched, or incomplete turn and keeps Gentle responsible', () => {

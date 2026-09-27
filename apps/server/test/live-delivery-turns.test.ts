@@ -4,13 +4,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   session: vi.fn(), turns: vi.fn(), latest: vi.fn(), upsert: vi.fn(),
-  segments: vi.fn(), segment: vi.fn(), resolve: vi.fn(), flags: vi.fn(), align: vi.fn(),
+  segments: vi.fn(), segment: vi.fn(), metrics: vi.fn(),
+  resolve: vi.fn(), flags: vi.fn(), align: vi.fn(),
 }))
 vi.mock('../src/lib/prisma', () => {
   const db = {
     session: { findUnique: mocks.session },
     sessionTurn: { findMany: mocks.turns, findFirst: mocks.latest, upsert: mocks.upsert },
     sessionSegment: { findMany: mocks.segments, findUnique: mocks.segment },
+    sessionMetrics: { findUnique: mocks.metrics, update: vi.fn(), create: vi.fn() },
     $executeRaw: vi.fn(),
   }
   return { prisma: { ...db, $transaction: (fn: (tx: unknown) => unknown) => fn(db) } }
@@ -63,6 +65,7 @@ describe('live evidence turn API boundary', () => {
     mocks.flags.mockResolvedValue({ flags: { hideTranscriptText: false }, accessDenied: false })
     mocks.turns.mockResolvedValue([structuredClone(turn)])
     mocks.segments.mockResolvedValue([])
+    mocks.metrics.mockResolvedValue(null)
     mocks.resolve.mockResolvedValue({ audioPath: '/synthetic.wav', inputSignature: 'audio', segments: [] })
     mocks.align.mockResolvedValue({ aligned: false, turns: [], regionCount: 0, userTurnCount: 1 })
   })

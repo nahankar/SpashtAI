@@ -1,7 +1,11 @@
 import type { Request, Response } from 'express'
 import { prisma } from '../lib/prisma'
 import { applyAlignedDelivery } from '../analytics/alignedDelivery'
-import { clockSignatureFromStatus, readStreamClocks } from '../analytics/recordingClockMap'
+import {
+  clockSignatureFromStatus,
+  mergeStreamClockSnapshots,
+  readStreamClocks,
+} from '../analytics/recordingClockMap'
 import {
   approximatePlaybackWords,
   incomingTimingMetrics,
@@ -470,7 +474,14 @@ export async function saveSessionTurnsForAgent(req: Request, res: Response) {
         const status = metrics?.processingStatus && typeof metrics.processingStatus === 'object'
           && !Array.isArray(metrics.processingStatus)
           ? metrics.processingStatus as Record<string, unknown> : {}
-        const processingStatus = { ...status, liveStreamClocks: req.body.streamClocks }
+        const processingStatus = {
+          ...status,
+          liveStreamClocks: mergeStreamClockSnapshots(
+            status.liveStreamClocks,
+            req.body.streamClocks,
+            segmentId,
+          ),
+        }
         if (metrics) {
           await tx.sessionMetrics.update({
             where: { sessionId }, data: { processingStatus: processingStatus as any },
