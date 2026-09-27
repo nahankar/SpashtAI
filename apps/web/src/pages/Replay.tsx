@@ -3,11 +3,10 @@ import { useNavigate, Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useConfirm } from '@/hooks/useConfirm'
 import { useUserExportFlags } from '@/hooks/useUserExportFlags'
-import { ContextForm } from '@/components/replay/ContextForm'
 import { UploadZone } from '@/components/replay/UploadZone'
 import { ProcessingStatus } from '@/components/replay/ProcessingStatus'
 import { useReplaySession } from '@/hooks/useReplaySession'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
@@ -91,7 +90,7 @@ const STATUS_BADGE: Record<string, { variant: 'default' | 'secondary' | 'destruc
   failed: { variant: 'destructive', label: 'Failed' },
 }
 
-type Step = 'history' | 'context' | 'upload' | 'meetingDate' | 'processing'
+type Step = 'history' | 'upload' | 'processing'
 
 function EditSessionDialog({
   open,
@@ -215,7 +214,6 @@ export function Replay() {
   const [sortField, setSortField] = useState<SortField>('date')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
   const [statusFilter, setStatusFilter] = useState('all')
-  const [flowMeetingDate, setFlowMeetingDate] = useState('')
   const [editSession, setEditSession] = useState<ReplaySessionSummary | null>(null)
   const [editOpen, setEditOpen] = useState(false)
 
@@ -228,7 +226,6 @@ export function Replay() {
     participantMismatch,
     createSession,
     uploadFiles,
-    patchReplaySession,
     startProcessing,
     retryWithSpeaker,
   } = useReplaySession()
@@ -390,13 +387,13 @@ export function Replay() {
 
   const handleContinue = useCallback((s: ReplaySessionSummary) => {
     setSessionId(s.id)
-    if (s.meetingDate) {
-      setFlowMeetingDate(new Date(s.meetingDate).toISOString().slice(0, 10))
+    if (s.uploadedFiles.length > 0) {
+      setStep('processing')
+      void startProcessing(s.id)
     } else {
-      setFlowMeetingDate('')
+      setStep('upload')
     }
-    setStep(s.uploadedFiles.length > 0 ? 'meetingDate' : 'upload')
-  }, [setSessionId])
+  }, [setSessionId, startProcessing])
 
   useEffect(() => {
     if (sessionsLoading || sessionsError) return
@@ -410,7 +407,8 @@ export function Replay() {
     handledCoachRequestRef.current = requestKey
 
     if (requestKey === 'new') {
-      setStep('context')
+      setSessionId(null)
+      setStep('upload')
       return
     }
 
@@ -428,6 +426,7 @@ export function Replay() {
     navigate,
     resultPath,
     searchParams,
+    setSessionId,
     sessions,
     sessionsError,
     sessionsLoading,
@@ -465,14 +464,10 @@ export function Replay() {
     }
   }
 
-  const handleContextSubmit = async (data: {
-    sessionName?: string
-    participantName?: string
-  }) => {
+  const createDraftSession = async () => {
     const coachContext = searchParams.get('context')?.trim()
     const coachFocus = searchParams.get('focus')?.trim()
     const createdSessionId = await createSession({
-      ...data,
       meetingGoal: coachContext || undefined,
       focusAreas: coachFocus ? [coachFocus] : undefined,
     })
@@ -484,7 +479,7 @@ export function Replay() {
         targetId: createdSessionId,
       }).catch(() => undefined)
     }
-    setStep('upload')
+    return createdSessionId
   }
 
   const handleUploadSubmit = async (files: {
@@ -492,34 +487,13 @@ export function Replay() {
     transcript?: File
     text?: string
   }) => {
-    if (!sessionId) return
     try {
-      const res = await uploadFiles(sessionId, files)
-      if (res.meetingDate) {
-        setFlowMeetingDate(res.meetingDate)
-      } else {
-        setFlowMeetingDate('')
-      }
-      setStep('meetingDate')
-    } catch {
-      /* uploadFiles sets error */
-    }
-  }
-
-  const handleConfirmFlowMeetingDate = async () => {
-    if (!sessionId || !flowMeetingDate.trim()) {
-      toast.error('Meeting date is required', {
-        description:
-          'Progress Pulse needs the real meeting date to track your skill trends accurately.',
-      })
-      return
-    }
-    try {
-      await patchReplaySession(sessionId, { meetingDate: flowMeetingDate.trim() })
+      const sid = sessionId ?? await createDraftSession()
+      await uploadFiles(sid, files)
       setStep('processing')
-      await startProcessing(sessionId)
+      await startProcessing(sid)
     } catch {
-      /* patch/start sets error */
+      /* create/upload/process helpers expose the error */
     }
   }
 
@@ -575,31 +549,24 @@ export function Replay() {
     { value: 'failed', label: 'Failed' },
   ]
 
-  // Show the create flow (context → upload → processing)
+  // Upload first; transcript preparation discovers metadata and speaker choices.
   if (step !== 'history') {
     return (
       <div>
-        {/* Back to history */}
-        {(step === 'context' || step === 'meetingDate') && (
+        {step === 'upload' && (
           <button
-            onClick={() => setStep(step === 'meetingDate' ? 'upload' : 'history')}
+            onClick={() => setStep('history')}
             className="mb-4 text-sm text-muted-foreground hover:text-foreground"
           >
-            &larr; {step === 'meetingDate' ? 'Back to upload' : 'Back to sessions'}
+            &larr; Back to sessions
           </button>
         )}
 
-        {/* Step indicators */}
         <div className="mb-6 flex items-center gap-2 text-sm">
-          {(['context', 'upload', 'processing'] as const).map((s, i) => {
-            const labels = ['Context', 'Upload', 'Analysis']
-            const isActive =
-              (s === 'context' && step === 'context') ||
-              (s === 'upload' && step === 'upload') ||
-              (s === 'processing' && (step === 'processing' || step === 'meetingDate'))
-            const isDone =
-              (s === 'context' && step !== 'context') ||
-              (s === 'upload' && (step === 'meetingDate' || step === 'processing'))
+          {(['upload', 'processing'] as const).map((s, i) => {
+            const labels = ['Upload', 'Prepare transcript']
+            const isActive = s === step
+            const isDone = s === 'upload' && step === 'processing'
             return (
               <div key={s} className="flex items-center gap-2">
                 {i > 0 && <div className="h-px w-6 bg-border" />}
@@ -632,58 +599,15 @@ export function Replay() {
           </div>
         )}
 
-        {step === 'context' && (
+        {step === 'upload' && (
           <div className="space-y-3">
             {searchParams.get('context') && (
               <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-                Coach brief:{' '}
-                <span className="font-medium text-foreground">
-                  {searchParams.get('context')}
-                </span>
+                Coach brief: <span className="font-medium text-foreground">{searchParams.get('context')}</span>
               </p>
             )}
-            <ContextForm onSubmit={handleContextSubmit} loading={loading} />
+            <UploadZone onSubmit={handleUploadSubmit} loading={loading} />
           </div>
-        )}
-
-        {step === 'upload' && (
-          <UploadZone onSubmit={handleUploadSubmit} loading={loading} />
-        )}
-
-        {step === 'meetingDate' && (
-          <Card>
-            <CardHeader>
-              <CardTitle>
-                {flowMeetingDate ? 'Confirm meeting date' : 'When did this meeting happen?'}
-              </CardTitle>
-              <CardDescription>
-                {flowMeetingDate
-                  ? 'We extracted this date from your transcript. Please confirm it\u2019s correct, or change it if needed.'
-                  : 'We couldn\u2019t find a calendar date in your transcript file name or header. Please enter the date this meeting took place.'}
-                {' '}Progress Pulse uses the real meeting date to track your skill trends over time.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="flowMeetingDate">Meeting date</Label>
-                <input
-                  id="flowMeetingDate"
-                  type="date"
-                  value={flowMeetingDate}
-                  onChange={(e) => setFlowMeetingDate(e.target.value)}
-                  className="flex h-10 w-full max-w-xs rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                />
-              </div>
-              <Button
-                className="w-full sm:w-auto"
-                size="lg"
-                onClick={handleConfirmFlowMeetingDate}
-                disabled={loading || !flowMeetingDate}
-              >
-                {flowMeetingDate ? 'Confirm & continue' : 'Continue to analysis'}
-              </Button>
-            </CardContent>
-          </Card>
         )}
 
         {step === 'processing' && (
@@ -733,7 +657,7 @@ export function Replay() {
               <RefreshCw className="mr-2 h-4 w-4" /> Reprocess All
             </Button>
           )}
-          <Button onClick={() => setStep('context')}>
+          <Button onClick={() => { setSessionId(null); setStep('upload') }}>
             <Plus className="mr-2 h-4 w-4" /> New Analysis
           </Button>
         </div>
@@ -793,7 +717,7 @@ export function Replay() {
             <p className="mt-1 text-sm text-muted-foreground">
               Upload a transcript or recording to get started with AI analysis.
             </p>
-            <Button className="mt-4" onClick={() => setStep('context')}>
+            <Button className="mt-4" onClick={() => { setSessionId(null); setStep('upload') }}>
               <Plus className="mr-2 h-4 w-4" /> Create Your First Analysis
             </Button>
           </CardContent>

@@ -98,6 +98,7 @@ model User {
   city        String? // resolved from pincode — admin only
   state       String? // admin only
   country     String? // admin only
+  speakerAliases String[] @default([])
 
   // Authorization
   role UserRole @default(USER)

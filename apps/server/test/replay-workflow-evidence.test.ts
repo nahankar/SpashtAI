@@ -86,6 +86,26 @@ describe('Replay upload, cached analysis and deletion workflow (mocked providers
     expect((await request(app).delete(path())).status).toBe(200)
     await expect(readFile(stored)).rejects.toMatchObject({ code: 'ENOENT' })
   })
+  it('prepares a transcript before date confirmation but requires the date for personalized analysis', async () => {
+    state.session.meetingDate = null
+    const speech = Array.from({ length: 45 }, (_, index) => `word${index}`).join(' ')
+    expect((await request(app).post(`${path()}/upload`).send({ text: `Alice: ${speech}\nAlice: closing thought` })).status).toBe(200)
+    await processSession()
+    expect(state.analyze).not.toHaveBeenCalled()
+    const first = (await request(app).get(`${path()}/results`)).body
+    expect(first.evidence.speakers[0].speaker).toBe('Alice')
+    expect((await request(app).put(`${path()}/learner`).send({
+      speaker: 'Alice',
+      transcriptRevision: first.evidence.transcriptRevision,
+      recordingSignature: null,
+      selectionRevision: null,
+    })).status).toBe(200)
+    expect((await request(app).post(`${path()}/process`).send({
+      selectionRevision: state.session.learnerSelection.revision,
+      transcriptRevision: first.evidence.transcriptRevision,
+    })).status).toBe(400)
+    expect(state.analyze).not.toHaveBeenCalled()
+  })
   it('reuses audio word cache after confirming a speaker and keeps conflicting uploaded text separate', async () => {
     expect((await request(app).post(`${path()}/upload`).attach('audio', Buffer.from('synthetic test bytes'), 'test.wav').field('text', 'Alice: Different supplied wording.')).status).toBe(200)
     await processSession()

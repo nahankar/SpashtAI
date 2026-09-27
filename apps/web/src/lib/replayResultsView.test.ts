@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hasInsightItems, hintedSpeaker, rankSpeakerChoices, replayInsightsState, replayTranscriptMode } from './replayResultsView'
+import { exactAliasSpeaker, hasInsightItems, hintedSpeaker, rankSpeakerChoices, replayInsightsState, replayTranscriptMode } from './replayResultsView'
 
 describe('Replay results view states', () => {
   it('derives confirmation/analyze/complete insight states', () => {
@@ -15,6 +15,8 @@ describe('Replay results view states', () => {
     expect(rankSpeakerChoices(speakers, 'Neelesh').map(item => item.speaker)).toEqual(['Neelesh Ahankari', 'Bob'])
     expect(hintedSpeaker(speakers, 'Neelesh')).toBe('Neelesh Ahankari')
     expect(hintedSpeaker(speakers, 'Priya')).toBeNull()
+    expect(exactAliasSpeaker(speakers, ['neelesh ahankari'])).toBe('Neelesh Ahankari')
+    expect(exactAliasSpeaker(speakers, ['Neelesh'])).toBeNull()
   })
 
   it('prevents blank insight cards', () => {

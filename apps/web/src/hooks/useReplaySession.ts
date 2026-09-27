@@ -18,6 +18,7 @@ export interface ReplayUploadResponse {
   meetingDateMissing?: boolean
   meetingDateAutoFilled?: boolean
   meetingDate?: string | null
+  sessionName?: string | null
 }
 
 export interface ReplaySessionStatus {
@@ -219,7 +220,7 @@ export function useReplaySession() {
   )
 
   const patchReplaySession = useCallback(
-    async (sid: string, body: { meetingDate: string }) => {
+    async (sid: string, body: { meetingDate?: string; sessionName?: string; participantName?: string }) => {
       setError(null)
       setLoading(true)
       try {

@@ -40,7 +40,7 @@ import { generateSessionPdf } from '@/lib/generate-session-pdf'
 import { markCoachHomeResultSeen } from '@/lib/coach-api'
 import { FileText } from 'lucide-react'
 import { ReplayEvidencePanel } from '@/components/replay/ReplayEvidencePanel'
-import { ReplayAssessmentAction } from '@/components/replay/ReplayAssessmentAction'
+import { useAuth } from '@/hooks/useAuth'
 import { replayEvidenceReport } from '@/components/replay/evidence-report'
 import { hasInsightItems, replayInsightsState, replayTranscriptMode } from '@/lib/replayResultsView'
 
@@ -995,6 +995,7 @@ function ReanalyzeOverlay({ status, error, hasPriorAssessment, onDismiss, onRetr
 
 export function ReplayResults() {
   const { id } = useParams<{ id: string }>()
+  const { user, updateUser } = useAuth()
   const exportFlags = useUserExportFlags()
   const [searchParams] = useSearchParams()
   const cameFromHistory = searchParams.get('from') === 'history'
@@ -1400,13 +1401,19 @@ export function ReplayResults() {
         </div>
       )}
 
-      <ReplayEvidencePanel key={`${id}:${data.evidence.recording?.signature}:${data.evidence.identity.revision}`} sessionId={id!} evidence={data.evidence} audioDisabled={!!data.audioDownloadDisabled || exportFlags.hideAudioDownload} speakerHint={session.participantName} onConfirmed={loadResults} />
-      <ReplayAssessmentAction evidence={data.evidence} hasAssessment={!!data.skillScores}
-        busy={reanalyzing === 'transcribing' || reanalyzing === 'analyzing'}
-        onAnalyze={() => {
-          if (!session.meetingDate) setDialogOpen(true)
-          else void startReanalyze(null, assessmentSelection)
-        }} />
+      <ReplayEvidencePanel
+        key={`${id}:${data.evidence.recording?.signature}:${data.evidence.identity.revision}`}
+        sessionId={id!}
+        evidence={data.evidence}
+        audioDisabled={!!data.audioDownloadDisabled || exportFlags.hideAudioDownload}
+        speakerHint={session.participantName}
+        sessionName={session.sessionName}
+        meetingDate={session.meetingDate}
+        speakerAliases={user?.speakerAliases}
+        userFullName={[user?.firstName, user?.lastName].filter(Boolean).join(' ')}
+        onAliasesSaved={speakerAliases => updateUser({ speakerAliases })}
+        onConfirmed={selection => void startReanalyze(null, selection)}
+      />
       <p className="my-4 text-sm text-muted-foreground">{result.feedbackScope}</p>
       <Tabs defaultValue="overview">
         <TabsList className="mb-4 w-full justify-start">

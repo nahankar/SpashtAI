@@ -86,6 +86,7 @@ export function toAuthUser(user: {
   dateOfBirth?: Date | null
   gender?: Gender | null
   pincode?: string | null
+  speakerAliases?: string[]
   hideTranscriptText?: boolean
   hideTranscriptJsonExport?: boolean
   hideAudioDownload?: boolean
@@ -107,6 +108,7 @@ export function toAuthUser(user: {
     lastLoginAt: user.lastLoginAt ?? null,
     createdAt: user.createdAt,
     rewardPoints: user.rewardPoints,
+    speakerAliases: user.speakerAliases ?? [],
     profileComplete: isProfileComplete(user),
     needsProfileCompletion: needsProfileCompletion(user),
     hideTranscriptText: user.hideTranscriptText ?? false,

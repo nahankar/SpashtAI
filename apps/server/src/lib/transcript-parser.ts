@@ -328,6 +328,39 @@ export function extractMeetingDateFromTranscript(content: string, originalFileNa
   return null
 }
 
+/** Suggest an editable Replay title without running learner analysis. */
+export function suggestReplaySessionName(content: string, originalFileName?: string): string {
+  const header = content.split('\n').slice(0, 40).map(line => line.trim()).filter(Boolean)
+  for (const line of header) {
+    const match = line.match(/^(?:title|meeting|topic|subject)\s*:\s*(.+)$/i)
+    const value = match?.[1]?.replace(/\s+/g, ' ').trim()
+    if (value && value.length >= 3 && value.length <= 100) return value
+  }
+
+  const rawName = (originalFileName ?? '').replace(/\.[^.]+$/, '')
+  const cleanedName = rawName
+    .replace(/GMT\d{8}-\d{6}/gi, ' ')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b20\d{2}\s?\d{2}\s?\d{2}\b/g, ' ')
+    .replace(/\b(transcript|recording|audio|video|meeting|captions?)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (cleanedName.length >= 3) return cleanedName.slice(0, 100)
+
+  const firstContentLine = header.find(line =>
+    !/^WEBVTT$/i.test(line) &&
+    !/^\d+$/.test(line) &&
+    !/-->/.test(line) &&
+    !/^(?:date|recorded\s+(?:on|at))\s*:/i.test(line),
+  )
+  if (firstContentLine) {
+    const withoutSpeaker = firstContentLine.replace(/^\[?[^:\]]+\]?\s*:\s*/, '')
+    const words = withoutSpeaker.split(/\s+/).filter(Boolean).slice(0, 8).join(' ')
+    if (words.length >= 3) return words.length < withoutSpeaker.length ? `${words}…` : words
+  }
+  return 'Replay session'
+}
+
 export function parseJSON(content: string): ParsedTranscript {
   const data = JSON.parse(content)
 

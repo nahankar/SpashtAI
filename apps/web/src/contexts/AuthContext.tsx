@@ -23,6 +23,7 @@ export interface AuthUser {
   enableReprocess?: boolean
   enablePro?: boolean
   enableUltra?: boolean
+  speakerAliases?: string[]
 }
 
 export interface RegisterData {

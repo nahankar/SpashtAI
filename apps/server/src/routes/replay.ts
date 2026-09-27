@@ -36,6 +36,7 @@ import {
   correctAnnotatedSpeakers,
   filterParticipantAnnotations,
   extractMeetingDateFromTranscript,
+  suggestReplaySessionName,
 } from '../lib/transcript-parser'
 import { calculateReplayMetrics } from '../lib/replay-metrics'
 import { analyzeTranscript } from '../lib/aws-bedrock'
@@ -371,11 +372,22 @@ router.post(
       }
       if (!prepared.length) return res.status(400).json({ error: 'No files or text provided' })
       let inferred: Date | null = null
+      let titleSource = ''
+      let titleFileName = media?.originalname
       const transcript = prepared.find(f => f.fileType === 'transcript')
       if (transcript) {
-        try { inferred = extractMeetingDateFromTranscript(await readFile(transcript.storedPath, 'utf8'), transcript.originalName) } catch { /* not a text format */ }
+        try {
+          titleSource = await readFile(transcript.storedPath, 'utf8')
+          titleFileName = transcript.originalName
+          inferred = extractMeetingDateFromTranscript(titleSource, transcript.originalName)
+        } catch { /* not a text format */ }
       }
-      if (!inferred && pastedText) inferred = extractMeetingDateFromTranscript(pastedText, 'pasted-transcript.vtt')
+      if (pastedText) {
+        titleSource ||= pastedText
+        if (!inferred) inferred = extractMeetingDateFromTranscript(pastedText, 'pasted-transcript.vtt')
+      }
+      if (!inferred && media) inferred = extractMeetingDateFromTranscript('', media.originalname)
+      const suggestedSessionName = suggestReplaySessionName(titleSource, titleFileName)
       const outcome = await prisma.$transaction(async tx => {
         await tx.$queryRaw`SELECT id FROM "ReplaySession" WHERE id = ${id} FOR UPDATE`
         const session = await tx.replaySession.findFirst({ where: ownedReplayWhere(req, id) })
@@ -386,10 +398,12 @@ router.post(
         await tx.replayResult.deleteMany({ where: { replaySessionId: id } })
         await tx.progressPulse.deleteMany({ where: { sessionId: id, source: 'replay' } })
         await tx.replaySession.update({ where: { id }, data: { status: 'pending', learnerSelection: Prisma.DbNull, progressPulseStatus: null,
-          ...(session.meetingDate ? {} : { meetingDate: inferred }) } })
+          ...(session.meetingDate ? {} : { meetingDate: inferred }),
+          ...(session.sessionName ? {} : { sessionName: suggestedSessionName }) } })
         const meetingDate = session.meetingDate ?? inferred
         return { code: 200, uploads: uploads.map(({ storedPath, ...safe }) => safe), meetingDateMissing: !meetingDate,
-          meetingDateAutoFilled: !session.meetingDate && !!inferred, meetingDate: meetingDate?.toISOString().slice(0, 10) ?? null }
+          meetingDateAutoFilled: !session.meetingDate && !!inferred, meetingDate: meetingDate?.toISOString().slice(0, 10) ?? null,
+          sessionName: session.sessionName ?? suggestedSessionName }
       })
       persisted = outcome.code === 200
       res.status(outcome.code).json(outcome)
@@ -418,7 +432,7 @@ router.post('/sessions/:id/process', trackFeatureUsage('replay', 'analyze'), asy
     })
     if (!session) return res.status(404).json({ error: 'Replay session not found' })
 
-    if (!session.meetingDate) {
+    if (boundAssessment && !session.meetingDate) {
       return res.status(400).json({
         code: 'MEETING_DATE_REQUIRED',
         error:

@@ -35,6 +35,12 @@ export function hintedSpeaker(speakers: { speaker: string }[], hint: string | nu
   return lower === needle || lower.includes(needle) || needle.includes(lower) ? best.speaker : null
 }
 
+export function exactAliasSpeaker(speakers: { speaker: string }[], aliases: string[]): string | null {
+  const normalized = new Set(aliases.map(alias => alias.trim().toLocaleLowerCase()).filter(Boolean))
+  const matches = speakers.filter(item => normalized.has(item.speaker.trim().toLocaleLowerCase()))
+  return matches.length === 1 ? matches[0].speaker : null
+}
+
 export function hasInsightItems(items: unknown[] | null | undefined): boolean {
   return Array.isArray(items) && items.length > 0
 }

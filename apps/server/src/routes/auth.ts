@@ -412,6 +412,7 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
         dateOfBirth: true,
         gender: true,
         pincode: true,
+        speakerAliases: true,
         hideTranscriptText: true,
         hideTranscriptJsonExport: true,
         hideAudioDownload: true,
@@ -441,10 +442,18 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
   }
 })
 
-// PUT /api/auth/me (authenticated)
+// PUT /api/auth/me (authenticated profile and transcript aliases)
 router.put('/me', requireAuth, async (req: Request, res: Response) => {
   try {
-    const { firstName, lastName, avatar } = req.body
+    const { firstName, lastName, avatar, speakerAliases } = req.body
+    if (speakerAliases !== undefined && (!Array.isArray(speakerAliases) ||
+        speakerAliases.some(value => typeof value !== 'string' || !value.trim() || value.trim().length > 80) ||
+        speakerAliases.length > 12)) {
+      return res.status(400).json({ error: 'speakerAliases must contain at most 12 non-empty names' })
+    }
+    const normalizedAliases: string[] | undefined = speakerAliases === undefined ? undefined : [...new Map(
+      (speakerAliases as string[]).map(value => [value.trim().toLocaleLowerCase(), value.trim()]),
+    ).values()]
 
     const user = await prisma.user.update({
       where: { id: req.user!.userId },
@@ -452,6 +461,7 @@ router.put('/me', requireAuth, async (req: Request, res: Response) => {
         ...(firstName !== undefined && { firstName }),
         ...(lastName !== undefined && { lastName }),
         ...(avatar !== undefined && { avatar }),
+        ...(normalizedAliases !== undefined && { speakerAliases: normalizedAliases }),
       },
       select: {
         id: true,
@@ -459,6 +469,7 @@ router.put('/me', requireAuth, async (req: Request, res: Response) => {
         firstName: true,
         lastName: true,
         avatar: true,
+        speakerAliases: true,
         role: true,
       },
     })

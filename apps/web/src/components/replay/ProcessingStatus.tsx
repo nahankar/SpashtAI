@@ -15,9 +15,8 @@ interface ProcessingStatusProps {
 }
 
 const STEPS = [
-  { key: 'transcribing', label: 'Processing transcript', pct: 33 },
-  { key: 'analyzing', label: 'Analyzing content with AI', pct: 66 },
-  { key: 'completed', label: 'Analysis complete', pct: 100 },
+  { key: 'transcribing', label: 'Transcribing or parsing your upload', pct: 50 },
+  { key: 'completed', label: 'Transcript and speaker choices ready', pct: 100 },
 ]
 
 export function ProcessingStatus({
@@ -90,7 +89,7 @@ export function ProcessingStatus({
           {isFailed && <XCircle className="h-5 w-5 text-destructive" />}
           {isComplete && <CheckCircle2 className="h-5 w-5 text-green-500" />}
           {!isFailed && !isComplete && <Loader2 className="h-5 w-5 animate-spin text-primary" />}
-          {isFailed ? 'Processing Failed' : isComplete ? 'Analysis Complete' : 'Processing...'}
+          {isFailed ? 'Preparation failed' : isComplete ? 'Ready to review' : 'Preparing transcript...'}
         </CardTitle>
       </CardHeader>
       <CardContent className="grid gap-4">

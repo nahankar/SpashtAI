@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parsePlainText, parseSRT, parseVTT } from '../src/lib/transcript-parser'
+import { parsePlainText, parseSRT, parseVTT, suggestReplaySessionName } from '../src/lib/transcript-parser'
 
 describe('Replay transcript speaker parsing', () => {
   it('does not treat timestamp prefixes as speaker labels', () => {
@@ -48,5 +48,13 @@ describe('Replay transcript speaker parsing', () => {
     expect(dialogue.segments.map(segment => segment.speaker)).toEqual(['Alice', 'Bob'])
     const diarized = parsePlainText('Speaker 1: I will send the notes after this call.')
     expect(diarized.segments[0].speaker).toBe('Speaker 1')
+  })
+
+  it('suggests an editable title from metadata, filename, then transcript content', () => {
+    expect(suggestReplaySessionName('Title: Q3 Customer Review\nAlice: Hello')).toBe('Q3 Customer Review')
+    expect(suggestReplaySessionName('', '2026-09-27_Project-Retrospective_recording.vtt')).toBe('Project Retrospective')
+    expect(suggestReplaySessionName('Alice: We should review the invoice automation rollout tomorrow.')).toBe(
+      'We should review the invoice automation rollout tomorrow.',
+    )
   })
 })

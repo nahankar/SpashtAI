@@ -16,16 +16,23 @@ const input: ReplayEvidence = {
 }
 let selected = ''
 window.fetch = async (url, options) => {
+  if (String(url).endsWith('/api/auth/me') && options?.method === 'PUT') {
+    return new Response(JSON.stringify({ user: { speakerAliases: ['spk_0'] } }), { headers: { 'Content-Type': 'application/json' } })
+  }
+  if (String(url).endsWith('/api/replay/sessions/synthetic') && options?.method === 'PATCH') {
+    return new Response(JSON.stringify({ session: {} }), { headers: { 'Content-Type': 'application/json' } })
+  }
   if (!String(url).endsWith('/api/replay/sessions/synthetic/learner') || options?.method !== 'PUT') throw new Error('Unexpected fixture request')
   const body = JSON.parse(String(options.body))
   selected = body.speaker
-  return new Response(JSON.stringify({ code: 200 }), { headers: { 'Content-Type': 'application/json' } })
+  return new Response(JSON.stringify({ code: 200, selection: { revision: 'fixture-revision' } }), { headers: { 'Content-Type': 'application/json' } })
 }
 export function Fixture() {
   const [evidence, setEvidence] = useState(input)
   return <main className="max-w-3xl mx-auto p-8">
     <h1>Replay synthetic UI acceptance</h1>
     <ReplayEvidencePanel sessionId="synthetic" key={evidence.identity.revision} evidence={evidence} audioDisabled={true}
+      sessionName="Synthetic review" meetingDate="2026-09-27" speakerAliases={['spk_0']}
       onConfirmed={() => setEvidence({ ...input, reason: 'word_timing_missing_or_legacy', identity: { state: 'confirmed', speaker: selected, revision: selected } })} />
   </main>
 }
