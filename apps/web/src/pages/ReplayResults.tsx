@@ -40,7 +40,7 @@ import { inferFocusArea, EXERCISE_PREVIEWS, getFocusAreaLabel } from '@/lib/focu
 import { generateSessionPdf } from '@/lib/generate-session-pdf'
 import { markCoachHomeResultSeen } from '@/lib/coach-api'
 import { FileText } from 'lucide-react'
-import { ReplayEvidencePanel } from '@/components/replay/ReplayEvidencePanel'
+import { ReplayDeliveryNote, ReplayEvidencePanel } from '@/components/replay/ReplayEvidencePanel'
 import { useAuth } from '@/hooks/useAuth'
 import { replayEvidenceReport } from '@/components/replay/evidence-report'
 import { hasInsightItems, replayInsightsState, replayTranscriptMode } from '@/lib/replayResultsView'
@@ -1433,7 +1433,10 @@ export function ReplayResults() {
         onEditingChange={setEditingSpeaker}
         onConfirmed={selection => { setEditingSpeaker(false); void startReanalyze(null, selection) }}
       />
-      <p className="my-4 text-sm text-muted-foreground">{result.feedbackScope}</p>
+      <p className="my-4 text-sm text-muted-foreground">
+        {result.feedbackScope}{' '}
+        <ReplayDeliveryNote evidence={data.evidence} />
+      </p>
       <Tabs defaultValue="overview">
         <TabsList className="mb-4 w-full justify-start">
           <TabsTrigger value="overview">Overview</TabsTrigger>

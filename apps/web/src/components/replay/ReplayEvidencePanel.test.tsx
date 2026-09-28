@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import { ReplayEvidencePanel } from './ReplayEvidencePanel'
+import { ReplayDeliveryNote, ReplayEvidencePanel } from './ReplayEvidencePanel'
 import type { ReplayEvidence } from './evidence-contract'
 
 vi.mock('@/lib/api-client', () => ({ getAuthHeaders: () => ({}) }))
@@ -37,7 +37,10 @@ describe('Replay speaker confirmation after analysis', () => {
     />)
     expect(collapsed).not.toContain('They want a singular framework.')
     expect(collapsed).not.toContain('Confirm details and analyze')
-    expect(collapsed).toContain('Delivery evidence')
+    expect(collapsed).not.toContain('Delivery evidence')
+    const note = renderToStaticMarkup(<ReplayDeliveryNote evidence={evidence} />)
+    expect(note).toContain('aria-label="Delivery evidence"')
+    expect(note).not.toContain('Pace: Not available')
     const opened = renderToStaticMarkup(<ReplayEvidencePanel
       sessionId="synthetic" evidence={evidence} audioDisabled editing onConfirmed={vi.fn()}
     />)

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Info } from 'lucide-react'
 import { getAuthHeaders } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -18,6 +19,39 @@ const reasons: Record<string, string> = {
   word_transcript_mismatch: 'The word evidence does not match the displayed transcript. Delivery is unavailable for this analysis.',
   word_evidence_malformed: 'The stored word evidence could not be validated. Delivery is unavailable for this analysis.',
 }
+export function ReplayDeliveryNote({ evidence }: { evidence: ReplayEvidence }) {
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const close = (event: MouseEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false)
+    }
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+  return <span ref={root} className="relative inline-flex align-text-bottom">
+    <button type="button" className="inline-flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Delivery evidence" aria-expanded={open} onClick={() => setOpen(value => !value)}>
+      <Info className="h-3.5 w-3.5" />
+    </button>
+    {open ? <span role="dialog" aria-label="Delivery evidence" className="absolute left-0 top-6 z-20 w-80 rounded-lg border bg-popover p-3 text-left text-sm text-popover-foreground shadow-md space-y-2">
+      <span className="block">{evidence.reason ? reasons[evidence.reason] ?? evidence.reason : evidence.state === 'empty' ? 'No notable word gaps met the evidence rules.' : `${evidence.moments.length} model-timed moments · ${Math.round(evidence.coverage * 100)}% eligible selected-speaker word coverage`}</span>
+      <span className="block">Pace: {evidence.pace.wpm == null ? 'Not available' : `${Math.round(evidence.pace.wpm)} WPM · model-timed`}</span>
+      <span className="block text-xs text-muted-foreground">{evidence.measurement}</span>
+      <span className="block text-xs text-muted-foreground">Source: {evidence.source} · {evidence.version}</span>
+      <span className="block text-xs text-muted-foreground">{evidence.eligibleWords} eligible words; {evidence.excludedWords} excluded. Overlap detection and capture settings are unknown.</span>
+      {evidence.limitations.map(item => <span key={item} className="block text-xs text-muted-foreground">{item}</span>)}
+      {evidence.supplementaryTranscript?.status === 'different_not_aligned' && <span className="block text-xs text-muted-foreground">The uploaded text differs from the audio transcript. Its words have not been given audio timestamps; valid audio passages remain independently eligible.</span>}
+      {evidence.supplementaryTranscript?.status === 'unavailable' && <span className="block text-xs text-muted-foreground">The supplemental text could not be read. This analysis uses only the recording’s transcript.</span>}
+    </span> : null}
+  </span>
+}
+
 export function ReplayEvidencePanel({ sessionId, evidence, audioDisabled, speakerHint, sessionName, meetingDate, speakerAliases, userFullName, onAliasesSaved, editing: editingProp, onEditingChange, onConfirmed }: {
   sessionId: string
   evidence: ReplayEvidence
@@ -167,30 +201,18 @@ export function ReplayEvidencePanel({ sessionId, evidence, audioDisabled, speake
     </> : null
   return <>
     {identityForm ? <div className="mb-6 space-y-5">{identityForm}</div> : null}
-    <section className="rounded-xl border p-6 space-y-5" aria-labelledby="replay-evidence-heading">
-    <h2 id="replay-evidence-heading" className="text-xl font-semibold">Delivery evidence</h2>
-    <div role="status" className="space-y-2">
-      <p>{evidence.reason ? reasons[evidence.reason] ?? evidence.reason : evidence.state === 'empty' ? 'No notable word gaps met the evidence rules.' : `${evidence.moments.length} model-timed moments · ${Math.round(evidence.coverage * 100)}% eligible selected-speaker word coverage`}</p>
-      <p>Pace: {evidence.pace.wpm == null ? 'Not available' : `${Math.round(evidence.pace.wpm)} WPM · model-timed`}</p>
-    </div>
     <audio ref={audio} preload="none" onError={() => { operation.current?.abort(); setMessage('The browser cannot play this recording.'); setBusy(false) }} />
-    {busy && <Button variant="outline" onClick={() => { operation.current?.abort(); setBusy(false); setMessage('Playback stopped.') }}>Stop playback</Button>}
-    <p role="status" aria-live="polite">{message}</p>
-    {evidence.moments.map(moment => <article key={moment.id} className="rounded-lg border p-4 space-y-2">
-      <h3 className="font-medium">{time(moment.start)}–{time(moment.end)} · Word gap</h3>
-      <p>{moment.description}</p><p className="text-sm text-muted-foreground">{moment.limitation}</p>
-      <div className="flex gap-2"><Button disabled={!playable} onClick={() => void play(moment)}>Hear this moment</Button>
-        <Button variant="outline" disabled={!playable} onClick={() => void play({ start: Math.max(0, moment.start - 3), end: Math.min(evidence.recording?.duration ?? moment.end, moment.end + 3) })}>Hear surrounding context</Button></div>
-      <p className="text-sm">Listen again: would you keep this gap or try a different delivery?</p>
-    </article>)}
-    {audioDisabled && <p>Recording playback is disabled for your account.</p>}
-    <details><summary>Evidence and limitations</summary><div className="text-sm space-y-2 mt-3">
-      <p>{evidence.measurement}</p><p>Source: {evidence.source} · {evidence.version}</p>
-      <p>{evidence.eligibleWords} eligible words; {evidence.excludedWords} excluded. Overlap detection and capture settings are unknown.</p>
-      {evidence.limitations.map(l => <p key={l}>{l}</p>)}
-      {evidence.supplementaryTranscript?.status === 'different_not_aligned' && <p>The uploaded text differs from the audio transcript. Its words have not been given audio timestamps; valid audio passages remain independently eligible.</p>}
-      {evidence.supplementaryTranscript?.status === 'unavailable' && <p>The supplemental text could not be read. This analysis uses only the recording’s transcript.</p>}
-    </div></details>
-    </section>
+    {evidence.moments.length > 0 ? <section className="mb-6 space-y-3" aria-label="Delivery moments">
+      {busy && <Button variant="outline" onClick={() => { operation.current?.abort(); setBusy(false); setMessage('Playback stopped.') }}>Stop playback</Button>}
+      <p role="status" aria-live="polite">{message}</p>
+      {evidence.moments.map(moment => <article key={moment.id} className="rounded-lg border p-4 space-y-2">
+        <h3 className="font-medium">{time(moment.start)}–{time(moment.end)} · Word gap</h3>
+        <p>{moment.description}</p><p className="text-sm text-muted-foreground">{moment.limitation}</p>
+        <div className="flex gap-2"><Button disabled={!playable} onClick={() => void play(moment)}>Hear this moment</Button>
+          <Button variant="outline" disabled={!playable} onClick={() => void play({ start: Math.max(0, moment.start - 3), end: Math.min(evidence.recording?.duration ?? moment.end, moment.end + 3) })}>Hear surrounding context</Button></div>
+        <p className="text-sm">Listen again: would you keep this gap or try a different delivery?</p>
+      </article>)}
+      {audioDisabled && <p>Recording playback is disabled for your account.</p>}
+    </section> : null}
   </>
 }
