@@ -5,6 +5,7 @@ import { apiClient } from '@/lib/api-client'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { cn } from '@/lib/utils'
 
 interface ReplaySession {
   id: string
@@ -166,7 +167,15 @@ export function CoachReplayCard({
               </div>
             )}
             <div className="flex flex-wrap items-center gap-4">
-              <Button asChild size="sm" className="gap-2">
+              <Button
+                asChild
+                size="sm"
+                className={cn(
+                  'gap-2',
+                  completed &&
+                    'bg-[#48d878] text-[#083222] hover:bg-[#3cc96a] focus-visible:ring-[#48d878]',
+                )}
+              >
                 <Link to={primaryPath}>
                   {completed
                     ? 'View results'
