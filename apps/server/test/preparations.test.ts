@@ -229,6 +229,43 @@ describe('Prepare API ownership and validation', () => {
     )
   })
 
+  it('creates an optional simplified practice context with one practice stage', async () => {
+    prismaMock.preparation.create.mockResolvedValue(preparation)
+    const response = await request(appFor())
+      .post('/api/preparations')
+      .send({
+        mode: 'SIMPLIFIED',
+        companyName: '',
+        roleTitle: '',
+        questionsText: '- Tell me about yourself\n- Why this role?',
+        interviewerProfileText: 'VP Engineering',
+      })
+    expect(response.status).toBe(201)
+    expect(prismaMock.preparation.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          title: 'Interview preparation — Interview practice',
+          stages: {
+            create: [
+              expect.objectContaining({
+                type: PreparationStageType.CUSTOM,
+                name: 'Interview Practice',
+                status: PreparationStageStatus.UPCOMING,
+                interviewerProfileText: 'VP Engineering',
+              }),
+            ],
+          },
+          questions: {
+            create: [
+              expect.objectContaining({ questionText: 'Tell me about yourself' }),
+              expect.objectContaining({ questionText: 'Why this role?' }),
+            ],
+          },
+        }),
+      }),
+    )
+  })
+
   it('rejects protected mass-assignment fields', async () => {
     const response = await request(appFor())
       .post('/api/preparations')

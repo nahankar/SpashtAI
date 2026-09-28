@@ -51,18 +51,37 @@ const optionalDate = z
 
 export const createPreparationSchema = z
   .object({
-    companyName: shortText('Company', PREPARE_TEXT_LIMITS.companyName),
-    roleTitle: shortText('Role', PREPARE_TEXT_LIMITS.roleTitle),
+    mode: z.enum(['SIMPLIFIED', 'DETAILED']).optional().default('DETAILED'),
+    companyName: z.string().trim().max(PREPARE_TEXT_LIMITS.companyName),
+    roleTitle: z.string().trim().max(PREPARE_TEXT_LIMITS.roleTitle),
     interviewDate: optionalDate,
     currentStageType: z.nativeEnum(PreparationStageType).optional().nullable(),
     jobDescriptionText: optionalText(PREPARE_TEXT_LIMITS.jobDescriptionText),
     resumeText: optionalText(PREPARE_TEXT_LIMITS.resumeText),
     resumeLabel: optionalText(PREPARE_TEXT_LIMITS.resumeLabel),
+    questionsText: optionalText(PREPARE_TEXT_LIMITS.questionsText),
     interviewerName: optionalText(PREPARE_TEXT_LIMITS.interviewerName),
     interviewerRole: optionalText(PREPARE_TEXT_LIMITS.interviewerRole),
     interviewerProfileText: optionalText(PREPARE_TEXT_LIMITS.interviewerProfileText),
   })
   .strict()
+  .superRefine((value, context) => {
+    if (value.mode !== 'DETAILED') return
+    if (!value.companyName) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['companyName'],
+        message: 'Company is required',
+      })
+    }
+    if (!value.roleTitle) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['roleTitle'],
+        message: 'Role is required',
+      })
+    }
+  })
 
 export const updatePreparationSchema = z
   .object({

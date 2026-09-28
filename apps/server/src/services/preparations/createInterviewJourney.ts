@@ -1,12 +1,16 @@
 import {
+  InterviewQuestionSource,
+  PreparationStageStatus,
   PreparationStageType,
   PreparationType,
   type Prisma,
 } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { buildDefaultStages } from '../../lib/prepareStages'
+import { parseInterviewQuestions } from '../../lib/parseInterviewQuestions'
 
 export type CreateInterviewJourneyInput = {
+  mode: 'SIMPLIFIED' | 'DETAILED'
   companyName: string
   roleTitle: string
   interviewDate: Date | null
@@ -14,6 +18,7 @@ export type CreateInterviewJourneyInput = {
   jobDescriptionText: string | null
   resumeText: string | null
   resumeLabel: string | null
+  questionsText: string | null
   interviewerName: string | null
   interviewerRole: string | null
   interviewerProfileText: string | null
@@ -46,14 +51,25 @@ export async function createInterviewJourney(
   userId: string,
   input: CreateInterviewJourneyInput,
 ) {
-  const stages = buildDefaultStages(
-    input.currentStageType ?? undefined,
-    input.interviewDate ?? undefined,
-  )
+  const simplified = input.mode === 'SIMPLIFIED'
+  const stages = simplified
+    ? [{
+        type: PreparationStageType.CUSTOM,
+        name: 'Interview Practice',
+        sequence: 0,
+        status: PreparationStageStatus.UPCOMING,
+        scheduledAt: null,
+      }]
+    : buildDefaultStages(
+        input.currentStageType ?? undefined,
+        input.interviewDate ?? undefined,
+      )
   const hasInterviewer = Boolean(
     input.interviewerName || input.interviewerRole || input.interviewerProfileText,
   )
-  const selectedIndex = input.currentStageType
+  const selectedIndex = simplified
+    ? 0
+    : input.currentStageType
     ? stages.findIndex((stage) => stage.type === input.currentStageType)
     : input.interviewDate || hasInterviewer
       ? 0
@@ -81,6 +97,12 @@ export async function createInterviewJourney(
           interviewerRole: index === selectedIndex ? input.interviewerRole : null,
           interviewerProfileText:
             index === selectedIndex ? input.interviewerProfileText : null,
+        })),
+      },
+      questions: {
+        create: parseInterviewQuestions(input.questionsText).map((questionText) => ({
+          questionText,
+          source: InterviewQuestionSource.USER_ENTERED,
         })),
       },
     },

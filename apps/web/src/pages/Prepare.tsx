@@ -14,6 +14,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { createPreparation } from '@/lib/prepare-api'
 import {
   PREPARE_TEXT_LIMITS,
@@ -105,6 +106,7 @@ export function Prepare() {
   const endRef = useRef<HTMLDivElement>(null)
 
   const [opening, setOpening] = useState('')
+  const [setupMode, setSetupMode] = useState<'simplified' | 'detailed'>('simplified')
   const [started, setStarted] = useState(false)
   const [companyName, setCompanyName] = useState('')
   const [roleTitle, setRoleTitle] = useState('')
@@ -117,6 +119,8 @@ export function Prepare() {
   const [interviewerName, setInterviewerName] = useState('')
   const [interviewerRole, setInterviewerRole] = useState('')
   const [interviewerProfileText, setInterviewerProfileText] = useState('')
+  const [pastQuestionsText, setPastQuestionsText] = useState('')
+  const [interviewerDetails, setInterviewerDetails] = useState('')
   const [showJd, setShowJd] = useState(false)
   const [showResume, setShowResume] = useState(false)
   const [showInterviewer, setShowInterviewer] = useState(false)
@@ -132,6 +136,7 @@ export function Prepare() {
     setSubmitting(true)
     try {
       const preparation = await createPreparation({
+        mode: 'DETAILED',
         companyName: companyName.trim(),
         roleTitle: roleTitle.trim(),
         interviewDate: interviewDate ? new Date(interviewDate).toISOString() : null,
@@ -147,6 +152,32 @@ export function Prepare() {
       navigate(`/prepare/interviews/${preparation.id}`)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not create journey')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function submitSimplified() {
+    setSubmitting(true)
+    try {
+      const preparation = await createPreparation({
+        mode: 'SIMPLIFIED',
+        companyName: '',
+        roleTitle: roleTitle.trim(),
+        jobDescriptionText: jobDescriptionText.trim() || null,
+        resumeText: resumeText.trim() || null,
+        questionsText: pastQuestionsText.trim() || null,
+        interviewerProfileText: interviewerDetails.trim() || null,
+      })
+      const params = new URLSearchParams({
+        newSession: 'true',
+        preparationId: preparation.id,
+      })
+      if (preparation.nextStage?.id) params.set('stageId', preparation.nextStage.id)
+      toast.success('Practice context saved')
+      navigate(`/elevate?${params.toString()}`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not start practice')
     } finally {
       setSubmitting(false)
     }
@@ -169,7 +200,107 @@ export function Prepare() {
 
       <Card className="mx-auto max-w-3xl">
         <CardContent className="space-y-6 py-6">
-          {!started ? (
+          <Tabs
+            value={setupMode}
+            onValueChange={(value) => setSetupMode(value as 'simplified' | 'detailed')}
+          >
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="simplified">Simplified</TabsTrigger>
+              <TabsTrigger value="detailed">Detailed journey</TabsTrigger>
+            </TabsList>
+          </Tabs>
+
+          {setupMode === 'simplified' ? (
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-xl font-semibold">Quick interview practice</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Add any context you have. All five answers are optional and no attachments are
+                  needed.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="simple-role">1. Interview role</Label>
+                <Input
+                  id="simple-role"
+                  value={roleTitle}
+                  maxLength={PREPARE_TEXT_LIMITS.roleTitle}
+                  onChange={(event) => setRoleTitle(event.target.value)}
+                  placeholder="e.g. Senior Engineering Manager"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="simple-jd">2. Job description</Label>
+                <Textarea
+                  id="simple-jd"
+                  rows={5}
+                  value={jobDescriptionText}
+                  maxLength={PREPARE_TEXT_LIMITS.jobDescriptionText}
+                  onChange={(event) => setJobDescriptionText(event.target.value)}
+                  placeholder="Paste the relevant job description…"
+                />
+                <CharacterCount
+                  value={jobDescriptionText}
+                  limit={PREPARE_TEXT_LIMITS.jobDescriptionText}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="simple-resume">3. Candidate resume</Label>
+                <Textarea
+                  id="simple-resume"
+                  rows={5}
+                  value={resumeText}
+                  maxLength={PREPARE_TEXT_LIMITS.resumeText}
+                  onChange={(event) => setResumeText(event.target.value)}
+                  placeholder="Paste the candidate resume as text…"
+                />
+                <p className="text-xs text-muted-foreground">Text only — no attachment required.</p>
+                <CharacterCount value={resumeText} limit={PREPARE_TEXT_LIMITS.resumeText} />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="simple-questions">4. Any questions from past rounds</Label>
+                <Textarea
+                  id="simple-questions"
+                  rows={4}
+                  value={pastQuestionsText}
+                  maxLength={PREPARE_TEXT_LIMITS.questionsText}
+                  onChange={(event) => setPastQuestionsText(event.target.value)}
+                  placeholder="Add one question per line…"
+                />
+                <CharacterCount
+                  value={pastQuestionsText}
+                  limit={PREPARE_TEXT_LIMITS.questionsText}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="simple-interviewer">5. Interviewer details</Label>
+                <Textarea
+                  id="simple-interviewer"
+                  rows={4}
+                  value={interviewerDetails}
+                  maxLength={PREPARE_TEXT_LIMITS.interviewerProfileText}
+                  onChange={(event) => setInterviewerDetails(event.target.value)}
+                  placeholder="Name, role, team, or relevant professional background…"
+                />
+                <CharacterCount
+                  value={interviewerDetails}
+                  limit={PREPARE_TEXT_LIMITS.interviewerProfileText}
+                />
+              </div>
+
+              <div className="flex justify-end border-t pt-4">
+                <Button onClick={submitSimplified} disabled={submitting}>
+                  {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Continue to practice <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          ) : !started ? (
             <Turn
               prompt="What is coming up?"
               hint="Write it however you think about it. You will confirm the details next."

@@ -71,6 +71,7 @@ function withPreparationDetail(
 }
 
 const FIELD_LABELS: Record<string, string> = {
+  mode: 'Setup type',
   companyName: 'Company',
   roleTitle: 'Role',
   interviewDate: 'Interview date',
@@ -78,6 +79,7 @@ const FIELD_LABELS: Record<string, string> = {
   jobDescriptionText: 'Job description',
   resumeText: 'Profile / resume',
   resumeLabel: 'Profile label',
+  questionsText: 'Questions from past rounds',
   interviewerName: 'Interviewer name',
   interviewerRole: 'Interviewer role',
   interviewerProfileText: 'Interviewer profile details',
@@ -88,7 +90,6 @@ const FIELD_LABELS: Record<string, string> = {
   sessionId: 'Elevate session',
   questionText: 'Question',
   source: 'Question source',
-  questionsText: 'What they asked',
   rating: 'How it went',
   outcome: 'Outcome',
   wentWell: 'What went well',
@@ -138,11 +139,16 @@ router.post('/', async (req, res) => {
   try {
     const preparation = await createInterviewJourney(userId(req), {
       ...parsed.data,
+      companyName:
+        parsed.data.companyName || (parsed.data.mode === 'SIMPLIFIED' ? 'Interview preparation' : ''),
+      roleTitle:
+        parsed.data.roleTitle || (parsed.data.mode === 'SIMPLIFIED' ? 'Interview practice' : ''),
       interviewDate: parsed.data.interviewDate ?? null,
       currentStageType: parsed.data.currentStageType ?? null,
       jobDescriptionText: parsed.data.jobDescriptionText ?? null,
       resumeText: parsed.data.resumeText ?? null,
       resumeLabel: parsed.data.resumeLabel ?? null,
+      questionsText: parsed.data.questionsText ?? null,
       interviewerName: parsed.data.interviewerName ?? null,
       interviewerRole: parsed.data.interviewerRole ?? null,
       interviewerProfileText: parsed.data.interviewerProfileText ?? null,

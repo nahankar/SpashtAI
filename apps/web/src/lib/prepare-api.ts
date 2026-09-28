@@ -15,6 +15,7 @@ import type {
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 
 export type CreatePreparationInput = {
+  mode?: 'SIMPLIFIED' | 'DETAILED'
   companyName: string
   roleTitle: string
   interviewDate?: string | null
@@ -22,6 +23,7 @@ export type CreatePreparationInput = {
   jobDescriptionText?: string | null
   resumeText?: string | null
   resumeLabel?: string | null
+  questionsText?: string | null
   interviewerName?: string | null
   interviewerRole?: string | null
   interviewerProfileText?: string | null
