@@ -93,8 +93,13 @@ describe('Replay upload, cached analysis and deletion workflow (mocked providers
     expect(response.status).toBe(403)
     expect(response.body).toMatchObject({
       code: 'REPLAY_AUDIO_UPLOAD_DISABLED',
-      error: 'Replay audio upload is coming soon for your account.',
+      error: 'Replay audio and video upload is coming soon for your account.',
     })
+    const video = await request(app)
+      .post(`${path()}/upload`)
+      .attach('audio', Buffer.from('synthetic'), { filename: 'clip.mp4', contentType: 'video/mp4' })
+    expect(video.status).toBe(403)
+    expect(video.body.code).toBe('REPLAY_AUDIO_UPLOAD_DISABLED')
   })
   it('keeps content-only uploads usable without inventing pace, and deletes local artifacts', async () => {
     const uploaded = await request(app).post(`${path()}/upload`).send({ text: 'Alice: The project needs a clear owner.\nBob: I can own the next step.' })

@@ -5,12 +5,11 @@ import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Upload, X, FileAudio, FileText, Film, Lock } from 'lucide-react'
-import { useIsUltra } from '@/hooks/useIsUltra'
 import { useCanReplayAudioUpload } from '@/hooks/useCanReplayAudioUpload'
 
 const AUDIO_TYPES = ['.mp3', '.mp4', '.wav', '.m4a', '.ogg', '.mov', '.webm']
 const TEXT_TYPES = ['.txt', '.json', '.srt', '.vtt']
-// Audio-only accept hint for users without the Ultra plan (video blocked).
+// Audio extensions offered when recording upload is enabled.
 const AUDIO_ONLY_TYPES = ['.mp3', '.wav', '.m4a', '.ogg']
 const VIDEO_EXTS = ['.mp4', '.mov', '.webm', '.mkv', '.avi', '.m4v']
 
@@ -39,9 +38,9 @@ interface UploadZoneProps {
 }
 
 export function UploadZone({ onSubmit, loading }: UploadZoneProps) {
-  const isUltra = useIsUltra()
-  const canAudio = useCanReplayAudioUpload()
-  const canVideo = isUltra
+  const canUploadRecording = useCanReplayAudioUpload()
+  const canAudio = canUploadRecording
+  const canVideo = canUploadRecording
   const [audioFile, setAudioFile] = useState<File | null>(null)
   const [transcriptFile, setTranscriptFile] = useState<File | null>(null)
   const [pastedText, setPastedText] = useState('')
@@ -50,12 +49,12 @@ export function UploadZone({ onSubmit, loading }: UploadZoneProps) {
   const audioRef = useRef<HTMLInputElement>(null)
   const transcriptRef = useRef<HTMLInputElement>(null)
 
-  /** Accept a media file, gating audio behind Pro and video behind Ultra. */
+  /** Accept a recording. Audio and video stay off until an admin enables them. */
   const selectAudioFile = (f: File) => {
     if (isVideoFile(f)) {
       if (!canVideo) {
         setBlockedMsg(
-          'Video uploads are an Ultra plan feature. Upload an audio file or a transcript instead, or contact your admin to enable Ultra.',
+          'Replay video upload is coming soon for your account. Upload a transcript or paste text instead.',
         )
         return
       }
@@ -114,7 +113,7 @@ export function UploadZone({ onSubmit, loading }: UploadZoneProps) {
           <p className="text-sm font-medium">Drag & drop files here</p>
           <p className="mt-1 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1">
-              Audio: MP3, WAV, M4A, OGG (max 500MB)
+              Audio: MP3, WAV, M4A, OGG
               {!canAudio && (
                 <Badge
                   variant="secondary"
@@ -130,9 +129,9 @@ export function UploadZone({ onSubmit, loading }: UploadZoneProps) {
               {!canVideo && (
                 <Badge
                   variant="secondary"
-                  className="px-1.5 py-0 text-[10px] font-semibold uppercase tracking-wide"
+                  className="px-1.5 py-0 text-[10px] font-semibold tracking-wide"
                 >
-                  <Lock className="mr-1 h-2.5 w-2.5" /> Ultra
+                  <Lock className="mr-1 h-2.5 w-2.5" /> Coming soon
                 </Badge>
               )}
             </span>
@@ -151,7 +150,9 @@ export function UploadZone({ onSubmit, loading }: UploadZoneProps) {
                 ? 'Choose Audio/Video'
                 : canVideo
                   ? 'Choose Video'
-                  : 'Choose Audio'}
+                  : canAudio
+                    ? 'Choose Audio'
+                    : 'Choose Audio/Video'}
             </Button>
             <Button
               variant="outline"

@@ -949,20 +949,6 @@ export function Coach() {
     [isAccessible],
   )
 
-  const lastActionTurn = [...turns]
-    .reverse()
-    .find(
-      (
-        turn,
-      ): turn is Extract<
-        ThreadTurn,
-        { kind: 'intent' | 'elevate-result' | 'replay-result' }
-      > =>
-        turn.role === 'coach' &&
-        (turn.kind === 'intent' ||
-          turn.kind === 'elevate-result' ||
-          turn.kind === 'replay-result'),
-    )
   const firstName =
     user?.firstName && user.firstName.toLowerCase() !== 'admin'
       ? user.firstName
@@ -1303,12 +1289,12 @@ export function Coach() {
     }
   }
 
-  /** Swaps a recommendation for a different workspace, shown in-thread as a card. */
-  function chooseAlternative(intent: CoachIntent) {
+  /** Swaps any workspace card for a different workspace, including older cards. */
+  function switchWorkspace(fromTurnId: string, intent: CoachIntent) {
     if (!thread) return
     const next: ThreadTurn[] = [
       ...turns.map<ThreadTurn>((turn) =>
-        turn.role === 'coach' && turn.kind === 'recommend' && turn.id === expandedConfirmId
+        turn.role === 'coach' && turn.kind === 'recommend' && turn.id === fromTurnId
           ? { ...turn, superseded: true }
           : turn,
       ),
@@ -1316,6 +1302,11 @@ export function Coach() {
     ]
     setExpandedConfirmId(null)
     void persistTurns(thread.id, next.slice(-40))
+  }
+
+  function chooseAlternative(intent: CoachIntent) {
+    if (!expandedConfirmId) return
+    switchWorkspace(expandedConfirmId, intent)
   }
 
   async function commitRequestForThread(
@@ -1896,16 +1887,38 @@ export function Coach() {
                 <div key={turn.id} className="space-y-2.5">
                   <p className="max-w-[80%] text-sm leading-relaxed">{turn.text}</p>
                   {turn.evidence ? (
-                    <CoachPulseEvidenceCard
-                      evidence={turn.evidence}
-                      threadId={thread?.id}
-                      showPulseLink={turn.module !== 'progress'}
-                      primary={{
-                        label: turn.label,
-                        to: recommendationPath(turn.module, turn.brief, thread?.id),
-                        onClick: () => void recordRecommendation(turn.module),
-                      }}
-                    />
+                    <div className="space-y-2.5">
+                      <CoachPulseEvidenceCard
+                        evidence={turn.evidence}
+                        threadId={thread?.id}
+                        showPulseLink={turn.module !== 'progress'}
+                        onChangeWorkspace={() =>
+                          setExpandedConfirmId(expandedConfirmId === turn.id ? null : turn.id)
+                        }
+                        primary={{
+                          label: turn.label,
+                          to: recommendationPath(turn.module, turn.brief, thread?.id),
+                          onClick: () => void recordRecommendation(turn.module),
+                        }}
+                      />
+                      {expandedConfirmId === turn.id && (
+                        <div className="flex flex-wrap gap-2 pt-0.5">
+                          {availableIntents
+                            .filter((intent) => intent.id !== turn.module)
+                            .map((intent) => (
+                              <Button
+                                key={intent.id}
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => switchWorkspace(turn.id, intent.id)}
+                              >
+                                {intent.label}
+                              </Button>
+                            ))}
+                        </div>
+                      )}
+                    </div>
                   ) : (
                     <>
                       <div className="flex flex-wrap items-center gap-3">
@@ -2046,78 +2059,78 @@ export function Coach() {
                 </div>
               )
             }
-            if (turn.kind === 'elevate-result') {
-              if (turn.id !== lastActionTurn?.id) {
+            if (turn.kind === 'elevate-result' || turn.kind === 'replay-result' || turn.kind === 'intent') {
+              const currentWorkspace =
+                turn.kind === 'elevate-result'
+                  ? 'elevate'
+                  : turn.kind === 'replay-result'
+                    ? 'replay'
+                    : turn.intent
+              const showingAlternatives = expandedConfirmId === turn.id
+              const changeWorkspace = () =>
+                setExpandedConfirmId(showingAlternatives ? null : turn.id)
+              const alternatives = showingAlternatives ? (
+                <div className="flex flex-wrap gap-2 pt-0.5">
+                  {availableIntents
+                    .filter((intent) => intent.id !== currentWorkspace)
+                    .map((intent) => (
+                      <Button
+                        key={intent.id}
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => switchWorkspace(turn.id, intent.id)}
+                      >
+                        {intent.label}
+                      </Button>
+                    ))}
+                </div>
+              ) : null
+              if (turn.kind === 'elevate-result' || (turn.kind === 'intent' && turn.intent === 'elevate')) {
                 return (
-                  <p
-                    key={turn.id}
-                    className="flex items-center gap-2 text-xs text-muted-foreground"
-                  >
-                    <Mic className="h-3.5 w-3.5" />
-                    Earlier Elevate result
-                  </p>
+                  <div key={turn.id} className="space-y-2.5">
+                    <CoachElevateCard
+                      userId={user?.id}
+                      sessionId={turn.kind === 'elevate-result' ? turn.sessionId : undefined}
+                      threadId={thread?.id}
+                      onChangeWorkspace={changeWorkspace}
+                    />
+                    {alternatives}
+                  </div>
                 )
               }
-              return (
-                <CoachElevateCard
-                  key={turn.id}
-                  userId={user?.id}
-                  sessionId={turn.sessionId}
-                  threadId={thread?.id}
-                />
-              )
-            }
-            if (turn.kind === 'replay-result') {
-              if (turn.id !== lastActionTurn?.id) {
+              if (turn.kind === 'replay-result' || (turn.kind === 'intent' && turn.intent === 'replay')) {
                 return (
-                  <p
-                    key={turn.id}
-                    className="flex items-center gap-2 text-xs text-muted-foreground"
-                  >
-                    <Upload className="h-3.5 w-3.5" />
-                    Earlier Replay result
-                  </p>
+                  <div key={turn.id} className="space-y-2.5">
+                    <CoachReplayCard
+                      sessionId={turn.kind === 'replay-result' ? turn.sessionId : undefined}
+                      threadId={thread?.id}
+                      onChangeWorkspace={changeWorkspace}
+                    />
+                    {alternatives}
+                  </div>
                 )
               }
-              return (
-                <CoachReplayCard
-                  key={turn.id}
-                  sessionId={turn.sessionId}
-                  threadId={thread?.id}
-                />
-              )
-            }
-            if (turn.id !== lastActionTurn?.id) {
-              const previous = INTENTS.find((intent) => intent.id === turn.intent)
-              if (!previous) return null
-              const PreviousIcon = previous.icon
-              return (
-                <p
-                  key={turn.id}
-                  className="flex items-center gap-2 text-xs text-muted-foreground"
-                >
-                  <PreviousIcon className="h-3.5 w-3.5" />
-                  Opened earlier · {previous.label}
-                </p>
-              )
-            }
-            if (turn.intent === 'progress') {
-              return <CoachPulseCard key={turn.id} threadId={thread?.id} />
-            }
-            if (turn.intent === 'prepare') {
-              return (
-                <CoachPrepareCard
-                  key={turn.id}
-                  threadId={thread?.id}
-                  preparationId={thread?.preparationId}
-                />
-              )
-            }
-            if (turn.intent === 'elevate') {
-              return <CoachElevateCard key={turn.id} userId={user?.id} threadId={thread?.id} />
-            }
-            if (turn.intent === 'replay') {
-              return <CoachReplayCard key={turn.id} threadId={thread?.id} />
+              if (turn.kind === 'intent' && turn.intent === 'progress') {
+                return (
+                  <div key={turn.id} className="space-y-2.5">
+                    <CoachPulseCard threadId={thread?.id} onChangeWorkspace={changeWorkspace} />
+                    {alternatives}
+                  </div>
+                )
+              }
+              if (turn.kind === 'intent' && turn.intent === 'prepare') {
+                return (
+                  <div key={turn.id} className="space-y-2.5">
+                    <CoachPrepareCard
+                      threadId={thread?.id}
+                      preparationId={thread?.preparationId}
+                      onChangeWorkspace={changeWorkspace}
+                    />
+                    {alternatives}
+                  </div>
+                )
+              }
             }
             return null
           })}

@@ -16,11 +16,13 @@ export function CoachPulseEvidenceCard({
   primary,
   threadId,
   showPulseLink = true,
+  onChangeWorkspace,
 }: {
   evidence: CoachPulseEvidence
   primary?: { label: string; to: string; onClick?: () => void }
   threadId?: string
   showPulseLink?: boolean
+  onChangeWorkspace?: () => void
 }) {
   const measurementLabel =
     evidence.measurementCount === 1 ? 'tracked measurement' : 'tracked measurements'
@@ -65,6 +67,15 @@ export function CoachPulseEvidenceCard({
                 {primary.label}
               </Link>
             </Button>
+          )}
+          {onChangeWorkspace && (
+            <button
+              type="button"
+              className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+              onClick={onChangeWorkspace}
+            >
+              Change workspace
+            </button>
           )}
           {showPulseLink && (
             <Button asChild variant="link" size="sm" className="h-auto p-0 text-muted-foreground">

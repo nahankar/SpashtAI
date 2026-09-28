@@ -49,10 +49,12 @@ export function CoachElevateCard({
   userId,
   sessionId,
   threadId,
+  onChangeWorkspace,
 }: {
   userId?: string
   sessionId?: string
   threadId?: string
+  onChangeWorkspace?: () => void
 }) {
   const [sessions, setSessions] = useState<ElevateSession[]>([])
   const [loading, setLoading] = useState(true)
@@ -231,6 +233,15 @@ export function CoachElevateCard({
                   )}
                 </Link>
               </Button>
+              {onChangeWorkspace && (
+                <button
+                  type="button"
+                  className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                  onClick={onChangeWorkspace}
+                >
+                  Change workspace
+                </button>
+              )}
               {current && (
                 <Link
                   to={coachElevatePath({ newSession: 'true' }, threadId)}

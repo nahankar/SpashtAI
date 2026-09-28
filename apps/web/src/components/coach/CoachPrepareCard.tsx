@@ -55,9 +55,11 @@ function journeyHref(preparationId: string, threadId?: string) {
 export function CoachPrepareCard({
   threadId,
   preparationId,
+  onChangeWorkspace,
 }: {
   threadId?: string
   preparationId?: string | null
+  onChangeWorkspace?: () => void
 }) {
   const [journey, setJourney] = useState<Preparation | null>(null)
   const [count, setCount] = useState(0)
@@ -206,6 +208,15 @@ export function CoachPrepareCard({
                 <ArrowRight className="h-4 w-4" />
               </Link>
             </Button>
+          )}
+          {onChangeWorkspace && (
+            <button
+              type="button"
+              className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+              onClick={onChangeWorkspace}
+            >
+              Change workspace
+            </button>
           )}
         </div>
       </CardContent>

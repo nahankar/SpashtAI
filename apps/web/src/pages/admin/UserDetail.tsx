@@ -436,8 +436,9 @@ export function UserDetail() {
             <CardTitle className="text-base">Subscription plans</CardTitle>
             <CardDescription>
               New accounts start with Pro and Ultra on. Turn a plan off to
-              remove it for this user. Replay audio upload is separately
-              enabled per user and defaults off. Admins always have access.
+              remove it for this user. Replay audio and video upload is
+              separately enabled per user and defaults off. Admins always
+              have access.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
@@ -467,10 +468,10 @@ export function UserDetail() {
                 }
               />
               <span>
-                <span className="font-medium">Enable Replay audio upload</span>
+                <span className="font-medium">Enable Replay audio and video upload</span>
                 <span className="block text-xs text-muted-foreground">
-                  Allows MP3, WAV, M4A, and OGG uploads. Off by default while
-                  the feature is marked coming soon.
+                  Allows audio and video recording uploads. Off by default
+                  while the feature is marked coming soon.
                 </span>
               </span>
             </label>

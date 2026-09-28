@@ -32,9 +32,11 @@ function relativeTime(value: string): string {
 export function CoachReplayCard({
   sessionId,
   threadId,
+  onChangeWorkspace,
 }: {
   sessionId?: string
   threadId?: string
+  onChangeWorkspace?: () => void
 }) {
   const [latest, setLatest] = useState<ReplaySession | null>(null)
   const [loading, setLoading] = useState(true)
@@ -178,6 +180,15 @@ export function CoachReplayCard({
                   <ArrowRight className="h-4 w-4" />
                 </Link>
               </Button>
+              {onChangeWorkspace && (
+                <button
+                  type="button"
+                  className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                  onClick={onChangeWorkspace}
+                >
+                  Change workspace
+                </button>
+              )}
               {latest && (
                 <Link
                   to={newAnalysisPath}

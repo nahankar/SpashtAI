@@ -354,15 +354,12 @@ router.post(
       if (media && !isPrivilegedRole(req.user?.role)) {
         const u = await prisma.user.findUnique({
           where: { id: req.user!.userId },
-          select: { enableReplayAudioUpload: true, enableUltra: true },
+          select: { enableReplayAudioUpload: true },
         })
-        const video = media.mimetype.startsWith('video/')
-        if (!(video ? u?.enableUltra : u?.enableReplayAudioUpload)) {
+        if (!u?.enableReplayAudioUpload) {
           return res.status(403).json({
-            error: video
-              ? 'Video uploads require Ultra.'
-              : 'Replay audio upload is coming soon for your account.',
-            code: video ? 'ULTRA_REQUIRED' : 'REPLAY_AUDIO_UPLOAD_DISABLED',
+            error: 'Replay audio and video upload is coming soon for your account.',
+            code: 'REPLAY_AUDIO_UPLOAD_DISABLED',
           })
         }
       }

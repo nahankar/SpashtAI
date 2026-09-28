@@ -48,7 +48,13 @@ function buildPulseSummary(items: PulseSummaryItem[]): string {
   return `${parts.join('. ')}.`
 }
 
-export function CoachPulseCard({ threadId }: { threadId?: string }) {
+export function CoachPulseCard({
+  threadId,
+  onChangeWorkspace,
+}: {
+  threadId?: string
+  onChangeWorkspace?: () => void
+}) {
   const [items, setItems] = useState<PulseSummaryItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -155,6 +161,15 @@ export function CoachPulseCard({ threadId }: { threadId?: string }) {
                 <ArrowRight className="h-4 w-4" />
               </Link>
             </Button>
+          )}
+          {onChangeWorkspace && (
+            <button
+              type="button"
+              className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+              onClick={onChangeWorkspace}
+            >
+              Change workspace
+            </button>
           )}
         </div>
       </CardContent>
