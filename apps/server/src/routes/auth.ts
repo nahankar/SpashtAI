@@ -425,6 +425,7 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
         enableTxtExport: true,
         enableJsonExport: true,
         enableAudioExport: true,
+        enableReplayAudioUpload: true,
         enableReprocess: true,
         enablePro: true,
         enableUltra: true,

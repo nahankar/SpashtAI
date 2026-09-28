@@ -94,6 +94,7 @@ export function toAuthUser(user: {
   enableTxtExport?: boolean
   enableJsonExport?: boolean
   enableAudioExport?: boolean
+  enableReplayAudioUpload?: boolean
   enableReprocess?: boolean
   enablePro?: boolean
   enableUltra?: boolean
@@ -118,6 +119,7 @@ export function toAuthUser(user: {
     enableTxtExport: user.enableTxtExport ?? false,
     enableJsonExport: user.enableJsonExport ?? false,
     enableAudioExport: user.enableAudioExport ?? false,
+    enableReplayAudioUpload: user.enableReplayAudioUpload ?? false,
     enableReprocess: user.enableReprocess ?? true,
     enablePro: user.enablePro ?? true,
     enableUltra: user.enableUltra ?? true,

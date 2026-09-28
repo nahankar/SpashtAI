@@ -6,7 +6,14 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { normalizeStreamingWords, wordSegments } from '../src/lib/replay-word-evidence'
 
-const state = vi.hoisted(() => ({ session: null as any, stream: vi.fn(), analyze: vi.fn(), progress: vi.fn(), receipt: vi.fn() }))
+const state = vi.hoisted(() => ({
+  session: null as any,
+  replayAudioUpload: true,
+  stream: vi.fn(),
+  analyze: vi.fn(),
+  progress: vi.fn(),
+  receipt: vi.fn(),
+}))
 vi.mock('../src/lib/prisma', () => {
   const tx = {
     $queryRaw: vi.fn(),
@@ -23,7 +30,13 @@ vi.mock('../src/lib/prisma', () => {
       update: vi.fn(async ({ data }: any) => { Object.assign(state.session.result, data); return state.session.result }),
     },
     progressPulse: { deleteMany: state.progress }, coachHomeResultReceipt: { deleteMany: state.receipt },
-    user: { findUnique: vi.fn(async () => ({ enablePro: true, enableUltra: true })) },
+    user: {
+      findUnique: vi.fn(async () => ({
+        enablePro: true,
+        enableUltra: true,
+        enableReplayAudioUpload: state.replayAudioUpload,
+      })),
+    },
   }
   return { prisma: { ...tx, $transaction: (fn: (client: typeof tx) => unknown) => fn(tx) } }
 })
@@ -50,6 +63,7 @@ describe('Replay upload, cached analysis and deletion workflow (mocked providers
   })
   beforeEach(() => {
     vi.clearAllMocks()
+    state.replayAudioUpload = true
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false })))
     state.session = { id: `s-${Math.random().toString(36).slice(2)}`, userId: 'owner', status: 'pending', uploadedFiles: [], result: null,
       meetingDate: new Date('2026-01-01T00:00:00Z'), meetingType: 'Review', userRole: 'Participant', focusAreas: [] }
@@ -70,6 +84,17 @@ describe('Replay upload, cached analysis and deletion workflow (mocked providers
     const before = await readdir(directory)
     expect((await request(app).post(`${path()}/upload`).set('test-user', 'intruder').attach('audio', Buffer.from('synthetic'), 'test.wav')).status).toBe(404)
     expect(await readdir(directory)).toEqual(before)
+  })
+  it('rejects audio uploads unless an admin enabled them for the user', async () => {
+    state.replayAudioUpload = false
+    const response = await request(app)
+      .post(`${path()}/upload`)
+      .attach('audio', Buffer.from('synthetic'), 'test.wav')
+    expect(response.status).toBe(403)
+    expect(response.body).toMatchObject({
+      code: 'REPLAY_AUDIO_UPLOAD_DISABLED',
+      error: 'Replay audio upload is coming soon for your account.',
+    })
   })
   it('keeps content-only uploads usable without inventing pace, and deletes local artifacts', async () => {
     const uploaded = await request(app).post(`${path()}/upload`).send({ text: 'Alice: The project needs a clear owner.\nBob: I can own the next step.' })

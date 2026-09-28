@@ -20,6 +20,7 @@ export interface AuthUser {
   enableTxtExport?: boolean
   enableJsonExport?: boolean
   enableAudioExport?: boolean
+  enableReplayAudioUpload?: boolean
   enableReprocess?: boolean
   enablePro?: boolean
   enableUltra?: boolean

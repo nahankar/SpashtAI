@@ -93,6 +93,7 @@ router.get('/:id', async (req: Request, res: Response) => {
         enableTxtExport: true,
         enableJsonExport: true,
         enableAudioExport: true,
+        enableReplayAudioUpload: true,
         enableReprocess: true,
         enablePro: true,
         enableUltra: true,
@@ -362,6 +363,7 @@ router.patch('/:id/export-flags', async (req: Request, res: Response) => {
       enableTxtExport,
       enableJsonExport,
       enableAudioExport,
+      enableReplayAudioUpload,
       enableReprocess,
       enablePro,
       enableUltra,
@@ -374,6 +376,9 @@ router.patch('/:id/export-flags', async (req: Request, res: Response) => {
     if (typeof enableTxtExport === 'boolean') data.enableTxtExport = enableTxtExport
     if (typeof enableJsonExport === 'boolean') data.enableJsonExport = enableJsonExport
     if (typeof enableAudioExport === 'boolean') data.enableAudioExport = enableAudioExport
+    if (typeof enableReplayAudioUpload === 'boolean') {
+      data.enableReplayAudioUpload = enableReplayAudioUpload
+    }
     if (typeof enableReprocess === 'boolean') data.enableReprocess = enableReprocess
     if (typeof enablePro === 'boolean') data.enablePro = enablePro
     if (typeof enableUltra === 'boolean') data.enableUltra = enableUltra
@@ -395,6 +400,7 @@ router.patch('/:id/export-flags', async (req: Request, res: Response) => {
         enableTxtExport: true,
         enableJsonExport: true,
         enableAudioExport: true,
+        enableReplayAudioUpload: true,
         enableReprocess: true,
         enablePro: true,
         enableUltra: true,

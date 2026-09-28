@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowRight, Clock3, Loader2, Mic, Play, RotateCcw } from 'lucide-react'
+import { ArrowRight, Loader2, Mic, Play } from 'lucide-react'
 import { apiClient } from '@/lib/api-client'
 import { coachElevatePath } from '@/lib/coach-api'
 import { Badge } from '@/components/ui/badge'
@@ -159,7 +159,7 @@ export function CoachElevateCard({
             : error
               ? 'Session history is unavailable right now. You can still start Elevate.'
               : current
-                ? `${name}${current.focusArea ? ` · ${current.focusArea.replaceAll('_', ' ')}` : ''} · ${relativeTime(current.endedAt || current.startedAt)}`
+                ? `${name}${current.focusArea ? ` · ${current.focusArea.replaceAll('_', ' ')}` : ''} · ${relativeTime(current.endedAt || current.startedAt)}${duration ? ` · ${duration}` : ''}`
                 : 'Choose a communication skill, speak with your coach, and review the completed session.'}
         </CardDescription>
       </CardHeader>
@@ -171,24 +171,8 @@ export function CoachElevateCard({
           </div>
         ) : (
           <>
-            {current && (
-              <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
-                {duration && (
-                  <span className="flex items-center gap-1.5">
-                    <Clock3 className="h-4 w-4" />
-                    {duration}
-                  </span>
-                )}
-                {!isUnfinished && (
-                  <span className="flex items-center gap-1.5">
-                    <RotateCcw className="h-4 w-4" />
-                    Verified when the session ended
-                  </span>
-                )}
-              </div>
-            )}
             {sessionId && current?.endedAt && resultSummary && (
-              <div className="grid gap-2 sm:grid-cols-2">
+              <div className="grid gap-2">
                 {focusScore != null && (
                   <div className="rounded-md border bg-muted/40 px-3 py-2">
                     <p className="text-xs text-muted-foreground">
@@ -204,7 +188,7 @@ export function CoachElevateCard({
                   </div>
                 )}
                 {resultSummary.primaryImprovement && (
-                  <div className="rounded-md border bg-muted/40 px-3 py-2 sm:col-span-2">
+                  <div className="rounded-md border bg-muted/40 px-3 py-2">
                     <p className="text-xs text-muted-foreground">Work next</p>
                     <p className="text-sm font-medium">{resultSummary.primaryImprovement}</p>
                   </div>

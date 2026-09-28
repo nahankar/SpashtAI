@@ -37,6 +37,7 @@ interface UserDetailData {
   enableTxtExport: boolean
   enableJsonExport: boolean
   enableAudioExport: boolean
+  enableReplayAudioUpload: boolean
   enableReprocess: boolean
   enablePro: boolean
   enableUltra: boolean
@@ -115,6 +116,7 @@ export function UserDetail() {
       | 'enableTxtExport'
       | 'enableJsonExport'
       | 'enableAudioExport'
+      | 'enableReplayAudioUpload'
       | 'enableReprocess'
       | 'enablePro'
       | 'enableUltra',
@@ -132,6 +134,7 @@ export function UserDetail() {
           | 'enableTxtExport'
           | 'enableJsonExport'
           | 'enableAudioExport'
+          | 'enableReplayAudioUpload'
           | 'enableReprocess'
           | 'enablePro'
           | 'enableUltra'
@@ -141,7 +144,7 @@ export function UserDetail() {
         body: JSON.stringify({ [key]: value }),
       })
       setUser((prev) => prev ? { ...prev, ...data.user } : null)
-      toast.success('Export settings updated')
+      toast.success('User access updated')
     } catch (err) {
       console.error('Failed to update export flags:', err)
       toast.error('Failed to update export settings')
@@ -433,7 +436,8 @@ export function UserDetail() {
             <CardTitle className="text-base">Subscription plans</CardTitle>
             <CardDescription>
               New accounts start with Pro and Ultra on. Turn a plan off to
-              remove it for this user. Admins always have access.
+              remove it for this user. Replay audio upload is separately
+              enabled per user and defaults off. Admins always have access.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
@@ -449,6 +453,24 @@ export function UserDetail() {
                 <span className="font-medium">Enable Pro features</span>
                 <span className="block text-xs text-muted-foreground">
                   Playback “Key Moments” and the “Ask AI Coach” assistant.
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border"
+                checked={user.enableReplayAudioUpload}
+                disabled={savingFlags}
+                onChange={(e) =>
+                  updateExportFlag('enableReplayAudioUpload', e.target.checked)
+                }
+              />
+              <span>
+                <span className="font-medium">Enable Replay audio upload</span>
+                <span className="block text-xs text-muted-foreground">
+                  Allows MP3, WAV, M4A, and OGG uploads. Off by default while
+                  the feature is marked coming soon.
                 </span>
               </span>
             </label>

@@ -204,6 +204,7 @@ export function Elevate() {
   const [isSessionPaused, setIsSessionPaused] = useState(false)
   const [pauseReason, setPauseReason] = useState<'intentional' | 'disconnected' | null>(null)
   const [isCompletedSessionView, setIsCompletedSessionView] = useState(false)
+  const [loadingViewedSession, setLoadingViewedSession] = useState(Boolean(viewSessionId))
   const [viewSessionName, setViewSessionName] = useState<string | null>(null)
   const [viewSessionPulse, setViewSessionPulse] = useState<string | null>(null)
   const [viewFocusArea, setViewFocusArea] = useState<string | null>(null)
@@ -952,9 +953,13 @@ export function Elevate() {
 
   // Check if URL parameter session is completed (for "View Details & Metrics" button)
   useEffect(() => {
-    if (!viewSessionId) return
+    if (!viewSessionId) {
+      setLoadingViewedSession(false)
+      return
+    }
     let cancelled = false
     const controller = new AbortController()
+    setLoadingViewedSession(true)
     setIsCompletedSessionView(false)
     ;(async () => {
       let createdSegmentId: string | null = null
@@ -1056,6 +1061,8 @@ export function Elevate() {
         }
         if (cancelled || (error instanceof DOMException && error.name === 'AbortError')) return
         console.error('Error checking/resuming session:', error)
+      } finally {
+        if (!cancelled) setLoadingViewedSession(false)
       }
     })()
     return () => {
@@ -2060,6 +2067,11 @@ export function Elevate() {
             <div className="flex min-h-40 items-center justify-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
               Saving your session and preparing results…
+            </div>
+          ) : loadingViewedSession ? (
+            <div className="flex min-h-40 items-center justify-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading session…
             </div>
           ) : !joined && !viewSessionId && !sessionId ? (
             <div className="grid gap-3">

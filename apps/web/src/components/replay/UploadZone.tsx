@@ -5,8 +5,8 @@ import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Upload, X, FileAudio, FileText, Film, Lock } from 'lucide-react'
-import { useIsPro } from '@/hooks/useIsPro'
 import { useIsUltra } from '@/hooks/useIsUltra'
+import { useCanReplayAudioUpload } from '@/hooks/useCanReplayAudioUpload'
 
 const AUDIO_TYPES = ['.mp3', '.mp4', '.wav', '.m4a', '.ogg', '.mov', '.webm']
 const TEXT_TYPES = ['.txt', '.json', '.srt', '.vtt']
@@ -39,11 +39,8 @@ interface UploadZoneProps {
 }
 
 export function UploadZone({ onSubmit, loading }: UploadZoneProps) {
-  const isPro = useIsPro()
   const isUltra = useIsUltra()
-  // Tiered plans: Free = transcript/text only, Pro adds audio, Ultra adds video.
-  // Ultra is treated as a superset of Pro. Admins satisfy both.
-  const canAudio = isPro || isUltra
+  const canAudio = useCanReplayAudioUpload()
   const canVideo = isUltra
   const [audioFile, setAudioFile] = useState<File | null>(null)
   const [transcriptFile, setTranscriptFile] = useState<File | null>(null)
@@ -64,7 +61,7 @@ export function UploadZone({ onSubmit, loading }: UploadZoneProps) {
       }
     } else if (!canAudio) {
       setBlockedMsg(
-        'Audio uploads are a Pro plan feature. Upload a transcript or paste text instead, or contact your admin to enable Pro.',
+        'Replay audio upload is coming soon for your account. Upload a transcript or paste text instead.',
       )
       return
     }
@@ -121,9 +118,9 @@ export function UploadZone({ onSubmit, loading }: UploadZoneProps) {
               {!canAudio && (
                 <Badge
                   variant="secondary"
-                  className="px-1.5 py-0 text-[10px] font-semibold uppercase tracking-wide"
+                  className="px-1.5 py-0 text-[10px] font-semibold tracking-wide"
                 >
-                  <Lock className="mr-1 h-2.5 w-2.5" /> Pro
+                  <Lock className="mr-1 h-2.5 w-2.5" /> Coming soon
                 </Badge>
               )}
             </span>
@@ -148,8 +145,13 @@ export function UploadZone({ onSubmit, loading }: UploadZoneProps) {
               size="sm"
               type="button"
               onClick={() => audioRef.current?.click()}
+              disabled={!canAudio && !canVideo}
             >
-              {canVideo ? 'Choose Audio/Video' : 'Choose Audio'}
+              {canAudio && canVideo
+                ? 'Choose Audio/Video'
+                : canVideo
+                  ? 'Choose Video'
+                  : 'Choose Audio'}
             </Button>
             <Button
               variant="outline"
@@ -163,7 +165,10 @@ export function UploadZone({ onSubmit, loading }: UploadZoneProps) {
           <input
             ref={audioRef}
             type="file"
-            accept={(canVideo ? AUDIO_TYPES : AUDIO_ONLY_TYPES).join(',')}
+            accept={[
+              ...(canAudio ? AUDIO_ONLY_TYPES : []),
+              ...(canVideo ? VIDEO_EXTS : []),
+            ].join(',')}
             className="hidden"
             onChange={(e) => e.target.files?.[0] && selectAudioFile(e.target.files[0])}
           />

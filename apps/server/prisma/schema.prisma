@@ -122,6 +122,9 @@ model User {
   enableTxtExport   Boolean @default(false)
   enableJsonExport  Boolean @default(false)
   enableAudioExport Boolean @default(false)
+  // Replay audio-file upload is an invite-style capability while the feature
+  // is in preview. It is independent from Pro and defaults off.
+  enableReplayAudioUpload Boolean @default(false)
   // On for new accounts. An admin can turn it off for one user.
   enableReprocess   Boolean @default(true)
 
