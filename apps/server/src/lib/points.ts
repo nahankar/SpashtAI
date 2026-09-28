@@ -1,4 +1,5 @@
 import { prisma } from './prisma'
+import { areRewardPointsEnabled } from './platformSettings'
 import { lockWritableSession } from './sessionDiscard'
 
 export const POINTS_FEEDBACK = 0.25
@@ -9,6 +10,13 @@ export async function awardFeedbackConsideredPoints(
   userId: string,
   feedbackId: string,
 ): Promise<{ awarded: number; total: number }> {
+  if (!(await areRewardPointsEnabled())) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { rewardPoints: true },
+    })
+    return { awarded: 0, total: user?.rewardPoints ?? 0 }
+  }
   const feedback = await prisma.userFeedback.findUnique({
     where: { id: feedbackId },
     select: { userId: true, pointsAwarded: true },
@@ -64,6 +72,13 @@ export async function awardSessionActivePoints(
   userId: string,
   sessionId: string,
 ): Promise<{ awarded: number; total: number }> {
+  if (!(await areRewardPointsEnabled())) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { rewardPoints: true },
+    })
+    return { awarded: 0, total: user?.rewardPoints ?? 0 }
+  }
   return prisma.$transaction(async (tx) => {
     await lockWritableSession(tx, sessionId)
     const session = await tx.session.findUnique({

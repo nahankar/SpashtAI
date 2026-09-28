@@ -30,6 +30,7 @@ interface PlatformSettings {
   signupsPaused: boolean
   signupsPausedMessage: string | null
   adminRateLimitBypass: boolean
+  rewardPointsEnabled: boolean
 }
 
 export function Users() {
@@ -46,6 +47,8 @@ export function Users() {
   const [togglingSignups, setTogglingSignups] = useState(false)
   const [adminRateLimitBypass, setAdminRateLimitBypass] = useState(false)
   const [togglingRateLimit, setTogglingRateLimit] = useState(false)
+  const [rewardPointsEnabled, setRewardPointsEnabled] = useState(false)
+  const [togglingRewardPoints, setTogglingRewardPoints] = useState(false)
 
   const fetchUsers = useCallback(async () => {
     setLoading(true)
@@ -74,6 +77,7 @@ export function Users() {
         setSignupsPaused(res.settings.signupsPaused)
         setSignupsMessage(res.settings.signupsPausedMessage ?? '')
         setAdminRateLimitBypass(res.settings.adminRateLimitBypass)
+        setRewardPointsEnabled(Boolean(res.settings.rewardPointsEnabled))
       })
       .catch(console.error)
       .finally(() => setSettingsLoading(false))
@@ -151,12 +155,67 @@ export function Users() {
     }
   }
 
+  async function toggleRewardPoints() {
+    const nextEnabled = !rewardPointsEnabled
+    setTogglingRewardPoints(true)
+    try {
+      const res = await apiClient<{ settings: PlatformSettings }>(
+        '/api/admin/platform/reward-points',
+        {
+          method: 'PUT',
+          body: JSON.stringify({ rewardPointsEnabled: nextEnabled }),
+        },
+      )
+      setRewardPointsEnabled(res.settings.rewardPointsEnabled)
+      toast.success(nextEnabled ? 'Reward points enabled' : 'Reward points hidden')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update reward points')
+    } finally {
+      setTogglingRewardPoints(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Users</h1>
         <p className="text-muted-foreground">{total} registered users</p>
       </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle className="text-lg">Reward points</CardTitle>
+              <CardDescription>
+                Off by default. Points do not unlock Pro or Ultra. Turn this on
+                only to show the points balance and award points again.
+              </CardDescription>
+            </div>
+            <Badge variant={rewardPointsEnabled ? 'default' : 'outline'}>
+              {settingsLoading ? '…' : rewardPointsEnabled ? 'Points on' : 'Points off'}
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Button
+            variant={rewardPointsEnabled ? 'destructive' : 'default'}
+            disabled={settingsLoading || togglingRewardPoints}
+            onClick={toggleRewardPoints}
+          >
+            {togglingRewardPoints ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Updating…
+              </>
+            ) : rewardPointsEnabled ? (
+              'Hide reward points'
+            ) : (
+              'Enable reward points'
+            )}
+          </Button>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="pb-3">

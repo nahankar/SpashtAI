@@ -10,5 +10,5 @@ export function useIsPro(): boolean {
   const auth = useContext(AuthContext)
   if (!auth?.user) return false
   if (auth.isAdmin) return true
-  return auth.user.enablePro ?? false
+  return auth.user.enablePro ?? true
 }

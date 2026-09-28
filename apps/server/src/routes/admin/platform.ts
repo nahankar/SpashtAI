@@ -102,4 +102,40 @@ router.put('/rate-limit', async (req: Request, res: Response) => {
   }
 })
 
+router.put('/reward-points', async (req: Request, res: Response) => {
+  try {
+    const { rewardPointsEnabled } = req.body as { rewardPointsEnabled?: boolean }
+    if (typeof rewardPointsEnabled !== 'boolean') {
+      res.status(400).json({ error: 'rewardPointsEnabled must be a boolean' })
+      return
+    }
+
+    await ensurePlatformSettings()
+    const adminId = req.user?.userId ?? null
+    const settings = await prisma.platformSettings.update({
+      where: { id: 'default' },
+      data: { rewardPointsEnabled, updatedBy: adminId },
+    })
+
+    try {
+      await prisma.adminAction.create({
+        data: {
+          adminId: adminId ?? 'unknown',
+          action: settings.rewardPointsEnabled
+            ? 'platform.reward_points_enabled'
+            : 'platform.reward_points_disabled',
+          metadata: { rewardPointsEnabled: settings.rewardPointsEnabled },
+        },
+      })
+    } catch (auditErr) {
+      console.warn('Audit log skipped:', auditErr)
+    }
+
+    res.json({ settings })
+  } catch (err) {
+    console.error('Update reward points setting error:', err)
+    res.status(500).json({ error: 'Failed to update reward points setting' })
+  }
+})
+
 export default router

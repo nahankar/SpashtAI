@@ -8,7 +8,7 @@ import { requireAuth } from '../middleware/auth'
 import { authLimiter } from '../middleware/rate-limit'
 import { sendEmail, buildPasswordResetEmail } from '../lib/email'
 import { verifyGoogleIdToken } from '../lib/google-auth'
-import { validateProfileFields, resolveProfileLocation, toAuthUser } from '../lib/profile'
+import { validateProfileFields, resolveProfileLocation, authUserForClient } from '../lib/profile'
 import { areSignupsPaused, getSignupsPausedMessage } from '../lib/platformSettings'
 
 const router = Router()
@@ -87,6 +87,9 @@ router.post('/register', authLimiter, async (req: Request, res: Response) => {
         city: location.city,
         state: location.state,
         country: location.country,
+        enablePro: true,
+        enableUltra: true,
+        enableReprocess: true,
       },
     })
 
@@ -103,7 +106,7 @@ router.post('/register', authLimiter, async (req: Request, res: Response) => {
 
     res.status(201).json({
       token,
-      user: toAuthUser(user),
+      user: await authUserForClient(user),
     })
   } catch (err) {
     logger.error({ err: err }, 'Register error:')
@@ -164,7 +167,7 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
     reqLog(req).info({ event: 'auth.login_succeeded', userId: user.id }, 'login ok')
     res.json({
       token,
-      user: toAuthUser(user),
+      user: await authUserForClient(user),
     })
   } catch (err) {
     reqLog(req).error({ err, event: 'auth.login_error' }, 'login error')
@@ -226,6 +229,9 @@ router.post('/google', authLimiter, async (req: Request, res: Response) => {
           avatar: googleUser.avatar,
           lastLoginAt: new Date(),
           loginCount: 1,
+          enablePro: true,
+          enableUltra: true,
+          enableReprocess: true,
         },
       })
 
@@ -250,7 +256,7 @@ router.post('/google', authLimiter, async (req: Request, res: Response) => {
       },
     })
 
-    res.json({ token, user: toAuthUser(user) })
+    res.json({ token, user: await authUserForClient(user) })
   } catch (err) {
     logger.error({ err: err }, 'Google auth error:')
     const message = err instanceof Error ? err.message : 'Google sign-in failed'
@@ -284,7 +290,7 @@ router.post('/complete-profile', requireAuth, async (req: Request, res: Response
       },
     })
 
-    res.json({ user: toAuthUser(user) })
+    res.json({ user: await authUserForClient(user) })
   } catch (err) {
     logger.error({ err: err }, 'Complete profile error:')
     res.status(500).json({ error: 'Failed to save profile' })
@@ -435,7 +441,7 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
       data: { lastActiveAt: new Date() },
     })
 
-    res.json({ user: toAuthUser(user) })
+    res.json({ user: await authUserForClient(user) })
   } catch (err) {
     logger.error({ err: err }, 'Get me error:')
     res.status(500).json({ error: 'Failed to fetch user' })

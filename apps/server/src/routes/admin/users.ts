@@ -137,6 +137,9 @@ router.post('/', async (req: Request, res: Response) => {
         lastName: lastName || null,
         role: role || 'USER',
         emailVerified: true,
+        enablePro: true,
+        enableUltra: true,
+        enableReprocess: true,
       },
     })
 

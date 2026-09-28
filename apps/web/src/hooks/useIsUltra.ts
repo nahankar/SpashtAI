@@ -10,5 +10,5 @@ export function useIsUltra(): boolean {
   const auth = useContext(AuthContext)
   if (!auth?.user) return false
   if (auth.isAdmin) return true
-  return auth.user.enableUltra ?? false
+  return auth.user.enableUltra ?? true
 }

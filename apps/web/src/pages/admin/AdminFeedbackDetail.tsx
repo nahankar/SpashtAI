@@ -53,7 +53,7 @@ interface FeedbackData {
 const STATUS_OPTIONS = [
   { value: 'OPEN', label: 'Open' },
   { value: 'ACKNOWLEDGED', label: 'Acknowledged' },
-  { value: 'CONSIDERED', label: 'Considered (+0.25 pts)' },
+  { value: 'CONSIDERED', label: 'Considered' },
   { value: 'IMPLEMENTED', label: 'Implemented' },
   { value: 'PARKED', label: 'Parked' },
 ]

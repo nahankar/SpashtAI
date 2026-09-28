@@ -432,8 +432,8 @@ export function UserDetail() {
           <CardHeader>
             <CardTitle className="text-base">Subscription plans</CardTitle>
             <CardDescription>
-              Unlock paid-tier features for this user. Off by default; admins
-              always have access regardless of these flags.
+              New accounts start with Pro and Ultra on. Turn a plan off to
+              remove it for this user. Admins always have access.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
@@ -480,8 +480,8 @@ export function UserDetail() {
           <CardHeader>
             <CardTitle className="text-base">Session Analytics actions</CardTitle>
             <CardDescription>
-              These buttons are hidden by default. Enable them to let this user
-              download exports or reprocess audio.
+              Downloads stay off until enabled here. Reprocess Audio is on for
+              new accounts and can be turned off for this user.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">

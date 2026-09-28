@@ -37,6 +37,7 @@ import { useConversationPersistence } from '@/hooks/useConversationPersistence'
 import { AgentVisualizer, SessionStatusBar } from '@/components/layout/AgentVisualizer'
 import { toast } from 'sonner'
 import { getAuthHeaders } from '@/lib/api-client'
+import { shouldReturnToElevateList } from '@/lib/elevateNavigation'
 import { logEvent } from '@/lib/remoteLogger'
 import { FOCUS_AREAS, PRACTICE_FOCUS_AREAS, getFocusAreaLabel, EXERCISE_PREVIEWS } from '@/lib/focus-areas'
 import { pulseSkillLabel } from '@/lib/pulse-skills'
@@ -208,7 +209,7 @@ export function Elevate() {
   const [viewFocusArea, setViewFocusArea] = useState<string | null>(null)
   const [viewFocusContext, setViewFocusContext] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<string | null>(viewSessionId) // Initialize with URL param if present
-  const [showMetrics, setShowMetrics] = useState(false)
+  const [showMetrics, setShowMetrics] = useState(true)
   const [turnMetricsByIndex, setTurnMetricsByIndex] = useState<Record<number, TurnMetrics>>({})
   const [turnTextByIndex, setTurnTextByIndex] = useState<Record<number, string>>({})
   const [turnMetricsByText, setTurnMetricsByText] = useState<Record<string, TurnMetrics>>({})
@@ -1085,6 +1086,35 @@ export function Elevate() {
   }, [sessionId, loadConversation])
 
   const joined = useMemo(() => Boolean(token && url), [token, url])
+  const previousViewSessionId = useRef(viewSessionId)
+  const pendingListReturn = useRef(false)
+  if (previousViewSessionId.current !== viewSessionId) {
+    const returningToList = shouldReturnToElevateList({
+      previousSessionId: previousViewSessionId.current,
+      nextSessionId: viewSessionId,
+      hasLiveConnection: joined,
+      paused: isSessionPaused,
+      joining: isJoining,
+      leaving: isLeaving,
+    })
+    previousViewSessionId.current = viewSessionId
+    if (returningToList) {
+      pendingListReturn.current = true
+      setSessionId(null)
+      setIsCompletedSessionView(false)
+      setViewSessionName(null)
+      setViewSessionPulse(null)
+      setViewFocusArea(null)
+      setViewFocusContext(null)
+      setShowHistory(true)
+    }
+  }
+  useEffect(() => {
+    if (!pendingListReturn.current) return
+    pendingListReturn.current = false
+    clearMessages()
+    resetMetrics()
+  }, [viewSessionId, clearMessages, resetMetrics])
   const fallbackDispatchAttemptedRef = useRef<string | null>(null)
   const wakeLockRef = useRef<WakeLockSentinel | null>(null)
 

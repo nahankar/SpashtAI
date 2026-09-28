@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/prisma'
 import { logger, reqLog } from '../lib/logger'
 import { awardSessionActivePoints } from '../lib/points'
+import { areRewardPointsEnabled } from '../lib/platformSettings'
 import { isPrivilegedRole } from '../lib/userExportFlags'
 import { enqueueSessionDeletion } from '../lib/sessionDeletionWorker'
 import {
@@ -158,9 +159,10 @@ export async function endSession(req: Request, res: Response) {
       }
     })
 
+    const pointsOn = await areRewardPointsEnabled()
     let pointsAwarded = 0
     let totalPoints = session.user.rewardPoints
-    if (!alreadyEnded) {
+    if (!alreadyEnded && pointsOn) {
       try {
         const pts = await awardSessionActivePoints(session.userId, id)
         pointsAwarded = pts.awarded
@@ -177,7 +179,12 @@ export async function endSession(req: Request, res: Response) {
     // Agent turn persistence may finish before or after endedAt. Queue near-term
     // retries; the durable database sweep also repairs sessions after restarts.
     queuePaceReconciliation(id)
-    res.json({ success: true, session, pointsAwarded, totalPoints })
+    res.json({
+      success: true,
+      session,
+      pointsAwarded,
+      ...(pointsOn ? { totalPoints } : {}),
+    })
   } catch (error) {
     if (error instanceof SessionDiscardedError || error instanceof SessionMissingError) {
       return res.status(error.status).json({ error: error.message })

@@ -5,7 +5,7 @@ export interface UserExportFlags {
   hideTranscriptText: boolean
   hideTranscriptJsonExport: boolean
   hideAudioDownload: boolean
-  // Capability flags for the Session Analytics action buttons (default OFF).
+  // Download actions stay off. Reprocess is on unless an admin turns it off.
   enableTxtExport: boolean
   enableJsonExport: boolean
   enableAudioExport: boolean
@@ -37,6 +37,6 @@ export function useUserExportFlags(): UserExportFlags {
     enableTxtExport: auth.user.enableTxtExport ?? false,
     enableJsonExport: auth.user.enableJsonExport ?? false,
     enableAudioExport: auth.user.enableAudioExport ?? false,
-    enableReprocess: auth.user.enableReprocess ?? false,
+    enableReprocess: auth.user.enableReprocess ?? true,
   }
 }

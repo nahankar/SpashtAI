@@ -31,6 +31,11 @@ export async function getSignupsPausedMessage(): Promise<string> {
   return settings.signupsPausedMessage?.trim() || DEFAULT_SIGNUPS_PAUSED_MESSAGE
 }
 
+export async function areRewardPointsEnabled(): Promise<boolean> {
+  const settings = await getPlatformSettings()
+  return settings.rewardPointsEnabled
+}
+
 export async function getPublicPlatformSettings() {
   const settings = await getPlatformSettings()
   return {

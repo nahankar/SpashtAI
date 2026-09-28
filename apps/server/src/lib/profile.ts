@@ -1,4 +1,5 @@
 import type { Gender } from '@prisma/client'
+import { areRewardPointsEnabled } from './platformSettings'
 import { resolvePincodeLocation, isValidPincodeFormat, isValidPhone } from './pincode'
 
 export const PROFILE_GENDERS: Gender[] = ['MALE', 'FEMALE']
@@ -117,8 +118,16 @@ export function toAuthUser(user: {
     enableTxtExport: user.enableTxtExport ?? false,
     enableJsonExport: user.enableJsonExport ?? false,
     enableAudioExport: user.enableAudioExport ?? false,
-    enableReprocess: user.enableReprocess ?? false,
-    enablePro: user.enablePro ?? false,
-    enableUltra: user.enableUltra ?? false,
+    enableReprocess: user.enableReprocess ?? true,
+    enablePro: user.enablePro ?? true,
+    enableUltra: user.enableUltra ?? true,
   }
+}
+
+/** Hide the points balance unless an admin has turned the points system on. */
+export async function authUserForClient(user: Parameters<typeof toAuthUser>[0]) {
+  const presented = toAuthUser(user)
+  if (await areRewardPointsEnabled()) return presented
+  const { rewardPoints: _rewardPoints, ...withoutPoints } = presented
+  return withoutPoints
 }

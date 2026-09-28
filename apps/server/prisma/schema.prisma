@@ -122,16 +122,16 @@ model User {
   enableTxtExport   Boolean @default(false)
   enableJsonExport  Boolean @default(false)
   enableAudioExport Boolean @default(false)
-  enableReprocess   Boolean @default(false)
+  // On for new accounts. An admin can turn it off for one user.
+  enableReprocess   Boolean @default(true)
 
-  // Pro license (admin-controlled). Gates premium UI features such as
-  // playback "Key Moments" and the "Ask AI Coach" assistant. Default OFF;
-  // admins always have access regardless of this flag.
-  enablePro Boolean @default(false)
+  // Pro license. On for new accounts. Gates playback "Key Moments" and the
+  // "Ask AI Coach" assistant. Admins always have access.
+  enablePro Boolean @default(true)
 
-  // Ultra license (admin-controlled). Gates the highest-tier features such as
-  // Replay video-file uploads. Default OFF; admins always have access.
-  enableUltra Boolean @default(false)
+  // Ultra license. On for new accounts. Gates Replay video-file uploads.
+  // Admins always have access.
+  enableUltra Boolean @default(true)
 
   // Relations
   sessions                Session[]
@@ -842,6 +842,9 @@ model PlatformSettings {
   signupsPaused        Boolean  @default(false)
   signupsPausedMessage String?  @db.Text
   adminRateLimitBypass Boolean  @default(false)
+  // Points display and awards. Off until an admin turns the system on.
+  // Pro and Ultra access do not depend on points.
+  rewardPointsEnabled  Boolean  @default(false)
   updatedBy            String?
   updatedAt            DateTime @updatedAt
 }
