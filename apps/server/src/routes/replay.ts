@@ -920,6 +920,15 @@ router.get('/sessions/:id/results', async (req: Request, res: Response) => {
       })
     }
 
+    let progressPulseStatus = session.progressPulseStatus
+    if (progressPulseStatus == null) {
+      const tracked = await prisma.progressPulse.findFirst({
+        where: { sessionId: session.id, source: 'replay' },
+        select: { id: true },
+      })
+      if (tracked) progressPulseStatus = 'tracked'
+    }
+
     const safe = replayResultView(session.result, session.learnerSelection as unknown as ReplaySelection | null)
     if (flags.hideTranscriptText) {
       safe.result.transcriptText = ''
@@ -944,7 +953,7 @@ router.get('/sessions/:id/results', async (req: Request, res: Response) => {
         meetingDate: session.meetingDate,
         participantName: session.participantName,
         status: session.status,
-        progressPulseStatus: session.progressPulseStatus,
+        progressPulseStatus,
         createdAt: session.createdAt,
       },
       uploads: session.uploadedFiles,
@@ -985,8 +994,24 @@ router.get('/sessions', async (req: Request, res: Response) => {
       },
       orderBy: { createdAt: 'desc' },
     })
+    const undecidedIds = sessions
+      .filter((session) => session.progressPulseStatus == null)
+      .map((session) => session.id)
+    const trackedIds = undecidedIds.length
+      ? new Set(
+          (
+            await prisma.progressPulse.findMany({
+              where: { sessionId: { in: undecidedIds }, source: 'replay' },
+              select: { sessionId: true },
+              distinct: ['sessionId'],
+            })
+          )
+            .map((row) => row.sessionId)
+            .filter((id): id is string => Boolean(id)),
+        )
+      : new Set<string>()
 
-    res.json({ sessions: sessions.map(s => ({ ...s, learnerSelection: undefined, result: s.result ? {
+    res.json({ sessions: sessions.map(s => ({ ...s, learnerSelection: undefined, progressPulseStatus: s.progressPulseStatus ?? (trackedIds.has(s.id) ? 'tracked' : null), result: s.result ? {
       transcriptionSource: s.result.transcriptionSource,
       overallScore: replayResultView(s.result, s.learnerSelection as unknown as ReplaySelection | null).result.overallScore,
     } : null })) })

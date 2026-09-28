@@ -1218,9 +1218,9 @@ export function SessionReplay({
         <CardContent className="py-16 text-center">
           <AlertCircle className="mx-auto mb-3 h-10 w-10 text-destructive" />
           <p className="text-sm text-destructive">{error}</p>
-          <Link to="/history?tab=elevate">
+          <Link to="/elevate">
             <Button variant="outline" size="sm" className="mt-4">
-              Back to Sessions
+              Back to Elevate
             </Button>
           </Link>
         </CardContent>
@@ -1238,9 +1238,9 @@ export function SessionReplay({
             This session was recorded before per-turn playback was enabled, or no
             turns were captured. New sessions will have full playback.
           </p>
-          <Link to="/history?tab=elevate">
+          <Link to="/elevate">
             <Button variant="outline" size="sm" className="mt-4">
-              Back to Sessions
+              Back to Elevate
             </Button>
           </Link>
         </CardContent>
@@ -1255,10 +1255,10 @@ export function SessionReplay({
         {!embedded && (
           <>
             <Link
-              to="/history?tab=elevate"
+              to="/elevate"
               className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
             >
-              <ArrowLeft className="h-3.5 w-3.5" /> Sessions
+              <ArrowLeft className="h-3.5 w-3.5" /> Elevate
             </Link>
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Playback

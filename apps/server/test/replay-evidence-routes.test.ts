@@ -3,10 +3,10 @@ import request from 'supertest'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { legacyInput } from '../src/lib/replay-evidence'
 
-const mocks = vi.hoisted(() => ({ find: vi.fn(), update: vi.fn(), resultUpdate: vi.fn(), pulseDelete: vi.fn(), pulseCreate: vi.fn(), pulseUpdate: vi.fn(), user: vi.fn(), identify: vi.fn() }))
+const mocks = vi.hoisted(() => ({ find: vi.fn(), update: vi.fn(), resultUpdate: vi.fn(), pulseDelete: vi.fn(), pulseCreate: vi.fn(), pulseUpdate: vi.fn(), pulseFind: vi.fn(), user: vi.fn(), identify: vi.fn() }))
 vi.mock('../src/lib/prisma', () => {
   const tx = { $queryRaw: vi.fn(), replaySession: { findFirst: mocks.find, findUnique: mocks.find, update: mocks.update },
-    replayResult: { update: mocks.resultUpdate }, progressPulse: { deleteMany: mocks.pulseDelete, createMany: mocks.pulseCreate, updateMany: mocks.pulseUpdate }, user: { findUnique: mocks.user } }
+    replayResult: { update: mocks.resultUpdate }, progressPulse: { deleteMany: mocks.pulseDelete, createMany: mocks.pulseCreate, updateMany: mocks.pulseUpdate, findFirst: mocks.pulseFind }, user: { findUnique: mocks.user } }
   return { prisma: { ...tx, $transaction: (fn: (client: typeof tx) => unknown) => fn(tx) } }
 })
 vi.mock('../src/lib/replay-recording', () => ({ identifyReplayRecording: mocks.identify, replayCacheKey: vi.fn() }))
@@ -32,6 +32,7 @@ describe('Replay evidence route access and identity invalidation', () => {
         wordsPerMinute: 150, overallScore: 9, coachingInsights: { primaryImprovement: 'Old learner advice', meetingSummary: { topicsDiscussed: ['Project plan'], keyOutcomes: [], openQuestions: [] } } } }
     mocks.find.mockImplementation(async ({ where }: any) => where?.userId && where.userId !== row.userId ? null : row)
     mocks.user.mockResolvedValue({ enablePro: true, enableUltra: false, hideAudioDownload: false, hideTranscriptText: false })
+    mocks.pulseFind.mockResolvedValue(null)
     mocks.update.mockImplementation(async ({ data }: any) => { Object.assign(row, data); return row })
     mocks.resultUpdate.mockImplementation(async ({ data }: any) => { Object.assign(row.result, data); return row.result })
   })

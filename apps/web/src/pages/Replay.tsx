@@ -38,6 +38,7 @@ import {
   CheckSquare,
   Square,
   CheckCircle2,
+  LifeBuoy,
   MinusCircle,
   MoreVertical,
   Pencil,
@@ -767,6 +768,11 @@ export function Replay() {
                         {s.sessionName || s.meetingType}
                       </span>
                       <Badge variant={badge.variant}>{badge.label}</Badge>
+                      {s.progressPulseStatus === 'tracked' && (
+                        <span title="Tracked in Progress Pulse" className="inline-flex text-green-600">
+                          <CheckCircle2 className="h-4 w-4" aria-label="Tracked in Progress Pulse" />
+                        </span>
+                      )}
                     </div>
                     <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                       {s.sessionName && <span>{s.meetingType}</span>}
@@ -781,11 +787,6 @@ export function Replay() {
                         </span>
                       )}
                       <span>{s.userRole}</span>
-                      {s.progressPulseStatus === 'tracked' && (
-                        <span className="flex items-center gap-0.5 text-green-600" title="Tracked in Progress Pulse">
-                          <CheckCircle2 className="h-3 w-3" />
-                        </span>
-                      )}
                       {s.progressPulseStatus === 'skipped' && (
                         <span className="flex items-center gap-0.5 text-muted-foreground/50" title="Not considered for Progress Pulse">
                           <MinusCircle className="h-3 w-3" />
@@ -813,6 +814,18 @@ export function Replay() {
                         Continue <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
                       </Button>
                     ) : null}
+                    <Link
+                      to={`/feedback/new?module=replay&session=${encodeURIComponent(s.id)}`}
+                      title="Report an issue with this session"
+                    >
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 text-muted-foreground hover:text-primary"
+                      >
+                        <LifeBuoy className="h-4 w-4" />
+                      </Button>
+                    </Link>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground">

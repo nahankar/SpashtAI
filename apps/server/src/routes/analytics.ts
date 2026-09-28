@@ -65,7 +65,7 @@ const MIN_ANALYTICS_USER_WORDS = 5
  */
 export async function analyzeSession(req: Request, res: Response) {
   const { sessionId } = req.params
-  const { autoTrackPulse = false, source = 'elevate', audioCapture = null } = req.body || {}
+  const { autoTrackPulse, source = 'elevate', audioCapture = null } = req.body || {}
 
   try {
     // 1. Load session + transcript
@@ -81,6 +81,10 @@ export async function analyzeSession(req: Request, res: Response) {
     if (!session) {
       return res.status(404).json({ error: 'Session not found' })
     }
+    const shouldAutoTrackPulse =
+      typeof autoTrackPulse === 'boolean'
+        ? autoTrackPulse
+        : source === 'elevate' && session.focusArea !== 'snapshot'
 
     const transcript = session.transcript
     if (!transcript) {
@@ -436,7 +440,7 @@ export async function analyzeSession(req: Request, res: Response) {
     if (
       session.userId &&
       shouldWritePulse({
-        autoTrackPulse: Boolean(autoTrackPulse),
+        autoTrackPulse: shouldAutoTrackPulse,
         progressPulseStatus: session.progressPulseStatus,
         existingPulseRows,
       })

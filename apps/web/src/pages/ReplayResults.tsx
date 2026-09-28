@@ -999,7 +999,6 @@ export function ReplayResults() {
   const { user, updateUser } = useAuth()
   const exportFlags = useUserExportFlags()
   const [searchParams] = useSearchParams()
-  const cameFromHistory = searchParams.get('from') === 'history'
   const cameFromCoach = searchParams.get('coach') === '1'
   const coachBackParams = new URLSearchParams()
   const coachThreadId = searchParams.get('thread')
@@ -1009,14 +1008,10 @@ export function ReplayResults() {
     ? coachBackParams.size > 0
       ? `/coach?${coachBackParams.toString()}`
       : '/coach'
-    : cameFromHistory
-      ? '/history?tab=replay'
-      : '/replay'
+    : '/replay'
   const backLabel = cameFromCoach
     ? 'Back to Coach'
-    : cameFromHistory
-      ? 'Back to Sessions'
-      : 'Back to Replay'
+    : 'Back to Replay'
   const [data, setData] = useState<ReplayResultData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)

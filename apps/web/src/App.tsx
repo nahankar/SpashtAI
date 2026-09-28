@@ -9,7 +9,6 @@ import { Elevate } from '@/pages/Elevate'
 import { Replay } from '@/pages/Replay'
 import { ReplayResults } from '@/pages/ReplayResults'
 import { SessionReplay } from '@/pages/SessionReplay'
-import { History } from '@/pages/History'
 import { ProgressPulse } from '@/pages/ProgressPulse'
 import { Prepare } from '@/pages/Prepare'
 import { InterviewJourneys } from '@/pages/InterviewJourneys'
@@ -49,6 +48,11 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { safeAppPath } from '@/lib/safe-next-path'
 
+function HistoryRedirect() {
+  const [params] = useSearchParams()
+  return <Navigate to={params.get('tab') === 'replay' ? '/replay' : '/elevate'} replace />
+}
+
 function AppBreadcrumbs() {
   const location = useLocation()
   const path = location.pathname
@@ -65,7 +69,6 @@ function AppBreadcrumbs() {
     '/prepare': 'Prepare',
     '/prepare/interviews': 'Your Interviews',
     '/progress': 'Progress Pulse',
-    '/history': 'Sessions',
     '/feedback': 'Feedback',
     '/feedback/new': 'Provide Feedback',
     '/pricing': 'Pricing',
@@ -132,7 +135,7 @@ function AppBreadcrumbs() {
     : isFeedbackDetail || path === '/feedback/new'
       ? { to: '/feedback', label: 'Feedback' }
       : isElevatePlayback
-        ? { to: '/history?tab=elevate', label: 'Sessions' }
+        ? { to: '/elevate', label: 'Elevate' }
         : isElevateResults
           ? { to: '/elevate', label: 'Elevate' }
           : isInterviewJourney || path === '/prepare/interviews'
@@ -306,8 +309,6 @@ function Navbar() {
               <span className="text-muted-foreground/40 select-none" aria-hidden="true">·</span>
               <Link className="hover:underline" to="/progress">Progress Pulse</Link>
               <span className="text-muted-foreground/40 select-none" aria-hidden="true">·</span>
-              <Link className="hover:underline" to="/history">Sessions</Link>
-              <span className="text-muted-foreground/40 select-none" aria-hidden="true">·</span>
               <Link className="hover:underline" to="/feedback">Feedback</Link>
               {pricingEnabled && (
                 <>
@@ -357,7 +358,6 @@ function Navbar() {
               <NavFeatureLink feature="elevate" to="/elevate" label="Elevate" className={navLinkClass} onClick={() => setMobileOpen(false)} />
               <NavFeatureLink feature="prepare" to="/prepare" label="Prepare" className={navLinkClass} onClick={() => setMobileOpen(false)} />
               <Link className={navLinkClass} to="/progress" onClick={() => setMobileOpen(false)}>Progress Pulse</Link>
-              <Link className={navLinkClass} to="/history" onClick={() => setMobileOpen(false)}>Sessions</Link>
               <Link className={navLinkClass} to="/feedback" onClick={() => setMobileOpen(false)}>Feedback</Link>
               {pricingEnabled && (
                 <Link className={navLinkClass} to="/pricing" onClick={() => setMobileOpen(false)}>Pricing</Link>
@@ -573,12 +573,7 @@ function AppRoutes() {
               <Pricing />
             </main>
           } />
-          <Route path="/history" element={
-            <main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8">
-              <AppBreadcrumbs />
-              <History />
-            </main>
-          } />
+          <Route path="/history" element={<HistoryRedirect />} />
           <Route path="/settings" element={
             <main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8">
               <AppBreadcrumbs />

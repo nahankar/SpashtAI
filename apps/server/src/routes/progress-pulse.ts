@@ -4,6 +4,8 @@ import { Prisma } from '@prisma/client'
 import { getEnabledFeatures, isFeatureEnabled, type PlatformFeature } from '../lib/featureFlags'
 import { buildPrepareJourneyContext } from '../lib/prepareCoachingContext'
 import { eligiblePulseSql, eligiblePulseWhere } from '../analytics/pulseEligibility'
+import { saveSkillScoresToPulse } from '../analytics/progressPulse'
+import type { SkillScores } from '../analytics/skillScores'
 import { replayResultView } from '../lib/replay-result-view'
 import type { ReplaySelection } from '../lib/replay-evidence'
 import { guardPaceClaims, isPersistedPaceAvailable } from '../analytics/paceClaims'
@@ -194,6 +196,84 @@ export async function recordProgressPulse(req: Request, res: Response) {
   }
 }
 
+const PULSE_SKILL_KEYS = [
+  'clarity',
+  'conciseness',
+  'confidence',
+  'structure',
+  'engagement',
+  'pacing',
+  'delivery',
+  'emotionalControl',
+] as const
+
+function readStoredSkillScores(value: unknown): {
+  scores: SkillScores
+  components?: Record<string, Record<string, number>>
+} | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  const nested = record.scores && typeof record.scores === 'object' && !Array.isArray(record.scores)
+    ? record.scores as Record<string, unknown>
+    : record
+  const hasScore = PULSE_SKILL_KEYS.some((key) => typeof nested[key] === 'number')
+  if (!hasScore) return null
+  const components = record.components && typeof record.components === 'object' && !Array.isArray(record.components)
+    ? record.components as Record<string, Record<string, number>>
+    : undefined
+  return { scores: nested as unknown as SkillScores, components }
+}
+
+/** Re-include an Elevate session in Progress Pulse from the scores already saved on it. */
+export async function trackElevateProgressPulse(req: Request, res: Response) {
+  try {
+    const { sessionId } = req.body
+    if (typeof sessionId !== 'string' || !sessionId) {
+      return res.status(400).json({ error: 'sessionId is required' })
+    }
+    const userId = req.user!.userId
+    const session = await prisma.session.findFirst({
+      where: { id: sessionId, userId, discardedAt: null },
+      select: {
+        id: true,
+        focusArea: true,
+        metrics: { select: { skillScores: true } },
+      },
+    })
+    if (!session) return res.status(404).json({ error: 'Session not found' })
+    if (session.focusArea === 'snapshot') {
+      return res.status(400).json({ error: 'Communication Snapshot sessions are not tracked in Progress Pulse' })
+    }
+
+    const existing = await prisma.progressPulse.count({
+      where: { sessionId, userId, source: 'elevate' },
+    })
+    if (existing > 0) {
+      await prisma.session.update({
+        where: { id: sessionId },
+        data: { progressPulseStatus: 'tracked' },
+      })
+      return res.json({ success: true, pulseEntriesCreated: 0 })
+    }
+
+    const stored = readStoredSkillScores(session.metrics?.skillScores)
+    if (!stored) {
+      return res.status(409).json({ error: 'This session has no skill scores to track yet' })
+    }
+    const pulseEntriesCreated = await saveSkillScoresToPulse(
+      userId,
+      sessionId,
+      'elevate',
+      stored.scores,
+      stored.components,
+    )
+    res.json({ success: true, pulseEntriesCreated })
+  } catch (error) {
+    console.error('Error tracking elevate progress pulse:', error)
+    res.status(500).json({ error: 'Failed to track progress pulse' })
+  }
+}
+
 export async function skipProgressPulse(req: Request, res: Response) {
   try {
     const { sessionId, source } = req.body
@@ -211,6 +291,7 @@ export async function skipProgressPulse(req: Request, res: Response) {
       } else {
         await tx.$queryRaw`SELECT id FROM "Session" WHERE id = ${sessionId} AND "userId" = ${userId} FOR UPDATE`
         if (!await tx.session.findFirst({ where: { id: sessionId, userId, discardedAt: null } })) return false
+        await tx.progressPulse.deleteMany({ where: { sessionId, userId, source: 'elevate' } })
         await tx.session.update({ where: { id: sessionId }, data: { progressPulseStatus: 'skipped' } })
       }
       return true

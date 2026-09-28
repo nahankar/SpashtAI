@@ -61,6 +61,7 @@ import {
   getProgressPulseSummary,
   recordProgressPulse,
   skipProgressPulse,
+  trackElevateProgressPulse,
   getCoachingContext,
   getCoachingContextForAgent
 } from './routes/progress-pulse'
@@ -320,6 +321,7 @@ app.get('/api/progress-pulse', requireAuth, getProgressPulse)
 app.get('/api/progress-pulse/summary', requireAuth, getProgressPulseSummary)
 app.post('/api/progress-pulse', requireAuth, recordProgressPulse)
 app.post('/api/progress-pulse/skip', requireAuth, skipProgressPulse)
+app.post('/api/progress-pulse/track', requireAuth, trackElevateProgressPulse)
 app.get('/api/coaching-context', requireAuth, getCoachingContext)
 
 // Protected: downloads and replay

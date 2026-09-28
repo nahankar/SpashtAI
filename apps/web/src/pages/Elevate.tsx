@@ -45,7 +45,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useFeatureFlags } from '@/contexts/FeatureFlagsContext'
 import { useUserExportFlags } from '@/hooks/useUserExportFlags'
 import { useConfirm } from '@/hooks/useConfirm'
-import { Trash2, CheckSquare, Square, Target, ArrowRight, Play, ChevronDown, ChevronUp, BarChart3, CheckCircle2, RefreshCw, Download, Loader2, Mic, MicOff } from 'lucide-react'
+import { Trash2, CheckSquare, Square, Target, ArrowRight, Play, ChevronDown, ChevronUp, BarChart3, CheckCircle2, RefreshCw, Download, Loader2, Mic, MicOff, LifeBuoy, TrendingUp } from 'lucide-react'
 import { generateSessionPdf, type SessionReport } from '@/lib/generate-session-pdf'
 import { CoachAudioBootstrap } from '@/components/session/CoachAudioBootstrap'
 import { SessionRecorder, type SessionRecorderHandle } from '@/components/session/SessionRecorder'
@@ -153,7 +153,6 @@ export function Elevate() {
   const exportFlags = useUserExportFlags()
   const confirmDialog = useConfirm()
   const viewSessionId = searchParams.get('session')
-  const cameFromHistory = searchParams.get('from') === 'history'
   const inboundFocus = searchParams.get('focus') || ''
   const inboundContext = searchParams.get('context') ? decodeURIComponent(searchParams.get('context')!) : ''
   const inboundNewSession = searchParams.get('newSession') === 'true'
@@ -205,6 +204,7 @@ export function Elevate() {
   const [pauseReason, setPauseReason] = useState<'intentional' | 'disconnected' | null>(null)
   const [isCompletedSessionView, setIsCompletedSessionView] = useState(false)
   const [loadingViewedSession, setLoadingViewedSession] = useState(Boolean(viewSessionId))
+  const [pulseBusy, setPulseBusy] = useState(false)
   const [viewSessionName, setViewSessionName] = useState<string | null>(null)
   const [viewSessionPulse, setViewSessionPulse] = useState<string | null>(null)
   const [viewFocusArea, setViewFocusArea] = useState<string | null>(null)
@@ -1593,6 +1593,10 @@ export function Elevate() {
     localStorage.removeItem('spashtai_active_session')
     localStorage.removeItem('spashtai_session_timestamp')
 
+    // Snapshot / booth is a first impression, not a Pulse sample.
+    // Every other finished session is tracked. The results page can remove it.
+    const trackIt = !(inboundBoothDemo || focusArea === 'snapshot')
+
     if (currentSessionId) {
       try {
         const endRes = await fetch(`${API_BASE_URL}/sessions/${currentSessionId}/end`, {
@@ -1617,15 +1621,7 @@ export function Elevate() {
       }
 
       // Snapshot / booth is a first impression, not a Pulse sample.
-      const isSnapshot = inboundBoothDemo || focusArea === 'snapshot'
-      const trackIt = isSnapshot
-        ? false
-        : await confirmDialog({
-            title: 'Track in Progress Pulse?',
-            description: 'Would you like to include this session\'s skill scores in your progress tracking?',
-            confirmLabel: 'Yes, track this',
-            cancelLabel: 'Skip — won\'t be added later',
-          })
+      // Every other finished session is tracked. The results page can remove it.
 
       // Run the full analytics pipeline (signal extraction + skill scores + coaching insights)
       try {
@@ -1669,7 +1665,14 @@ export function Elevate() {
 
     setPastSessions((prev) =>
       prev.map((s) =>
-        s.id === currentSessionId ? { ...s, endedAt: new Date().toISOString() } : s
+        s.id === currentSessionId
+          ? {
+              ...s,
+              endedAt: new Date().toISOString(),
+              progressPulseStatus:
+                inboundBoothDemo || focusArea === 'snapshot' ? s.progressPulseStatus : 'tracked',
+            }
+          : s,
       )
     )
 
@@ -1695,6 +1698,7 @@ export function Elevate() {
       setResultsTab('playback')
       setPlaybackAutoPlayNonce(null)
       setIsCompletedSessionView(true)
+      setViewSessionPulse(trackIt ? 'tracked' : null)
       setSessionId(currentSessionId)
       const resultParams = new URLSearchParams({ session: currentSessionId })
       if (prepareLaunch) {
@@ -1704,10 +1708,10 @@ export function Elevate() {
       navigate(`/elevate?${resultParams.toString()}`)
     } else {
       setShowHistory(true)
-      navigate(cameFromHistory ? '/history?tab=elevate' : '/elevate')
+      navigate('/elevate')
     }
     setIsLeaving(false)
-  }, [sessionId, segmentId, clearMessages, resetMetrics, navigate, cameFromHistory, confirmDialog, updateUser, loadPastSessions, prepareLaunch, isLeaving, inboundBoothDemo, focusArea, launchedFromCoach, originCoachThreadId])
+  }, [sessionId, segmentId, clearMessages, resetMetrics, navigate, updateUser, loadPastSessions, prepareLaunch, isLeaving, inboundBoothDemo, focusArea, launchedFromCoach, originCoachThreadId])
 
   const handleDiscard = useCallback(async () => {
     if (isLeaving) return
@@ -1967,8 +1971,8 @@ export function Elevate() {
                             </Badge>
                           )}
                           {s.progressPulseStatus === 'tracked' && (
-                            <span className="flex items-center gap-0.5 text-green-600" title="Tracked in Progress Pulse">
-                              <CheckCircle2 className="h-4 w-4" />
+                            <span title="Tracked in Progress Pulse" className="inline-flex text-green-600">
+                              <CheckCircle2 className="h-4 w-4" aria-label="Tracked in Progress Pulse" />
                             </span>
                           )}
                         </div>
@@ -1985,6 +1989,18 @@ export function Elevate() {
                       <Link to={`/elevate?session=${s.id}`}>
                         <Button size="sm" variant="outline">
                           {done ? 'View Results' : 'Resume'}
+                        </Button>
+                      </Link>
+                      <Link
+                        to={`/feedback/new?module=elevate&session=${encodeURIComponent(s.id)}`}
+                        title="Report an issue with this session"
+                      >
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8 text-muted-foreground hover:text-primary"
+                        >
+                          <LifeBuoy className="h-4 w-4" />
                         </Button>
                       </Link>
                       <Button
@@ -2006,6 +2022,57 @@ export function Elevate() {
     )
   }
 
+  const applyPulseStatus = (status: string | null) => {
+    if (!viewSessionId) return
+    setViewSessionPulse(status)
+    setPastSessions((prev) =>
+      prev.map((session) =>
+        session.id === viewSessionId ? { ...session, progressPulseStatus: status } : session,
+      ),
+    )
+  }
+
+  const handleUntrackPulse = async () => {
+    if (!viewSessionId || pulseBusy) return
+    setPulseBusy(true)
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/progress-pulse/skip`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ sessionId: viewSessionId, source: 'elevate' }),
+      })
+      if (!response.ok) throw new Error('Unable to remove from Progress Pulse')
+      applyPulseStatus('skipped')
+      toast.info('Removed from Progress Pulse')
+    } catch {
+      toast.error('Failed to update Progress Pulse')
+    } finally {
+      setPulseBusy(false)
+    }
+  }
+
+  const handleTrackPulse = async () => {
+    if (!viewSessionId || pulseBusy) return
+    setPulseBusy(true)
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/progress-pulse/track`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ sessionId: viewSessionId }),
+      })
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}))
+        throw new Error(error.error || 'Unable to track this session')
+      }
+      applyPulseStatus('tracked')
+      toast.success('Session tracked in Progress Pulse')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to track session')
+    } finally {
+      setPulseBusy(false)
+    }
+  }
+
   return (
     <div className="grid gap-6">
       {/* Back navigation */}
@@ -2024,18 +2091,12 @@ export function Elevate() {
           &larr; Back to interview journeys
         </Link>
       ) : !joined && viewSessionId && (
-        cameFromHistory ? (
-          <Link to="/history?tab=elevate" className="text-sm text-muted-foreground hover:text-foreground w-fit">
-            &larr; Back to Sessions
-          </Link>
-        ) : (
-          <button
-            onClick={handleBackToElevate}
-            className="text-sm text-muted-foreground hover:text-foreground w-fit"
-          >
-            &larr; Back to Elevate
-          </button>
-        )
+        <button
+          onClick={handleBackToElevate}
+          className="text-sm text-muted-foreground hover:text-foreground w-fit"
+        >
+          &larr; Back to Elevate
+        </button>
       )}
       {!joined && !inboundPreparationId && !viewSessionId && !showHistory && !sessionId && (
         <button
@@ -2052,13 +2113,31 @@ export function Elevate() {
             <CardTitle>
               {viewSessionId && viewSessionName ? viewSessionName : 'Elevate Session'}
             </CardTitle>
-            {viewSessionId && isCompletedSessionView && viewFocusArea !== 'snapshot' && viewSessionPulse === 'tracked' && (
-              <span
-                className="inline-flex shrink-0 items-center gap-1 rounded-md border border-green-300 bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700"
-                title="This session is tracked in Progress Pulse"
-              >
-                <CheckCircle2 className="h-3.5 w-3.5" /> Tracked in Pulse
-              </span>
+            {viewSessionId && isCompletedSessionView && viewFocusArea !== 'snapshot' && (
+              pulseBusy ? (
+                <Button variant="outline" size="sm" disabled>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Updating...
+                </Button>
+              ) : viewSessionPulse === 'tracked' ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-green-300 bg-green-50 text-green-700 hover:bg-green-100"
+                  onClick={handleUntrackPulse}
+                  title="Remove this session from Progress Pulse"
+                >
+                  <CheckCircle2 className="mr-2 h-4 w-4" /> Tracked in Pulse
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTrackPulse}
+                  title="Track this session in Progress Pulse"
+                >
+                  <TrendingUp className="mr-2 h-4 w-4" /> Track in Pulse
+                </Button>
+              )
             )}
           </div>
         </CardHeader>

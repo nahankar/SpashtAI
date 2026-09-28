@@ -36,6 +36,27 @@ export async function listSessions(req: Request, res: Response) {
         }
       }
     })
+    const undecidedIds = sessions
+      .filter((session) => session.progressPulseStatus == null)
+      .map((session) => session.id)
+    const trackedIds = undecidedIds.length
+      ? new Set(
+          (
+            await prisma.progressPulse.findMany({
+              where: { sessionId: { in: undecidedIds }, source: 'elevate' },
+              select: { sessionId: true },
+              distinct: ['sessionId'],
+            })
+          )
+            .map((row) => row.sessionId)
+            .filter((id): id is string => Boolean(id)),
+        )
+      : new Set<string>()
+    const presentedSessions = sessions.map((session) =>
+      session.progressPulseStatus == null && trackedIds.has(session.id)
+        ? { ...session, progressPulseStatus: 'tracked' }
+        : session,
+    )
     const deletionWhere = isPrivilegedRole(req.user?.role)
       ? { discardedAt: { not: null } }
       : { userId: req.user!.userId, discardedAt: { not: null } }
@@ -49,7 +70,7 @@ export async function listSessions(req: Request, res: Response) {
         deletionStatus: true,
       },
     })
-    res.json({ sessions, deletions })
+    res.json({ sessions: presentedSessions, deletions })
   } catch (error) {
     logger.error({ err: error }, 'Error listing sessions:')
     res.status(500).json({ error: 'Failed to list sessions' })
@@ -85,6 +106,14 @@ export async function getSession(req: Request, res: Response) {
     // Ownership check: only the owner (or a privileged role) may read a session.
     if (!isPrivilegedRole(req.user?.role) && session.userId !== req.user?.userId) {
       return res.status(403).json({ error: 'Access denied' })
+    }
+
+    if (session.progressPulseStatus == null) {
+      const tracked = await prisma.progressPulse.findFirst({
+        where: { sessionId: session.id, source: 'elevate' },
+        select: { id: true },
+      })
+      if (tracked) session.progressPulseStatus = 'tracked'
     }
 
     res.json({ session })

@@ -101,7 +101,13 @@ export async function saveSkillScoresToPulse(
   return prisma.$transaction(async (tx) => {
     if (source === 'elevate') await lockWritableSession(tx, sessionId)
     const already = await tx.progressPulse.count({ where: { sessionId } })
-    if (already > 0) return 0
+    if (already > 0) {
+      await tx.session.update({
+        where: { id: sessionId },
+        data: { progressPulseStatus: 'tracked' },
+      })
+      return 0
+    }
     await tx.progressPulse.createMany({
       data: smoothedEntries.map((e) => ({
         userId,
@@ -111,6 +117,10 @@ export async function saveSkillScoresToPulse(
         score: e.score,
         metadata: e.metadata ?? undefined,
       })),
+    })
+    await tx.session.update({
+      where: { id: sessionId },
+      data: { progressPulseStatus: 'tracked' },
     })
     return smoothedEntries.length
   })

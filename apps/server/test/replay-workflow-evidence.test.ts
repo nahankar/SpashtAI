@@ -29,7 +29,7 @@ vi.mock('../src/lib/prisma', () => {
       deleteMany: vi.fn(async () => { state.session.result = null }),
       update: vi.fn(async ({ data }: any) => { Object.assign(state.session.result, data); return state.session.result }),
     },
-    progressPulse: { deleteMany: state.progress }, coachHomeResultReceipt: { deleteMany: state.receipt },
+    progressPulse: { deleteMany: state.progress, findFirst: vi.fn(async () => null), findMany: vi.fn(async () => []) }, coachHomeResultReceipt: { deleteMany: state.receipt },
     user: {
       findUnique: vi.fn(async () => ({
         enablePro: true,
