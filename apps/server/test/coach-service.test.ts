@@ -345,6 +345,27 @@ describe('Coach model response validation', () => {
     })
   })
 
+  it('keeps a goal title from a finished session when there is no new user message', () => {
+    const response = parseCoachResponse(
+      JSON.stringify({
+        reply: 'Structure is the clearest next focus.',
+        goalTitle: 'Improve structure',
+        clarify: null,
+        recommend: {
+          module: 'elevate',
+          label: 'Practise structure in Elevate',
+          reason: 'Structure will make the message easier to follow.',
+          brief: { focusArea: 'structure' },
+        },
+      }),
+      context,
+      '',
+      { preserveGoalTitle: true },
+    )
+
+    expect(response?.goalTitle).toBe('Improve structure')
+  })
+
   it('does not treat an options question as goal affirmation', () => {
     const response = parseCoachResponse(
       JSON.stringify({

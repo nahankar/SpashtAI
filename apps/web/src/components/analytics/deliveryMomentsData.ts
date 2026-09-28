@@ -54,7 +54,7 @@ export const MEASUREMENT_CONFIDENCE_NOTE =
 export function playbackNoticeCopy(data: DeliveryMomentResponse, pendingTimedOut: boolean): string {
   if (data.status.reason === 'alignment_processing') return pendingTimedOut
     ? 'Delivery analysis is continuing in the background. Reopen this session later to see the results.'
-    : 'Preparing delivery moments from your recording. This can take a few minutes; you can leave this page.'
+    : 'Preparing delivery moments from your recording. This can take a few minutes. Come back after a few minutes.'
   if (data.status.reason === 'alignment_unavailable') return 'We could not verify word timing for this recording. Playback and other feedback remain available.'
   if (data.status.state === 'pending') {
     return pendingTimedOut

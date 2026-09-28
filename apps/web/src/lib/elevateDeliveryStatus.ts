@@ -108,9 +108,9 @@ export function elevateDeliveryStatusLabel(status: ElevateDeliveryStatus): strin
     : ''
   switch (status.state) {
     case 'pending':
-      return `Delivery analysis is queued.${reason} You can leave this page.${later}`
+      return `Delivery analysis is queued.${reason} Come back after a few minutes.${later}`
     case 'processing':
-      return `Preparing delivery analysis from your recording.${reason} This can take a few minutes; you can leave this page.${later}`
+      return `Preparing delivery analysis from your recording.${reason} This can take a few minutes. Come back after a few minutes.${later}`
     case 'retry':
       return `Delivery analysis will retry automatically.${reason || ' The previous attempt could not finish.'}${later}`
     case 'unavailable':

@@ -200,7 +200,7 @@ export function parseCoachResponse(
   raw: string,
   ctx: CoachContext,
   message = '',
-  policy: { answeringClarification?: boolean } = {},
+  policy: { answeringClarification?: boolean; preserveGoalTitle?: boolean } = {},
 ): CoachResponse | null {
   const parsed = extractJsonObject(raw)
   if (!parsed) return null
@@ -279,7 +279,12 @@ export function parseCoachResponse(
     }
   }
 
-  if (!isAffirmedFocusIntent(message, policy.answeringClarification === true)) {
+  // A finished session has no new user message. The interpret prompt is what
+  // names the goal, so that title must survive this check.
+  if (
+    !policy.preserveGoalTitle &&
+    !isAffirmedFocusIntent(message, policy.answeringClarification === true)
+  ) {
     goalTitle = null
   }
 
@@ -403,7 +408,7 @@ export async function interpretCoachResult(input: {
       maxTokens: 900,
       timeoutMs: 20_000,
     })
-    const response = parseCoachResponse(raw, context)
+    const response = parseCoachResponse(raw, context, '', { preserveGoalTitle: true })
     if (!response) markCoachLlmFailure()
     return response
   } catch (error) {

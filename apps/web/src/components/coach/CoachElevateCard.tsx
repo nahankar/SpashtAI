@@ -5,6 +5,7 @@ import { apiClient } from '@/lib/api-client'
 import { coachElevatePath } from '@/lib/coach-api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
 interface ElevateSession {
@@ -211,7 +212,16 @@ export function CoachElevateCard({
               </div>
             )}
             <div className="flex flex-wrap items-center gap-4">
-              <Button asChild size="sm" className="gap-2">
+              <Button
+                asChild
+                size="sm"
+                className={cn(
+                  'gap-2',
+                  completed &&
+                    !isUnfinished &&
+                    'bg-[#48d878] text-[#083222] hover:bg-[#3cc96a] focus-visible:ring-[#48d878]',
+                )}
+              >
                 <Link
                   to={
                     current

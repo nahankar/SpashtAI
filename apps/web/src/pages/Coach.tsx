@@ -50,6 +50,7 @@ import {
   type CoachPulseEvidence,
 } from '@/lib/coach-api'
 import { detectCoachIntent, type CoachIntent } from '@/lib/coach-intent'
+import { coachGoalTitleNeedsUpdate, suggestCoachGoalTitle } from '@/lib/coachGoalTitle'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -563,8 +564,6 @@ export function Coach() {
   const requestedThreadId = searchParams.get('thread')
   const elevateResultParam = searchParams.get('elevateResult')
   const replayResultParam = searchParams.get('replayResult')
-  const isHome =
-    !requestedThreadId && !elevateResultParam && !replayResultParam
   const { user } = useAuth()
   const confirm = useConfirm()
   const { isAccessible } = useFeatureFlags()
@@ -582,6 +581,14 @@ export function Coach() {
   const [expandedConfirmId, setExpandedConfirmId] = useState<string | null>(null)
   const [historyEditingId, setHistoryEditingId] = useState<string | null>(null)
   const [historyTitleDraft, setHistoryTitleDraft] = useState('')
+  const [headingEditing, setHeadingEditing] = useState(false)
+  const [headingDraft, setHeadingDraft] = useState('')
+  const isHome =
+    !requestedThreadId &&
+    !elevateResultParam &&
+    !replayResultParam &&
+    !thread &&
+    !loadingThread
   const [journeyHint, setJourneyHint] = useState<string | null>(null)
   const [nextIntent, setNextIntent] = useState<CoachIntent>('progress')
   const persistSeq = useRef(0)
@@ -659,8 +666,24 @@ export function Coach() {
         const requested = requestedThreadId
         const returningWithResult = Boolean(elevateResultParam) || Boolean(replayResultParam)
         if (!requested && !returningWithResult) {
-          setThread(null)
-          setTurns([])
+          const recent = listed.find((item) => item.status === 'active')
+          if (!recent) {
+            setThread(null)
+            setTurns([])
+            return
+          }
+          const detail = await getCoachThread(recent.id)
+          if (cancelled) return
+          const loadedTurns = detail.turns
+            .map(fromRecord)
+            .filter((turn): turn is ThreadTurn => Boolean(turn))
+          // Keep this exchange on screen when the URL gains ?thread=.
+          locallyAuthoredThreadIdRef.current = recent.id
+          setThread(detail.thread)
+          setTurns(loadedTurns.slice(-40))
+          const nextParams = new URLSearchParams(searchParams)
+          nextParams.set('thread', recent.id)
+          setSearchParams(nextParams, { replace: true })
           return
         }
         if (!requested && returningWithResult) {
@@ -779,7 +802,7 @@ export function Coach() {
           module: resultModule,
         })
         if (!insight) return nextTurns
-        if (insight.goalTitle && !currentThread.title) {
+        if (coachGoalTitleNeedsUpdate(currentThread.title, insight.goalTitle)) {
           try {
             const updated = await patchCoachThread(currentThread.id, {
               title: insight.goalTitle,
@@ -944,13 +967,53 @@ export function Coach() {
     user?.firstName && user.firstName.toLowerCase() !== 'admin'
       ? user.firstName
       : user?.email.split('@')[0] ?? 'there'
-  const namedGoal = Boolean(thread?.title?.trim())
+  const suggestedGoalTitle = useMemo(() => {
+    if (!thread) return null
+    const userMessages = turns.flatMap((turn) => (turn.role === 'user' ? [turn.text] : []))
+    const focusAreas = turns.flatMap((turn) =>
+      turn.role === 'coach' && turn.kind === 'recommend'
+        ? [turn.brief.focusArea, ...explicitFocusAreas(turn.label)]
+        : [],
+    )
+    if (thread.focusArea) focusAreas.push(thread.focusArea)
+    return suggestCoachGoalTitle({ userMessages, focusAreas })
+  }, [thread, turns])
+  const headingTitle = thread?.title?.trim() || suggestedGoalTitle
+  const autoTitleKey = useRef<string | null>(null)
+  const headingCancelRef = useRef(false)
   const activeGoals = threads.filter((item) => item.status === 'active')
   const recentGoals = threads.filter((item) => item.status !== 'active')
 
   useEffect(() => {
     threadEndRef.current?.scrollIntoView({ block: 'end' })
   }, [turns])
+
+  useEffect(() => {
+    if (!thread || loadingThread || headingEditing) return
+    if (!coachGoalTitleNeedsUpdate(thread.title, suggestedGoalTitle)) return
+    const title = suggestedGoalTitle
+    if (!title) return
+    const key = `${thread.id}:${title}`
+    if (autoTitleKey.current === key) return
+    autoTitleKey.current = key
+    let cancelled = false
+    patchCoachThread(thread.id, { title })
+      .then(({ thread: updated }) => {
+        if (cancelled) return
+        setThread((current) => (current?.id === updated.id ? updated : current))
+        setThreads((current) =>
+          current.map((item) => (item.id === updated.id ? updated : item)),
+        )
+      })
+      .catch((error) => {
+        autoTitleKey.current = null
+        console.error('name coaching goal', error)
+      })
+    return () => {
+      cancelled = true
+      if (autoTitleKey.current === key) autoTitleKey.current = null
+    }
+  }, [headingEditing, loadingThread, suggestedGoalTitle, thread])
 
   function confirmIntent(turnId: string, intent: CoachIntent) {
     if (!thread) return
@@ -1551,6 +1614,24 @@ export function Coach() {
     }
   }
 
+  function beginHeadingRename() {
+    if (!thread || !headingTitle) return
+    setHeadingDraft(headingTitle.slice(0, 60))
+    setHeadingEditing(true)
+  }
+
+  async function saveHeadingTitle() {
+    if (!thread) return
+    const title = headingDraft.trim().slice(0, 60)
+    setHeadingEditing(false)
+    if (!title || title === thread.title?.trim()) return
+    const { thread: updated } = await patchCoachThread(thread.id, { title })
+    setThread(updated)
+    setThreads((current) =>
+      current.map((item) => (item.id === updated.id ? updated : item)),
+    )
+  }
+
   function beginHistoryRename(item: CoachThreadSummary) {
     setHistoryEditingId(item.id)
     setHistoryTitleDraft(item.title?.trim() || '')
@@ -1599,13 +1680,55 @@ export function Coach() {
             <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
               Coach
             </p>
-            <h1 className="mt-0.5 truncate text-lg font-semibold tracking-tight sm:text-xl">
-              {isHome
-                ? 'Start with Coach'
-                : namedGoal
-                  ? displayCoachTitle(thread?.title)
-                  : `What shall we do today, ${firstName}?`}
-            </h1>
+            {headingEditing && thread ? (
+              <form
+                className="mt-0.5"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  void saveHeadingTitle()
+                }}
+              >
+                <Input
+                  value={headingDraft}
+                  onChange={(event) => setHeadingDraft(event.target.value)}
+                  onBlur={() => {
+                    if (headingCancelRef.current) {
+                      headingCancelRef.current = false
+                      return
+                    }
+                    void saveHeadingTitle()
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') {
+                      event.preventDefault()
+                      headingCancelRef.current = true
+                      setHeadingEditing(false)
+                    }
+                  }}
+                  maxLength={60}
+                  autoFocus
+                  aria-label="Goal name"
+                  className="h-9 max-w-md text-lg font-semibold tracking-tight"
+                />
+              </form>
+            ) : (
+              <h1 className="mt-0.5 min-w-0 text-lg font-semibold tracking-tight sm:text-xl">
+                {isHome ? (
+                  'Start with Coach'
+                ) : headingTitle ? (
+                  <button
+                    type="button"
+                    onClick={beginHeadingRename}
+                    className="group inline-flex max-w-full items-center gap-2 text-left"
+                  >
+                    <span className="truncate">{headingTitle}</span>
+                    <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-70 group-hover:opacity-100" />
+                  </button>
+                ) : (
+                  `What shall we do today, ${firstName}?`
+                )}
+              </h1>
+            )}
             {!isHome && journeyHint && (
               <p className="mt-0.5 truncate text-sm text-muted-foreground">{journeyHint}</p>
             )}
@@ -1650,7 +1773,7 @@ export function Coach() {
           />
         ) : (
           <div className={cn(THREAD_LANE, 'space-y-5 py-6')}>
-          {turns.length === 0 && (
+          {!loadingThread && turns.length === 0 && (
             <p className="max-w-[80%] text-sm leading-relaxed">
               What would you like to get better at—or prepare for?
             </p>
