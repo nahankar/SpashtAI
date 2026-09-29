@@ -519,8 +519,7 @@ export function UserDetail() {
           <CardHeader>
             <CardTitle className="text-base">Session Analytics actions</CardTitle>
             <CardDescription>
-              Downloads stay off until enabled here. Reprocess Audio is on for
-              new accounts and can be turned off for this user.
+              Downloads and individual reprocessing stay off until enabled here.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
@@ -573,9 +572,9 @@ export function UserDetail() {
                     onChange={(e) => updateExportFlag('enableReprocess', e.target.checked)}
                   />
                   <span>
-                    <span className="font-medium">Enable “Reprocess Audio”</span>
+                    <span className="font-medium">Enable individual reprocessing</span>
                     <span className="block text-xs text-muted-foreground">
-                      Elevate “Reprocess All” / “Reprocess Audio” and Replay re-analyze actions.
+                      Elevate “Reprocess Audio” and Replay “Re-analyze” for this user’s individual sessions. Bulk reprocessing is never available.
                     </span>
                   </span>
                 </label>

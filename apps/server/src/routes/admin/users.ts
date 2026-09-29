@@ -167,7 +167,7 @@ router.post('/', async (req: Request, res: Response) => {
         emailVerified: true,
         enablePro: true,
         enableUltra: true,
-        enableReprocess: true,
+        enableReprocess: false,
       },
     })
 

@@ -120,7 +120,7 @@ export function toAuthUser(user: {
     enableJsonExport: user.enableJsonExport ?? false,
     enableAudioExport: user.enableAudioExport ?? false,
     enableReplayAudioUpload: user.enableReplayAudioUpload ?? false,
-    enableReprocess: user.enableReprocess ?? true,
+    enableReprocess: user.enableReprocess ?? false,
     enablePro: user.enablePro ?? true,
     enableUltra: user.enableUltra ?? true,
   }

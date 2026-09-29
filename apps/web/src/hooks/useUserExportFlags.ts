@@ -5,7 +5,7 @@ export interface UserExportFlags {
   hideTranscriptText: boolean
   hideTranscriptJsonExport: boolean
   hideAudioDownload: boolean
-  // Download actions stay off. Reprocess is on unless an admin turns it off.
+  // Download and individual reprocessing actions stay off until an admin enables them.
   enableTxtExport: boolean
   enableJsonExport: boolean
   enableAudioExport: boolean
@@ -37,6 +37,6 @@ export function useUserExportFlags(): UserExportFlags {
     enableTxtExport: auth.user.enableTxtExport ?? false,
     enableJsonExport: auth.user.enableJsonExport ?? false,
     enableAudioExport: auth.user.enableAudioExport ?? false,
-    enableReprocess: auth.user.enableReprocess ?? true,
+    enableReprocess: auth.user.enableReprocess ?? false,
   }
 }

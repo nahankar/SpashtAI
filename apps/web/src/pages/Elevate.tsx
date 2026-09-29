@@ -45,12 +45,11 @@ import { useAuth } from '@/hooks/useAuth'
 import { useFeatureFlags } from '@/contexts/FeatureFlagsContext'
 import { useUserExportFlags } from '@/hooks/useUserExportFlags'
 import { useConfirm } from '@/hooks/useConfirm'
-import { Trash2, CheckSquare, Square, Target, ArrowRight, Play, ChevronDown, ChevronUp, BarChart3, CheckCircle2, RefreshCw, Download, Loader2, Mic, MicOff, Bug, TrendingUp } from 'lucide-react'
+import { Trash2, CheckSquare, Square, Target, ArrowRight, Play, ChevronDown, ChevronUp, BarChart3, CheckCircle2, Download, Loader2, Mic, MicOff, Bug, TrendingUp } from 'lucide-react'
 import { generateSessionPdf, type SessionReport } from '@/lib/generate-session-pdf'
 import { CoachAudioBootstrap } from '@/components/session/CoachAudioBootstrap'
 import { SessionRecorder, type SessionRecorderHandle } from '@/components/session/SessionRecorder'
 import { pauseAfterSealingRecording, settleRecordingBeforePause } from '@/lib/pauseCapture'
-import { runReprocess } from '@/lib/reprocess'
 import { stripThinkingBlocks } from '@/lib/stripThinking'
 import {
   UserTurnBubble,
@@ -453,41 +452,6 @@ export function Elevate() {
       toast.error('Failed to delete some sessions')
     }
   }, [selectedElevate, confirmDialog, pastSessions])
-
-  const [, setReprocessingElevate] = useState<Set<string>>(new Set())
-
-  const handleReprocessElevate = useCallback(async (id: string) => {
-    setReprocessingElevate((prev) => new Set(prev).add(id))
-    try {
-      const outcome = await runReprocess(id)
-      toast.success(outcome.message)
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Failed to reprocess session')
-    } finally {
-      setReprocessingElevate((prev) => {
-        const n = new Set(prev)
-        n.delete(id)
-        return n
-      })
-    }
-  }, [])
-
-  const handleReprocessAllElevate = useCallback(async () => {
-    const eligible = pastSessions.filter((s) => s.endedAt != null)
-    if (eligible.length === 0) {
-      toast.info('No completed sessions to reprocess')
-      return
-    }
-    const ok = await confirmDialog({
-      title: 'Reprocess All Sessions',
-      description: `Re-run audio analysis on ${eligible.length} completed session(s)?`,
-      confirmLabel: `Reprocess ${eligible.length}`,
-    })
-    if (!ok) return
-    for (const s of eligible) {
-      await handleReprocessElevate(s.id)
-    }
-  }, [pastSessions, confirmDialog, handleReprocessElevate])
 
   const loadPastSessions = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     try {
@@ -1831,12 +1795,6 @@ export function Elevate() {
             </p>
           </div>
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-            {exportFlags.enableReprocess &&
-              pastSessions.some((s) => s.endedAt != null) && (
-              <Button variant="outline" className="w-full sm:w-auto" onClick={handleReprocessAllElevate}>
-                <RefreshCw className="mr-2 h-4 w-4" /> Reprocess All
-              </Button>
-            )}
             <Button className="w-full sm:w-auto shrink-0" onClick={() => setShowHistory(false)}>
               + New Elevate Session
             </Button>

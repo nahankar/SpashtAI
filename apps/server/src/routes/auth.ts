@@ -89,7 +89,7 @@ router.post('/register', authLimiter, async (req: Request, res: Response) => {
         country: location.country,
         enablePro: true,
         enableUltra: true,
-        enableReprocess: true,
+        enableReprocess: false,
       },
     })
 
@@ -231,7 +231,7 @@ router.post('/google', authLimiter, async (req: Request, res: Response) => {
           loginCount: 1,
           enablePro: true,
           enableUltra: true,
-          enableReprocess: true,
+          enableReprocess: false,
         },
       })
 

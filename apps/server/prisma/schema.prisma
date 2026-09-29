@@ -125,8 +125,8 @@ model User {
   // Replay audio-file upload is an invite-style capability while the feature
   // is in preview. It is independent from Pro and defaults off.
   enableReplayAudioUpload Boolean @default(false)
-  // On for new accounts. An admin can turn it off for one user.
-  enableReprocess   Boolean @default(true)
+  // Disabled by default. An admin grants this only for an individual user.
+  enableReprocess   Boolean @default(false)
 
   // Pro license. On for new accounts. Gates playback "Key Moments" and the
   // "Ask AI Coach" assistant. Admins always have access.

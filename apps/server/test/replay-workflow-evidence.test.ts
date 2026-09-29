@@ -9,6 +9,7 @@ import { normalizeStreamingWords, wordSegments } from '../src/lib/replay-word-ev
 const state = vi.hoisted(() => ({
   session: null as any,
   replayAudioUpload: true,
+  replayReprocess: true,
   stream: vi.fn(),
   analyze: vi.fn(),
   progress: vi.fn(),
@@ -57,6 +58,7 @@ vi.mock('../src/lib/prisma', () => {
         enablePro: true,
         enableUltra: true,
         enableReplayAudioUpload: state.replayAudioUpload,
+        enableReprocess: state.replayReprocess,
       })),
     },
   }
@@ -89,6 +91,7 @@ describe('Replay upload, cached analysis and deletion workflow (mocked providers
   beforeEach(() => {
     vi.clearAllMocks()
     state.replayAudioUpload = true
+    state.replayReprocess = true
     state.deletions.clear()
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false })))
     state.session = { id: `s-${Math.random().toString(36).slice(2)}`, userId: 'owner', status: 'pending', uploadedFiles: [], result: null,
@@ -180,6 +183,33 @@ describe('Replay upload, cached analysis and deletion workflow (mocked providers
       transcriptRevision: first.evidence.transcriptRevision,
     })
     expect(state.analyze).toHaveBeenCalled()
+  })
+  it('requires the admin-granted capability before repeating a completed personalized analysis', async () => {
+    const speech = Array.from({ length: 45 }, (_, index) => `word${index}`).join(' ')
+    expect((await request(app).post(`${path()}/upload`).send({ text: `Alice: ${speech}\nAlice: closing thought` })).status).toBe(200)
+    await processSession()
+    const first = (await request(app).get(`${path()}/results`)).body
+    expect((await request(app).put(`${path()}/learner`).send({
+      speaker: 'Alice',
+      transcriptRevision: first.evidence.transcriptRevision,
+      recordingSignature: null,
+      selectionRevision: null,
+    })).status).toBe(200)
+    const selection = {
+      selectionRevision: state.session.learnerSelection.revision,
+      transcriptRevision: first.evidence.transcriptRevision,
+    }
+    await processSession(selection)
+    const completedResult = state.session.result
+    state.replayReprocess = false
+
+    const response = await request(app).post(`${path()}/process`).send(selection)
+
+    expect(response.status).toBe(403)
+    expect(response.body.error).toBe('Replay re-analysis is disabled for your account')
+    expect(state.session.status).toBe('completed')
+    expect(state.session.result).toBe(completedResult)
+    expect(state.analyze).toHaveBeenCalledTimes(1)
   })
   it('reuses audio word cache after confirming a speaker and keeps conflicting uploaded text separate', async () => {
     expect((await request(app).post(`${path()}/upload`).attach('audio', Buffer.from('synthetic test bytes'), 'test.wav').field('text', 'Alice: Different supplied wording.')).status).toBe(200)

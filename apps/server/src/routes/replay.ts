@@ -33,6 +33,18 @@ function ownedReplayWhere(req: Request, id: string) {
   )
 }
 
+/**
+ * A confirmation-only result is part of the first analysis flow and must stay
+ * available to every user. Every other repeat attempt is an explicit,
+ * admin-granted re-analysis capability.
+ */
+function isConfirmationOnlyReplayResult(result: { deliveryEvidence: unknown } | null): boolean {
+  const evidence = result?.deliveryEvidence
+  return !!evidence && typeof evidence === 'object' && !Array.isArray(evidence) &&
+    (evidence as Record<string, unknown>).version === 'replay-delivery-v1' &&
+    typeof (evidence as Record<string, unknown>).analysisSelectionRevision !== 'string'
+}
+
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 import {
@@ -498,6 +510,8 @@ router.post('/sessions/:id/process', trackFeatureUsage(
       },
     })
     if (!session) return res.status(404).json({ error: 'Replay session not found' })
+    const { flags, accessDenied } = await resolveRequestExportFlags(req, session.userId)
+    if (accessDenied) return exportDenied(res, 'Access denied')
     // Feature tracking middleware runs on res.json; use the durable ownership
     // relation, not an optional client-provided preparationId.
     req.body.preparationId = session.preparationRecording ? 'prepare-owned' : null
@@ -524,6 +538,10 @@ router.post('/sessions/:id/process', trackFeatureUsage(
       await tx.$queryRaw`SELECT id FROM "ReplaySession" WHERE id = ${id} FOR UPDATE`
       const fresh = await tx.replaySession.findFirst({ where: ownedReplayWhere(req, id), include: { result: true } })
       if (!fresh || !['pending', 'completed', 'failed'].includes(fresh.status)) return 'busy'
+      const completingInitialAssessment = boundAssessment && isConfirmationOnlyReplayResult(fresh.result)
+      if (fresh.status !== 'pending' && !completingInitialAssessment && !flags.enableReprocess) {
+        return 'reprocess_disabled'
+      }
       if (boundAssessment) {
         const view = fresh.result ? replayResultView(fresh.result, fresh.learnerSelection as unknown as ReplaySelection | null) : null
         if (view?.evidence.identity.state !== 'confirmed' || view.evidence.identity.revision !== selectionRevision ||
@@ -533,9 +551,14 @@ router.post('/sessions/:id/process', trackFeatureUsage(
       await tx.replaySession.update({ where: { id }, data: { status: 'transcribing', errorMessage: null, progressPulseStatus: null } })
       return 'claimed'
     })
-    if (claimed !== 'claimed') return res.status(409).json({ error: claimed === 'selection_changed'
-      ? 'The confirmed speaker or transcript changed. Reload before starting the assessment.'
-      : 'Replay session is busy or no longer available' })
+    if (claimed !== 'claimed') {
+      if (claimed === 'reprocess_disabled') {
+        return exportDenied(res, 'Replay re-analysis is disabled for your account')
+      }
+      return res.status(409).json({ error: claimed === 'selection_changed'
+        ? 'The confirmed speaker or transcript changed. Reload before starting the assessment.'
+        : 'Replay session is busy or no longer available' })
+    }
 
     if (session.preparationRecording) {
       recordFeatureUsage(req, 'prepare', 'event_recording_analyzed', id)

@@ -332,7 +332,7 @@ export function Replay() {
     if (!session) return
     if (!session.meetingDate) {
       toast.error('Meeting date is required', {
-        description: 'Set a meeting date via Edit Details before reprocessing.',
+        description: 'Set a meeting date via Edit Details before re-analyzing.',
       })
       return
     }
@@ -344,65 +344,20 @@ export function Replay() {
       })
       if (!res.ok) {
         const body = await res.json()
-        throw new Error(body.error || 'Failed to start reprocessing')
+        throw new Error(body.error || 'Failed to start re-analysis')
       }
       setSessions((prev) =>
         prev.map((s) =>
           s.id === id ? { ...s, status: 'transcribing', progressPulseStatus: null } : s
         )
       )
-      toast.success('Reprocessing started', {
+      toast.success('Re-analysis started', {
         description: session.sessionName || session.meetingType,
       })
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Failed to reprocess session')
+      toast.error(e instanceof Error ? e.message : 'Failed to re-analyze session')
     } finally {
       setReprocessing((prev) => { const n = new Set(prev); n.delete(id); return n })
-    }
-  }
-
-  const handleReprocessSelected = async () => {
-    const ids = Array.from(selectedReplay)
-    const eligible = sessions.filter((s) => ids.includes(s.id) && (s.status === 'completed' || s.status === 'failed'))
-    const missingDate = eligible.filter((s) => !s.meetingDate)
-    if (missingDate.length > 0) {
-      toast.error(`${missingDate.length} session(s) are missing a meeting date`, {
-        description: 'Set meeting dates via Edit Details before reprocessing.',
-      })
-      return
-    }
-    if (eligible.length === 0) {
-      toast.info('No completed or failed sessions selected to reprocess')
-      return
-    }
-    const ok = await confirm({
-      title: 'Reprocess Sessions',
-      description: `Re-run AI analysis on ${eligible.length} session(s)? Previous results will be replaced with fresh analysis using the latest analytics engine.`,
-      confirmLabel: `Reprocess ${eligible.length}`,
-    })
-    if (!ok) return
-    for (const s of eligible) {
-      await handleReprocess(s.id)
-    }
-    setSelectedReplay(new Set())
-  }
-
-  const handleReprocessAll = async () => {
-    const eligible = sessions.filter((s) => s.status === 'completed' || s.status === 'failed')
-    const missingDate = eligible.filter((s) => !s.meetingDate)
-    if (eligible.length === 0) {
-      toast.info('No completed or failed sessions to reprocess')
-      return
-    }
-    const ok = await confirm({
-      title: 'Reprocess All Sessions',
-      description: `Re-run AI analysis on ${eligible.length} session(s)?${missingDate.length > 0 ? ` ${missingDate.length} session(s) without a meeting date will be skipped.` : ''} Previous results will be replaced with fresh analysis using the latest analytics engine.`,
-      confirmLabel: `Reprocess ${eligible.length - missingDate.length}`,
-    })
-    if (!ok) return
-    const toProcess = eligible.filter((s) => s.meetingDate)
-    for (const s of toProcess) {
-      await handleReprocess(s.id)
     }
   }
 
@@ -723,12 +678,6 @@ export function Replay() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {exportFlags.enableReprocess &&
-            sessions.some((s) => s.status === 'completed' || s.status === 'failed') && (
-            <Button variant="outline" onClick={handleReprocessAll}>
-              <RefreshCw className="mr-2 h-4 w-4" /> Reprocess All
-            </Button>
-          )}
           <Button onClick={() => { setSessionId(null); setStep('upload') }}>
             <Plus className="mr-2 h-4 w-4" /> New Analysis
           </Button>
@@ -751,11 +700,6 @@ export function Replay() {
 
       {selectedReplay.size > 0 && (
         <div className="mb-4 flex items-center gap-2">
-          {exportFlags.enableReprocess && (
-            <Button variant="outline" size="sm" onClick={handleReprocessSelected}>
-              <RefreshCw className="mr-2 h-4 w-4" /> Reprocess {selectedReplay.size} Selected
-            </Button>
-          )}
           <Button variant="destructive" size="sm" onClick={handleDeleteSelected}>
             <Trash2 className="mr-2 h-4 w-4" /> Delete {selectedReplay.size} Selected
           </Button>
@@ -919,7 +863,7 @@ export function Replay() {
                             disabled={reprocessing.has(s.id)}
                           >
                             <RefreshCw className={`mr-2 h-4 w-4 ${reprocessing.has(s.id) ? 'animate-spin' : ''}`} />
-                            {reprocessing.has(s.id) ? 'Reprocessing...' : 'Reprocess'}
+                            {reprocessing.has(s.id) ? 'Re-analyzing...' : 'Re-analyze'}
                           </DropdownMenuItem>
                         )}
                         <DropdownMenuSeparator />
