@@ -239,6 +239,7 @@ model Preparation {
   questions    InterviewQuestion[]
   reflections  StageReflection[]
   practices    PreparationPractice[]
+  recordings   PreparationRecording[]
   coachThreads CoachThread[]
 
   createdAt DateTime @default(now())
@@ -282,6 +283,7 @@ model PreparationStage {
   questions  InterviewQuestion[]
   reflection StageReflection?
   practices  PreparationPractice[]
+  recordings PreparationRecording[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -332,8 +334,9 @@ model StageReflection {
   @@index([preparationId])
 }
 
-// Prepare owns the journey association. Elevate Session remains independently
-// addressable and is never deleted when a Preparation is removed.
+// Prepare owns the journey association.  The source Session is retained while
+// the journey exists, then securely discarded through the deletion outbox when
+// its owning journey is removed.
 model PreparationPractice {
   id            String            @id @default(cuid())
   preparationId String
@@ -347,6 +350,41 @@ model PreparationPractice {
 
   @@index([preparationId, createdAt])
   @@index([stageId])
+}
+
+// Replay is reused as the analysis engine for a recorded interview, but this
+// association makes its user-facing home the Prepare journey rather than the
+// standalone Replay history.
+model PreparationRecording {
+  id              String            @id @default(cuid())
+  preparationId   String
+  preparation     Preparation       @relation(fields: [preparationId], references: [id], onDelete: Cascade)
+  stageId         String?
+  stage           PreparationStage? @relation(fields: [stageId], references: [id], onDelete: SetNull)
+  replaySessionId String            @unique
+  replaySession   ReplaySession     @relation(fields: [replaySessionId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([preparationId, createdAt])
+  @@index([stageId])
+}
+
+// Durable cleanup outbox for Replay artifacts.  ReplaySession must be removed
+// transactionally with its parent journey, while files are deleted and retried
+// outside that database transaction.
+model ReplayDeletion {
+  id              String   @id @default(cuid())
+  replaySessionId String   @unique
+  filePaths       Json
+  status          String   @default("pending") // pending | retrying | failed
+  attempts        Int      @default(0)
+  error           String?  @db.Text
+  nextAttemptAt   DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([status, nextAttemptAt])
 }
 
 model Session {
@@ -591,6 +629,7 @@ model ReplaySession {
 
   uploadedFiles ReplayUpload[]
   result        ReplayResult?
+  preparationRecording PreparationRecording?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

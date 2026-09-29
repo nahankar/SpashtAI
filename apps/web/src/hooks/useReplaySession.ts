@@ -11,6 +11,8 @@ export interface ReplayContext {
   participantName?: string
   meetingGoal?: string
   focusAreas?: string[]
+  preparationId?: string
+  stageId?: string
 }
 
 export interface ReplayUploadResponse {
@@ -67,6 +69,10 @@ export interface ReplayResultData {
     participantName?: string | null
     status: string
     progressPulseStatus?: string | null
+    preparationRecording?: {
+      preparationId: string
+      stageId: string | null
+    } | null
     createdAt: string
   }
   uploads: ReplayUploadRecord[]
@@ -241,13 +247,52 @@ export function useReplaySession() {
     []
   )
 
+  const watchProcessing = useCallback((sid: string) => {
+    stopPolling()
+    pollRef.current = setInterval(async () => {
+      try {
+        const statusRes = await fetch(`${API_BASE_URL}/api/replay/sessions/${sid}/status`, {
+          headers: getAuthHeaders(),
+        })
+        if (!statusRes.ok) return
+        const statusData: ReplaySessionStatus = await statusRes.json()
+        setStatus(statusData)
+
+        if (statusData.status === 'completed') {
+          stopPolling()
+          const resultsRes = await fetch(`${API_BASE_URL}/api/replay/sessions/${sid}/results`, {
+            headers: getAuthHeaders(),
+          })
+          if (resultsRes.ok) setResults(await resultsRes.json())
+        } else if (statusData.status === 'failed') {
+          stopPolling()
+          if (statusData.errorMessage) {
+            try {
+              const parsed = JSON.parse(statusData.errorMessage)
+              if (parsed.code === 'PARTICIPANT_NOT_FOUND') {
+                setParticipantMismatch({
+                  participantName: parsed.participantName,
+                  detectedSpeakers: parsed.detectedSpeakers,
+                })
+                setError(null)
+                return
+              }
+            } catch { /* regular error below */ }
+          }
+          setError(statusData.errorMessage || 'Processing failed')
+        }
+      } catch { /* transient polling failure */ }
+    }, 3000)
+  }, [stopPolling])
+
   const startProcessing = useCallback(
-    async (sid: string) => {
+    async (sid: string, options?: { preparationId?: string }) => {
       setError(null)
       try {
         const res = await fetch(`${API_BASE_URL}/api/replay/sessions/${sid}/process`, {
           method: 'POST',
           headers: getAuthHeaders(),
+          body: JSON.stringify({ preparationId: options?.preparationId || null }),
         })
         if (!res.ok) {
           const errBody = await res.json().catch(() => ({} as { error?: string; code?: string }))
@@ -258,54 +303,13 @@ export function useReplaySession() {
           throw err
         }
 
-        // Begin polling
-        pollRef.current = setInterval(async () => {
-          try {
-            const statusRes = await fetch(`${API_BASE_URL}/api/replay/sessions/${sid}/status`, {
-              headers: getAuthHeaders(),
-            })
-            if (!statusRes.ok) return
-            const statusData: ReplaySessionStatus = await statusRes.json()
-            setStatus(statusData)
-
-            if (statusData.status === 'completed') {
-              stopPolling()
-              const resultsRes = await fetch(`${API_BASE_URL}/api/replay/sessions/${sid}/results`, {
-                headers: getAuthHeaders(),
-              })
-              if (resultsRes.ok) {
-                setResults(await resultsRes.json())
-              }
-            } else if (statusData.status === 'failed') {
-              stopPolling()
-              // Check if this is a participant-not-found error
-              if (statusData.errorMessage) {
-                try {
-                  const parsed = JSON.parse(statusData.errorMessage)
-                  if (parsed.code === 'PARTICIPANT_NOT_FOUND') {
-                    setParticipantMismatch({
-                      participantName: parsed.participantName,
-                      detectedSpeakers: parsed.detectedSpeakers,
-                    })
-                    setError(null)
-                    return
-                  }
-                } catch {
-                  // Not JSON — treat as regular error
-                }
-              }
-              setError(statusData.errorMessage || 'Processing failed')
-            }
-          } catch {
-            // polling failure is transient
-          }
-        }, 3000)
+        watchProcessing(sid)
       } catch (e: unknown) {
         setError(errorMessage(e))
         throw e
       }
     },
-    [stopPolling]
+    [watchProcessing]
   )
 
   const updateParticipantName = useCallback(
@@ -331,12 +335,12 @@ export function useReplaySession() {
   )
 
   const retryWithSpeaker = useCallback(
-    async (sid: string, speakerName: string) => {
+    async (sid: string, speakerName: string, options?: { preparationId?: string }) => {
       setParticipantMismatch(null)
       setError(null)
       setStatus(null)
       await updateParticipantName(sid, speakerName)
-      await startProcessing(sid)
+      await startProcessing(sid, options)
     },
     [updateParticipantName, startProcessing]
   )
@@ -373,6 +377,7 @@ export function useReplaySession() {
     uploadFiles,
     patchReplaySession,
     startProcessing,
+    watchProcessing,
     fetchResults,
     retryWithSpeaker,
   }

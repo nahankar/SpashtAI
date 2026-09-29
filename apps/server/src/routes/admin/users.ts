@@ -43,7 +43,12 @@ router.get('/', async (req: Request, res: Response) => {
         hideTranscriptText: true,
         hideTranscriptJsonExport: true,
         hideAudioDownload: true,
-        _count: { select: { sessions: true, replaySessions: true } },
+        _count: {
+          select: {
+            sessions: { where: { preparationPractice: null } },
+            replaySessions: { where: { preparationRecording: null } },
+          },
+        },
         },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
@@ -65,7 +70,8 @@ router.get('/', async (req: Request, res: Response) => {
 // GET /api/admin/users/:id
 router.get('/:id', async (req: Request, res: Response) => {
   try {
-    const user = await prisma.user.findUnique({
+    const [user, eventPractices, eventRecordings] = await Promise.all([
+      prisma.user.findUnique({
       where: { id: req.params.id },
       select: {
         id: true,
@@ -97,16 +103,37 @@ router.get('/:id', async (req: Request, res: Response) => {
         enableReprocess: true,
         enablePro: true,
         enableUltra: true,
-        _count: { select: { sessions: true, replaySessions: true, featureUsage: true } },
+        _count: {
+          select: {
+            sessions: { where: { preparationPractice: null } },
+            replaySessions: { where: { preparationRecording: null } },
+            preparations: true,
+            featureUsage: true,
+          },
+        },
       },
-    })
+      }),
+      prisma.preparationPractice.count({
+        where: { preparation: { userId: req.params.id }, session: { discardedAt: null } },
+      }),
+      prisma.preparationRecording.count({ where: { preparation: { userId: req.params.id } } }),
+    ])
 
     if (!user) {
       res.status(404).json({ error: 'User not found' })
       return
     }
 
-    res.json({ user })
+    res.json({
+      user: {
+        ...user,
+        prepareActivity: {
+          journeys: user._count.preparations,
+          eventPractices,
+          eventRecordings,
+        },
+      },
+    })
   } catch (err) {
     console.error('Get user error:', err)
     res.status(500).json({ error: 'Failed to get user' })

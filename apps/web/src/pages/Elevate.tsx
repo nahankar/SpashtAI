@@ -45,7 +45,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useFeatureFlags } from '@/contexts/FeatureFlagsContext'
 import { useUserExportFlags } from '@/hooks/useUserExportFlags'
 import { useConfirm } from '@/hooks/useConfirm'
-import { Trash2, CheckSquare, Square, Target, ArrowRight, Play, ChevronDown, ChevronUp, BarChart3, CheckCircle2, RefreshCw, Download, Loader2, Mic, MicOff, LifeBuoy, TrendingUp } from 'lucide-react'
+import { Trash2, CheckSquare, Square, Target, ArrowRight, Play, ChevronDown, ChevronUp, BarChart3, CheckCircle2, RefreshCw, Download, Loader2, Mic, MicOff, Bug, TrendingUp } from 'lucide-react'
 import { generateSessionPdf, type SessionReport } from '@/lib/generate-session-pdf'
 import { CoachAudioBootstrap } from '@/components/session/CoachAudioBootstrap'
 import { SessionRecorder, type SessionRecorderHandle } from '@/components/session/SessionRecorder'
@@ -59,7 +59,7 @@ import {
 } from '@/components/session/UserTurnMetrics'
 import type { SessionTurnRecord } from '@/hooks/useSessionMetrics'
 import { AutomaticDeliveryStatus } from '@/components/analytics/AutomaticDeliveryStatus'
-import { getPreparation, linkPreparationPractice } from '@/lib/prepare-api'
+import { getPreparation } from '@/lib/prepare-api'
 import { COACH_BUBBLE, USER_BUBBLE } from '@/lib/conversation'
 import { isUsableProsody } from '@/lib/prosody'
 import { buildExperimentalMeasurementsSection } from '@/lib/pdfDeliveryMeasurements'
@@ -268,10 +268,11 @@ export function Elevate() {
           stageName: stage?.name ?? null,
         })
         setPrepareLaunchError(null)
+        setFocusArea((current) => current || 'interview_practice')
         setElevateSessionName((current) =>
           current.trim()
             ? current
-            : `${journey.interview.companyName} — ${stage?.name ?? 'Interview'} practice`,
+            : `Interview practice — ${journey.interview.roleTitle}`,
         )
       })
       .catch((error) => {
@@ -996,6 +997,15 @@ export function Elevate() {
             journeyTitle: session.preparationPractice.preparation.title,
             stageName: session.preparationPractice.stage?.name ?? null,
           })
+          // Repair old/shared direct links so the app shell, breadcrumb, and
+          // every subsequent navigation keep the activity in its journey.
+          const params = new URLSearchParams(searchParams)
+          params.set('session', viewSessionId)
+          params.set('preparationId', session.preparationPractice.preparationId)
+          if (session.preparationPractice.stageId) {
+            params.set('stageId', session.preparationPractice.stageId)
+          }
+          navigate(`/elevate?${params.toString()}`, { replace: true })
         }
 
         if (session.endedAt) {
@@ -1074,8 +1084,10 @@ export function Elevate() {
     identity,
     inboundBoothDemo,
     inboundPreparationId,
+    navigate,
     loadConversation,
     resetMetrics,
+    searchParams,
     user?.email,
     user?.firstName,
   ])
@@ -1393,20 +1405,17 @@ export function Elevate() {
   }, [joined, roomName, assistantState])
 
   const handleJoin = useCallback(async () => {
-    if (prepareLaunch && joiningRef.current) return
-    if (prepareLaunch) {
-      joiningRef.current = true
-      setIsJoining(true)
-    }
+    // One guard for every launch surface.  Previously it only protected the
+    // Prepare path, allowing rapid standalone clicks to create parallel rooms.
+    if (joiningRef.current) return
+    joiningRef.current = true
+    setIsJoining(true)
     let createdLinkedSessionId: string | null = null
     let createdSessionId: string | null = null
     let createdSegmentId: string | null = null
     try {
       if (inboundPreparationId && !prepareLaunch) {
         throw new Error(prepareLaunchError || 'Interview journey is still loading')
-      }
-      if (prepareLaunch && !focusArea) {
-        throw new Error('Choose a focus area for this interview practice')
       }
 
       // 1. Create session ID and room name
@@ -1424,27 +1433,20 @@ export function Elevate() {
           sessionName: elevateSessionName.trim() || null,
           focusArea: focusArea || null,
           focusContext: inboundContext || null,
+          preparationId: prepareLaunch?.preparationId || null,
+          stageId: prepareLaunch?.stageId || null,
           startedAt: new Date().toISOString()
         })
       })
       
-      if (!sessionResponse.ok && prepareLaunch) {
+      if (!sessionResponse.ok) {
         const body = await sessionResponse.json().catch(() => ({}))
         throw new Error(body.error || 'Failed to create Elevate session')
       }
-      if (!sessionResponse.ok) {
-        console.warn('Failed to create session in database, continuing anyway')
-      } else if (prepareLaunch) {
-        createdLinkedSessionId = newSessionId
-      }
-
-      // Prepare owns the optional journey association. Link before creating
-      // the room so the agent's first coaching-context fetch can see it.
+      // The server creates the Prepare association in the same transaction as
+      // the session, before the room and agent can observe it.
       if (prepareLaunch) {
-        await linkPreparationPractice(prepareLaunch.preparationId, {
-          sessionId: newSessionId,
-          stageId: prepareLaunch.stageId,
-        })
+        createdLinkedSessionId = newSessionId
       }
 
       // 3. Get LiveKit token (creates room — agent will start after this)
@@ -1482,24 +1484,22 @@ export function Elevate() {
           'unavailable',
         ).catch(() => undefined)
       }
-      if (createdLinkedSessionId) {
-        await fetch(`${API_BASE_URL}/sessions/${createdLinkedSessionId}`, {
-          method: 'DELETE',
-          headers: getAuthHeaders(),
+      if (createdLinkedSessionId && prepareLaunch) {
+        await fetch(
+          `${API_BASE_URL}/api/preparations/${encodeURIComponent(prepareLaunch.preparationId)}/practices/${encodeURIComponent(createdLinkedSessionId)}/discard`,
+          { method: 'POST', headers: getAuthHeaders() },
+        ).catch(() => null)
+      } else if (createdSessionId) {
+        await fetch(`${API_BASE_URL}/sessions/${createdSessionId}`, {
+          method: 'DELETE', headers: getAuthHeaders(),
         }).catch(() => null)
       }
       logEvent('error', 'elevate.session_join_failed', error)
       console.error('Error joining session:', error)
-      if (prepareLaunch) {
-        toast.error(error instanceof Error ? error.message : 'Failed to start session')
-      } else {
-        throw error
-      }
+      toast.error(error instanceof Error ? error.message : 'Failed to start session')
     } finally {
-      if (prepareLaunch) {
-        joiningRef.current = false
-        setIsJoining(false)
-      }
+      joiningRef.current = false
+      setIsJoining(false)
     }
   }, [
     identity,
@@ -1595,14 +1595,19 @@ export function Elevate() {
 
     // Snapshot / booth is a first impression, not a Pulse sample.
     // Every other finished session is tracked. The results page can remove it.
-    const trackIt = !(inboundBoothDemo || focusArea === 'snapshot')
+    // Journey practices are measured for their event results, never added to
+    // the user's global communication trend in Progress Pulse.
+    const trackIt = !(inboundBoothDemo || focusArea === 'snapshot' || prepareLaunch)
 
     if (currentSessionId) {
       try {
         const endRes = await fetch(`${API_BASE_URL}/sessions/${currentSessionId}/end`, {
           method: 'POST',
           headers: getAuthHeaders(),
-          body: JSON.stringify({ endedAt: new Date().toISOString() })
+          body: JSON.stringify({
+            endedAt: new Date().toISOString(),
+            preparationId: prepareLaunch?.preparationId || null,
+          })
         })
         if (endRes.ok) {
           const endData = await endRes.json().catch(() => ({}))
@@ -1650,7 +1655,7 @@ export function Elevate() {
         if (trackIt) toast.success('Session saved')
       }
 
-      if (!trackIt) {
+      if (!trackIt && !prepareLaunch) {
         try {
           await fetch(`${API_BASE_URL}/api/progress-pulse/skip`, {
             method: 'POST',
@@ -1669,8 +1674,7 @@ export function Elevate() {
           ? {
               ...s,
               endedAt: new Date().toISOString(),
-              progressPulseStatus:
-                inboundBoothDemo || focusArea === 'snapshot' ? s.progressPulseStatus : 'tracked',
+              progressPulseStatus: trackIt ? 'tracked' : null,
             }
           : s,
       )
@@ -1713,11 +1717,17 @@ export function Elevate() {
     setIsLeaving(false)
   }, [sessionId, segmentId, clearMessages, resetMetrics, navigate, updateUser, loadPastSessions, prepareLaunch, isLeaving, inboundBoothDemo, focusArea, launchedFromCoach, originCoachThreadId])
 
+  // A Prepare attempt is removable until it has been completed. The server
+  // enforces the same boundary using endedAt, so stale client state is safe.
+  const canDiscardPreparePractice = !prepareLaunch || !isCompletedSessionView
+
   const handleDiscard = useCallback(async () => {
     if (isLeaving) return
     const yes = await confirmDialog({
-      title: 'Discard this session?',
-      description: 'This will permanently delete the session and all its data. This cannot be undone.',
+      title: prepareLaunch ? 'Discard this interview practice?' : 'Discard this session?',
+      description: prepareLaunch
+        ? 'This in-progress practice will be removed completely. Completed practices remain on the interview journey.'
+        : 'This will permanently delete the session and all its data. This cannot be undone.',
       confirmLabel: 'Discard',
       cancelLabel: 'Keep session',
     })
@@ -1725,19 +1735,19 @@ export function Elevate() {
 
     setIsLeaving(true)
     const currentSessionId = sessionId
-    await recorderRef.current?.discard().catch((error) => {
-      console.warn('Failed to stop discarded browser recording:', error)
-    })
-    if (segmentId) intentionalDisconnectSegmentsRef.current.add(segmentId)
 
     if (currentSessionId) {
       try {
-        const response = await fetch(`${API_BASE_URL}/sessions/${currentSessionId}`, {
-          method: 'DELETE',
+        const discardUrl = prepareLaunch
+          ? `${API_BASE_URL}/api/preparations/${encodeURIComponent(prepareLaunch.preparationId)}/practices/${encodeURIComponent(currentSessionId)}/discard`
+          : `${API_BASE_URL}/sessions/${currentSessionId}`
+        const response = await fetch(discardUrl, {
+          method: prepareLaunch ? 'POST' : 'DELETE',
           headers: getAuthHeaders(),
         })
         if (!response.ok) {
-          throw new Error(`Discard failed with HTTP ${response.status}`)
+          const body = await response.json().catch(() => ({} as { error?: string }))
+          throw new Error(body.error || `Discard failed with HTTP ${response.status}`)
         }
         setPastSessions((prev) => prev.filter((s) => s.id !== currentSessionId))
         setPendingDeletions((prev) => [
@@ -1749,15 +1759,21 @@ export function Elevate() {
           ...prev.filter((item) => item.id !== currentSessionId),
         ])
         setSelectedElevate((prev) => { const n = new Set(prev); n.delete(currentSessionId); return n })
-        toast.success('Discarding session securely. Cleanup will retry automatically.')
+        toast.success(prepareLaunch
+          ? 'Interview practice discarded.'
+          : 'Discarding session securely. Cleanup will retry automatically.')
       } catch (error) {
         console.error('Failed to discard session:', error)
-        if (segmentId) intentionalDisconnectSegmentsRef.current.delete(segmentId)
         setIsLeaving(false)
-        toast.error('Could not start secure discard. Please retry.')
+        toast.error(error instanceof Error ? error.message : 'Could not start secure discard. Please retry.')
         return
       }
     }
+
+    await recorderRef.current?.discard().catch((error) => {
+      console.warn('Failed to stop discarded browser recording:', error)
+    })
+    if (segmentId) intentionalDisconnectSegmentsRef.current.add(segmentId)
 
     setToken(null)
     setUrl(null)
@@ -1778,7 +1794,7 @@ export function Elevate() {
       navigate('/elevate')
     }
     setIsLeaving(false)
-  }, [sessionId, segmentId, clearMessages, resetMetrics, navigate, confirmDialog, prepareLaunch, isLeaving, viewSessionName, elevateSessionName])
+  }, [sessionId, segmentId, clearMessages, resetMetrics, navigate, confirmDialog, prepareLaunch, isLeaving, viewSessionName, elevateSessionName, canDiscardPreparePractice])
 
   // Return from a viewed session's results back to the Elevate session list.
   const handleBackToElevate = useCallback(() => {
@@ -2000,7 +2016,7 @@ export function Elevate() {
                           variant="ghost"
                           className="h-8 w-8 text-muted-foreground hover:text-primary"
                         >
-                          <LifeBuoy className="h-4 w-4" />
+                          <Bug className="h-4 w-4" />
                         </Button>
                       </Link>
                       <Button
@@ -2111,9 +2127,17 @@ export function Elevate() {
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
             <CardTitle>
-              {viewSessionId && viewSessionName ? viewSessionName : 'Elevate Session'}
+              {viewSessionId && viewSessionName
+                ? viewSessionName
+                : prepareLaunch
+                  ? elevateSessionName.trim() || 'Interview practice'
+                  : elevateSessionName.trim()
+                    ? `Elevate — ${elevateSessionName.trim()}`
+                    : focusArea
+                      ? `Elevate — Practice: ${getFocusAreaLabel(focusArea)}`
+                      : 'Elevate — Practice'}
             </CardTitle>
-            {viewSessionId && isCompletedSessionView && viewFocusArea !== 'snapshot' && (
+            {viewSessionId && isCompletedSessionView && viewFocusArea !== 'snapshot' && !prepareLaunch && (
               pulseBusy ? (
                 <Button variant="outline" size="sm" disabled>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Updating...
@@ -2168,7 +2192,7 @@ export function Elevate() {
               {prepareLaunch && (
                 <div className="rounded-md border bg-primary/5 px-3 py-2">
                   <p className="text-sm font-medium">
-                    Preparing for {prepareLaunch.journeyTitle}
+                    {elevateSessionName.trim() || 'Interview practice'}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {prepareLaunch.stageName
@@ -2192,24 +2216,16 @@ export function Elevate() {
                 </p>
               </div>
               <div>
-                <label className="text-sm font-medium">Focus Area</label>
                 {prepareLaunch ? (
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {PRACTICE_FOCUS_AREAS.map((area) => (
-                      <Button
-                        key={area.id}
-                        type="button"
-                        size="sm"
-                        variant={focusArea === area.id ? 'default' : 'outline'}
-                        className="rounded-full"
-                        onClick={() => setFocusArea(area.id)}
-                        title={area.description}
-                      >
-                        {area.label}
-                      </Button>
-                    ))}
-                  </div>
+                  <>
+                    <label className="text-sm font-medium">Practice type</label>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Guided interview practice using this journey’s context. Your results stay on this journey.
+                    </p>
+                  </>
                 ) : (
+                  <>
+                    <label className="text-sm font-medium">Focus Area</label>
                   <select
                     value={focusArea}
                     onChange={(e) => setFocusArea(e.target.value)}
@@ -2220,11 +2236,7 @@ export function Elevate() {
                       <option key={a.id} value={a.id}>{a.label} — {a.description}</option>
                     ))}
                   </select>
-                )}
-                {prepareLaunch && !focusArea && (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Choose the communication skill Elevate should coach in this interview context.
-                  </p>
+                  </>
                 )}
                 {inboundContext && (
                   <p className="mt-1 rounded-md bg-primary/5 px-2 py-1.5 text-xs text-primary">
@@ -2249,8 +2261,7 @@ export function Elevate() {
                     isJoining ||
                     !elevateSessionName.trim() ||
                     prepareLaunchLoading ||
-                    Boolean(prepareLaunchError) ||
-                    Boolean(prepareLaunch && !focusArea)
+                    Boolean(prepareLaunchError)
                   }
                 >
                   {isJoining && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -2293,7 +2304,7 @@ export function Elevate() {
               }}
               className="space-y-4"
             >
-              <AutomaticDeliveryStatus sessionId={viewSessionId} />
+              {!prepareLaunch && <AutomaticDeliveryStatus sessionId={viewSessionId} />}
               {viewFocusArea === 'snapshot' && inboundFullReport && viewSessionId && (
                 <Button
                   variant="ghost"
@@ -2314,10 +2325,10 @@ export function Elevate() {
                     <Play className="mr-2 h-4 w-4" /> Playback
                   </TabsTrigger>
                   <TabsTrigger value="analytics" className="h-9 py-1.5">
-                    <BarChart3 className="mr-2 h-4 w-4" /> Session Analytics
+                    <BarChart3 className="mr-2 h-4 w-4" /> {prepareLaunch ? 'Event feedback' : 'Session Analytics'}
                   </TabsTrigger>
                 </TabsList>
-                {resultsTab === 'analytics' && historicalMetrics && (
+                {resultsTab === 'analytics' && historicalMetrics && !prepareLaunch && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -2337,7 +2348,7 @@ export function Elevate() {
               </div>
 
               <TabsContent value="analytics" className="space-y-4">
-                {sessionId && historicalMetrics && (
+                {!prepareLaunch && sessionId && historicalMetrics && (
                   <SessionMetricsSummary
                     sessionId={sessionId}
                     metrics={historicalMetrics}
@@ -2356,9 +2367,12 @@ export function Elevate() {
                   collapsible
                   defaultCollapsed
                 />
+                {prepareLaunch && sessionId && (
+                  <CoachingInsightsCard sessionId={sessionId} isSessionEnded fill />
+                )}
 
                 {/* Historical metrics display */}
-                {sessionId && historicalMetrics && (
+                {!prepareLaunch && sessionId && historicalMetrics && (
                   <>
                     <SessionMetrics
                       sessionId={sessionId}
@@ -2472,9 +2486,11 @@ export function Elevate() {
                         Record My Audio
                       </Button>
                     )}
-                    <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={handleDiscard} disabled={isLeaving}>
-                      Discard Session
-                    </Button>
+                    {canDiscardPreparePractice && (
+                      <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={handleDiscard} disabled={isLeaving}>
+                        {prepareLaunch ? 'Discard interview practice' : 'Discard Session'}
+                      </Button>
+                    )}
                   </div>
                 </>
               )}
@@ -2542,9 +2558,11 @@ export function Elevate() {
                       inputBlocked={isPausing || pauseAudioFailure != null}
                       enableAudioRecord={exportFlags.enableAudioExport}
                     />
-                    <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={handleDiscard} disabled={isLeaving}>
-                      Discard Session
-                    </Button>
+                    {canDiscardPreparePractice && (
+                      <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={handleDiscard} disabled={isLeaving}>
+                        {prepareLaunch ? 'Discard interview practice' : 'Discard Session'}
+                      </Button>
+                    )}
                   </div>
                   {pauseAudioFailure && (
                     <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
@@ -2601,7 +2619,7 @@ export function Elevate() {
               />
 
               {/* Historical metrics display */}
-              {!joined && sessionId && historicalMetrics && !isSessionPaused && (
+              {!prepareLaunch && !joined && sessionId && historicalMetrics && !isSessionPaused && (
                 <>
                   <SessionMetrics 
                     sessionId={sessionId}

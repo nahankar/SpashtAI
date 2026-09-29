@@ -38,7 +38,7 @@ import {
   CheckSquare,
   Square,
   CheckCircle2,
-  LifeBuoy,
+  Bug,
   MinusCircle,
   MoreVertical,
   Pencil,
@@ -47,6 +47,7 @@ import {
 } from 'lucide-react'
 import { getAuthHeaders } from '@/lib/api-client'
 import { recordCoachAction } from '@/lib/coach-api'
+import { getPreparation } from '@/lib/prepare-api'
 import { SessionFilters, type SortField, type SortDir } from '@/components/SessionFilters'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
@@ -193,6 +194,8 @@ export function Replay() {
   const [searchParams] = useSearchParams()
   const confirm = useConfirm()
   const exportFlags = useUserExportFlags()
+  const preparationId = searchParams.get('preparationId')?.trim() || null
+  const [preparationTitle, setPreparationTitle] = useState<string | null>(null)
   const [step, setStep] = useState<Step>('history')
   const [sessions, setSessions] = useState<ReplaySessionSummary[]>([])
   const [sessionsLoading, setSessionsLoading] = useState(true)
@@ -218,6 +221,22 @@ export function Replay() {
   const [editSession, setEditSession] = useState<ReplaySessionSummary | null>(null)
   const [editOpen, setEditOpen] = useState(false)
 
+  useEffect(() => {
+    if (!preparationId) {
+      setPreparationTitle(null)
+      return
+    }
+    let cancelled = false
+    void getPreparation(preparationId)
+      .then((journey) => {
+        if (!cancelled) setPreparationTitle(journey.title)
+      })
+      .catch(() => {
+        if (!cancelled) setPreparationTitle(null)
+      })
+    return () => { cancelled = true }
+  }, [preparationId])
+
   const {
     sessionId,
     setSessionId,
@@ -228,6 +247,7 @@ export function Replay() {
     createSession,
     uploadFiles,
     startProcessing,
+    watchProcessing,
     retryWithSpeaker,
   } = useReplaySession()
 
@@ -414,7 +434,40 @@ export function Replay() {
     }
 
     const requested = sessions.find((session) => session.id === requestedSession)
-    if (!requested) return
+    if (!requested) {
+      // Prepare-owned recordings are deliberately absent from the standalone
+      // Replay list.  Resolve them directly so a pending upload can resume
+      // from the journey Activity tab.
+      if (!requestedSession || !searchParams.get('preparationId')) return
+      void fetch(`${API_BASE_URL}/api/replay/sessions/${encodeURIComponent(requestedSession)}/status`, {
+        headers: getAuthHeaders(),
+      })
+        .then(async (response) => {
+          if (!response.ok) throw new Error('Could not load interview recording')
+          return response.json() as Promise<{ status: string; _count?: { uploadedFiles?: number } }>
+        })
+        .then((status) => {
+          if (status.status === 'completed' || status.status === 'failed') {
+            navigate(resultPath(requestedSession), { replace: true })
+            return
+          }
+          setSessionId(requestedSession)
+          if ((status._count?.uploadedFiles ?? 0) > 0) {
+            setStep('processing')
+            if (status.status === 'pending') {
+              void startProcessing(requestedSession, { preparationId: searchParams.get('preparationId') || undefined })
+            } else {
+              watchProcessing(requestedSession)
+            }
+          } else {
+            setStep('upload')
+          }
+        })
+        .catch((loadError: unknown) => {
+          toast.error(loadError instanceof Error ? loadError.message : 'Could not load interview recording')
+        })
+      return
+    }
     if (requested.status === 'completed' || requested.status === 'failed') {
       navigate(resultPath(requested.id), { replace: true })
       return
@@ -431,6 +484,7 @@ export function Replay() {
     sessions,
     sessionsError,
     sessionsLoading,
+    watchProcessing,
   ])
 
   const handleEditSaved = (updated: Partial<ReplaySessionSummary>) => {
@@ -468,9 +522,13 @@ export function Replay() {
   const createDraftSession = async () => {
     const coachContext = searchParams.get('context')?.trim()
     const coachFocus = searchParams.get('focus')?.trim()
+    const preparationId = searchParams.get('preparationId')?.trim()
+    const stageId = searchParams.get('stageId')?.trim()
     const createdSessionId = await createSession({
       meetingGoal: coachContext || undefined,
       focusAreas: coachFocus ? [coachFocus] : undefined,
+      preparationId: preparationId || undefined,
+      stageId: stageId || undefined,
     })
     const coachThreadId = searchParams.get('thread')
     if (searchParams.get('coach') === '1' && coachThreadId) {
@@ -492,7 +550,7 @@ export function Replay() {
       const sid = sessionId ?? await createDraftSession()
       await uploadFiles(sid, files)
       setStep('processing')
-      await startProcessing(sid)
+      await startProcessing(sid, { preparationId: searchParams.get('preparationId') || undefined })
     } catch {
       /* create/upload/process helpers expose the error */
     }
@@ -556,10 +614,16 @@ export function Replay() {
       <div>
         {step === 'upload' && (
           <button
-            onClick={() => setStep('history')}
+            onClick={() => {
+              if (preparationId) {
+                navigate(`/prepare/interviews/${encodeURIComponent(preparationId)}`)
+              } else {
+                setStep('history')
+              }
+            }}
             className="mb-4 text-sm text-muted-foreground hover:text-foreground"
           >
-            &larr; Back to sessions
+            &larr; Back to {preparationId ? preparationTitle || 'interview journey' : 'sessions'}
           </button>
         )}
 
@@ -603,8 +667,13 @@ export function Replay() {
         {step === 'upload' && (
           <div className="space-y-3">
             {searchParams.get('context') && (
-              <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-                Coach brief: <span className="font-medium text-foreground">{searchParams.get('context')}</span>
+            <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+              Coach brief: <span className="font-medium text-foreground">{searchParams.get('context')}</span>
+            </p>
+          )}
+            {searchParams.get('preparationId') && (
+              <p className="rounded-md border bg-primary/5 px-3 py-2 text-sm text-muted-foreground">
+                Interview event recording · This upload and its results stay with the interview journey.
               </p>
             )}
             <UploadZone onSubmit={handleUploadSubmit} loading={loading} />
@@ -619,7 +688,9 @@ export function Replay() {
             loading={loading}
             onSelectSpeaker={
               sessionId
-                ? (speaker: string) => retryWithSpeaker(sessionId, speaker)
+                ? (speaker: string) => retryWithSpeaker(sessionId, speaker, {
+                    preparationId: searchParams.get('preparationId') || undefined,
+                  })
                 : undefined
             }
             onViewResults={
@@ -823,7 +894,7 @@ export function Replay() {
                         variant="ghost"
                         className="h-8 w-8 text-muted-foreground hover:text-primary"
                       >
-                        <LifeBuoy className="h-4 w-4" />
+                        <Bug className="h-4 w-4" />
                       </Button>
                     </Link>
                     <DropdownMenu>

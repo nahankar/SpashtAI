@@ -14,6 +14,7 @@ const prismaMock = vi.hoisted(() => ({
     create: vi.fn(),
     update: vi.fn(),
     deleteMany: vi.fn(),
+    delete: vi.fn(),
   },
   preparationStage: {
     findFirst: vi.fn(),
@@ -40,14 +41,24 @@ const prismaMock = vi.hoisted(() => ({
     update: vi.fn(),
   },
   preparationPractice: {
+    findFirst: vi.fn(),
     findUnique: vi.fn(),
     findMany: vi.fn(),
     create: vi.fn(),
+    delete: vi.fn(),
+  },
+  preparationRecording: {
+    findMany: vi.fn(),
   },
   session: {
     findFirst: vi.fn(),
     create: vi.fn(),
+    update: vi.fn(),
+    updateMany: vi.fn(),
   },
+  replaySession: { deleteMany: vi.fn() },
+  progressPulse: { deleteMany: vi.fn() },
+  featureUsage: { create: vi.fn() },
   platformFeatureFlag: {
     count: vi.fn(),
     findMany: vi.fn(),
@@ -63,7 +74,10 @@ const prismaMock = vi.hoisted(() => ({
   }),
 }))
 
+const deletionMock = vi.hoisted(() => ({ enqueueSessionDeletion: vi.fn() }))
+
 vi.mock('../src/lib/prisma', () => ({ prisma: prismaMock }))
+vi.mock('../src/lib/sessionDeletionWorker', () => deletionMock)
 
 import preparationsRouter from '../src/routes/preparations'
 import { createSession } from '../src/routes/sessions'
@@ -229,14 +243,14 @@ describe('Prepare API ownership and validation', () => {
     )
   })
 
-  it('creates an optional simplified practice context with one practice stage', async () => {
+  it('creates a simplified practice context with one practice stage when a target role is provided', async () => {
     prismaMock.preparation.create.mockResolvedValue(preparation)
     const response = await request(appFor())
       .post('/api/preparations')
       .send({
         mode: 'SIMPLIFIED',
         companyName: '',
-        roleTitle: '',
+        roleTitle: 'Senior Engineering Manager',
         questionsText: '- Tell me about yourself\n- Why this role?',
         interviewerProfileText: 'VP Engineering',
       })
@@ -244,7 +258,7 @@ describe('Prepare API ownership and validation', () => {
     expect(prismaMock.preparation.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          title: 'Interview preparation — Interview practice',
+          title: 'General interview — Senior Engineering Manager',
           stages: {
             create: [
               expect.objectContaining({
@@ -264,6 +278,69 @@ describe('Prepare API ownership and validation', () => {
         }),
       }),
     )
+  })
+
+  it('requires a target role for simplified preparation', async () => {
+    const response = await request(appFor())
+      .post('/api/preparations')
+      .send({ mode: 'SIMPLIFIED', companyName: '', roleTitle: '' })
+
+    expect(response.status).toBe(400)
+    expect(response.body.error).toContain('Target role or interview title is required')
+    expect(prismaMock.preparation.create).not.toHaveBeenCalled()
+  })
+
+  it('discards an unused linked practice through the Prepare-owned endpoint', async () => {
+    prismaMock.preparationPractice.findFirst.mockResolvedValue({
+      id: 'practice-1',
+      sessionId: 'session-unused',
+      session: { endedAt: null },
+    })
+    prismaMock.preparationPractice.delete.mockResolvedValue({})
+    prismaMock.session.update.mockResolvedValue({})
+
+    const response = await request(appFor())
+      .post(`/api/preparations/${PREPARATION_ID}/practices/session-unused/discard`)
+
+    expect(response.status).toBe(202)
+    expect(prismaMock.preparationPractice.delete).toHaveBeenCalledWith({ where: { id: 'practice-1' } })
+    expect(prismaMock.session.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'session-unused' },
+      data: expect.objectContaining({ deletionStatus: 'pending' }),
+    }))
+    expect(deletionMock.enqueueSessionDeletion).toHaveBeenCalledWith('session-unused')
+  })
+
+  it('discards an in-progress linked practice after the participant has answered', async () => {
+    prismaMock.preparationPractice.findFirst.mockResolvedValue({
+      id: 'practice-1',
+      sessionId: 'session-started',
+      session: { endedAt: null },
+    })
+
+    const response = await request(appFor())
+      .post(`/api/preparations/${PREPARATION_ID}/practices/session-started/discard`)
+
+    expect(response.status).toBe(202)
+    expect(prismaMock.preparationPractice.delete).toHaveBeenCalledWith({ where: { id: 'practice-1' } })
+    expect(deletionMock.enqueueSessionDeletion).toHaveBeenCalledWith('session-started')
+  })
+
+  it('does not discard a completed linked practice', async () => {
+    prismaMock.preparationPractice.findFirst.mockResolvedValue({
+      id: 'practice-1',
+      sessionId: 'session-completed',
+      session: { endedAt: new Date('2026-09-29T10:00:00Z') },
+    })
+
+    const response = await request(appFor())
+      .post(`/api/preparations/${PREPARATION_ID}/practices/session-completed/discard`)
+
+    expect(response.status).toBe(409)
+    expect(response.body.error).toContain('Completed interview practice')
+    expect(prismaMock.preparationPractice.delete).not.toHaveBeenCalled()
+    expect(prismaMock.session.update).not.toHaveBeenCalled()
+    expect(deletionMock.enqueueSessionDeletion).not.toHaveBeenCalled()
   })
 
   it('rejects protected mass-assignment fields', async () => {
@@ -342,14 +419,14 @@ describe('Prepare API ownership and validation', () => {
   })
 
   it('does not let another user delete a preparation', async () => {
-    prismaMock.preparation.deleteMany.mockResolvedValue({ count: 0 })
+    prismaMock.preparation.findFirst.mockResolvedValue(null)
     const response = await request(appFor('user-b')).delete(
       `/api/preparations/${PREPARATION_ID}`,
     )
     expect(response.status).toBe(404)
-    expect(prismaMock.preparation.deleteMany).toHaveBeenCalledWith({
-      where: { id: PREPARATION_ID, userId: 'user-b' },
-    })
+    expect(prismaMock.preparation.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: PREPARATION_ID, userId: 'user-b' } }),
+    )
   })
 
   it('does not mutate a stage outside the owned parent', async () => {
@@ -755,109 +832,46 @@ describe('Prepare C1 Elevate linkage', () => {
     expect(prismaMock.preparationPractice.create).not.toHaveBeenCalled()
   })
 
-  it('links only this user’s Elevate session to an owned journey', async () => {
-    prismaMock.preparation.findFirst.mockResolvedValue(preparation)
+  it('creates Prepare ownership atomically with a new Elevate session', async () => {
+    prismaMock.$queryRaw.mockResolvedValue([{ id: PREPARATION_ID }])
     prismaMock.preparationStage.findFirst.mockResolvedValue(stages[1])
-    prismaMock.session.findFirst.mockResolvedValue({ id: SESSION_ID })
-    prismaMock.preparationPractice.findUnique.mockResolvedValue(null)
+    prismaMock.session.create.mockResolvedValue({
+      id: SESSION_ID,
+      userId: 'user-a',
+      module: 'elevate',
+      sessionName: 'Technical interview',
+      focusArea: null,
+      focusContext: null,
+      startedAt: new Date(),
+      user: { id: 'user-a', email: 'user-a@example.com' },
+    })
     prismaMock.preparationPractice.create.mockResolvedValue({
-      id: 'cfffffffffffffffffffffffff',
-      preparationId: PREPARATION_ID,
-      stageId: STAGE_B,
-      sessionId: SESSION_ID,
-      createdAt: new Date(),
+      id: 'practice-1', preparationId: PREPARATION_ID, stageId: STAGE_B, sessionId: SESSION_ID,
     })
 
-    const response = await request(appFor())
-      .post(`/api/preparations/${PREPARATION_ID}/practices`)
-      .send({ sessionId: SESSION_ID, stageId: STAGE_B })
-
-    expect(response.status).toBe(201)
-    expect(prismaMock.session.findFirst).toHaveBeenCalledWith({
-      where: {
+    const response = await request(sessionAppFor())
+      .post('/sessions')
+      .send({
         id: SESSION_ID,
-        userId: 'user-a',
         module: 'elevate',
-        discardedAt: null,
-      },
-      select: { id: true },
-    })
-    expect(prismaMock.preparationPractice.create).toHaveBeenCalledWith({
-      data: {
+        sessionName: 'Technical interview',
         preparationId: PREPARATION_ID,
         stageId: STAGE_B,
-        sessionId: SESSION_ID,
-      },
-    })
-  })
-
-  it('does not link another user’s session', async () => {
-    prismaMock.preparation.findFirst.mockResolvedValue(preparation)
-    prismaMock.preparationStage.findFirst.mockResolvedValue(stages[1])
-    prismaMock.session.findFirst.mockResolvedValue(null)
-
-    const response = await request(appFor())
-      .post(`/api/preparations/${PREPARATION_ID}/practices`)
-      .send({ sessionId: SESSION_ID, stageId: STAGE_B })
-
-    expect(response.status).toBe(404)
-    expect(prismaMock.preparationPractice.create).not.toHaveBeenCalled()
-  })
-
-  it('does not link a stage outside the owned journey', async () => {
-    prismaMock.preparation.findFirst.mockResolvedValue(preparation)
-    prismaMock.preparationStage.findFirst.mockResolvedValue(null)
-
-    const response = await request(appFor())
-      .post(`/api/preparations/${PREPARATION_ID}/practices`)
-      .send({
-        sessionId: SESSION_ID,
-        stageId: 'ceeeeeeeeeeeeeeeeeeeeeeee',
       })
 
-    expect(response.status).toBe(404)
-    expect(prismaMock.session.findFirst).not.toHaveBeenCalled()
-  })
-
-  it('is idempotent when the same session link is retried', async () => {
-    const existing = {
-      id: 'cfffffffffffffffffffffffff',
-      preparationId: PREPARATION_ID,
-      stageId: STAGE_B,
-      sessionId: SESSION_ID,
-      createdAt: new Date(),
-    }
-    prismaMock.preparation.findFirst.mockResolvedValue(preparation)
-    prismaMock.preparationStage.findFirst.mockResolvedValue(stages[1])
-    prismaMock.session.findFirst.mockResolvedValue({ id: SESSION_ID })
-    prismaMock.preparationPractice.findUnique.mockResolvedValue(existing)
-
-    const response = await request(appFor())
-      .post(`/api/preparations/${PREPARATION_ID}/practices`)
-      .send({ sessionId: SESSION_ID, stageId: STAGE_B })
-
-    expect(response.status).toBe(200)
-    expect(response.body.practice.sessionId).toBe(SESSION_ID)
-    expect(prismaMock.preparationPractice.create).not.toHaveBeenCalled()
-  })
-
-  it('rejects moving an already-linked session to another journey or stage', async () => {
-    prismaMock.preparation.findFirst.mockResolvedValue(preparation)
-    prismaMock.preparationStage.findFirst.mockResolvedValue(stages[1])
-    prismaMock.session.findFirst.mockResolvedValue({ id: SESSION_ID })
-    prismaMock.preparationPractice.findUnique.mockResolvedValue({
-      id: 'cfffffffffffffffffffffffff',
-      preparationId: PREPARATION_ID,
-      stageId: STAGE_A,
-      sessionId: SESSION_ID,
-      createdAt: new Date(),
+    expect(response.status).toBe(201)
+    expect(prismaMock.preparationPractice.create).toHaveBeenCalledWith({
+      data: { preparationId: PREPARATION_ID, stageId: STAGE_B, sessionId: SESSION_ID },
     })
+  })
 
+  it('retires retrospective practice linking so standalone sessions cannot become Prepare activity', async () => {
     const response = await request(appFor())
       .post(`/api/preparations/${PREPARATION_ID}/practices`)
       .send({ sessionId: SESSION_ID, stageId: STAGE_B })
 
-    expect(response.status).toBe(409)
+    expect(response.status).toBe(410)
+    expect(response.body.code).toBe('PREPARE_RETROACTIVE_LINKING_RETIRED')
     expect(prismaMock.preparationPractice.create).not.toHaveBeenCalled()
   })
 
@@ -978,5 +992,70 @@ describe('Prepare C1 Elevate linkage', () => {
         }),
       }),
     )
+  })
+
+  it('gives the next journey practice a bounded latest-practice and recording memory', async () => {
+    prismaMock.preparationPractice.findUnique.mockResolvedValue({
+      preparationId: PREPARATION_ID,
+      stageId: STAGE_B,
+      preparation: {
+        userId: 'user-a',
+        interview: {
+          companyName: 'Example', roleTitle: 'Director', jobDescriptionText: 'Cloud platforms',
+          resumeLabel: 'Profile', resumeText: 'Director with 23 yrs',
+        },
+      },
+      stage: { name: 'Leadership', type: PreparationStageType.TECHNICAL, sequence: 4,
+        interviewerName: null, interviewerRole: null, interviewerProfileText: null },
+    })
+    prismaMock.interviewQuestion.findMany.mockResolvedValue([])
+    prismaMock.preparationPractice.findMany.mockResolvedValue([
+      {
+        stage: { name: 'Technical' },
+        session: {
+          sessionName: 'Technical mock interview', focusArea: 'interview_practice',
+          startedAt: new Date('2026-09-20T00:00:00Z'), endedAt: new Date('2026-09-20T00:20:00Z'), durationSec: 1200,
+          turns: [{ text: 'How would you design a reliable event processor?' }],
+          metrics: { coachingInsights: { topStrength: 'Clear technical examples', primaryImprovement: 'Lead with the decision' }, skillScores: null },
+        },
+      },
+      {
+        stage: { name: 'Recruiter' },
+        session: {
+          sessionName: 'Recruiter practice', focusArea: 'interview_practice',
+          startedAt: new Date('2026-09-10T00:00:00Z'), endedAt: new Date('2026-09-10T00:15:00Z'), durationSec: 900,
+          turns: [{ text: 'Tell me about a difficult stakeholder conversation?' }],
+          metrics: { coachingInsights: { topStrength: 'Warm introduction', primaryImprovement: 'Tighten the close' }, skillScores: null },
+        },
+      },
+    ])
+    prismaMock.preparationRecording.findMany.mockResolvedValue([
+      {
+        stage: { name: 'Technical' },
+        replaySession: {
+          sessionName: 'Actual technical round', meetingDate: new Date('2026-09-18T00:00:00Z'),
+          result: { strengths: [{ point: 'Strong system-design framing' }], improvements: [{ point: 'Answer follow-ups more directly' }] },
+        },
+      },
+    ])
+
+    const context = await buildPrepareJourneyContext(SESSION_ID, 'user-a')
+
+    expect(context?.practiceMemory).toMatchObject({
+      completedPracticeCount: 2,
+      completedRecordingCount: 1,
+      latestPractice: {
+        headline: 'Technical mock interview',
+        completedAt: new Date('2026-09-20T00:20:00Z'),
+        topStrength: 'Clear technical examples',
+        primaryImprovement: 'Lead with the decision',
+      },
+    })
+    expect(context?.practiceMemory.earlierPracticeSummary).toContain('Recruiter practice')
+    expect(context?.practiceMemory.recordingSummary).toContain('Actual technical round')
+    expect(context?.practiceMemory.recentPracticeQuestions).toEqual([
+      'How would you design a reliable event processor?',
+      'Tell me about a difficult stakeholder conversation?',
+    ])
   })
 })

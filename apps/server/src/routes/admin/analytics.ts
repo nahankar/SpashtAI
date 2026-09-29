@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express'
 import { prisma } from '../../lib/prisma'
-import { getEnabledFeatures, type PlatformFeature } from '../../lib/featureFlags'
+import { getEnabledFeatures } from '../../lib/featureFlags'
 
 const router = Router()
 
@@ -22,6 +22,12 @@ router.get('/overview', async (_req: Request, res: Response) => {
       totalReplaySessions,
       recentElevate,
       recentReplay,
+      totalPrepareJourneys,
+      recentPrepareJourneys,
+      totalEventPractices,
+      recentEventPractices,
+      totalEventRecordings,
+      recentEventRecordings,
     ] = await Promise.all([
       prisma.user.count(),
       prisma.user.count({ where: { createdAt: { gte: todayStart } } }),
@@ -33,16 +39,30 @@ router.get('/overview', async (_req: Request, res: Response) => {
         },
       }),
       enabled.includes('elevate')
-        ? prisma.session.count({ where: { discardedAt: null } })
+        ? prisma.session.count({ where: { discardedAt: null, preparationPractice: null } })
         : Promise.resolve(0),
-      enabled.includes('replay') ? prisma.replaySession.count() : Promise.resolve(0),
+      enabled.includes('replay') ? prisma.replaySession.count({ where: { preparationRecording: null } }) : Promise.resolve(0),
       enabled.includes('elevate')
         ? prisma.session.count({
-            where: { startedAt: { gte: monthAgo }, discardedAt: null },
+            where: { startedAt: { gte: monthAgo }, discardedAt: null, preparationPractice: null },
           })
         : Promise.resolve(0),
       enabled.includes('replay')
-        ? prisma.replaySession.count({ where: { createdAt: { gte: monthAgo } } })
+        ? prisma.replaySession.count({ where: { createdAt: { gte: monthAgo }, preparationRecording: null } })
+        : Promise.resolve(0),
+      enabled.includes('prepare') ? prisma.preparation.count() : Promise.resolve(0),
+      enabled.includes('prepare')
+        ? prisma.preparation.count({ where: { createdAt: { gte: monthAgo } } })
+        : Promise.resolve(0),
+      enabled.includes('prepare')
+        ? prisma.preparationPractice.count({ where: { session: { discardedAt: null } } })
+        : Promise.resolve(0),
+      enabled.includes('prepare')
+        ? prisma.preparationPractice.count({ where: { createdAt: { gte: monthAgo }, session: { discardedAt: null } } })
+        : Promise.resolve(0),
+      enabled.includes('prepare') ? prisma.preparationRecording.count() : Promise.resolve(0),
+      enabled.includes('prepare')
+        ? prisma.preparationRecording.count({ where: { createdAt: { gte: monthAgo } } })
         : Promise.resolve(0),
     ])
 
@@ -52,6 +72,13 @@ router.get('/overview', async (_req: Request, res: Response) => {
     }
     if (enabled.includes('replay')) {
       sessions.replay = { total: totalReplaySessions, thisMonth: recentReplay }
+    }
+    if (enabled.includes('prepare')) {
+      sessions.prepare = {
+        journeys: { total: totalPrepareJourneys, thisMonth: recentPrepareJourneys },
+        eventPractices: { total: totalEventPractices, thisMonth: recentEventPractices },
+        eventRecordings: { total: totalEventRecordings, thisMonth: recentEventRecordings },
+      }
     }
 
     res.json({

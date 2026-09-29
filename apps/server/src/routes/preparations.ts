@@ -9,6 +9,8 @@ import { Router, type Request, type Response } from 'express'
 import type { ZodError } from 'zod'
 import { prisma } from '../lib/prisma'
 import { reqLog } from '../lib/logger'
+import { enqueueSessionDeletion } from '../lib/sessionDeletionWorker'
+import { enqueueReplayDeletion, replayTranscriptionCachePath } from '../lib/replayDeletionWorker'
 import {
   getOwnedPreparation,
   getOwnedPreparationDetail,
@@ -23,7 +25,6 @@ import {
   createPreparationSchema,
   createQuestionSchema,
   createStageSchema,
-  linkPreparationPracticeSchema,
   logInterviewSchema,
   reorderStagesSchema,
   updatePreparationSchema,
@@ -43,6 +44,7 @@ import {
   preparationInclude,
 } from '../services/preparations/createInterviewJourney'
 import { logInterview, LogInterviewError } from '../services/preparations/logInterview'
+import { trackFeatureUsage } from '../middleware/tracking'
 
 const router = Router()
 
@@ -132,7 +134,7 @@ router.get('/', async (req, res) => {
   }
 })
 
-router.post('/', async (req, res) => {
+router.post('/', trackFeatureUsage('prepare', 'journey_created'), async (req, res) => {
   const parsed = createPreparationSchema.safeParse(req.body)
   if (!parsed.success) return validationError(res, parsed.error)
 
@@ -140,9 +142,9 @@ router.post('/', async (req, res) => {
     const preparation = await createInterviewJourney(userId(req), {
       ...parsed.data,
       companyName:
-        parsed.data.companyName || (parsed.data.mode === 'SIMPLIFIED' ? 'Interview preparation' : ''),
+        parsed.data.companyName || (parsed.data.mode === 'SIMPLIFIED' ? 'General interview' : ''),
       roleTitle:
-        parsed.data.roleTitle || (parsed.data.mode === 'SIMPLIFIED' ? 'Interview practice' : ''),
+        parsed.data.roleTitle,
       interviewDate: parsed.data.interviewDate ?? null,
       currentStageType: parsed.data.currentStageType ?? null,
       jobDescriptionText: parsed.data.jobDescriptionText ?? null,
@@ -247,10 +249,77 @@ router.patch('/:id', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
-    const result = await prisma.preparation.deleteMany({
-      where: { id: req.params.id, userId: userId(req) },
+    const deleted = await prisma.$transaction(async (tx) => {
+      // This parent-row lock serializes all activity creation/linking with
+      // deletion, so a child cannot be orphaned between inspection and delete.
+      await tx.$queryRaw`SELECT id FROM "Preparation" WHERE id = ${req.params.id} FOR UPDATE`
+      const preparation = await tx.preparation.findFirst({
+        where: { id: req.params.id, userId: userId(req) },
+        select: {
+          id: true,
+          practices: { select: { sessionId: true } },
+          recordings: {
+            select: {
+              replaySessionId: true,
+              replaySession: { select: { uploadedFiles: { select: { storedPath: true } } } },
+            },
+          },
+        },
+      })
+      if (!preparation) return null
+      const discardedAt = new Date()
+      const practiceSessionIds = preparation.practices.map((practice) => practice.sessionId)
+      if (practiceSessionIds.length) {
+        await tx.session.updateMany({
+          where: { id: { in: practiceSessionIds }, userId: userId(req), discardedAt: null },
+          data: {
+            discardedAt,
+            deletionStatus: 'pending',
+            deletionAttempts: 0,
+            deletionError: null,
+            nextDeletionAttemptAt: discardedAt,
+          },
+        })
+        await tx.progressPulse.deleteMany({
+          where: { sessionId: { in: practiceSessionIds }, source: 'elevate' },
+        })
+      }
+      if (preparation.recordings.length) {
+        const replaySessionIds = preparation.recordings.map((recording) => recording.replaySessionId)
+        await tx.replayDeletion.createMany({
+          data: preparation.recordings.map((recording) => ({
+            replaySessionId: recording.replaySessionId,
+            filePaths: [
+              ...recording.replaySession.uploadedFiles.map((upload) => upload.storedPath),
+              replayTranscriptionCachePath(recording.replaySessionId),
+            ],
+          })),
+          skipDuplicates: true,
+        })
+        await tx.progressPulse.deleteMany({
+          where: { sessionId: { in: replaySessionIds }, source: 'replay' },
+        })
+        await tx.replaySession.deleteMany({ where: { id: { in: replaySessionIds }, userId: userId(req) } })
+      }
+      await tx.preparation.delete({ where: { id: preparation.id } })
+      return {
+        preparationId: preparation.id,
+        practiceSessionIds,
+        replaySessionIds: preparation.recordings.map((recording) => recording.replaySessionId),
+      }
     })
-    if (result.count === 0) return res.status(404).json({ error: 'Not found' })
+    if (!deleted) return res.status(404).json({ error: 'Not found' })
+    for (const sessionId of deleted.practiceSessionIds) enqueueSessionDeletion(sessionId)
+    for (const replaySessionId of deleted.replaySessionIds) enqueueReplayDeletion(replaySessionId)
+    reqLog(req).info(
+      {
+        event: 'prepare.deleted',
+        preparationId: deleted.preparationId,
+        practiceCount: deleted.practiceSessionIds.length,
+        recordingCount: deleted.replaySessionIds.length,
+      },
+      'Interview journey and its owned activity sources discarded',
+    )
     res.status(204).send()
   } catch (error) {
     reqLog(req).error({ err: error }, 'Failed to delete preparation')
@@ -455,65 +524,50 @@ router.get('/:id/practices', async (req, res) => {
   }
 })
 
-router.post('/:id/practices', async (req, res) => {
-  const parsed = linkPreparationPracticeSchema.safeParse(req.body)
-  if (!parsed.success) return validationError(res, parsed.error)
+// Prepare ownership is created atomically with POST /sessions. Retrospective
+// linking could turn a started standalone Elevate session into an event
+// practice after it has already produced standalone analytics or rewards.
+router.post('/:id/practices', (_req, res) => {
+  res.status(410).json({
+    code: 'PREPARE_RETROACTIVE_LINKING_RETIRED',
+    error: 'Create interview practice from the Prepare journey so ownership is established before it starts.',
+  })
+})
 
+// An in-progress attempt is not part of the journey history until it is
+// completed. It may be discarded, including after an answer was given. Once
+// completed, however, it is durable journey activity and is removed only with
+// its parent journey.
+router.post('/:id/practices/:sessionId/discard', async (req, res) => {
   try {
-    const preparation = await getOwnedPreparation(userId(req), req.params.id)
-    if (!preparation) return res.status(404).json({ error: 'Not found' })
-
-    if (parsed.data.stageId) {
-      const stage = await getOwnedStage(userId(req), preparation.id, parsed.data.stageId)
-      if (!stage) return res.status(404).json({ error: 'Not found' })
-    }
-
-    const session = await prisma.session.findFirst({
-      where: {
-        id: parsed.data.sessionId,
-        userId: userId(req),
-        module: 'elevate',
-        discardedAt: null,
-      },
-      select: { id: true },
+    const discarded = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Preparation" WHERE id = ${req.params.id} FOR UPDATE`
+      const practice = await tx.preparationPractice.findFirst({
+        where: { preparationId: req.params.id, sessionId: req.params.sessionId, preparation: { userId: userId(req) } },
+        include: { session: { select: { endedAt: true } } },
+      })
+      if (!practice) return false
+      if (practice.session.endedAt) throw new Error('PRACTICE_COMPLETED')
+      const now = new Date()
+      await tx.preparationPractice.delete({ where: { id: practice.id } })
+      await tx.session.update({
+        where: { id: practice.sessionId },
+        data: {
+          discardedAt: now, deletionStatus: 'pending', deletionAttempts: 0,
+          deletionError: null, nextDeletionAttemptAt: now,
+        },
+      })
+      return true
     })
-    if (!session) return res.status(404).json({ error: 'Not found' })
-
-    const existing = await prisma.preparationPractice.findUnique({
-      where: { sessionId: session.id },
-    })
-    if (existing) {
-      if (
-        existing.preparationId === preparation.id &&
-        existing.stageId === (parsed.data.stageId ?? null)
-      ) {
-        return res.json({ practice: existing })
-      }
-      return res.status(409).json({ error: 'This Elevate session is already linked' })
-    }
-
-    const practice = await prisma.preparationPractice.create({
-      data: {
-        preparationId: preparation.id,
-        stageId: parsed.data.stageId ?? null,
-        sessionId: session.id,
-      },
-    })
-    reqLog(req).info(
-      {
-        event: 'prepare.practice_linked',
-        preparationId: preparation.id,
-        sessionId: session.id,
-      },
-      'Elevate practice linked to interview journey',
-    )
-    res.status(201).json({ practice })
+    if (!discarded) return res.status(404).json({ error: 'Not found' })
+    enqueueSessionDeletion(req.params.sessionId)
+    res.status(202).json({ success: true })
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-      return res.status(409).json({ error: 'This Elevate session is already linked' })
+    if (error instanceof Error && error.message === 'PRACTICE_COMPLETED') {
+      return res.status(409).json({ error: 'Completed interview practice cannot be discarded individually' })
     }
-    reqLog(req).error({ err: error }, 'Failed to link preparation practice')
-    res.status(500).json({ error: 'Failed to link practice session' })
+    reqLog(req).error({ err: error }, 'Failed to discard in-progress interview practice')
+    res.status(500).json({ error: 'Failed to discard interview practice' })
   }
 })
 

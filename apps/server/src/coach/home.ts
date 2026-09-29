@@ -260,6 +260,7 @@ export async function loadCoachHome(userId: string): Promise<{
               userId,
               module: 'elevate',
               discardedAt: null,
+              preparationPractice: null,
               endedAt: { gte: resultSince },
               metrics: { isNot: null },
             },
@@ -279,6 +280,7 @@ export async function loadCoachHome(userId: string): Promise<{
               userId,
               module: 'elevate',
               discardedAt: null,
+              preparationPractice: null,
               endedAt: null,
               startedAt: { gte: liveSince },
             },
@@ -297,6 +299,7 @@ export async function loadCoachHome(userId: string): Promise<{
             where: {
               userId,
               status: 'completed',
+              preparationRecording: null,
               result: { is: { createdAt: { gte: resultSince } } },
             },
             orderBy: { createdAt: 'desc' },
@@ -532,11 +535,12 @@ export async function markCoachHomeResultSeen(
             module: 'elevate',
             endedAt: { not: null },
             discardedAt: null,
+            preparationPractice: null,
           },
           select: { id: true },
         })
       : await prisma.replaySession.findFirst({
-          where: { id: targetId, userId, status: 'completed' },
+          where: { id: targetId, userId, status: 'completed', preparationRecording: null },
           select: { id: true },
         })
   if (!owned) return false

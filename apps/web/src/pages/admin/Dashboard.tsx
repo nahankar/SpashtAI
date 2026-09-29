@@ -9,6 +9,11 @@ interface Overview {
     enabledFeatures?: string[]
     elevate?: { total: number; thisMonth: number }
     replay?: { total: number; thisMonth: number }
+    prepare?: {
+      journeys: { total: number; thisMonth: number }
+      eventPractices: { total: number; thisMonth: number }
+      eventRecordings: { total: number; thisMonth: number }
+    }
   }
 }
 
@@ -33,8 +38,12 @@ export function Dashboard() {
 
   const showElevate = data.sessions.elevate != null
   const showReplay = data.sessions.replay != null
+  const showPrepare = data.sessions.prepare != null
   const monthTotal =
-    (data.sessions.elevate?.thisMonth ?? 0) + (data.sessions.replay?.thisMonth ?? 0)
+    (data.sessions.elevate?.thisMonth ?? 0) +
+    (data.sessions.replay?.thisMonth ?? 0) +
+    (data.sessions.prepare?.eventPractices.thisMonth ?? 0) +
+    (data.sessions.prepare?.eventRecordings.thisMonth ?? 0)
 
   return (
     <div className="space-y-6">
@@ -43,7 +52,7 @@ export function Dashboard() {
         <p className="text-muted-foreground">Overview of your <BrandName size="sm" className="inline" /> platform</p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <MetricCard
           label="Total Users"
           value={data.users.total}
@@ -68,6 +77,13 @@ export function Dashboard() {
             sublabel={`${data.sessions.replay.thisMonth} this month`}
           />
         )}
+        {showPrepare && data.sessions.prepare && (
+          <MetricCard
+            label="Interview Journeys"
+            value={data.sessions.prepare.journeys.total}
+            sublabel={`${data.sessions.prepare.journeys.thisMonth} created this month`}
+          />
+        )}
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
@@ -81,13 +97,19 @@ export function Dashboard() {
             {showReplay && data.sessions.replay && (
               <li>Total replay sessions: <strong className="text-foreground">{data.sessions.replay.total}</strong></li>
             )}
+            {showPrepare && data.sessions.prepare && (
+              <>
+                <li>Prepare event practices: <strong className="text-foreground">{data.sessions.prepare.eventPractices.total}</strong></li>
+                <li>Prepare event recordings: <strong className="text-foreground">{data.sessions.prepare.eventRecordings.total}</strong></li>
+              </>
+            )}
           </ul>
         </div>
         <div className="rounded-md border p-4">
           <h3 className="mb-2 font-semibold">Recent Activity</h3>
           <p className="text-sm text-muted-foreground">
             {data.users.activeThisWeek} users have been active in the last week,
-            with {monthTotal} sessions this month across enabled modules.
+            with {monthTotal} activities this month across enabled modules.
           </p>
         </div>
       </div>

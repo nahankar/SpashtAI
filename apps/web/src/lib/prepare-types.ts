@@ -97,6 +97,22 @@ export type PreparationPractice = {
     focusArea: string | null
     startedAt: string
     endedAt: string | null
+    durationSec?: number | null
+    metrics?: { coachingInsights?: { topStrength?: string; primaryImprovement?: string } | null } | null
+  }
+}
+
+export type PreparationRecording = {
+  id: string
+  preparationId: string
+  stageId: string | null
+  replaySessionId: string
+  createdAt: string
+  replaySession?: {
+    sessionName: string | null
+    status: string
+    createdAt: string
+    result?: { overallScore: number | null } | null
   }
 }
 
@@ -125,6 +141,7 @@ export type Preparation = {
   questions?: InterviewQuestion[]
   timeline?: PreparationTimelineItem[]
   practices?: PreparationPractice[]
+  recordings?: PreparationRecording[]
 }
 
 /** Mirrors PREPARE_TEXT_LIMITS on the server. */

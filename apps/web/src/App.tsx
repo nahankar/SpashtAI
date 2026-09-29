@@ -56,7 +56,9 @@ function HistoryRedirect() {
 function AppBreadcrumbs() {
   const location = useLocation()
   const path = location.pathname
-  const fromCoach = new URLSearchParams(location.search).get('coach') === '1'
+  const routeParams = new URLSearchParams(location.search)
+  const fromCoach = routeParams.get('coach') === '1'
+  const preparationId = routeParams.get('preparationId')
 
   if (path.startsWith('/admin')) return null
   if (path.startsWith('/auth')) return null
@@ -67,6 +69,7 @@ function AppBreadcrumbs() {
     '/replay': 'Replay',
     '/elevate': 'Elevate',
     '/prepare': 'Prepare',
+    '/prepare/new': 'New Interview Journey',
     '/prepare/interviews': 'Your Interviews',
     '/progress': 'Progress Pulse',
     '/feedback': 'Feedback',
@@ -87,6 +90,9 @@ function AppBreadcrumbs() {
     path.startsWith('/prepare/interviews/') && path !== '/prepare/interviews'
 
   const currentLabel =
+    (preparationId && path === '/elevate' ? 'Interview practice' : null) ||
+    (preparationId && path === '/replay' ? 'Interview event recording' : null) ||
+    (preparationId && isReplayResults ? 'Interview event recording' : null) ||
     (isElevateResults ? 'Results' : null) ||
     routeLabelMap[path] ||
     (isReplayResults ? 'Results' : null) ||
@@ -130,7 +136,9 @@ function AppBreadcrumbs() {
 
   // Modules are peers of Coach, not children of it, so only genuinely nested
   // pages get a trail — rooted at their own module.
-  const parent = isReplayResults
+  const parent = preparationId && (isReplayResults || isElevateResults || path === '/replay')
+    ? { to: `/prepare/interviews/${encodeURIComponent(preparationId)}`, label: 'Interview journey' }
+    : isReplayResults
     ? { to: '/replay', label: 'Replay' }
     : isFeedbackDetail || path === '/feedback/new'
       ? { to: '/feedback', label: 'Feedback' }
@@ -523,17 +531,20 @@ function AppRoutes() {
             <main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8">
               <AppBreadcrumbs />
               <FeatureGate feature="prepare">
+                <InterviewJourneys />
+              </FeatureGate>
+            </main>
+          } />
+          <Route path="/prepare/new" element={
+            <main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8">
+              <AppBreadcrumbs />
+              <FeatureGate feature="prepare">
                 <Prepare />
               </FeatureGate>
             </main>
           } />
           <Route path="/prepare/interviews" element={
-            <main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8">
-              <AppBreadcrumbs />
-              <FeatureGate feature="prepare">
-                <InterviewJourneys />
-              </FeatureGate>
-            </main>
+            <Navigate to="/prepare" replace />
           } />
           <Route path="/prepare/interviews/:id" element={
             <main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8">

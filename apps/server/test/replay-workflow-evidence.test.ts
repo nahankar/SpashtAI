@@ -13,6 +13,7 @@ const state = vi.hoisted(() => ({
   analyze: vi.fn(),
   progress: vi.fn(),
   receipt: vi.fn(),
+  deletions: new Map<string, any>(),
 }))
 vi.mock('../src/lib/prisma', () => {
   const tx = {
@@ -30,6 +31,27 @@ vi.mock('../src/lib/prisma', () => {
       update: vi.fn(async ({ data }: any) => { Object.assign(state.session.result, data); return state.session.result }),
     },
     progressPulse: { deleteMany: state.progress, findFirst: vi.fn(async () => null), findMany: vi.fn(async () => []) }, coachHomeResultReceipt: { deleteMany: state.receipt },
+    replayDeletion: {
+      upsert: vi.fn(async ({ where, create }: any) => {
+        const existing = state.deletions.get(where.replaySessionId)
+        if (!existing) state.deletions.set(where.replaySessionId, {
+          ...create, status: 'pending', attempts: 0, error: null, nextAttemptAt: null,
+        })
+        return state.deletions.get(where.replaySessionId)
+      }),
+      findUnique: vi.fn(async ({ where }: any) => state.deletions.get(where.replaySessionId) ?? null),
+      update: vi.fn(async ({ where, data }: any) => {
+        const current = state.deletions.get(where.replaySessionId)
+        if (!current) throw new Error('Deletion job missing')
+        const attempts = data.attempts?.increment
+          ? current.attempts + data.attempts.increment
+          : data.attempts ?? current.attempts
+        const next = { ...current, ...data, attempts }
+        state.deletions.set(where.replaySessionId, next)
+        return next
+      }),
+      delete: vi.fn(async ({ where }: any) => state.deletions.delete(where.replaySessionId)),
+    },
     user: {
       findUnique: vi.fn(async () => ({
         enablePro: true,
@@ -40,7 +62,10 @@ vi.mock('../src/lib/prisma', () => {
   }
   return { prisma: { ...tx, $transaction: (fn: (client: typeof tx) => unknown) => fn(tx) } }
 })
-vi.mock('../src/middleware/tracking', () => ({ trackFeatureUsage: () => (_req: unknown, _res: unknown, next: () => void) => next() }))
+vi.mock('../src/middleware/tracking', () => ({
+  trackFeatureUsage: () => (_req: unknown, _res: unknown, next: () => void) => next(),
+  recordFeatureUsage: vi.fn(),
+}))
 vi.mock('../src/lib/analysisConfig', () => ({ getReplayModelId: async () => 'mock-only' }))
 vi.mock('../src/lib/aws-bedrock', () => ({ analyzeTranscript: state.analyze }))
 vi.mock('../src/lib/aws-transcribe-streaming', () => ({ transcribeStreamingFromFile: state.stream }))
@@ -64,6 +89,7 @@ describe('Replay upload, cached analysis and deletion workflow (mocked providers
   beforeEach(() => {
     vi.clearAllMocks()
     state.replayAudioUpload = true
+    state.deletions.clear()
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false })))
     state.session = { id: `s-${Math.random().toString(36).slice(2)}`, userId: 'owner', status: 'pending', uploadedFiles: [], result: null,
       meetingDate: new Date('2026-01-01T00:00:00Z'), meetingType: 'Review', userRole: 'Participant', focusAreas: [] }
@@ -135,6 +161,25 @@ describe('Replay upload, cached analysis and deletion workflow (mocked providers
       transcriptRevision: first.evidence.transcriptRevision,
     })).status).toBe(400)
     expect(state.analyze).not.toHaveBeenCalled()
+  })
+  it('lets a Prepare recording finish speaker-confirmed feedback without a meeting date', async () => {
+    state.session.meetingDate = null
+    state.session.preparationRecording = { id: 'recording-1' }
+    const speech = Array.from({ length: 45 }, (_, index) => `word${index}`).join(' ')
+    expect((await request(app).post(`${path()}/upload`).send({ text: `Alice: ${speech}\nAlice: closing thought` })).status).toBe(200)
+    await processSession()
+    const first = (await request(app).get(`${path()}/results`)).body
+    expect((await request(app).put(`${path()}/learner`).send({
+      speaker: 'Alice',
+      transcriptRevision: first.evidence.transcriptRevision,
+      recordingSignature: null,
+      selectionRevision: null,
+    })).status).toBe(200)
+    await processSession({
+      selectionRevision: state.session.learnerSelection.revision,
+      transcriptRevision: first.evidence.transcriptRevision,
+    })
+    expect(state.analyze).toHaveBeenCalled()
   })
   it('reuses audio word cache after confirming a speaker and keeps conflicting uploaded text separate', async () => {
     expect((await request(app).post(`${path()}/upload`).attach('audio', Buffer.from('synthetic test bytes'), 'test.wav').field('text', 'Alice: Different supplied wording.')).status).toBe(200)

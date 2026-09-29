@@ -3,10 +3,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 interface UsageChartProps {
   title: string
-  data: Array<{ name: string; elevate?: number; replay?: number; [key: string]: string | number | undefined }>
+  data: Array<{ name: string; elevate?: number; replay?: number; prepare?: number; [key: string]: string | number | undefined }>
+  enabledFeatures?: Array<'elevate' | 'replay' | 'prepare'>
 }
 
-export function UsageChart({ title, data }: UsageChartProps) {
+export function UsageChart({ title, data, enabledFeatures = ['elevate', 'replay', 'prepare'] }: UsageChartProps) {
   if (!data || data.length === 0) {
     return (
       <Card>
@@ -41,8 +42,15 @@ export function UsageChart({ title, data }: UsageChartProps) {
               }}
             />
             <Legend />
-            <Bar dataKey="elevate" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
-            <Bar dataKey="replay" fill="hsl(262.1, 83.3%, 57.8%)" radius={[4, 4, 0, 0]} />
+            {enabledFeatures.includes('elevate') && (
+              <Bar dataKey="elevate" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+            )}
+            {enabledFeatures.includes('replay') && (
+              <Bar dataKey="replay" fill="hsl(262.1, 83.3%, 57.8%)" radius={[4, 4, 0, 0]} />
+            )}
+            {enabledFeatures.includes('prepare') && (
+              <Bar dataKey="prepare" fill="hsl(142.1, 76.2%, 36.3%)" radius={[4, 4, 0, 0]} />
+            )}
           </BarChart>
         </ResponsiveContainer>
       </CardContent>

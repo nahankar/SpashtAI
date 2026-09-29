@@ -17,7 +17,12 @@ import {
   isPrivilegedRole,
   resolveRequestExportFlags,
 } from '../lib/userExportFlags'
-import { trackFeatureUsage } from '../middleware/tracking'
+import { recordFeatureUsage, trackFeatureUsage } from '../middleware/tracking'
+import {
+  enqueueReplayDeletion,
+  processReplayDeletion,
+  replayTranscriptionCachePath,
+} from '../lib/replayDeletionWorker'
 import { replaySessionAccessWhere } from '../lib/replay-access'
 
 function ownedReplayWhere(req: Request, id: string) {
@@ -215,7 +220,10 @@ router.put('/sessions/:id/learner', async (req: Request, res: Response) => {
   try {
     const outcome = await prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM "ReplaySession" WHERE id = ${req.params.id} FOR UPDATE`
-      const session = await tx.replaySession.findFirst({ where: ownedReplayWhere(req, req.params.id), include: { result: true } })
+      const session = await tx.replaySession.findFirst({
+        where: ownedReplayWhere(req, req.params.id),
+        include: { result: true, preparationRecording: { select: { id: true } } },
+      })
       if (!session) return { code: 404, error: 'Replay session not found' }
       if (session.status !== 'completed' || !session.result) return { code: 409, error: 'Wait for analysis to finish' }
       const segments = replaySegments(session.result.structuredTranscript)
@@ -232,7 +240,13 @@ router.put('/sessions/:id/learner', async (req: Request, res: Response) => {
       const selection: ReplaySelection = { speaker, transcriptRevision: current.transcriptRevision,
         recordingSignature: current.recording?.signature ?? null, provenance: 'user_confirmed',
         revision: digest([speaker, current.transcriptRevision, previous?.revision ?? '', Date.now()]) }
-      await tx.replaySession.update({ where: { id: session.id }, data: { learnerSelection: selection as any, progressPulseStatus: null } })
+      await tx.replaySession.update({
+        where: { id: session.id },
+        data: {
+          learnerSelection: selection as any,
+          progressPulseStatus: session.preparationRecording ? 'skipped' : null,
+        },
+      })
       // Replay-owned removal; shared historical aggregation is intentionally untouched.
       await tx.progressPulse.deleteMany({ where: { sessionId: session.id, source: 'replay' } })
       return { code: 200, selection }
@@ -247,8 +261,14 @@ router.post('/sessions/:id/track-progress', async (req: Request, res: Response) 
   try {
     const outcome = await prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM "ReplaySession" WHERE id = ${req.params.id} FOR UPDATE`
-      const session = await tx.replaySession.findFirst({ where: ownedReplayWhere(req, req.params.id), include: { result: true } })
+      const session = await tx.replaySession.findFirst({
+        where: ownedReplayWhere(req, req.params.id),
+        include: { result: true, preparationRecording: { select: { id: true } } },
+      })
       if (!session) return { code: 404, error: 'Replay session not found' }
+      if (session.preparationRecording) {
+        return { code: 409, error: 'This interview recording belongs to a Prepare journey, not Progress Pulse' }
+      }
       if (session.status !== 'completed' || !session.result) return { code: 409, error: 'Wait for analysis to finish' }
       const view = replayResultView(session.result, session.learnerSelection as unknown as ReplaySelection | null)
       if (view.evidence.identity.state !== 'confirmed' || !view.skillScores ||
@@ -294,9 +314,16 @@ router.get('/sessions/:id/media/:uploadId', async (req: Request, res: Response) 
 
 // ── POST /api/replay/sessions ──
 
-router.post('/sessions', trackFeatureUsage('replay', 'session_create'), async (req: Request, res: Response) => {
+router.post('/sessions', trackFeatureUsage(
+  'replay', 'session_create', (req) => !req.body?.preparationId,
+), async (req: Request, res: Response) => {
   try {
     const { sessionName, meetingType, userRole, focusAreas, meetingGoal, meetingDate, participantName } = req.body
+    const preparationId = typeof req.body?.preparationId === 'string' ? req.body.preparationId.trim() : ''
+    const stageId = typeof req.body?.stageId === 'string' ? req.body.stageId.trim() : ''
+    if (stageId && !preparationId) {
+      return res.status(400).json({ error: 'stageId requires a preparationId' })
+    }
 
     let parsedMeeting: Date | null = null
     if (meetingDate != null && meetingDate !== '') {
@@ -311,21 +338,51 @@ router.post('/sessions', trackFeatureUsage('replay', 'session_create'), async (r
 
     const userId = req.user!.userId
 
-    const session = await prisma.replaySession.create({
-      data: {
-        userId,
-        sessionName: sessionName?.trim() || null,
-        meetingType: meetingType?.trim() || 'General Meeting',
-        userRole: userRole?.trim() || 'Participant',
-        focusAreas: focusAreas || [],
-        meetingGoal: meetingGoal || null,
-        meetingDate: parsedMeeting,
-        participantName: participantName?.trim() || null,
-      },
+    const session = await prisma.$transaction(async (tx) => {
+      if (preparationId) {
+        await tx.$queryRaw`SELECT id FROM "Preparation" WHERE id = ${preparationId} FOR UPDATE`
+        const preparation = await tx.preparation.findFirst({
+          where: { id: preparationId, userId },
+          select: { id: true },
+        })
+        if (!preparation) throw new Error('PREPARATION_NOT_FOUND')
+        if (stageId) {
+          const stage = await tx.preparationStage.findFirst({
+            where: { id: stageId, preparationId: preparation.id },
+            select: { id: true },
+          })
+          if (!stage) throw new Error('STAGE_NOT_FOUND')
+        }
+      }
+      const created = await tx.replaySession.create({
+        data: {
+          userId,
+          sessionName: sessionName?.trim() || null,
+          meetingType: preparationId ? 'Interview' : meetingType?.trim() || 'General Meeting',
+          userRole: preparationId ? 'Candidate' : userRole?.trim() || 'Participant',
+          focusAreas: preparationId ? [] : focusAreas || [],
+          meetingGoal: meetingGoal || null,
+          meetingDate: parsedMeeting,
+          participantName: participantName?.trim() || null,
+          ...(preparationId ? { progressPulseStatus: 'skipped' } : {}),
+        },
+      })
+      if (preparationId) {
+        await tx.preparationRecording.create({
+          data: { preparationId, stageId: stageId || null, replaySessionId: created.id },
+        })
+      }
+      return created
     })
 
+    if (preparationId) {
+      recordFeatureUsage(req, 'prepare', 'event_recording_created', session.id)
+    }
     res.json({ sessionId: session.id })
   } catch (error) {
+    if (error instanceof Error && (error.message === 'PREPARATION_NOT_FOUND' || error.message === 'STAGE_NOT_FOUND')) {
+      return res.status(404).json({ error: 'Interview journey or round not found' })
+    }
     logger.error({ err: error }, 'Error creating replay session:')
     res.status(500).json({ error: 'Failed to create replay session' })
   }
@@ -423,7 +480,9 @@ router.post(
 
 // ── POST /api/replay/sessions/:id/process ──
 
-router.post('/sessions/:id/process', trackFeatureUsage('replay', 'analyze'), async (req: Request, res: Response) => {
+router.post('/sessions/:id/process', trackFeatureUsage(
+  'replay', 'analyze', (req) => !req.body?.preparationId,
+), async (req: Request, res: Response) => {
   try {
     const { id } = req.params
     const { selectionRevision, transcriptRevision: expectedTranscript } = req.body ?? {}
@@ -433,11 +492,20 @@ router.post('/sessions/:id/process', trackFeatureUsage('replay', 'analyze'), asy
     }
     const session = await prisma.replaySession.findFirst({
       where: ownedReplayWhere(req, id),
-      include: { uploadedFiles: { orderBy: { createdAt: 'desc' } } },
+      include: {
+        uploadedFiles: { orderBy: { createdAt: 'desc' } },
+        preparationRecording: { select: { id: true } },
+      },
     })
     if (!session) return res.status(404).json({ error: 'Replay session not found' })
+    // Feature tracking middleware runs on res.json; use the durable ownership
+    // relation, not an optional client-provided preparationId.
+    req.body.preparationId = session.preparationRecording ? 'prepare-owned' : null
 
-    if (boundAssessment && !session.meetingDate) {
+    // A meeting date exists solely for global Progress Pulse chronology. A
+    // Prepare-owned recording never enters Pulse, so requiring one here would
+    // block its speaker-confirmed event feedback with no visible recovery UI.
+    if (boundAssessment && !session.preparationRecording && !session.meetingDate) {
       return res.status(400).json({
         code: 'MEETING_DATE_REQUIRED',
         error:
@@ -469,6 +537,9 @@ router.post('/sessions/:id/process', trackFeatureUsage('replay', 'analyze'), asy
       ? 'The confirmed speaker or transcript changed. Reload before starting the assessment.'
       : 'Replay session is busy or no longer available' })
 
+    if (session.preparationRecording) {
+      recordFeatureUsage(req, 'prepare', 'event_recording_analyzed', id)
+    }
     // Fire-and-forget processing — respond immediately
     res.json({ message: 'Processing started', status: 'transcribing' })
 
@@ -873,7 +944,13 @@ router.get('/sessions/:id/status', async (req: Request, res: Response) => {
     const { id } = req.params
     const session = await prisma.replaySession.findFirst({
       where: ownedReplayWhere(req, id),
-      select: { id: true, status: true, errorMessage: true, updatedAt: true },
+      select: {
+        id: true,
+        status: true,
+        errorMessage: true,
+        updatedAt: true,
+        _count: { select: { uploadedFiles: true } },
+      },
     })
     if (!session) return res.status(404).json({ error: 'Replay session not found' })
     res.json(session)
@@ -907,6 +984,7 @@ router.get('/sessions/:id/results', async (req: Request, res: Response) => {
             duration: true,
           },
         },
+        preparationRecording: { select: { preparationId: true, stageId: true } },
       },
     })
     if (!session) return res.status(404).json({ error: 'Replay session not found' })
@@ -917,7 +995,7 @@ router.get('/sessions/:id/results', async (req: Request, res: Response) => {
       })
     }
 
-    let progressPulseStatus = session.progressPulseStatus
+    let progressPulseStatus = session.preparationRecording ? 'skipped' : session.progressPulseStatus
     if (progressPulseStatus == null) {
       const tracked = await prisma.progressPulse.findFirst({
         where: { sessionId: session.id, source: 'replay' },
@@ -952,6 +1030,7 @@ router.get('/sessions/:id/results', async (req: Request, res: Response) => {
         status: session.status,
         progressPulseStatus,
         createdAt: session.createdAt,
+        preparationRecording: session.preparationRecording,
       },
       uploads: session.uploadedFiles,
       result: safe.result,
@@ -974,7 +1053,7 @@ router.get('/sessions', async (req: Request, res: Response) => {
   try {
     const userId = req.user!.userId
     const sessions = await prisma.replaySession.findMany({
-      where: { userId },
+      where: { userId, preparationRecording: null },
       include: {
         result: {
           select: {
@@ -1063,20 +1142,32 @@ router.delete('/sessions/:id', async (req: Request, res: Response) => {
     const { id } = req.params
     const deleted = await prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM "ReplaySession" WHERE id = ${id} FOR UPDATE`
-      const session = await tx.replaySession.findFirst({ where: ownedReplayWhere(req, id), include: { uploadedFiles: true } })
+      const session = await tx.replaySession.findFirst({
+        where: ownedReplayWhere(req, id),
+        include: { uploadedFiles: true, preparationRecording: { select: { id: true } } },
+      })
       if (!session) return false
-      // Serialize with cache writes so an in-flight transcript cannot recreate a
-      // derived cache after deletion. Missing files are harmless; other errors retry.
-      for (const storedPath of [...session.uploadedFiles.map(f => f.storedPath), transcriptionCachePath(id)]) {
-        try { await unlink(storedPath) } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-        }
-      }
+      if (session.preparationRecording) return 'PREPARE_OWNED' as const
+      await tx.replayDeletion.upsert({
+        where: { replaySessionId: id },
+        create: {
+          replaySessionId: id,
+          filePaths: [...session.uploadedFiles.map((file) => file.storedPath), replayTranscriptionCachePath(id)],
+        },
+        update: {},
+      })
       await tx.progressPulse.deleteMany({ where: { sessionId: id, source: 'replay' } })
       await tx.replaySession.delete({ where: { id } })
-      return true
+      return id
     })
     if (!deleted) return res.status(404).json({ error: 'Replay session not found' })
+    if (deleted === 'PREPARE_OWNED') {
+      return res.status(409).json({ error: 'This interview recording belongs to a Prepare journey. Delete the journey to remove it.' })
+    }
+    // Preserve the existing user-visible delete contract when local cleanup
+    // succeeds, while the committed outbox still guarantees retry after any
+    // storage failure or process restart.
+    if (!(await processReplayDeletion(deleted))) enqueueReplayDeletion(deleted)
     res.json({ message: 'Replay session deleted' })
   } catch (error) {
     logger.error({ err: error }, 'Error deleting replay session:')

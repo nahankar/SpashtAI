@@ -27,6 +27,8 @@ export type CreateInterviewJourneyInput = {
 export const preparationInclude = {
   interview: true,
   stages: { orderBy: { sequence: 'asc' as const } },
+  practices: { select: { id: true } },
+  recordings: { select: { id: true } },
 } satisfies Prisma.PreparationInclude
 
 export const preparationDetailInclude = {
@@ -43,6 +45,34 @@ export const preparationDetailInclude = {
       preparationId: true,
       stageId: true,
       sessionId: true,
+      createdAt: true,
+      session: {
+        select: {
+          sessionName: true,
+          startedAt: true,
+          endedAt: true,
+          durationSec: true,
+          metrics: { select: { coachingInsights: true } },
+        },
+      },
+    },
+  },
+  recordings: {
+    orderBy: { createdAt: 'desc' as const },
+    select: {
+      id: true,
+      preparationId: true,
+      stageId: true,
+      replaySessionId: true,
+      createdAt: true,
+      replaySession: {
+        select: {
+          sessionName: true,
+          status: true,
+          createdAt: true,
+          result: { select: { overallScore: true } },
+        },
+      },
     },
   },
 } satisfies Prisma.PreparationInclude

@@ -106,6 +106,7 @@ import { randomUUID } from 'crypto'
 import { prisma } from './lib/prisma'
 import { discardedSessionGuard } from './lib/sessionDiscard'
 import { startSessionDeletionWorker } from './lib/sessionDeletionWorker'
+import { startReplayDeletionWorker } from './lib/replayDeletionWorker'
 import { startPaceReconciliationWorker } from './lib/paceReconciliationWorker'
 import { startDeliveryAlignmentWorker } from './lib/deliveryAlignmentWorker'
 import { startAudioEnrichmentRetryWorker } from './analytics/audioEnrichment'
@@ -242,8 +243,12 @@ app.get('/personas/:id', getPersona)
 // Protected: sessions (Elevate live coaching)
 app.get('/sessions', requireAuth, requireFeature('elevate'), listSessions)
 app.get('/sessions/:id', requireAuth, requireFeature('elevate'), getSession)
-app.post('/sessions', requireAuth, requireFeature('elevate'), trackFeatureUsage('elevate', 'session_start'), createSession)
-app.post('/sessions/:id/end', requireAuthOrAgent, requireFeature('elevate'), trackFeatureUsage('elevate', 'session_end'), endSession)
+app.post('/sessions', requireAuth, requireFeature('elevate'), trackFeatureUsage(
+  'elevate', 'session_start', (req) => !req.body?.preparationId,
+), createSession)
+app.post('/sessions/:id/end', requireAuthOrAgent, requireFeature('elevate'), trackFeatureUsage(
+  'elevate', 'session_end', (req) => !req.body?.preparationId,
+), endSession)
 app.delete('/sessions/:id', requireAuth, requireFeature('elevate'), deleteSession)
 
 // Protected: settings
@@ -437,6 +442,7 @@ async function startServer() {
   }
 
   startSessionDeletionWorker()
+  startReplayDeletionWorker()
   startPaceReconciliationWorker()
   startDeliveryAlignmentWorker()
   startAudioEnrichmentRetryWorker()

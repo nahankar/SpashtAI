@@ -18,10 +18,14 @@ interface RecentUsage {
   user: { email: string; firstName: string | null }
 }
 
+function readableEventName(value: string) {
+  return value.replace(/_/g, ' ')
+}
+
 export function FeatureAnalytics() {
   const [usage, setUsage] = useState<FeatureUsageSummary[]>([])
   const [recent, setRecent] = useState<RecentUsage[]>([])
-  const [enabledFeatures, setEnabledFeatures] = useState<string[]>(['elevate', 'replay'])
+  const [enabledFeatures, setEnabledFeatures] = useState<string[]>(['elevate', 'replay', 'prepare'])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -31,7 +35,7 @@ export function FeatureAnalytics() {
       .then((data) => {
         setUsage(data.usage)
         setRecent(data.recentUsage)
-        setEnabledFeatures(data.enabledFeatures ?? ['elevate', 'replay'])
+        setEnabledFeatures(data.enabledFeatures ?? ['elevate', 'replay', 'prepare'])
       })
       .catch(console.error)
       .finally(() => setLoading(false))
@@ -43,15 +47,18 @@ export function FeatureAnalytics() {
 
   const elevateCount = usage.filter((u) => u.feature === 'elevate').reduce((sum, u) => sum + u._count.id, 0)
   const replayCount = usage.filter((u) => u.feature === 'replay').reduce((sum, u) => sum + u._count.id, 0)
+  const prepareCount = usage.filter((u) => u.feature === 'prepare').reduce((sum, u) => sum + u._count.id, 0)
   const appPageViews = usage
     .filter((u) => u.feature === 'app' && u.action === 'page_view')
     .reduce((sum, u) => sum + u._count.id, 0)
   const showElevate = enabledFeatures.includes('elevate')
   const showReplay = enabledFeatures.includes('replay')
+  const showPrepare = enabledFeatures.includes('prepare')
 
   const chartData = [
-    ...(showElevate ? [{ name: 'Elevate', elevate: elevateCount, replay: 0 }] : []),
-    ...(showReplay ? [{ name: 'Replay', elevate: 0, replay: replayCount }] : []),
+    ...(showElevate ? [{ name: 'Elevate', elevate: elevateCount, replay: 0, prepare: 0 }] : []),
+    ...(showReplay ? [{ name: 'Replay', elevate: 0, replay: replayCount, prepare: 0 }] : []),
+    ...(showPrepare ? [{ name: 'Prepare', elevate: 0, replay: 0, prepare: prepareCount }] : []),
   ]
 
   return (
@@ -61,20 +68,33 @@ export function FeatureAnalytics() {
         <p className="text-muted-foreground">Usage breakdown by enabled modules (last 30 days)</p>
       </div>
 
-      {showElevate || showReplay ? (
+      {showElevate || showReplay || showPrepare ? (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
             {showElevate && (
               <MetricCard label="Elevate Usage" value={elevateCount} sublabel="Events tracked" />
             )}
             {showReplay && (
               <MetricCard label="Replay Usage" value={replayCount} sublabel="Events tracked" />
             )}
-            <MetricCard label="Total Events" value={elevateCount + replayCount + appPageViews} sublabel="All tracked events" />
+            {showPrepare && (
+              <MetricCard label="Prepare Usage" value={prepareCount} sublabel="Journey and event activity" />
+            )}
+            <MetricCard label="Total Events" value={elevateCount + replayCount + prepareCount + appPageViews} sublabel="All tracked events" />
             <MetricCard label="Page Views" value={appPageViews} sublabel="Authenticated navigation (30d)" />
           </div>
 
-          {chartData.length > 0 && <UsageChart title="Feature Usage" data={chartData} />}
+          {chartData.length > 0 && (
+            <UsageChart
+              title="Feature Usage"
+              data={chartData}
+              enabledFeatures={[
+                ...(showElevate ? ['elevate' as const] : []),
+                ...(showReplay ? ['replay' as const] : []),
+                ...(showPrepare ? ['prepare' as const] : []),
+              ]}
+            />
+          )}
         </>
       ) : (
         <Card>
@@ -105,7 +125,7 @@ export function FeatureAnalytics() {
                   {usage.map((u, i) => (
                     <tr key={i} className="border-b last:border-0">
                       <td className="px-3 py-2 capitalize">{u.feature}</td>
-                      <td className="px-3 py-2 text-muted-foreground">{u.action}</td>
+                      <td className="px-3 py-2 text-muted-foreground">{readableEventName(u.action)}</td>
                       <td className="px-3 py-2 text-right font-medium">{u._count.id}</td>
                     </tr>
                   ))}
@@ -129,7 +149,7 @@ export function FeatureAnalytics() {
                 <div key={i} className="flex items-center justify-between text-sm border-b last:border-0 pb-2">
                   <div>
                     <span className="font-medium capitalize">{r.feature}</span>
-                    <span className="text-muted-foreground ml-2">{r.action}</span>
+                    <span className="text-muted-foreground ml-2">{readableEventName(r.action)}</span>
                     <span className="text-muted-foreground ml-2">by {r.user.firstName || r.user.email}</span>
                   </div>
                   <span className="text-xs text-muted-foreground">

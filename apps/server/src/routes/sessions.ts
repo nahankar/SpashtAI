@@ -6,6 +6,7 @@ import { awardSessionActivePoints } from '../lib/points'
 import { areRewardPointsEnabled } from '../lib/platformSettings'
 import { isPrivilegedRole } from '../lib/userExportFlags'
 import { enqueueSessionDeletion } from '../lib/sessionDeletionWorker'
+import { lockOwnedPreparation } from '../lib/prepareAccess'
 import {
   queuePaceReconciliation,
   requeuePaceReconciliationData,
@@ -19,6 +20,7 @@ import {
 import { deleteRecordingArtifact } from '../lib/sessionStorageCleanup'
 import { isValidInternalAgentRequest } from '../middleware/auth'
 import { scheduleElevateSessionAudioEnrichmentIfAnalyzed } from '../analytics/audioEnrichment'
+import { recordFeatureUsage } from '../middleware/tracking'
 
 export async function listSessions(req: Request, res: Response) {
   try {
@@ -26,7 +28,9 @@ export async function listSessions(req: Request, res: Response) {
     // keep the full list so admin views don't regress.
     const where = isPrivilegedRole(req.user?.role)
       ? { discardedAt: null }
-      : { userId: req.user!.userId, discardedAt: null }
+      // Prepare owns linked practices. They stay available to support/admin
+      // through privileged reads, but are not standalone Elevate history.
+      : { userId: req.user!.userId, discardedAt: null, preparationPractice: null }
     const sessions = await prisma.session.findMany({
       where,
       orderBy: { startedAt: 'desc' },
@@ -127,30 +131,69 @@ export async function createSession(req: Request, res: Response) {
   try {
     const { id, module = 'elevate', startedAt, sessionName, focusArea, focusContext } = req.body
     const userId = req.user!.userId
+    const preparationId = typeof req.body?.preparationId === 'string'
+      ? req.body.preparationId.trim()
+      : ''
+    const stageId = typeof req.body?.stageId === 'string' ? req.body.stageId.trim() : ''
+    if (stageId && !preparationId) {
+      return res.status(400).json({ error: 'stageId requires a preparationId' })
+    }
+    if (preparationId && module !== 'elevate') {
+      return res.status(400).json({ error: 'Interview practice must use the Elevate session engine' })
+    }
 
-    const session = await prisma.session.create({
-      data: {
-        id,
-        userId,
-        module,
-        sessionName: sessionName?.trim() || null,
-        focusArea: focusArea?.trim() || null,
-        focusContext: focusContext?.trim() || null,
-        startedAt: startedAt ? new Date(startedAt) : new Date(),
-      },
-      include: {
-        user: {
-          select: { id: true, email: true }
+    // The native Elevate row and its Prepare ownership must appear together.
+    // Creating then linking in separate requests lets retries and analytics see
+    // a temporary standalone session.
+    const session = await prisma.$transaction(async (tx) => {
+      if (preparationId) {
+        if (!(await lockOwnedPreparation(tx, userId, preparationId))) {
+          throw new Error('PREPARATION_NOT_FOUND')
+        }
+        if (stageId) {
+          const stage = await tx.preparationStage.findFirst({
+            where: { id: stageId, preparationId },
+            select: { id: true },
+          })
+          if (!stage) throw new Error('STAGE_NOT_FOUND')
         }
       }
+      const created = await tx.session.create({
+        data: {
+          id,
+          userId,
+          module,
+          sessionName: sessionName?.trim() || null,
+          focusArea: focusArea?.trim() || null,
+          focusContext: focusContext?.trim() || null,
+          startedAt: startedAt ? new Date(startedAt) : new Date(),
+        },
+        include: {
+          user: {
+            select: { id: true, email: true },
+          },
+        },
+      })
+      if (preparationId) {
+        await tx.preparationPractice.create({
+          data: { preparationId, stageId: stageId || null, sessionId: created.id },
+        })
+      }
+      return created
     })
     
     reqLog(req).info(
       { event: 'elevate.session_created', sessionId: session.id, module, focusArea: focusArea?.trim() || null },
       'session created',
     )
+    if (preparationId) {
+      recordFeatureUsage(req, 'prepare', 'event_practice_started', session.id)
+    }
     res.status(201).json({ success: true, session })
   } catch (error) {
+    if (error instanceof Error && (error.message === 'PREPARATION_NOT_FOUND' || error.message === 'STAGE_NOT_FOUND')) {
+      return res.status(404).json({ error: 'Interview journey or round not found' })
+    }
     logger.error({ err: error }, 'Error creating session:')
     res.status(500).json({ error: 'Failed to create session' })
   }
@@ -183,15 +226,19 @@ export async function endSession(req: Request, res: Response) {
             user: {
               select: { id: true, email: true, rewardPoints: true },
             },
+            preparationPractice: { select: { id: true } },
           },
         }),
       }
     })
 
     const pointsOn = await areRewardPointsEnabled()
+    // Feature tracking middleware runs when the response is sent. Derive this
+    // from the persisted association rather than trusting the caller's body.
+    req.body.preparationId = session.preparationPractice ? 'prepare-owned' : null
     let pointsAwarded = 0
     let totalPoints = session.user.rewardPoints
-    if (!alreadyEnded && pointsOn) {
+    if (!alreadyEnded && pointsOn && !session.preparationPractice) {
       try {
         const pts = await awardSessionActivePoints(session.userId, id)
         pointsAwarded = pts.awarded
@@ -199,6 +246,9 @@ export async function endSession(req: Request, res: Response) {
       } catch (ptsErr) {
         logger.warn({ err: ptsErr, sessionId: id }, 'session points award skipped')
       }
+    }
+    if (!alreadyEnded && session.preparationPractice) {
+      recordFeatureUsage(req, 'prepare', 'event_practice_completed', id)
     }
 
     reqLog(req).info(
@@ -426,6 +476,7 @@ export async function deleteSession(req: Request, res: Response) {
     // Check if session exists
     const session = await prisma.session.findUnique({
       where: { id },
+      include: { preparationPractice: { select: { id: true } } },
     })
     
     if (!session) {
@@ -435,6 +486,12 @@ export async function deleteSession(req: Request, res: Response) {
     // Ownership check: only the owner (or a privileged role) may delete a session.
     if (!isPrivilegedRole(req.user?.role) && session.userId !== req.user?.userId) {
       return res.status(403).json({ error: 'Access denied' })
+    }
+
+    if (session.preparationPractice && !isPrivilegedRole(req.user?.role)) {
+      return res.status(409).json({
+        error: 'This interview practice belongs to a Prepare journey. Delete the journey to remove it.',
+      })
     }
 
     if (!session.discardedAt) {
@@ -488,6 +545,3 @@ export async function deleteSession(req: Request, res: Response) {
     res.status(500).json({ error: 'Failed to delete session' })
   }
 }
-
-
-

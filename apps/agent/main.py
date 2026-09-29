@@ -507,6 +507,12 @@ class CoachingAgent(Agent):
             line = f"Hello {self._user_name}, {welcome}"
         else:
             line = f"Hello, {welcome}"
+        if self._focus_area == "interview_practice":
+            role = (self._session_name or "this role").removeprefix("Interview practice — ").strip()
+            return (
+                f"{line} We'll run an interview practice for {role}. "
+                "Let's begin: tell me about yourself and why this role interests you."
+            )
         # Do not speak Pulse history. That number is from earlier sessions
         # (and on a shared booth login, someone else's).
         if self._focus_area:
@@ -548,6 +554,10 @@ class CoachingAgent(Agent):
         if self._focus_area:
             focus_label = self._focus_area.replace("_", " ")
             greeting_parts.append(f"Mention today's focus area: {focus_label}.")
+        if self._focus_area == "interview_practice":
+            greeting_parts.append(
+                "Begin the interview immediately with one role-relevant opening question; do not ask the user to choose a topic."
+            )
         if self._session_name:
             greeting_parts.append(f"This session is titled '{self._session_name}'.")
         return " ".join(greeting_parts)

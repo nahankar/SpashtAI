@@ -447,9 +447,12 @@ async function summariseElevateSession(
 ): Promise<CompletedSessionSummary | null> {
   const session = await prisma.session.findFirst({
     where: { id: sessionId, userId: ownerId, discardedAt: null },
-    include: { metrics: true },
+    include: { metrics: true, preparationPractice: { select: { id: true } } },
   })
-  if (!session) return null
+  // Coach's generic result loop must not turn a journey-owned event into an
+  // Elevate result card. A future journey-aware interpretation can consume the
+  // bounded Prepare activity digest instead.
+  if (!session || session.preparationPractice) return null
   const persistedPace = readPersistedPaceEvidence(session.metrics?.processingStatus)
   const expectedWords =
     persistedPace && typeof persistedPace === 'object'
@@ -478,9 +481,9 @@ async function summariseReplaySession(
 ): Promise<CompletedSessionSummary | null> {
   const replay = await prisma.replaySession.findFirst({
     where: { id: sessionId, userId: ownerId },
-    include: { result: true },
+    include: { result: true, preparationRecording: { select: { id: true } } },
   })
-  if (!replay?.result || replay.status !== 'completed') return null
+  if (!replay?.result || replay.status !== 'completed' || replay.preparationRecording) return null
   const safe = replayResultView(replay.result, replay.learnerSelection as unknown as ReplaySelection | null)
   return {
     module: 'replay',

@@ -179,15 +179,29 @@ export async function recordProgressPulse(req: Request, res: Response) {
     const records = await prisma.$transaction(async tx => {
       for (const id of [...new Set(data.map(row => row.sessionId!))].sort()) {
         await tx.$queryRaw`SELECT id FROM "Session" WHERE id = ${id} AND "userId" = ${userId} FOR UPDATE`
-        const session = await tx.session.findFirst({ where: { id, userId, discardedAt: null }, select: { module: true } })
-        if (!session || data.some(row => row.sessionId === id && row.source !== session.module)) return null
+        const session = await tx.session.findFirst({
+          where: { id, userId, discardedAt: null },
+          select: { module: true, preparationPractice: { select: { id: true } } },
+        })
+        if (!session || data.some(row => row.sessionId === id && row.source !== session.module)) {
+          return { kind: 'not_found' as const }
+        }
+        // Prepare practices have event-specific feedback and must never be
+        // admitted through this legacy, client-supplied Pulse writer.
+        if (session.preparationPractice) return { kind: 'prepare_owned' as const }
       }
       const created = await tx.progressPulse.createMany({ data })
       await tx.session.updateMany({ where: { userId, id: { in: data.map(row => row.sessionId!) } },
         data: { progressPulseStatus: 'tracked' } })
-      return created
+      return { kind: 'created' as const, count: created.count }
     })
-    if (!records) return res.status(404).json({ error: 'Session not found for this owner and source' })
+    if (records.kind === 'not_found') return res.status(404).json({ error: 'Session not found for this owner and source' })
+    if (records.kind === 'prepare_owned') {
+      return res.status(400).json({
+        code: 'PREPARE_ACTIVITY_NOT_PULSE_ELIGIBLE',
+        error: 'Interview practices belong to their Prepare journey and are not eligible for Progress Pulse.',
+      })
+    }
 
     res.status(201).json({ success: true, count: records.count })
   } catch (error) {
@@ -238,11 +252,15 @@ export async function trackElevateProgressPulse(req: Request, res: Response) {
         id: true,
         focusArea: true,
         metrics: { select: { skillScores: true } },
+        preparationPractice: { select: { id: true } },
       },
     })
     if (!session) return res.status(404).json({ error: 'Session not found' })
     if (session.focusArea === 'snapshot') {
       return res.status(400).json({ error: 'Communication Snapshot sessions are not tracked in Progress Pulse' })
+    }
+    if (session.preparationPractice) {
+      return res.status(400).json({ error: 'Interview practice is tracked in its Prepare journey, not Progress Pulse' })
     }
 
     const existing = await prisma.progressPulse.count({
@@ -285,18 +303,34 @@ export async function skipProgressPulse(req: Request, res: Response) {
     const skipped = await prisma.$transaction(async tx => {
       if (source === 'replay') {
         await tx.$queryRaw`SELECT id FROM "ReplaySession" WHERE id = ${sessionId} AND "userId" = ${userId} FOR UPDATE`
-        if (!await tx.replaySession.findFirst({ where: { id: sessionId, userId } })) return false
+        const replay = await tx.replaySession.findFirst({
+          where: { id: sessionId, userId },
+          select: { preparationRecording: { select: { id: true } } },
+        })
+        if (!replay) return 'not_found' as const
+        if (replay.preparationRecording) return 'prepare_owned' as const
         await tx.progressPulse.deleteMany({ where: { sessionId, userId, source: 'replay' } })
         await tx.replaySession.update({ where: { id: sessionId }, data: { progressPulseStatus: 'skipped' } })
       } else {
         await tx.$queryRaw`SELECT id FROM "Session" WHERE id = ${sessionId} AND "userId" = ${userId} FOR UPDATE`
-        if (!await tx.session.findFirst({ where: { id: sessionId, userId, discardedAt: null } })) return false
+        const session = await tx.session.findFirst({
+          where: { id: sessionId, userId, discardedAt: null },
+          select: { preparationPractice: { select: { id: true } } },
+        })
+        if (!session) return 'not_found' as const
+        if (session.preparationPractice) return 'prepare_owned' as const
         await tx.progressPulse.deleteMany({ where: { sessionId, userId, source: 'elevate' } })
         await tx.session.update({ where: { id: sessionId }, data: { progressPulseStatus: 'skipped' } })
       }
-      return true
+      return 'skipped' as const
     })
-    if (!skipped) return res.status(404).json({ error: 'Session not found' })
+    if (skipped === 'not_found') return res.status(404).json({ error: 'Session not found' })
+    if (skipped === 'prepare_owned') {
+      return res.status(400).json({
+        code: 'PREPARE_ACTIVITY_NOT_PULSE_ELIGIBLE',
+        error: 'Interview activities belong to their Prepare journey and are not eligible for Progress Pulse.',
+      })
+    }
 
     res.json({ success: true })
   } catch (error) {
@@ -346,8 +380,8 @@ async function buildCoachingContext(
     let replayInsights: any = null
     if (enabled.includes('replay')) {
     const replayWhere: Prisma.ReplaySessionWhereInput = replaySessionId
-      ? { id: replaySessionId, userId }
-      : { userId, status: 'completed' }
+      ? { id: replaySessionId, userId, preparationRecording: null }
+      : { userId, status: 'completed', preparationRecording: null }
 
     const latestReplay = await prisma.replaySession.findFirst({
       where: replayWhere,
@@ -441,6 +475,7 @@ async function buildCoachingContext(
         focusArea: focusArea || undefined,
         endedAt: { not: null },
         discardedAt: null,
+        preparationPractice: null,
       },
       orderBy: { startedAt: 'desc' },
       select: {
@@ -512,6 +547,7 @@ async function buildCoachingContext(
         focusArea: focusArea || undefined,
         endedAt: { not: null },
         discardedAt: null,
+        preparationPractice: null,
       },
     })
     }

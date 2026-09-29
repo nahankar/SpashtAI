@@ -75,16 +75,18 @@ export async function analyzeSession(req: Request, res: Response) {
         transcript: true,
         segments: true,
         turns: { orderBy: { sequenceNo: 'asc' } },
+        preparationPractice: { select: { id: true } },
       },
     })
 
     if (!session) {
       return res.status(404).json({ error: 'Session not found' })
     }
-    const shouldAutoTrackPulse =
+    const requestedAutoTrackPulse =
       typeof autoTrackPulse === 'boolean'
         ? autoTrackPulse
         : source === 'elevate' && session.focusArea !== 'snapshot'
+    const shouldAutoTrackPulse = !session.preparationPractice && requestedAutoTrackPulse
 
     const transcript = session.transcript
     if (!transcript) {

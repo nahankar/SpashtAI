@@ -93,12 +93,24 @@ describe('shared Replay evidence boundaries', () => {
   })
 
   it('retains owned Elevate write behavior', async () => {
-    mocks.session.mockResolvedValue({ module: 'elevate' })
+    mocks.session.mockResolvedValue({ module: 'elevate', preparationPractice: null })
     mocks.create.mockResolvedValue({ count: 1 })
     expect((await request(app).post('/pulse').send({
       source: 'elevate', sessionId: 'e', entries: [{ skill: 'clarity', score: 8 }],
     })).status).toBe(201)
     expect(mocks.create.mock.calls[0][0].data[0]).toMatchObject({ userId: 'owner', sessionId: 'e', score: 8 })
+  })
+
+  it('rejects a Prepare-owned practice even through the legacy Pulse writer', async () => {
+    mocks.session.mockResolvedValue({ module: 'elevate', preparationPractice: { id: 'practice-1' } })
+
+    const response = await request(app).post('/pulse').send({
+      source: 'elevate', sessionId: 'practice-session', entries: [{ skill: 'clarity', score: 8 }],
+    })
+
+    expect(response.status).toBe(400)
+    expect(response.body.code).toBe('PREPARE_ACTIVITY_NOT_PULSE_ELIGIBLE')
+    expect(mocks.create).not.toHaveBeenCalled()
   })
 
   it('removes only owned Replay entries under the same session lock when skipping', async () => {
@@ -109,7 +121,20 @@ describe('shared Replay evidence boundaries', () => {
     mocks.replay.mockResolvedValue(null)
     expect((await request(app).post('/pulse/skip').send({ source: 'replay', sessionId: 'foreign' })).status).toBe(404)
     expect(mocks.remove).not.toHaveBeenCalled()
-    expect(mocks.replay).toHaveBeenLastCalledWith({ where: { id: 'foreign', userId: 'owner' } })
+    expect(mocks.replay).toHaveBeenLastCalledWith({
+      where: { id: 'foreign', userId: 'owner' },
+      select: { preparationRecording: { select: { id: true } } },
+    })
+  })
+
+  it('does not let Prepare-owned activities alter Pulse status or entries', async () => {
+    mocks.session.mockResolvedValue({ preparationPractice: { id: 'practice-1' } })
+    const response = await request(app).post('/pulse/skip').send({ source: 'elevate', sessionId: 'practice-session' })
+
+    expect(response.status).toBe(400)
+    expect(response.body.code).toBe('PREPARE_ACTIVITY_NOT_PULSE_ELIGIBLE')
+    expect(mocks.remove).not.toHaveBeenCalled()
+    expect(mocks.sessionUpdate).not.toHaveBeenCalled()
   })
 
   it('filters unverified Replay history in API, Coach context, SQL summary and smoothing', async () => {

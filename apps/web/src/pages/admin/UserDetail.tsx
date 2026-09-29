@@ -41,7 +41,8 @@ interface UserDetailData {
   enableReprocess: boolean
   enablePro: boolean
   enableUltra: boolean
-  _count: { sessions: number; replaySessions: number; featureUsage: number }
+  _count: { sessions: number; replaySessions: number; featureUsage: number; preparations: number }
+  prepareActivity: { journeys: number; eventPractices: number; eventRecordings: number }
 }
 
 interface Activity {
@@ -417,12 +418,27 @@ export function UserDetail() {
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Elevate Sessions</span>
+              <span className="text-muted-foreground">Standalone Elevate sessions</span>
               <span className="font-medium">{user._count.sessions}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Replay Sessions</span>
+              <span className="text-muted-foreground">Standalone Replay uploads</span>
               <span className="font-medium">{user._count.replaySessions}</span>
+            </div>
+            <div className="border-t pt-2 mt-2 space-y-2">
+              <p className="text-xs text-muted-foreground uppercase tracking-wide">Prepare</p>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Interview journeys</span>
+                <span className="font-medium">{user.prepareActivity.journeys}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Event practices</span>
+                <span className="font-medium">{user.prepareActivity.eventPractices}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Event recordings</span>
+                <span className="font-medium">{user.prepareActivity.eventRecordings}</span>
+              </div>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Feature Usage Events</span>

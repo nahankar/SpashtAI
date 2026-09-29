@@ -141,7 +141,13 @@ async function loadPreparation(
 
 async function loadLastElevate(userId: string): Promise<ElevateContext | null> {
   const session = await prisma.session.findFirst({
-    where: { userId, module: 'elevate', endedAt: { not: null }, discardedAt: null },
+    where: {
+      userId,
+      module: 'elevate',
+      endedAt: { not: null },
+      discardedAt: null,
+      preparationPractice: null,
+    },
     orderBy: { startedAt: 'desc' },
     include: { metrics: true },
   })
@@ -159,7 +165,7 @@ async function loadLastElevate(userId: string): Promise<ElevateContext | null> {
 
 async function loadLastReplay(userId: string): Promise<ReplayContext | null> {
   const replay = await prisma.replaySession.findFirst({
-    where: { userId, status: 'completed' },
+    where: { userId, status: 'completed', preparationRecording: null },
     orderBy: { createdAt: 'desc' },
     include: { result: true },
   })

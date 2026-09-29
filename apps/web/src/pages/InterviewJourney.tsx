@@ -26,6 +26,7 @@ import { LogInterviewDialog } from '@/components/prepare/LogInterviewDialog'
 import { QuestionMemory } from '@/components/prepare/QuestionMemory'
 import { StageTracker } from '@/components/prepare/StageTracker'
 import { useConfirm } from '@/hooks/useConfirm'
+import { useFeatureFlags } from '@/contexts/FeatureFlagsContext'
 import {
   addPreparationStage,
   deletePreparationStage,
@@ -71,6 +72,16 @@ function practiceHref(preparationId: string, stageId?: string | null) {
   return `/elevate?${params.toString()}`
 }
 
+function recordingHref(preparationId: string, stageId?: string | null) {
+  const params = new URLSearchParams({ new: 'true', preparationId })
+  if (stageId) params.set('stageId', stageId)
+  return `/replay?${params.toString()}`
+}
+
+function practiceResultHref(preparationId: string, sessionId: string) {
+  return `/elevate?${new URLSearchParams({ session: sessionId, preparationId }).toString()}`
+}
+
 const STAGE_PIPELINE_STATUSES: PreparationStageStatus[] = [
   'UPCOMING',
   'SCHEDULED',
@@ -88,6 +99,7 @@ const JOURNEY_STATUSES: PreparationStatus[] = [
 
 export function InterviewJourney() {
   const confirm = useConfirm()
+  const { isAccessible } = useFeatureFlags()
   const { id } = useParams<{ id: string }>()
   const [journey, setJourney] = useState<Preparation | null>(null)
   const [loading, setLoading] = useState(true)
@@ -99,6 +111,8 @@ export function InterviewJourney() {
   const [tab, setTab] = useState('overview')
   const [logOpen, setLogOpen] = useState(false)
   const [logStageId, setLogStageId] = useState<string | null>(null)
+  const livePracticeAvailable = isAccessible('elevate')
+  const recordingAvailable = isAccessible('replay')
 
   function openLog(stageId?: string) {
     setLogStageId(stageId ?? journey?.nextStage?.id ?? null)
@@ -276,7 +290,7 @@ export function InterviewJourney() {
       <Card>
         <CardContent className="py-10 text-center">
           <p className="text-sm text-destructive">{error || 'Journey not found'}</p>
-          <Link to="/prepare/interviews"><Button className="mt-4" variant="outline">Back to interviews</Button></Link>
+          <Link to="/prepare"><Button className="mt-4" variant="outline">Back to interviews</Button></Link>
         </CardContent>
       </Card>
     )
@@ -285,7 +299,7 @@ export function InterviewJourney() {
   return (
     <div className="space-y-6">
       <Link
-        to="/prepare/interviews"
+        to="/prepare"
         className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="h-4 w-4" /> Your interviews
@@ -299,8 +313,14 @@ export function InterviewJourney() {
             <Badge>{journey.status.toLowerCase()}</Badge>
             {(journey.practices?.length ?? 0) > 0 && (
               <Badge variant="outline">
-                {journey.practices?.length} Elevate practice
+                {journey.practices?.length} interview practice
                 {journey.practices?.length === 1 ? '' : 's'}
+              </Badge>
+            )}
+            {(journey.recordings?.length ?? 0) > 0 && (
+              <Badge variant="outline">
+                {journey.recordings?.length} interview recording
+                {journey.recordings?.length === 1 ? '' : 's'}
               </Badge>
             )}
             {journey.nextStage && (
@@ -312,13 +332,28 @@ export function InterviewJourney() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          {journey.nextStage && (
+          {journey.nextStage && livePracticeAvailable && (
             <Link to={practiceHref(journey.id, journey.nextStage.id)}>
               <Button variant="outline">
                 <Dumbbell className="mr-2 h-4 w-4" />
-                Practice next round
+                New interview practice
               </Button>
             </Link>
+          )}
+          {journey.nextStage && !livePracticeAvailable && (
+            <Button variant="outline" disabled title="Live practice is currently unavailable">
+              <Dumbbell className="mr-2 h-4 w-4" />
+              New interview practice
+            </Button>
+          )}
+          {recordingAvailable ? <Link to={recordingHref(journey.id, journey.nextStage?.id)}>
+            <Button variant="outline">
+              New interview recording
+            </Button>
+          </Link> : (
+            <Button variant="outline" disabled title="Interview recording is currently unavailable">
+              New interview recording
+            </Button>
           )}
           <Button onClick={() => openLog()}>
             <NotebookPen className="mr-2 h-4 w-4" />
@@ -352,6 +387,9 @@ export function InterviewJourney() {
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="activity">
+            Activity ({(journey.practices?.length ?? 0) + (journey.recordings?.length ?? 0)})
+          </TabsTrigger>
           <TabsTrigger value="stages">Stages</TabsTrigger>
           <TabsTrigger value="questions">Questions</TabsTrigger>
         </TabsList>
@@ -438,6 +476,79 @@ export function InterviewJourney() {
           )}
         </TabsContent>
 
+        <TabsContent value="activity" className="mt-5 space-y-4">
+          <div className="flex flex-wrap gap-2">
+            {livePracticeAvailable ? <Link to={practiceHref(journey.id, journey.nextStage?.id)}>
+              <Button size="sm"><Dumbbell className="mr-2 h-4 w-4" /> New interview practice</Button>
+            </Link> : <Button size="sm" disabled title="Live practice is currently unavailable"><Dumbbell className="mr-2 h-4 w-4" /> New interview practice</Button>}
+            {recordingAvailable ? <Link to={recordingHref(journey.id, journey.nextStage?.id)}>
+              <Button size="sm" variant="outline">New interview event recording</Button>
+            </Link> : <Button size="sm" variant="outline" disabled title="Interview recording is currently unavailable">New interview event recording</Button>}
+          </div>
+          {(journey.practices?.length ?? 0) === 0 && (journey.recordings?.length ?? 0) === 0 ? (
+            <Card>
+              <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                No interview activity yet. Start an event practice or add an event recording when you are ready.
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-3">
+              {(journey.practices ?? []).map((practice) => {
+                const stage = journey.stages.find((item) => item.id === practice.stageId)
+                const completed = Boolean(practice.session?.endedAt)
+                const insight = practice.session?.metrics?.coachingInsights
+                return (
+                  <Card key={practice.id}>
+                    <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+                      <div>
+                        <p className="font-medium">Interview practice</p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {[stage?.name, practice.session?.sessionName, displayDate(practice.session?.startedAt)]
+                            .filter(Boolean).join(' · ')}
+                        </p>
+                        {insight?.primaryImprovement && (
+                          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+                            Next focus: {insight.primaryImprovement}
+                          </p>
+                        )}
+                      </div>
+                      <Link to={practiceResultHref(journey.id, practice.sessionId)}>
+                        <Button size="sm" variant="outline">{completed ? 'View results' : 'Resume'}</Button>
+                      </Link>
+                    </CardContent>
+                  </Card>
+                )
+              })}
+              {(journey.recordings ?? []).map((recording) => {
+                const stage = journey.stages.find((item) => item.id === recording.stageId)
+                const recordingSession = recording.replaySession
+                const completed = recordingSession?.status === 'completed'
+                return (
+                  <Card key={recording.id}>
+                    <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+                      <div>
+                        <p className="font-medium">Interview event recording</p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {[stage?.name, recordingSession?.sessionName, displayDate(recordingSession?.createdAt)]
+                            .filter(Boolean).join(' · ')}
+                        </p>
+                        {completed && (
+                          <p className="mt-2 text-sm text-muted-foreground">Analysis complete</p>
+                        )}
+                      </div>
+                      <Link to={completed
+                        ? `/replay/${encodeURIComponent(recording.replaySessionId)}?preparationId=${encodeURIComponent(journey.id)}`
+                        : `/replay?session=${encodeURIComponent(recording.replaySessionId)}&preparationId=${encodeURIComponent(journey.id)}`}>
+                        <Button size="sm" variant="outline">{completed ? 'View results' : 'Continue upload'}</Button>
+                      </Link>
+                    </CardContent>
+                  </Card>
+                )
+              })}
+            </div>
+          )}
+        </TabsContent>
+
         <TabsContent value="stages" className="mt-5 space-y-4">
           {journey.stages.map((stage, index) => (
             <Card key={stage.id}>
@@ -500,12 +611,15 @@ export function InterviewJourney() {
                         <Button size="sm" variant="outline" onClick={() => openLog(stage.id)}>
                           Log interview
                         </Button>
-                        <Link to={practiceHref(journey.id, stage.id)}>
+                        {livePracticeAvailable ? <Link to={practiceHref(journey.id, stage.id)}>
                           <Button size="sm" variant="outline">
                             <Dumbbell className="mr-1.5 h-3.5 w-3.5" />
                             Practice
                           </Button>
-                        </Link>
+                        </Link> : <Button size="sm" variant="outline" disabled title="Live practice is currently unavailable">Practice</Button>}
+                        {recordingAvailable ? <Link to={recordingHref(journey.id, stage.id)}>
+                          <Button size="sm" variant="outline">Recording</Button>
+                        </Link> : <Button size="sm" variant="outline" disabled title="Interview recording is currently unavailable">Recording</Button>}
                         <Button size="sm" variant="outline" onClick={() => setEditingStage(stage.id)}>Edit</Button>
                         <Button size="icon" variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => removeStage(stage)} aria-label={`Remove ${stage.name}`}><Trash2 className="h-4 w-4" /></Button>
                       </div>

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { useParams, Link, useSearchParams } from 'react-router-dom'
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { getAuthHeaders } from '@/lib/api-client'
 import { useUserExportFlags } from '@/hooks/useUserExportFlags'
@@ -996,6 +996,7 @@ function ReanalyzeOverlay({ status, error, hasPriorAssessment, onDismiss, onRetr
 
 export function ReplayResults() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const { user, updateUser } = useAuth()
   const exportFlags = useUserExportFlags()
   const [searchParams] = useSearchParams()
@@ -1004,12 +1005,12 @@ export function ReplayResults() {
   const coachThreadId = searchParams.get('thread')
   if (coachThreadId) coachBackParams.set('thread', coachThreadId)
   if (id && coachThreadId) coachBackParams.set('replayResult', id)
-  const backTo = cameFromCoach
+  const defaultBackTo = cameFromCoach
     ? coachBackParams.size > 0
       ? `/coach?${coachBackParams.toString()}`
       : '/coach'
     : '/replay'
-  const backLabel = cameFromCoach
+  const defaultBackLabel = cameFromCoach
     ? 'Back to Coach'
     : 'Back to Replay'
   const [data, setData] = useState<ReplayResultData | null>(null)
@@ -1017,6 +1018,19 @@ export function ReplayResults() {
   const [error, setError] = useState<string | null>(null)
   const seenResultRef = useRef<string | null>(null)
   const resultsRequestRef = useRef<AbortController | null>(null)
+  const preparationId = data?.session.preparationRecording?.preparationId
+  const isInterviewRecording = Boolean(preparationId)
+  const backTo = isInterviewRecording
+    ? `/prepare/interviews/${encodeURIComponent(preparationId!)}`
+    : defaultBackTo
+  const backLabel = isInterviewRecording ? 'Back to interview' : defaultBackLabel
+
+  useEffect(() => {
+    if (!id || !preparationId || searchParams.get('preparationId')) return
+    const params = new URLSearchParams(searchParams)
+    params.set('preparationId', preparationId)
+    navigate(`/replay/${encodeURIComponent(id)}?${params.toString()}`, { replace: true })
+  }, [id, navigate, preparationId, searchParams])
 
   const loadResults = useCallback(() => {
     if (!id) return
@@ -1314,7 +1328,9 @@ export function ReplayResults() {
           <Link to={backTo} className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
             <ArrowLeft className="h-3.5 w-3.5" /> {backLabel}
           </Link>
-          <h1 className="text-2xl font-bold">{session.sessionName || 'Replay Results'}</h1>
+          <h1 className="text-2xl font-bold">
+            {session.sessionName || (isInterviewRecording ? 'Interview event recording' : 'Replay Results')}
+          </h1>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
             {data.evidence.identity.speaker && (
               <span className="inline-flex items-center gap-1 font-medium text-primary">
@@ -1334,7 +1350,7 @@ export function ReplayResults() {
                 )}
               </span>
             )}
-            <Badge variant="secondary">{session.meetingType}</Badge>
+            <Badge variant="secondary">{isInterviewRecording ? 'Interview event recording' : session.meetingType}</Badge>
             <span>{session.userRole}</span>
             {session.meetingDate && (
               <>
@@ -1345,7 +1361,7 @@ export function ReplayResults() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {pulseLoading ? (
+          {!isInterviewRecording && (pulseLoading ? (
             <Button variant="outline" size="sm" disabled>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Updating...
             </Button>
@@ -1368,17 +1384,17 @@ export function ReplayResults() {
             >
               <TrendingUp className="mr-2 h-4 w-4" /> {pulseStatus === 'skipped' ? 'Track in Pulse' : 'Track in Pulse'}
             </Button>
-          )}
+          ))}
           {exportFlags.enableReprocess && (
             <Button variant="outline" size="sm" onClick={() => setDialogOpen(true)}>
               <RefreshCw className="mr-2 h-4 w-4" /> Re-analyze
             </Button>
           )}
-          <Button variant="outline" size="sm" onClick={handleExportPdf} disabled={pdfLoading}>
+          {!isInterviewRecording && <Button variant="outline" size="sm" onClick={handleExportPdf} disabled={pdfLoading}>
             {pdfLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
             Export PDF
-          </Button>
-          {exportFlags.enableJsonExport && (
+          </Button>}
+          {!isInterviewRecording && exportFlags.enableJsonExport && (
             <Button variant="outline" size="sm" onClick={handleDownload}>
               <Download className="mr-2 h-4 w-4" /> Export JSON
             </Button>
@@ -1387,7 +1403,7 @@ export function ReplayResults() {
       </div>
 
       {/* Missing meeting date nudge */}
-      {!session.meetingDate && !nudgeDismissed && (
+      {!isInterviewRecording && !session.meetingDate && !nudgeDismissed && (
         <div className="mb-4 flex flex-col gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex gap-3">
             <CalendarDays className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
@@ -1435,12 +1451,12 @@ export function ReplayResults() {
       <Tabs defaultValue="overview">
         <TabsList className="mb-4 w-full justify-start">
           <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="metrics">Metrics</TabsTrigger>
+          {!isInterviewRecording && <TabsTrigger value="metrics">Metrics</TabsTrigger>}
           <TabsTrigger value="insights">AI Insights</TabsTrigger>
           {!exportFlags.hideTranscriptText && (
             <TabsTrigger value="transcript">Transcript</TabsTrigger>
           )}
-          <TabsTrigger value="impact">Meeting Impact</TabsTrigger>
+          {!isInterviewRecording && <TabsTrigger value="impact">Meeting Impact</TabsTrigger>}
         </TabsList>
 
         {/* Overview */}
@@ -1466,23 +1482,25 @@ export function ReplayResults() {
                         )}
                       </div>
                     </div>
-                    <Link
-                      to={`/elevate?focus=${
-                        inferFocusArea(data.coachingInsights.primaryImprovement)
-                      }&context=${encodeURIComponent(
-                        data.coachingInsights.practicePlan?.[0]?.description || data.coachingInsights.practiceExercise || data.coachingInsights.primaryImprovement
-                      )}&newSession=true`}
-                      className="shrink-0"
-                    >
-                      <Button>
-                        <Mic className="mr-2 h-4 w-4" /> Start Practice
-                        <ArrowRight className="ml-2 h-4 w-4" />
-                      </Button>
-                    </Link>
+                    {!isInterviewRecording && (
+                      <Link
+                        to={`/elevate?focus=${
+                          inferFocusArea(data.coachingInsights.primaryImprovement)
+                        }&context=${encodeURIComponent(
+                          data.coachingInsights.practicePlan?.[0]?.description || data.coachingInsights.practiceExercise || data.coachingInsights.primaryImprovement
+                        )}&newSession=true`}
+                        className="shrink-0"
+                      >
+                        <Button>
+                          <Mic className="mr-2 h-4 w-4" /> Start Practice
+                          <ArrowRight className="ml-2 h-4 w-4" />
+                        </Button>
+                      </Link>
+                    )}
                   </div>
 
                   {/* Exercise Preview */}
-                  {(() => {
+                  {!isInterviewRecording && (() => {
                     const focusId = inferFocusArea(data.coachingInsights.primaryImprovement)
                     const preview = EXERCISE_PREVIEWS[focusId]
                     const skillScores = data.skillScores?.scores as Record<string, number> | undefined
@@ -1533,7 +1551,7 @@ export function ReplayResults() {
             )}
 
             {/* Unified Communication Score */}
-            <Card className="border-2 border-primary/20">
+            {!isInterviewRecording && <Card className="border-2 border-primary/20">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Communication Score</CardTitle>
                 <CardDescription>Click any skill to see what contributes to the score</CardDescription>
@@ -1615,10 +1633,10 @@ export function ReplayResults() {
                   </div>
                 )}
               </CardContent>
-            </Card>
+            </Card>}
 
             {/* Top 3 Coaching Actions */}
-            {data.skillScores && <TopCoachingActions result={result} coachingInsights={data.coachingInsights} />}
+            {!isInterviewRecording && data.skillScores && <TopCoachingActions result={result} coachingInsights={data.coachingInsights} />}
 
             {/* Strengths, Improvements & Recommendations */}
             <div className="grid gap-4 md:grid-cols-3">
@@ -1656,12 +1674,14 @@ export function ReplayResults() {
                         {imp.suggestion && (
                           <p className="mt-0.5 text-xs text-muted-foreground">{imp.suggestion}</p>
                         )}
-                        <Link
-                          to={`/elevate?focus=${focus}&context=${ctx}&newSession=true`}
-                          className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-                        >
-                          <Mic className="h-3 w-3" /> Practice this in Elevate <ArrowRight className="h-3 w-3" />
-                        </Link>
+                        {!isInterviewRecording && (
+                          <Link
+                            to={`/elevate?focus=${focus}&context=${ctx}&newSession=true`}
+                            className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                          >
+                            <Mic className="h-3 w-3" /> Practice this in Elevate <ArrowRight className="h-3 w-3" />
+                          </Link>
+                        )}
                       </div>
                     )
                   })}
@@ -1688,7 +1708,7 @@ export function ReplayResults() {
             </div>
 
             {/* Elevate CTA (compact, since Next Improvement card is at the top) */}
-            <div className="flex items-center justify-between rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
+            {!isInterviewRecording && <div className="flex items-center justify-between rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
               <div className="flex items-center gap-2 text-sm">
                 <Mic className="h-4 w-4 text-primary" />
                 <span>Practice your areas for improvement with a live AI coaching session</span>
@@ -1704,12 +1724,12 @@ export function ReplayResults() {
                   Open Elevate <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
                 </Button>
               </Link>
-            </div>
+            </div>}
           </div>
         </TabsContent>
 
         {/* Metrics */}
-        <TabsContent value="metrics">
+        {!isInterviewRecording && <TabsContent value="metrics">
           <div className="grid gap-6">
             {/* AI Scores */}
             <Card>
@@ -1783,7 +1803,7 @@ export function ReplayResults() {
               </CardContent>
             </Card>
           </div>
-        </TabsContent>
+        </TabsContent>}
 
         {/* AI Insights */}
         <TabsContent value="insights">
@@ -1836,7 +1856,7 @@ export function ReplayResults() {
                         </div>
                         <RatingBadge rating={f.rating} />
                       </div>
-                      {f.rating === 'needs_work' && (
+                      {!isInterviewRecording && f.rating === 'needs_work' && (
                         <Link
                           to={`/elevate?focus=${focus}&context=${ctx}&newSession=true`}
                           className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
@@ -1875,7 +1895,7 @@ export function ReplayResults() {
             )}
 
             {/* Elevate CTA */}
-            <div className="flex items-center justify-between rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
+            {!isInterviewRecording && <div className="flex items-center justify-between rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
               <div className="flex items-center gap-2 text-sm">
                 <Mic className="h-4 w-4 text-primary" />
                 <span>Work on these insights with a live AI coaching session</span>
@@ -1885,7 +1905,7 @@ export function ReplayResults() {
                   Open Elevate <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
                 </Button>
               </Link>
-            </div>
+            </div>}
           </div>
         </TabsContent>
 
@@ -1972,7 +1992,7 @@ export function ReplayResults() {
         )}
 
         {/* Meeting Impact */}
-        <TabsContent value="impact">
+        {!isInterviewRecording && <TabsContent value="impact">
           <div className="grid gap-6">
             {/* Meeting Summary */}
             {data.coachingInsights?.meetingSummary && (
@@ -1993,7 +2013,7 @@ export function ReplayResults() {
               />
             )}
           </div>
-        </TabsContent>
+        </TabsContent>}
       </Tabs>
     </div>
   )

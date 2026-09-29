@@ -193,7 +193,7 @@ export function Prepare() {
             Tell us what is coming up. We will organise the interview journey underneath.
           </p>
         </div>
-        <Link to="/prepare/interviews">
+        <Link to="/prepare">
           <Button variant="outline">Your interviews</Button>
         </Link>
       </div>
@@ -215,20 +215,24 @@ export function Prepare() {
               <div>
                 <h2 className="text-xl font-semibold">Quick interview practice</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Add any context you have. All five answers are optional and no attachments are
-                  needed.
+                  Add any context you have. Your target role is required; the rest is optional and
+                  no attachments are needed.
                 </p>
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="simple-role">1. Interview role</Label>
+                <Label htmlFor="simple-role">1. Target role or interview title *</Label>
                 <Input
                   id="simple-role"
                   value={roleTitle}
                   maxLength={PREPARE_TEXT_LIMITS.roleTitle}
                   onChange={(event) => setRoleTitle(event.target.value)}
                   placeholder="e.g. Senior Engineering Manager"
+                  required
                 />
+                <p className="text-xs text-muted-foreground">
+                  This gives the practice a clear, meaningful focus. Company is optional for a quick practice.
+                </p>
               </div>
 
               <div className="space-y-1.5">
@@ -294,7 +298,7 @@ export function Prepare() {
               </div>
 
               <div className="flex justify-end border-t pt-4">
-                <Button onClick={submitSimplified} disabled={submitting}>
+                <Button onClick={submitSimplified} disabled={submitting || !roleTitle.trim()}>
                   {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   Continue to practice <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>

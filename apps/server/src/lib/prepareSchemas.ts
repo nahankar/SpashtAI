@@ -66,7 +66,16 @@ export const createPreparationSchema = z
   })
   .strict()
   .superRefine((value, context) => {
-    if (value.mode !== 'DETAILED') return
+    if (value.mode === 'SIMPLIFIED') {
+      if (!value.roleTitle) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['roleTitle'],
+          message: 'Target role or interview title is required',
+        })
+      }
+      return
+    }
     if (!value.companyName) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
