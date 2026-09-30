@@ -12,7 +12,6 @@ import {
   MessageSquare,
   Star,
   Lightbulb,
-  Search,
   FastForward,
   TrendingUp,
   Zap,
@@ -23,7 +22,7 @@ import {
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
+import { SessionChat } from '@/components/session/SessionChat'
 import { getAuthHeaders, getAuthenticatedMediaUrl } from '@/lib/api-client'
 import { COACH_BUBBLE, USER_BUBBLE } from '@/lib/conversation'
 import { ElevateDeliveryClip, isElevateRecordingReady, watchElevateRecordingDuration } from '@/lib/elevateDeliveryClip'
@@ -1346,23 +1345,12 @@ export function SessionReplay({
             )
           })}
         </div>
-        {/* Ask AI Coach — conversational Q&A over this session (Pro) */}
-        <div className="relative ml-auto w-full max-w-xs" title="Ask AI Coach is a Pro version feature">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value=""
-            readOnly
-            disabled
-            placeholder="Ask AI Coach about this session…"
-            className="h-8 cursor-not-allowed pl-8 pr-14 text-xs"
-          />
-          <Badge
-            variant="secondary"
-            className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 px-1.5 py-0 text-[10px] font-semibold uppercase tracking-wide"
-          >
-            Pro
-          </Badge>
-        </div>
+        {/* Ask AI Coach — conversational Q&A over this session.
+            Renders the inert "Pro" placeholder until an admin enables the
+            `session_chat` flag, then becomes interactive (see SessionChat). */}
+        {sessionId ? (
+          <SessionChat module="elevate" sessionId={sessionId} />
+        ) : null}
       </div>
 
       {effectiveChips.size > 0 && (

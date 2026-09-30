@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { getAuthHeaders } from '@/lib/api-client'
 import { useUserExportFlags } from '@/hooks/useUserExportFlags'
+import { SessionChat } from '@/components/session/SessionChat'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -1401,6 +1402,14 @@ export function ReplayResults() {
           )}
         </div>
       </div>
+
+      {/* Ask AI Coach about this session — inert "Pro" placeholder until an admin
+          enables the `session_chat` flag, then interactive (see SessionChat). */}
+      {id ? (
+        <div className="mb-4 flex justify-end">
+          <SessionChat module="replay" sessionId={id} />
+        </div>
+      ) : null}
 
       {/* Missing meeting date nudge */}
       {!isInterviewRecording && !session.meetingDate && !nudgeDismissed && (

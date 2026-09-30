@@ -4,13 +4,14 @@ import { prisma } from './prisma'
 /** Product modules that may be shown in navigation and counted in Pulse. */
 export type PlatformFeature = 'elevate' | 'replay' | 'prepare' | 'quick_try'
 /** Controlled capabilities that are enabled from Admin but are not modules. */
-export type InternalFeature = 'delivery_moments'
+export type InternalFeature = 'delivery_moments' | 'session_chat'
 export type ConfigurableFeature = PlatformFeature | InternalFeature
 
 export const PLATFORM_FEATURES: PlatformFeature[] = ['elevate', 'replay', 'prepare', 'quick_try']
 export const CONFIGURABLE_FEATURES: ConfigurableFeature[] = [
   ...PLATFORM_FEATURES,
   'delivery_moments',
+  'session_chat',
 ]
 const PULSE_FEATURES: PlatformFeature[] = ['elevate', 'replay', 'prepare']
 
@@ -65,6 +66,17 @@ const DEFAULT_FLAGS: Array<{
     // It remains off until an administrator intentionally exposes it.
     hidden: true,
     disabled: false,
+  },
+  {
+    feature: 'session_chat',
+    label: 'Session Chat',
+    description:
+      'Ask-AI-Coach conversational Q&A grounded in a single session (Elevate/Replay). '
+      + 'A controlled capability — visible but disabled until an administrator turns it on.',
+    // Disabled (not hidden) by default: the "Ask AI Coach about this session" box
+    // stays in its inactive/Pro state until an admin enables this flag.
+    hidden: false,
+    disabled: true,
   },
 ]
 
@@ -141,6 +153,12 @@ export async function getFeatureFlagsMap(): Promise<FeatureFlagsMap> {
     delivery_moments: {
       hidden: true,
       disabled: false,
+      overlayComment: null,
+      overlayPosition: 'center',
+    },
+    session_chat: {
+      hidden: false,
+      disabled: true,
       overlayComment: null,
       overlayPosition: 'center',
     },

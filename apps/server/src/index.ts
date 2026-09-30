@@ -78,6 +78,7 @@ import adminAgentPromptsRouter, { ensurePrompts } from './routes/admin/agent-pro
 import internalAgentPromptsRouter from './routes/internal/agent-prompts'
 import feedbackRouter from './routes/feedback'
 import coachRouter from './routes/coach'
+import sessionChatRouter from './routes/session-chat'
 import adminFeedbackRouter from './routes/admin/feedback'
 import adminTickersRouter from './routes/admin/tickers'
 import adminPricingRouter from './routes/admin/pricing'
@@ -228,6 +229,9 @@ app.use('/api/events', requireAuth, eventsRouter)
 // Protected: user feedback
 app.use('/api/feedback', requireAuth, feedbackRouter)
 app.use('/api/coach', requireAuth, coachRouter)
+// Session-level chat ("Ask AI Coach about this session"). Flag-gated inside the
+// router (session_chat, disabled by default); ownership-checked per request.
+app.use('/api/session-chat', requireAuth, sessionChatRouter)
 
 // Protected: Prepare interview journeys
 app.use('/api/preparations', requireAuth, requireFeature('prepare'), preparationsRouter)
