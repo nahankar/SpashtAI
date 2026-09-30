@@ -40,6 +40,7 @@ livekit-agents==1.5.8
 livekit-api==1.1.0
 livekit-blingfire==1.1.0
 livekit-plugins-aws==1.5.8
+livekit-plugins-hush==0.3.3
 livekit-plugins-silero==1.5.8
 livekit-protocol==1.1.8
 markdown-it-py==4.0.0

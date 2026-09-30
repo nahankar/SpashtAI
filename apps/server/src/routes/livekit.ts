@@ -35,6 +35,7 @@ async function getActiveVoiceConfig() {
     sttBaseUrl: null,
     llmBaseUrl: null,
     ttsBaseUrl: null,
+    hushEnabled: false,
   } as const
 }
 
@@ -44,6 +45,22 @@ function normalizeTurnDetection(value?: string): TurnDetection {
   const level = (value || 'MEDIUM').toUpperCase()
   if (level === 'HIGH' || level === 'LOW' || level === 'EXTRA') return level
   return 'MEDIUM'
+}
+
+function parseRoomMetadata(value: string | undefined): Record<string, unknown> {
+  if (!value) return {}
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {}
+  } catch {
+    return {}
+  }
+}
+
+function normalizeHushEnabled(value: unknown): boolean {
+  return value === true || (typeof value === 'string' && ['1', 'true', 'yes'].includes(value.trim().toLowerCase()))
 }
 
 function hasActiveDispatchJobs(dispatches: any[] | undefined): boolean {
@@ -93,7 +110,7 @@ export async function getLivekitToken(req: Request, res: Response) {
 
     // Create the room first to ensure agent can join
     const roomService = new RoomServiceClient(httpUrl, apiKey, apiSecret)
-    const roomMeta: Record<string, string | undefined | null> = {
+    const roomMeta: Record<string, string | boolean | undefined | null> = {
       sessionId,
       segmentId,
       userName,
@@ -113,6 +130,9 @@ export async function getLivekitToken(req: Request, res: Response) {
       sttBaseUrl: voiceCfg.sttBaseUrl ?? undefined,
       llmBaseUrl: voiceCfg.llmBaseUrl ?? undefined,
       ttsBaseUrl: voiceCfg.ttsBaseUrl ?? undefined,
+      // This is resolved once for a new room. The agent reads it at session
+      // start; changing the admin switch never mutates an active session.
+      hushEnabled: voiceCfg.backend === 'pipeline-bedrock' && voiceCfg.hushEnabled === true,
       turnDetection: normalizeTurnDetection(turnDetection),
     }
     try {
@@ -126,10 +146,24 @@ export async function getLivekitToken(req: Request, res: Response) {
       const msg = roomError?.message || String(roomError)
       if (msg.includes('already exists')) {
         try {
+          // Preserve the Hush decision made at room creation.  A token refresh
+          // for an active room must never turn cleanup on/off mid-session.
+          // If the existing room predates this flag, leave it absent; the agent
+          // safely interprets that as disabled.
+          const existingRoom = (await roomService.listRooms([room]))[0]
+          if (!existingRoom) {
+            throw new Error('existing room could not be read')
+          }
+          const existingMeta = parseRoomMetadata(existingRoom.metadata)
+          if (Object.prototype.hasOwnProperty.call(existingMeta, 'hushEnabled')) {
+            roomMeta.hushEnabled = normalizeHushEnabled(existingMeta.hushEnabled)
+          } else {
+            delete roomMeta.hushEnabled
+          }
           await roomService.updateRoomMetadata(room, JSON.stringify(roomMeta))
-          console.log(`✅ Room ${room} metadata updated (voice backend: ${voiceCfg.backend})`)
+          console.log(`✅ Room ${room} metadata updated; Hush setting preserved`)
         } catch (metaErr: any) {
-          console.log(`ℹ️ Room metadata update failed: ${metaErr?.message || metaErr}`)
+          console.log(`ℹ️ Existing room metadata left unchanged: ${metaErr?.message || metaErr}`)
         }
       } else {
         console.log(`ℹ️ Room creation note: ${msg}`)
@@ -173,7 +207,13 @@ export async function getLivekitToken(req: Request, res: Response) {
     
     const token = await at.toJwt()
     reqLog(req).info(
-      { event: 'livekit.token_issued', room, sessionId, voiceBackend: voiceCfg.backend },
+      {
+        event: 'livekit.token_issued',
+        room,
+        sessionId,
+        voiceBackend: voiceCfg.backend,
+        hushRequested: roomMeta.hushEnabled === true,
+      },
       'livekit token issued',
     )
     res.json({ token, url: lkUrl })
@@ -207,4 +247,3 @@ export async function dispatchAgent(req: Request, res: Response) {
     res.status(500).json({ error: 'Failed to dispatch agent', details: error.message })
   }
 }
-

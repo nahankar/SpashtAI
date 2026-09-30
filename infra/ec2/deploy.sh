@@ -146,8 +146,9 @@ AGENT_PY="$("${RESOLVE_PY}")"
 VENV_DIR="${ROOT}/apps/agent/.venv"
 if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
   "${AGENT_PY}" -m venv "${VENV_DIR}"
-  "${VENV_DIR}/bin/pip" install -r apps/agent/requirements.txt
 fi
+"${VENV_DIR}/bin/pip" install -r apps/agent/requirements.txt
+"${VENV_DIR}/bin/python" apps/agent/verify_hush_plugin_wheel.py
 echo "    Using ${VENV_DIR} ($("${VENV_DIR}/bin/python" --version))"
 
 mkdir -p logs

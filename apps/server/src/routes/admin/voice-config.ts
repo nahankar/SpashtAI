@@ -1,5 +1,6 @@
 import net from 'net'
 import { Router, type Request, type Response } from 'express'
+import { RoomServiceClient } from 'livekit-server-sdk'
 import { prisma } from '../../lib/prisma'
 
 const router = Router()
@@ -8,6 +9,68 @@ const DEFAULT_STT_URL =
   process.env.PIPELINE_STT_URL || 'http://localhost:8001/v1'
 const DEFAULT_TTS_URL =
   process.env.PIPELINE_TTS_URL || 'http://localhost:8002/v1'
+
+type HushRuntimeSession = {
+  room: string
+  agentIdentity: string
+  requested: boolean
+  effective: boolean
+  state: string
+  failureReason: string | null
+  effectiveBackend: string | null
+  pluginVersion: string | null
+  frames: number
+  latencyP95Ms: number
+  overruns: number
+}
+
+function parseMetadata(value: string | undefined): Record<string, unknown> {
+  if (!value) return {}
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {}
+  } catch {
+    return {}
+  }
+}
+
+function asFiniteNumber(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+function hushRuntimeFromParticipant(
+  room: string,
+  identity: string,
+  metadata: string | undefined,
+): HushRuntimeSession | null {
+  const value = parseMetadata(metadata)
+  if (value.role !== 'agent' || typeof value.hushRequested !== 'boolean') return null
+
+  return {
+    room,
+    agentIdentity: identity,
+    requested: value.hushRequested,
+    effective: value.hushEffective === true,
+    state: typeof value.hushState === 'string' ? value.hushState : 'unknown',
+    failureReason: typeof value.hushFailureReason === 'string' ? value.hushFailureReason : null,
+    effectiveBackend: typeof value.effectiveBackend === 'string' ? value.effectiveBackend : null,
+    pluginVersion: typeof value.hushPluginVersion === 'string' ? value.hushPluginVersion : null,
+    frames: asFiniteNumber(value.hushFrames),
+    latencyP95Ms: asFiniteNumber(value.hushLatencyP95Ms),
+    overruns: asFiniteNumber(value.hushOverruns),
+  }
+}
+
+function livekitRoomService(): RoomServiceClient | null {
+  const apiKey = process.env.LIVEKIT_API_KEY
+  const apiSecret = process.env.LIVEKIT_API_SECRET
+  const url = process.env.LIVEKIT_INTERNAL_URL || process.env.LIVEKIT_URL
+  if (!apiKey || !apiSecret || !url) return null
+  const httpUrl = url.replace('ws://', 'http://').replace('wss://', 'https://')
+  return new RoomServiceClient(httpUrl, apiKey, apiSecret)
+}
 
 // ── Seed defaults if none exist ──
 const DEFAULT_PRESETS = [
@@ -18,6 +81,7 @@ const DEFAULT_PRESETS = [
       'Speech-to-speech via AWS Bedrock Nova Sonic. Lowest latency (~250ms), highest naturalness. Requires valid AWS credentials with Bedrock access.',
     sttProvider: null,
     ttsProvider: null,
+    hushEnabled: false,
     pipelineStt: null,
     pipelineLlm: null,
     pipelineTts: null,
@@ -36,6 +100,7 @@ const DEFAULT_PRESETS = [
       'self-hosted Whisper or TTS to Kokoro for local/offline testing.',
     sttProvider: 'transcribe',
     ttsProvider: 'polly',
+    hushEnabled: false,
     pipelineStt: 'deepdml/faster-whisper-large-v3-turbo-ct2',
     pipelineLlm: 'amazon.nova-lite-v1:0',
     pipelineTts: 'polly',
@@ -53,6 +118,7 @@ const DEFAULT_PRESETS = [
       'Fully offline, for local Mac dev only.',
     sttProvider: 'whisper',
     ttsProvider: 'kokoro',
+    hushEnabled: false,
     pipelineStt: 'Systran/faster-distil-whisper-small.en',
     pipelineLlm: 'qwen2.5:14b',
     pipelineTts: 'kokoro',
@@ -101,6 +167,7 @@ async function probePipelineBedrock(cfg: {
   ttsProvider?: string | null
   sttBaseUrl?: string | null
   ttsBaseUrl?: string | null
+  hushEnabled?: boolean | null
 }) {
   const sttProvider = (cfg.sttProvider || 'whisper').toLowerCase()
   const ttsProvider = (cfg.ttsProvider || 'kokoro').toLowerCase()
@@ -126,6 +193,15 @@ async function probePipelineBedrock(cfg: {
   }
 
   checks.llm = { ok: true, detail: 'bedrock-nova-lite (IAM at runtime)' }
+  // This route runs in the server process, while Hush is deliberately loaded
+  // only inside a new agent session.  Report the configuration truthfully;
+  // the agent participant metadata reports active/fallback runtime state.
+  checks.hush = {
+    ok: true,
+    detail: cfg.hushEnabled
+      ? 'enabled for new Pipeline Bedrock sessions; agent verifies artifact at startup'
+      : 'disabled (baseline audio path)',
+  }
 
   const ok = Object.values(checks).every((c) => c.ok)
   return { ok, checks }
@@ -185,6 +261,7 @@ type HealthProbeInput = {
   ttsProvider: string | null
   sttBaseUrl: string | null
   ttsBaseUrl: string | null
+  hushEnabled?: boolean
 }
 
 // GET/POST /api/admin/voice-config/health — probe STT/TTS (saved config or POST body preview)
@@ -195,6 +272,7 @@ async function runHealthForConfig(cfg: {
   sttBaseUrl?: string | null
   ttsBaseUrl?: string | null
   llmBaseUrl?: string | null
+  hushEnabled?: boolean | null
 }) {
   if (cfg.backend === 'pipeline-bedrock') {
     return { backend: cfg.backend, ...(await probePipelineBedrock(cfg)) }
@@ -255,11 +333,55 @@ router.post('/health', async (req: Request, res: Response) => {
         ttsProvider: body.ttsProvider ?? 'kokoro',
         sttBaseUrl: body.sttBaseUrl ?? null,
         ttsBaseUrl: body.ttsBaseUrl ?? null,
+        hushEnabled: body.hushEnabled === true,
       }),
     )
   } catch (err) {
     console.error('Voice config health preview error:', err)
     res.status(500).json({ error: 'Health check failed' })
+  }
+})
+
+// GET /api/admin/voice-config/hush-runtime — live, non-sensitive agent state.
+// Agent participant metadata is the source of truth because Hush is initialized
+// per fresh agent session, not by this server process.
+router.get('/hush-runtime', async (_req: Request, res: Response) => {
+  const roomService = livekitRoomService()
+  if (!roomService) {
+    return res.status(503).json({
+      available: false,
+      error: 'LiveKit server credentials are not configured',
+      sessions: [],
+    })
+  }
+
+  try {
+    const rooms = await roomService.listRooms()
+    const sessionGroups = await Promise.all(
+      rooms.map(async (room) => {
+        try {
+          const participants = await roomService.listParticipants(room.name)
+          return participants
+            .map((participant) => hushRuntimeFromParticipant(
+              room.name,
+              participant.identity,
+              participant.metadata,
+            ))
+            .filter((item): item is HushRuntimeSession => item !== null)
+        } catch (err) {
+          console.warn(`Unable to read Hush runtime metadata for room ${room.name}:`, err)
+          return []
+        }
+      }),
+    )
+    res.json({ available: true, sessions: sessionGroups.flat() })
+  } catch (err) {
+    console.error('Hush runtime status read failed:', err)
+    res.status(503).json({
+      available: false,
+      error: 'LiveKit runtime status is unavailable',
+      sessions: [],
+    })
   }
 })
 
@@ -271,12 +393,11 @@ router.put('/active', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'backend is required' })
     }
 
+    const adminId = (req as any).user?.userId ?? null
     const target = await prisma.voiceConfig.findUnique({ where: { backend } })
     if (!target) {
       return res.status(404).json({ error: `Unknown backend: ${backend}` })
     }
-
-    const adminId = (req as any).user?.userId ?? null
 
     const [_clear, updated] = await prisma.$transaction([
       prisma.voiceConfig.updateMany({
@@ -317,11 +438,16 @@ router.put('/:backend', async (req: Request, res: Response) => {
     }
 
     const adminId = (req as any).user?.userId ?? null
+    const target = await prisma.voiceConfig.findUnique({ where: { backend } })
+    if (!target) {
+      return res.status(404).json({ error: `Unknown backend: ${backend}` })
+    }
     const allowed = [
       'displayName',
       'description',
       'sttProvider',
       'ttsProvider',
+      'hushEnabled',
       'pipelineStt',
       'pipelineLlm',
       'pipelineTts',
@@ -341,12 +467,38 @@ router.put('/:backend', async (req: Request, res: Response) => {
     if (patch.ttsProvider && !['kokoro', 'polly'].includes(String(patch.ttsProvider))) {
       return res.status(400).json({ error: 'ttsProvider must be kokoro or polly' })
     }
+    if ('hushEnabled' in patch && typeof patch.hushEnabled !== 'boolean') {
+      return res.status(400).json({ error: 'hushEnabled must be a boolean' })
+    }
+    if ('hushEnabled' in patch && backend !== 'pipeline-bedrock') {
+      return res.status(400).json({ error: 'hushEnabled is supported only for pipeline-bedrock' })
+    }
 
     patch['updatedBy'] = adminId
 
-    const updated = await prisma.voiceConfig.update({
-      where: { backend },
-      data: patch,
+    const hushChanged = 'hushEnabled' in patch && target.hushEnabled !== patch.hushEnabled
+    const updated = await prisma.$transaction(async (tx) => {
+      const updatedConfig = await tx.voiceConfig.update({
+        where: { backend },
+        data: patch,
+      })
+
+      if (hushChanged) {
+        await tx.adminAction.create({
+          data: {
+            adminId: adminId ?? 'unknown',
+            action: 'voice_config.set_hush_enabled',
+            targetResource: backend,
+            metadata: {
+              backend,
+              previous: target.hushEnabled,
+              next: updatedConfig.hushEnabled,
+              appliesTo: 'new_sessions_only',
+            },
+          },
+        })
+      }
+      return updatedConfig
     })
     res.json({ config: updated })
   } catch (err) {

@@ -15,6 +15,7 @@ interface VoiceConfigRow {
   description: string | null
   sttProvider: string | null
   ttsProvider: string | null
+  hushEnabled: boolean
   pipelineStt: string | null
   pipelineLlm: string | null
   pipelineTts: string | null
@@ -41,6 +42,26 @@ interface HealthResponse {
   backend: string
   ok: boolean
   checks: Record<string, HealthCheck>
+}
+
+interface HushRuntimeSession {
+  room: string
+  agentIdentity: string
+  requested: boolean
+  effective: boolean
+  state: string
+  failureReason: string | null
+  effectiveBackend: string | null
+  pluginVersion: string | null
+  frames: number
+  latencyP95Ms: number
+  overruns: number
+}
+
+interface HushRuntimeResponse {
+  available: boolean
+  error?: string
+  sessions: HushRuntimeSession[]
 }
 
 const BACKEND_META: Record<string, { icon: typeof Cloud; latency: string; ram: string; offline: boolean }> = {
@@ -81,6 +102,8 @@ export function VoiceBackend() {
   const [error, setError] = useState<string | null>(null)
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [healthLoading, setHealthLoading] = useState(false)
+  const [hushRuntime, setHushRuntime] = useState<HushRuntimeResponse | null>(null)
+  const [hushRuntimeLoading, setHushRuntimeLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [savingPremiumStt, setSavingPremiumStt] = useState(false)
 
@@ -92,6 +115,7 @@ export function VoiceBackend() {
   const [editVoice, setEditVoice] = useState('af_bella')
   const [editLlm, setEditLlm] = useState('amazon.nova-lite-v1:0')
   const [editSttModel, setEditSttModel] = useState('deepdml/faster-whisper-large-v3-turbo-ct2')
+  const [editHushEnabled, setEditHushEnabled] = useState(false)
 
   const syncEditFromConfig = useCallback((cfg: VoiceConfigRow) => {
     setEditStt((cfg.sttProvider as SttProvider) || 'whisper')
@@ -101,6 +125,7 @@ export function VoiceBackend() {
     setEditVoice(cfg.voiceName || (cfg.ttsProvider === 'polly' ? 'Ruth' : 'af_bella'))
     setEditLlm(cfg.pipelineLlm || 'amazon.nova-lite-v1:0')
     setEditSttModel(cfg.pipelineStt || 'deepdml/faster-whisper-large-v3-turbo-ct2')
+    setEditHushEnabled(cfg.hushEnabled === true)
   }, [])
 
   const load = useCallback(async () => {
@@ -118,9 +143,26 @@ export function VoiceBackend() {
     }
   }, [syncEditFromConfig])
 
+  const loadHushRuntime = useCallback(async () => {
+    setHushRuntimeLoading(true)
+    try {
+      const runtime = await apiClient<HushRuntimeResponse>('/api/admin/voice-config/hush-runtime')
+      setHushRuntime(runtime)
+    } catch (e) {
+      setHushRuntime({
+        available: false,
+        error: e instanceof Error ? e.message : 'Live Hush runtime status is unavailable',
+        sessions: [],
+      })
+    } finally {
+      setHushRuntimeLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     load()
-  }, [load])
+    loadHushRuntime()
+  }, [load, loadHushRuntime])
 
   async function setActive(backend: string) {
     setSwitchingTo(backend)
@@ -150,6 +192,7 @@ export function VoiceBackend() {
           ttsProvider: editTts,
           sttBaseUrl: editStt === 'whisper' ? editSttUrl : null,
           ttsBaseUrl: editTts === 'kokoro' ? editTtsUrl : null,
+          hushEnabled: editHushEnabled,
         }),
       })
       setHealth(res)
@@ -175,10 +218,12 @@ export function VoiceBackend() {
           pipelineLlm: editLlm,
           pipelineTts: editTts,
           voiceName: editVoice,
+          hushEnabled: editHushEnabled,
         }),
       })
       await load()
       await runHealth()
+      await loadHushRuntime()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save')
     } finally {
@@ -315,6 +360,31 @@ export function VoiceBackend() {
               </div>
             </div>
 
+            <div className="rounded-md border border-amber-500/40 bg-amber-50/50 p-4 dark:bg-amber-950/20">
+              <div className="flex items-start gap-3">
+                <input
+                  id="pipeline-hush"
+                  type="checkbox"
+                  checked={editHushEnabled}
+                  onChange={(event) => setEditHushEnabled(event.target.checked)}
+                  className="mt-1 h-4 w-4 accent-primary"
+                />
+                <div className="space-y-1">
+                  <Label htmlFor="pipeline-hush" className="cursor-pointer font-medium">
+                    Hush cleanup before VAD and STT
+                  </Label>
+                  <p className="text-sm text-muted-foreground">
+                    {editHushEnabled
+                      ? 'On — new Pipeline Bedrock sessions run server-side Hush before the existing VAD and transcription path.'
+                      : 'Off — new sessions use the current baseline audio path.'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Applies only after Save stack and a new session starts. Raw microphone audio still reaches LiveKit before server-side Hush; Hush is not speaker-identity isolation.
+                  </p>
+                </div>
+              </div>
+            </div>
+
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="pipeline-llm">LLM (Bedrock)</Label>
@@ -428,6 +498,39 @@ export function VoiceBackend() {
                 </dl>
               </div>
             )}
+
+            <div className="rounded-md border bg-muted/30 p-3 text-sm">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <div className="font-medium">Live Hush runtime</div>
+                <Button type="button" size="sm" variant="outline" onClick={() => loadHushRuntime()} disabled={hushRuntimeLoading}>
+                  {hushRuntimeLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Refresh'}
+                </Button>
+              </div>
+              {!hushRuntimeLoading && hushRuntime?.available === false && (
+                <p className="text-xs text-destructive">{hushRuntime.error || 'LiveKit runtime status is unavailable.'}</p>
+              )}
+              {!hushRuntimeLoading && hushRuntime?.available && hushRuntime.sessions.length === 0 && (
+                <p className="text-xs text-muted-foreground">No active agent session has reported Hush status.</p>
+              )}
+              {hushRuntime?.available && hushRuntime.sessions.length > 0 && (
+                <div className="space-y-2">
+                  {hushRuntime.sessions.map((runtime) => (
+                    <div key={`${runtime.room}:${runtime.agentIdentity}`} className="rounded border bg-background/60 p-2 text-xs">
+                      <div className="flex flex-wrap justify-between gap-x-4 gap-y-1">
+                        <span className="font-medium">{runtime.state.toUpperCase()}</span>
+                        <span className={runtime.effective ? 'text-green-700' : runtime.requested ? 'text-amber-700' : 'text-muted-foreground'}>
+                          {runtime.effective ? 'Hush processing' : runtime.requested ? 'Fallback to baseline' : 'Baseline audio'}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-muted-foreground">
+                        {runtime.effectiveBackend || 'unknown backend'} · p95 {runtime.latencyP95Ms.toFixed(1)} ms · {runtime.frames} frames · {runtime.overruns} overruns
+                      </p>
+                      {runtime.failureReason && <p className="mt-1 text-amber-700">Reason: {runtime.failureReason}</p>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </CardContent>
         </Card>
       )}
@@ -499,6 +602,13 @@ export function VoiceBackend() {
                     <ConfigRow label="LLM" value={cfg.pipelineLlm} />
                     <ConfigRow label="TTS" value={cfg.ttsProvider || 'kokoro'} />
                     <ConfigRow label="Voice" value={cfg.voiceName} />
+                    <ConfigRow
+                      label="Hush configuration"
+                      value={cfg.hushEnabled ? 'Enabled for new sessions' : 'Disabled — baseline'}
+                    />
+                    <p className="pt-1 text-[11px] text-muted-foreground">
+                      Agent startup records the actual active or fallback state in session metadata; this card shows the saved configuration only.
+                    </p>
                   </dl>
                 )}
 

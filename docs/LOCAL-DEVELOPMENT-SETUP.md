@@ -148,6 +148,7 @@ cd apps/agent
 python3.12 -m venv .venv312
 source .venv312/bin/activate
 pip install -r requirements.txt
+python verify_hush_plugin_wheel.py  # verifies the pinned Hush wheel
 ```
 
 **Start:**

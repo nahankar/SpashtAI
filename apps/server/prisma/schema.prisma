@@ -780,6 +780,12 @@ model VoiceConfig {
   sttProvider String? // whisper | transcribe
   ttsProvider String? // kokoro | polly
 
+  // Server-side speech/noise cleanup for pipeline-bedrock only. This defaults
+  // off so existing and newly created sessions retain the raw baseline unless
+  // an admin explicitly enables it. The setting is copied into room metadata
+  // when a room is created and is never changed mid-session.
+  hushEnabled Boolean @default(false)
+
   // Endpoints for local pipeline servers (only used by pipeline-* backends)
   sttBaseUrl String? // e.g. "http://localhost:8001/v1"
   llmBaseUrl String? // e.g. "http://localhost:11434/v1"

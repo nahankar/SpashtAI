@@ -32,7 +32,7 @@ from livekit.agents import (
     WorkerOptions,
     cli,
 )
-from livekit.agents import AgentSession, Agent, function_tool, RunContext, llm, stt
+from livekit.agents import AgentSession, Agent, function_tool, RunContext, llm, room_io, stt
 from livekit.agents.llm import StopResponse
 from livekit.agents.voice.agent import ModelSettings
 from session_memory import build_resume_memory_messages
@@ -42,6 +42,7 @@ from monologue_guard import MONOLOGUE_FOCUS_AREAS, MonologueGuard
 from echo_guard import is_likely_echo, record_assistant_speech
 from text_sanitize import StreamingThinkingStripper, is_thinking_only, strip_thinking_blocks
 from voice_backends import VoiceBackendConfig, apply_turn_detection_update, build_session, metadata_label
+from hush_audio import HushRuntime, prepare_hush_audio
 from backend_profiles import BackendProfile, SttMode, profile_for
 from elevate_live_words import LiveWordEvidenceCollector
 from elevate_stream_clock import StreamClockTracker
@@ -1658,18 +1659,34 @@ async def entrypoint(ctx: JobContext):
         voice_cfg.turn_detection, profile.stt_mode.value,
     )
 
+    # The server resolves this flag into room metadata when the room is created.
+    # It is Pipeline Bedrock-only and remains fixed for the complete session.
+    # A failed optional Hush startup is explicitly labelled and falls back to
+    # the existing raw pipeline; it never blocks the learner from joining.
+    hush_requested = voice_cfg.backend == "pipeline-bedrock" and voice_cfg.hush_enabled
+    effective_backend = voice_cfg.backend
+    # Do not import or initialize the optional plugin yet.  The requested
+    # Pipeline Bedrock stack may intentionally fall back to Nova Sonic during
+    # its health check; Hush must never cross that backend boundary.
+    hush_runtime = HushRuntime(requested=hush_requested)
+
     try:
-        # Set agent metadata for frontend
-        try:
-            await ctx.room.local_participant.set_name("SpashtAI Assistant")
+        async def _publish_agent_metadata() -> None:
             await ctx.room.local_participant.set_metadata(
                 json.dumps({
                     "role": "agent",
                     "type": "voice_assistant",
                     "model": metadata_label(voice_cfg),
                     "backend": voice_cfg.backend,
+                    "effectiveBackend": effective_backend,
+                    **hush_runtime.status(),
                 })
             )
+
+        # Set agent metadata for frontend
+        try:
+            await ctx.room.local_participant.set_name("SpashtAI Assistant")
+            await _publish_agent_metadata()
             logger.info("✅ Agent metadata set")
         except Exception as e:
             logger.warning("⚠️ Failed to set metadata: %s", e)
@@ -1917,7 +1934,48 @@ async def entrypoint(ctx: JobContext):
         # • pipeline-premium  → faster-whisper + Ollama + Kokoro
         # • pipeline-bedrock  → Whisper/Transcribe + Nova Lite + Kokoro/Polly
         # • unknown / pipeline servers down → falls back to nova-sonic.
-        session = await build_session(voice_cfg)
+        session_build = await build_session(voice_cfg)
+        session = session_build.session
+        effective_backend = session_build.effective_backend
+
+        if hush_requested:
+            if session_build.effective_backend == "pipeline-bedrock":
+                hush_runtime = prepare_hush_audio(requested=True)
+            else:
+                hush_runtime.mark_fallback(
+                    f"backend_fallback:{session_build.fallback_reason or session_build.effective_backend}"
+                )
+
+        # The agent participant metadata is the session-level operational
+        # record visible in LiveKit: it exposes active/fallback state plus the
+        # verified source/model hashes.  A frame failure can arrive on a media
+        # callback, so schedule the metadata update onto this session's loop.
+        status_loop = asyncio.get_running_loop()
+
+        def _schedule_hush_status_publish(_runtime: HushRuntime) -> None:
+            async def _publish_safely() -> None:
+                try:
+                    await _publish_agent_metadata()
+                except Exception as metadata_error:
+                    # A room can close between a processor failure and this
+                    # best-effort status update. Never leave an unobserved
+                    # task exception or affect the raw-audio fallback.
+                    logger.warning("⚠️ Failed to publish Hush fallback status: %s", metadata_error)
+
+            def _publish() -> None:
+                asyncio.create_task(_publish_safely())
+
+            try:
+                status_loop.call_soon_threadsafe(_publish)
+            except RuntimeError:
+                logger.debug("Hush status changed after the agent event loop closed")
+
+        hush_runtime.on_status_change = _schedule_hush_status_publish
+        try:
+            await _publish_agent_metadata()
+        except Exception as metadata_error:
+            logger.warning("⚠️ Failed to publish resolved Hush status: %s", metadata_error)
+
         logger.info("✅ AgentSession created with transcript support")
 
         async def _suppress_premature_coach_speech(assistant_text: str) -> None:
@@ -2347,7 +2405,32 @@ async def entrypoint(ctx: JobContext):
 
         # Start session (proven pattern - this handles everything)
         logger.info("🎯 Starting AgentSession...")
-        session_task = asyncio.create_task(session.start(room=ctx.room, agent=agent))
+        if hush_runtime.effective and hush_runtime.processor is not None:
+            # Compatibility spike validated this exact Agents 1.5.8 hook. The
+            # processor receives frames before the unchanged Silero VAD/STT
+            # pipeline. All VAD/endpointing configuration remains in
+            # voice_backends.py and is deliberately untouched here.
+            session_task = asyncio.create_task(
+                session.start(
+                    room=ctx.room,
+                    agent=agent,
+                    room_options=room_io.RoomOptions(
+                        participant_identity=participant.identity,
+                        audio_input=room_io.AudioInputOptions(
+                            sample_rate=16000,
+                            frame_size_ms=50,
+                            noise_cancellation=hush_runtime.processor,
+                        ),
+                    ),
+                )
+            )
+            logger.info("🎧 Hush active before existing VAD/STT: %s", hush_runtime.status())
+        else:
+            # Baseline is intentionally byte-for-byte the previous start call:
+            # no pass-through processor and no RoomOptions are injected.
+            session_task = asyncio.create_task(session.start(room=ctx.room, agent=agent))
+            if hush_runtime.requested:
+                logger.error("⚠️ Hush requested but using baseline audio: %s", hush_runtime.status())
 
         async def _greeting_watchdog() -> None:
             """Fallback if on_enter greeting was cancelled or never ran."""
@@ -2458,6 +2541,7 @@ async def entrypoint(ctx: JobContext):
         logger.error("❌ Agent error: %s", e, exc_info=True)
         raise
     finally:
+        hush_runtime.close()
         # Discard deletes the Session row immediately after disconnecting the
         # room. Teardown must still stop active egress recordings, but must not
         # analyze or persist a session the user explicitly threw away.

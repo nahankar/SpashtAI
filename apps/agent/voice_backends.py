@@ -61,6 +61,15 @@ def _normalize_tts_provider(value: Optional[str]) -> str:
     return provider if provider in _TTS_PROVIDERS else "kokoro"
 
 
+def _normalize_hush_enabled(value: object) -> bool:
+    """Room metadata is JSON, but retain a safe parser for legacy string values."""
+    if value is True:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes"}
+    return False
+
+
 def _nova_turn_detection(value: Optional[str]) -> str:
     """Nova Sonic only accepts HIGH/MEDIUM/LOW — EXTRA maps to LOW (~2s AWS max)."""
     level = _normalize_turn_detection(value)
@@ -113,6 +122,7 @@ class VoiceBackendConfig:
     stt_base_url: Optional[str] = None
     llm_base_url: Optional[str] = None
     tts_base_url: Optional[str] = None
+    hush_enabled: bool = False
 
     @classmethod
     def from_room_meta(cls, meta: dict) -> "VoiceBackendConfig":
@@ -128,7 +138,22 @@ class VoiceBackendConfig:
             stt_base_url=(meta.get("sttBaseUrl") or None),
             llm_base_url=(meta.get("llmBaseUrl") or None),
             tts_base_url=(meta.get("ttsBaseUrl") or None),
+            hush_enabled=_normalize_hush_enabled(meta.get("hushEnabled")),
         )
+
+
+@dataclass(frozen=True)
+class SessionBuildResult:
+    """A session plus the backend that actually won the startup decision.
+
+    Pipeline health checks can intentionally fall back to Nova Sonic.  Callers
+    must use this resolved value rather than the requested room configuration
+    when attaching optional, pipeline-only audio processors.
+    """
+
+    session: AgentSession
+    effective_backend: str
+    fallback_reason: str | None = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -415,7 +440,7 @@ async def _pipeline_bedrock_health(cfg: VoiceBackendConfig) -> tuple[bool, dict[
     return all(checks.values()), checks
 
 
-async def build_session(cfg: VoiceBackendConfig) -> AgentSession:
+async def build_session(cfg: VoiceBackendConfig) -> SessionBuildResult:
     """
     Build an `AgentSession` for the requested backend.
 
@@ -425,7 +450,7 @@ async def build_session(cfg: VoiceBackendConfig) -> AgentSession:
     backend = cfg.backend or "nova-sonic"
 
     if backend == "nova-sonic":
-        return _build_nova_sonic(cfg)
+        return SessionBuildResult(_build_nova_sonic(cfg), "nova-sonic")
 
     if backend == "pipeline-premium":
         stt_host, stt_port = _host_port_from_url(cfg.stt_base_url or "http://localhost:8001/v1", 8001)
@@ -446,8 +471,12 @@ async def build_session(cfg: VoiceBackendConfig) -> AgentSession:
                 ok_llm, llm_host, llm_port,
                 ok_tts, tts_host, tts_port,
             )
-            return _build_nova_sonic(cfg)
-        return _build_pipeline_premium(cfg)
+            return SessionBuildResult(
+                _build_nova_sonic(cfg),
+                "nova-sonic",
+                "pipeline_premium_health_failed",
+            )
+        return SessionBuildResult(_build_pipeline_premium(cfg), "pipeline-premium")
 
     if backend == "pipeline-bedrock":
         ok, checks = await _pipeline_bedrock_health(cfg)
@@ -457,11 +486,15 @@ async def build_session(cfg: VoiceBackendConfig) -> AgentSession:
                 checks.get("stt"),
                 checks.get("tts"),
             )
-            return _build_nova_sonic(cfg)
-        return _build_pipeline_bedrock(cfg)
+            return SessionBuildResult(
+                _build_nova_sonic(cfg),
+                "nova-sonic",
+                "pipeline_bedrock_health_failed",
+            )
+        return SessionBuildResult(_build_pipeline_bedrock(cfg), "pipeline-bedrock")
 
     logger.warning("Unknown voice backend '%s' — falling back to nova-sonic", backend)
-    return _build_nova_sonic(cfg)
+    return SessionBuildResult(_build_nova_sonic(cfg), "nova-sonic", "unknown_backend")
 
 
 async def apply_turn_detection_update(
