@@ -1,5 +1,5 @@
 import { useId, useState } from 'react'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, Clock } from 'lucide-react'
 import { toast } from 'sonner'
 import { setSessionRetained, type RetainResult } from '@/lib/sessionRetain'
 
@@ -7,7 +7,8 @@ export function AutoCompleteNotice({ count, scope }: { count: number; scope: 'el
   const kind = scope === 'elevate' ? 'Elevate session' : 'interview practice'
   return (
     <div className="space-y-2">
-      <p className="text-xs text-muted-foreground">
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Clock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         Unfinished sessions are automatically completed after 24 hours without activity.
       </p>
       {count > 0 && (
