@@ -42,6 +42,8 @@ import { logEvent } from '@/lib/remoteLogger'
 import { FOCUS_AREAS, PRACTICE_FOCUS_AREAS, getFocusAreaLabel, EXERCISE_PREVIEWS } from '@/lib/focus-areas'
 import { pulseSkillLabel } from '@/lib/pulse-skills'
 import { useAuth } from '@/hooks/useAuth'
+import { AutoCompleteNotice, RetainCheckbox } from '@/components/session/SessionRetain'
+import { applyRetainResult } from '@/lib/sessionRetain'
 import { useFeatureFlags } from '@/contexts/FeatureFlagsContext'
 import { useUserExportFlags } from '@/hooks/useUserExportFlags'
 import { useConfirm } from '@/hooks/useConfirm'
@@ -315,6 +317,8 @@ export function Elevate() {
     words?: number
     fillerRate?: number
     progressPulseStatus?: string | null
+    retainedAt?: string | null
+    userId?: string
     user?: SessionOwner | null
   }
   const [pastSessions, setPastSessions] = useState<ElevateSessionItem[]>([])
@@ -1905,6 +1909,13 @@ export function Elevate() {
           </Card>
         )}
 
+        {!pastLoading && (
+          <AutoCompleteNotice
+            scope="elevate"
+            count={filteredPastSessions.filter((s) => !s.endedAt && (!s.user?.id || s.user.id === user?.id)).length}
+          />
+        )}
+
         {selectedElevate.size > 0 && (
           <div className="mb-1 flex items-center gap-2">
             <Button variant="destructive" size="sm" onClick={handleDeleteSelectedElevate}>
@@ -1921,6 +1932,7 @@ export function Elevate() {
             {filteredPastSessions.map((s) => {
               const done = s.endedAt != null
               const isSelected = selectedElevate.has(s.id)
+              const ownSession = !s.user?.id || s.user.id === user?.id
               return (
                 <Card key={s.id} className={`transition-all hover:shadow-md ${isSelected ? 'ring-2 ring-primary' : ''}`}>
                   <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center py-4">
@@ -1973,7 +1985,14 @@ export function Elevate() {
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
-                      {!done && isAdmin && s.user?.id && s.user.id !== user?.id ? (
+                      {!done && ownSession && (
+                        <RetainCheckbox
+                          sessionId={s.id}
+                          retained={Boolean(s.retainedAt)}
+                          onChange={(result) => setPastSessions((prev) => applyRetainResult(prev, result))}
+                        />
+                      )}
+                      {!done && isAdmin && !ownSession ? (
                         <Button size="sm" variant="outline" disabled title="Another user's live session can't be resumed">
                           In progress
                         </Button>

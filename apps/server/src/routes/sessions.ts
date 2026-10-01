@@ -217,6 +217,7 @@ export async function endSession(req: Request, res: Response) {
           data: {
             endedAt: endedAt ? new Date(endedAt) : existing.endedAt ?? new Date(),
             durationSec: durationSec ?? existing.durationSec,
+            retainedAt: null,
             ...(!existing.endedAt ? {
               ...requeuePaceReconciliationData(),
               deliveryAlignmentStatus: 'pending',
@@ -271,6 +272,75 @@ export async function endSession(req: Request, res: Response) {
     }
     logger.error({ err: error }, 'Error ending session:')
     res.status(500).json({ error: 'Failed to end session' })
+  }
+}
+
+export class RetainConflictError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message)
+  }
+}
+
+/**
+ * PUT /sessions/:id/retain { retain: boolean }
+ * Keeps one unfinished session open past the inactivity sweep. The limit is one
+ * per list the user sees: standalone Elevate, and Prepare interview practice.
+ * Retaining a session releases the user's other retained session of that kind.
+ */
+export async function retainSession(req: Request, res: Response) {
+  const { id } = req.params
+  const retain = req.body?.retain
+  if (typeof retain !== 'boolean') {
+    return res.status(400).json({ error: 'retain must be a boolean' })
+  }
+  const userId = req.user!.userId
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      // Serialise per user so two concurrent retains cannot both win.
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${userId} FOR UPDATE`
+      await lockWritableSession(tx, id)
+      const session = await tx.session.findUnique({
+        where: { id },
+        select: { userId: true, endedAt: true, preparationPractice: { select: { id: true } } },
+      })
+      if (!session) throw new SessionMissingError()
+      if (session.userId !== userId) throw new RetainConflictError('Only the session owner can retain it', 403)
+      if (retain && session.endedAt) throw new RetainConflictError('Completed sessions cannot be retained', 409)
+      let released: string[] = []
+      if (retain) {
+        const others = await tx.session.findMany({
+          where: {
+            userId,
+            retainedAt: { not: null },
+            id: { not: id },
+            preparationPractice: session.preparationPractice ? { isNot: null } : { is: null },
+          },
+          select: { id: true },
+        })
+        released = others.map((other) => other.id)
+        if (released.length) {
+          await tx.session.updateMany({ where: { id: { in: released } }, data: { retainedAt: null } })
+        }
+      }
+      const updated = await tx.session.update({
+        where: { id },
+        data: { retainedAt: retain ? new Date() : null },
+        select: { id: true, retainedAt: true },
+      })
+      return { session: updated, released }
+    })
+    reqLog(req).info(
+      { event: 'elevate.session_retain', sessionId: id, retain, released: result.released },
+      'session retain updated',
+    )
+    res.json({ sessionId: id, retainedAt: result.session.retainedAt, releasedSessionIds: result.released })
+  } catch (error) {
+    if (error instanceof RetainConflictError) return res.status(error.status).json({ error: error.message })
+    if (error instanceof SessionDiscardedError || error instanceof SessionMissingError) {
+      return res.status(error.status).json({ error: error.message })
+    }
+    logger.error({ err: error }, 'Error retaining session:')
+    res.status(500).json({ error: 'Failed to update retain setting' })
   }
 }
 

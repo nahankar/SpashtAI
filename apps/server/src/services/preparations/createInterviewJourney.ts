@@ -35,6 +35,9 @@ export const preparationInclude = {
 } satisfies Prisma.PreparationInclude
 
 export const preparationDetailInclude = {
+  user: {
+    select: { id: true, email: true, firstName: true, lastName: true },
+  },
   interview: true,
   stages: {
     orderBy: { sequence: 'asc' as const },
@@ -54,6 +57,7 @@ export const preparationDetailInclude = {
           sessionName: true,
           startedAt: true,
           endedAt: true,
+          retainedAt: true,
           durationSec: true,
           metrics: { select: { coachingInsights: true } },
         },

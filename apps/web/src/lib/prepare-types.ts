@@ -97,6 +97,7 @@ export type PreparationPractice = {
     focusArea: string | null
     startedAt: string
     endedAt: string | null
+    retainedAt?: string | null
     durationSec?: number | null
     metrics?: { coachingInsights?: { topStrength?: string; primaryImprovement?: string } | null } | null
   }

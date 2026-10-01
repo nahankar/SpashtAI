@@ -6,7 +6,7 @@ import { WebSocketServer } from 'ws'
 import path from 'path'
 import { getLivekitToken, dispatchAgent } from './routes/livekit'
 import { listPersonas, getPersona } from './routes/personas'
-import { listSessions, getSession, createSession, endSession, saveTranscript, saveRecording, deleteSession } from './routes/sessions'
+import { listSessions, getSession, createSession, endSession, retainSession, saveTranscript, saveRecording, deleteSession } from './routes/sessions'
 import { getSettings, updateSettings } from './routes/settings'
 import { assistantText } from './routes/assistant'
 import { 
@@ -255,6 +255,7 @@ app.post('/sessions/:id/end', requireAuthOrAgent, requireFeature('elevate'), tra
   'elevate', 'session_end', (req) => !req.body?.preparationId,
 ), endSession)
 app.delete('/sessions/:id', requireAuth, requireFeature('elevate'), deleteSession)
+app.put('/sessions/:id/retain', requireAuth, requireFeature('elevate'), retainSession)
 
 // Protected: settings
 app.get('/settings', requireAuth, getSettings)

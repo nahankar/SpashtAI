@@ -27,6 +27,9 @@ import { QuestionMemory } from '@/components/prepare/QuestionMemory'
 import { StageTracker } from '@/components/prepare/StageTracker'
 import { useConfirm } from '@/hooks/useConfirm'
 import { useFeatureFlags } from '@/contexts/FeatureFlagsContext'
+import { useAuth } from '@/hooks/useAuth'
+import { AutoCompleteNotice, RetainCheckbox } from '@/components/session/SessionRetain'
+import type { RetainResult } from '@/lib/sessionRetain'
 import {
   addPreparationStage,
   deletePreparationStage,
@@ -100,6 +103,7 @@ const JOURNEY_STATUSES: PreparationStatus[] = [
 export function InterviewJourney() {
   const confirm = useConfirm()
   const { isAccessible } = useFeatureFlags()
+  const { user } = useAuth()
   const { id } = useParams<{ id: string }>()
   const [journey, setJourney] = useState<Preparation | null>(null)
   const [loading, setLoading] = useState(true)
@@ -113,6 +117,22 @@ export function InterviewJourney() {
   const [logStageId, setLogStageId] = useState<string | null>(null)
   const livePracticeAvailable = isAccessible('elevate')
   const recordingAvailable = isAccessible('replay')
+
+  function applyPracticeRetain(result: RetainResult) {
+    const released = new Set(result.releasedSessionIds)
+    setJourney((current) => current && {
+      ...current,
+      practices: current.practices?.map((practice) => {
+        if (!practice.session) return practice
+        if (practice.sessionId === result.sessionId) {
+          return { ...practice, session: { ...practice.session, retainedAt: result.retainedAt } }
+        }
+        return released.has(practice.sessionId)
+          ? { ...practice, session: { ...practice.session, retainedAt: null } }
+          : practice
+      }),
+    })
+  }
 
   function openLog(stageId?: string) {
     setLogStageId(stageId ?? journey?.nextStage?.id ?? null)
@@ -295,6 +315,8 @@ export function InterviewJourney() {
       </Card>
     )
   }
+
+  const ownJourney = !journey.user?.id || journey.user.id === user?.id
 
   return (
     <div className="space-y-6">
@@ -493,6 +515,12 @@ export function InterviewJourney() {
             </Card>
           ) : (
             <div className="space-y-3">
+              {ownJourney && (
+                <AutoCompleteNotice
+                  scope="interview"
+                  count={(journey.practices ?? []).filter((practice) => practice.session && !practice.session.endedAt).length}
+                />
+              )}
               {(journey.practices ?? []).map((practice) => {
                 const stage = journey.stages.find((item) => item.id === practice.stageId)
                 const completed = Boolean(practice.session?.endedAt)
@@ -512,9 +540,18 @@ export function InterviewJourney() {
                           </p>
                         )}
                       </div>
-                      <Link to={practiceResultHref(journey.id, practice.sessionId)}>
-                        <Button size="sm" variant="outline">{completed ? 'View results' : 'Resume'}</Button>
-                      </Link>
+                      <div className="flex items-center gap-3">
+                        {!completed && practice.session && ownJourney && (
+                          <RetainCheckbox
+                            sessionId={practice.sessionId}
+                            retained={Boolean(practice.session.retainedAt)}
+                            onChange={applyPracticeRetain}
+                          />
+                        )}
+                        <Link to={practiceResultHref(journey.id, practice.sessionId)}>
+                          <Button size="sm" variant="outline">{completed ? 'View results' : 'Resume'}</Button>
+                        </Link>
+                      </div>
                     </CardContent>
                   </Card>
                 )

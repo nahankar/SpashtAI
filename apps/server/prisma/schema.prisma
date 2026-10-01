@@ -403,6 +403,10 @@ model Session {
   viewCount    Int       @default(0)
   lastViewedAt DateTime?
 
+  // User opt-out from 24h inactivity auto-completion. At most one unfinished
+  // session per user; cleared when the session ends.
+  retainedAt   DateTime?
+
   progressPulseStatus String? // 'tracked' | 'skipped' | null (not yet decided)
 
   // Durable post-Leave pace reconciliation job.
@@ -445,6 +449,7 @@ model Session {
 
   @@index([userId, startedAt])
   @@index([userId, module, endedAt])
+  @@index([userId, retainedAt])
   @@index([discardedAt, nextDeletionAttemptAt])
   @@index([discardedAt, deletionLeaseUntil, nextDeletionAttemptAt])
   @@index([paceReconciliationStatus, nextPaceReconciliationAt])

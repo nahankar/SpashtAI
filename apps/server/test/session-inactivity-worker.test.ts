@@ -50,11 +50,12 @@ function stubActivity({
   closedSum = 0,
   prepare = false,
   module = 'elevate',
+  retainedAt = null as Date | null,
 } = {}) {
   const { tx } = mocks
   tx.$queryRaw.mockResolvedValue([{ discardedAt: null }])
   tx.session.findUnique.mockResolvedValue({
-    id: 's1', userId: 'u1', startedAt: started, endedAt, durationSec: null, module,
+    id: 's1', userId: 'u1', startedAt: started, endedAt, durationSec: null, module, retainedAt,
     preparationPractice: prepare ? { id: 'p1' } : null,
   })
   tx.sessionSegment.aggregate.mockImplementation(async (args: { _sum?: unknown }) =>
@@ -90,6 +91,12 @@ describe('session inactivity worker', () => {
   it('leaves already-ended sessions untouched', async () => {
     stubActivity({ endedAt: hoursAgo(25) })
     expect(await completeInactiveSession('s1', NOW)).toEqual({ completed: false, reason: 'already_ended' })
+    expect(mocks.tx.session.update).not.toHaveBeenCalled()
+  })
+
+  it('never completes a session the user chose to retain', async () => {
+    stubActivity({ started: hoursAgo(72), retainedAt: hoursAgo(70) })
+    expect(await completeInactiveSession('s1', NOW)).toEqual({ completed: false, reason: 'retained' })
     expect(mocks.tx.session.update).not.toHaveBeenCalled()
   })
 
@@ -139,7 +146,7 @@ describe('session inactivity worker', () => {
     stubActivity({ prepare: false })
     expect(await sweepInactiveSessions(NOW)).toBe(1)
     expect(mocks.prisma.session.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { endedAt: null, discardedAt: null, startedAt: { lt: hoursAgo(24) } },
+      where: { endedAt: null, discardedAt: null, retainedAt: null, startedAt: { lt: hoursAgo(24) } },
     }))
     expect(mocks.queuePace).toHaveBeenCalledWith('s1')
     expect(mocks.award).toHaveBeenCalledWith('u1', 's1')

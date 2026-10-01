@@ -43,7 +43,7 @@ async function sessionLastActivityAt(db: ActivityClient, sessionId: string, star
 
 export type InactiveCompletionResult =
   | { completed: true; endedAt: Date; userId: string; prepareOwned: boolean; module: string }
-  | { completed: false; reason: 'already_ended' | 'active' | 'discarded' | 'missing' }
+  | { completed: false; reason: 'already_ended' | 'active' | 'retained' | 'discarded' | 'missing' }
 
 /**
  * Complete one abandoned session. Re-checks activity under the same row lock
@@ -64,6 +64,7 @@ export async function completeInactiveSession(
           userId: true,
           startedAt: true,
           endedAt: true,
+          retainedAt: true,
           durationSec: true,
           module: true,
           preparationPractice: { select: { id: true } },
@@ -71,6 +72,7 @@ export async function completeInactiveSession(
       })
       if (!session) return { completed: false, reason: 'missing' } as const
       if (session.endedAt) return { completed: false, reason: 'already_ended' } as const
+      if (session.retainedAt) return { completed: false, reason: 'retained' } as const
 
       const lastActivity = await sessionLastActivityAt(tx, sessionId, session.startedAt)
       if (lastActivity.getTime() > cutoff) return { completed: false, reason: 'active' } as const
@@ -162,7 +164,7 @@ export async function sweepInactiveSessions(now = new Date()): Promise<number> {
     let cursor: string | undefined
     for (;;) {
       const batch = await prisma.session.findMany({
-        where: { endedAt: null, discardedAt: null, startedAt: { lt: startedBefore } },
+        where: { endedAt: null, discardedAt: null, retainedAt: null, startedAt: { lt: startedBefore } },
         orderBy: { id: 'asc' },
         select: { id: true },
         take: BATCH_SIZE,
