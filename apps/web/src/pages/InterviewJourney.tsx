@@ -507,6 +507,12 @@ export function InterviewJourney() {
               <Button size="sm" variant="outline">New interview event recording</Button>
             </Link> : <Button size="sm" variant="outline" disabled title="Interview recording is currently unavailable">New interview event recording</Button>}
           </div>
+          <AutoCompleteNotice
+            scope="interview"
+            count={ownJourney
+              ? (journey.practices ?? []).filter((practice) => practice.session && !practice.session.endedAt).length
+              : 0}
+          />
           {(journey.practices?.length ?? 0) === 0 && (journey.recordings?.length ?? 0) === 0 ? (
             <Card>
               <CardContent className="py-10 text-center text-sm text-muted-foreground">
@@ -515,12 +521,6 @@ export function InterviewJourney() {
             </Card>
           ) : (
             <div className="space-y-3">
-              {ownJourney && (
-                <AutoCompleteNotice
-                  scope="interview"
-                  count={(journey.practices ?? []).filter((practice) => practice.session && !practice.session.endedAt).length}
-                />
-              )}
               {(journey.practices ?? []).map((practice) => {
                 const stage = journey.stages.find((item) => item.id === practice.stageId)
                 const completed = Boolean(practice.session?.endedAt)

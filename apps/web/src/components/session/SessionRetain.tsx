@@ -1,22 +1,27 @@
 import { useId, useState } from 'react'
-import { Clock } from 'lucide-react'
+import { AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import { setSessionRetained, type RetainResult } from '@/lib/sessionRetain'
 
 export function AutoCompleteNotice({ count, scope }: { count: number; scope: 'elevate' | 'interview' }) {
-  if (count <= 0) return null
+  const kind = scope === 'elevate' ? 'Elevate session' : 'interview practice'
   return (
-    <div
-      role="status"
-      className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
-    >
-      <Clock className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-      <p>
-        {count === 1 ? '1 session is' : `${count} sessions are`} in progress. Unfinished sessions are
-        automatically completed after 24 hours without activity. To keep one open, tick{' '}
-        <span className="font-medium">Retain</span>. You can retain one{' '}
-        {scope === 'elevate' ? 'Elevate session' : 'interview practice'} at a time.
+    <div className="space-y-2">
+      <p className="text-xs text-muted-foreground">
+        Unfinished sessions are automatically completed after 24 hours without activity.
       </p>
+      {count > 0 && (
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <p>
+            You can retain one {kind} at a time. To keep one open, tick{' '}
+            <span className="font-medium">Retain</span>.
+          </p>
+        </div>
+      )}
     </div>
   )
 }

@@ -30,12 +30,13 @@ describe('session retain', () => {
     await expect(setSessionRetained('s1', true)).rejects.toThrow('Completed sessions cannot be retained')
   })
 
-  it('renders the 24-hour notice only when sessions are in progress', () => {
-    expect(renderToStaticMarkup(<AutoCompleteNotice scope="elevate" count={0} />)).toBe('')
-    const html = renderToStaticMarkup(<AutoCompleteNotice scope="elevate" count={2} />)
-    expect(html).toContain('2 sessions are in progress')
-    expect(html).toContain('24 hours')
-    expect(html).toContain('one Elevate session at a time')
+  it('always explains auto-completion and alerts about Retain only when sessions are in progress', () => {
+    const idle = renderToStaticMarkup(<AutoCompleteNotice scope="elevate" count={0} />)
+    expect(idle).toContain('automatically completed after 24 hours without activity')
+    expect(idle).not.toContain('role="alert"')
+    const active = renderToStaticMarkup(<AutoCompleteNotice scope="elevate" count={2} />)
+    expect(active).toContain('role="alert"')
+    expect(active).toContain('You can retain one Elevate session at a time. To keep one open, tick')
     expect(renderToStaticMarkup(<AutoCompleteNotice scope="interview" count={1} />))
       .toContain('one interview practice at a time')
   })

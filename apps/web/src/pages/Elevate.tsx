@@ -1887,6 +1887,13 @@ export function Elevate() {
           />
         )}
 
+        {!pastLoading && (
+          <AutoCompleteNotice
+            scope="elevate"
+            count={pastSessions.filter((s) => !s.endedAt && (!s.user?.id || s.user.id === user?.id)).length}
+          />
+        )}
+
         {!pastLoading && pastSessions.length === 0 && (
           <Card>
             <CardContent className="py-16 text-center">
@@ -1907,13 +1914,6 @@ export function Elevate() {
               No sessions match your filters.
             </CardContent>
           </Card>
-        )}
-
-        {!pastLoading && (
-          <AutoCompleteNotice
-            scope="elevate"
-            count={filteredPastSessions.filter((s) => !s.endedAt && (!s.user?.id || s.user.id === user?.id)).length}
-          />
         )}
 
         {selectedElevate.size > 0 && (
