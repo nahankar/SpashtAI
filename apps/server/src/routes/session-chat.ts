@@ -16,6 +16,7 @@ import { prisma } from '../lib/prisma'
 import { isFeatureAccessible } from '../lib/featureFlags'
 import { getElevateSessionOwnerId, getReplaySessionOwnerId, isPrivilegedRole } from '../lib/userExportFlags'
 import { invokeCoachModel, COACH_FAST_MODEL_ID, isCoachLlmEnabled } from '../coach/bedrock'
+import { inspectDeliveryMoments } from '../analytics/deliveryMoments'
 import { reqLog } from '../lib/logger'
 
 const router = Router()
@@ -74,6 +75,29 @@ function summariseJson(value: unknown, keys: string[], cap = 800): string {
   }
 }
 
+function clamp10(n: number): number {
+  return Math.max(0, Math.min(10, n))
+}
+function round1(n: number): number {
+  return Math.round(n * 10) / 10
+}
+
+/** Fluency (0-10), matching the Trends chart: 10 − per-turn filler rate (a percentage). */
+function fluencyFromFillerRate(fillerRate: number | null): number | null {
+  return fillerRate === null ? null : round1(clamp10(10 - fillerRate))
+}
+
+/** Per-turn confidence (0-10) from the LLM-judge score, matching the Trends chart. */
+function turnConfidence(score: unknown): number | null {
+  if (!score || typeof score !== 'object') return null
+  const s = score as Record<string, unknown>
+  const conf = num(s.confidence)
+  if (conf !== null) return round1(clamp10(conf > 1 ? conf / 10 : conf * 10))
+  const stars = num(s.stars)
+  if (stars !== null) return round1(clamp10((stars / 5) * 10))
+  return null
+}
+
 async function buildElevateContext(sessionId: string): Promise<string | null> {
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
@@ -84,6 +108,11 @@ async function buildElevateContext(sessionId: string): Promise<string | null> {
   })
   if (!session) return null
 
+  const allUserTurns = session.turns.filter((t) => t.role === 'user')
+  const userTurns = allUserTurns.slice(0, MAX_TURNS_IN_CONTEXT)
+  const turnMet = (t: (typeof session.turns)[number]) =>
+    (t.metrics && typeof t.metrics === 'object' ? t.metrics : {}) as Record<string, unknown>
+
   const lines: string[] = []
   lines.push(`SESSION (module=elevate)`)
   lines.push(`Focus: ${session.focusArea ?? 'general'}  Duration: ${clock(session.durationSec)}`)
@@ -93,26 +122,62 @@ async function buildElevateContext(sessionId: string): Promise<string | null> {
     const wpm = num(m.userWpm)
     const filler = num(m.userFillerRate)
     lines.push(
-      `Overall: avg WPM ${wpm ?? '—'}, filler rate ${filler !== null ? (filler * 100).toFixed(1) + '%' : '—'}`,
+      `Overall (whole session): avg WPM ${wpm ?? '—'}, filler rate ${filler !== null ? (filler * 100).toFixed(1) + '%' : '—'}`,
     )
     const scores = summariseJson(m.skillScores, ['clarity', 'confidence', 'engagement', 'structure', 'conciseness', 'pacing'])
-    if (scores) lines.push(`Skill scores (0-10): ${scores}`)
+    if (scores) lines.push(`Skill scores (0-10, whole session): ${scores}`)
     const insights = summariseJson(m.coachingInsights, ['topStrength', 'primaryImprovement', 'actionableAdvice'], 1200)
     if (insights) lines.push(`Coaching insights: ${insights}`)
   }
 
-  const userTurns = session.turns.filter((t) => t.role === 'user').slice(0, MAX_TURNS_IN_CONTEXT)
+  // Fluency is not a stored skill — it is derived per turn as (10 − filler rate),
+  // exactly like the "Fluency" line in Trends. Surface a session average so
+  // questions like "what is my fluency" can be answered.
+  const fluencies = allUserTurns
+    .map((t) => fluencyFromFillerRate(num(turnMet(t).filler_rate)))
+    .filter((v): v is number => v !== null)
+  if (fluencies.length > 0) {
+    const avg = fluencies.reduce((a, b) => a + b, 0) / fluencies.length
+    lines.push(`Fluency (avg 0-10, whole session; derived as 10 − filler rate per turn): ${round1(avg)}`)
+  }
+
+  // Pauses / delivery moments — same source (and same feature gate) as the
+  // "Delivery moments" cards on the page; empty when that capability is off.
+  // Placed before the per-turn transcript so these few high-value lines survive
+  // if the context is truncated to MAX_CONTEXT_CHARS.
+  try {
+    const delivery = await inspectDeliveryMoments(sessionId)
+    const moments = delivery.moments ?? []
+    if (moments.length > 0) {
+      lines.push(`Pauses (${moments.length}):`)
+      for (const mo of moments.slice(0, 20)) {
+        const kind = mo.kind === 'mid_thought_pause' ? 'mid-sentence' : 'after a sentence'
+        const observation = typeof mo.observation === 'string' ? mo.observation.slice(0, 120) : ''
+        lines.push(
+          `  @${clock(mo.startSec)} ${mo.pauseSeconds.toFixed(1)}s ${kind} (${mo.polarity})` +
+            (observation ? ` — ${observation}` : ''),
+        )
+      }
+    }
+  } catch {
+    // Delivery inspection is best-effort; never block the answer on it.
+  }
+
   if (userTurns.length > 0) {
-    lines.push(`Your turns (${userTurns.length}${session.turns.filter((t) => t.role === 'user').length > userTurns.length ? '+ truncated' : ''}):`)
+    lines.push(`Your turns${allUserTurns.length > userTurns.length ? ` (first ${userTurns.length} of ${allUserTurns.length})` : ` (${userTurns.length})`}:`)
     for (const t of userTurns) {
-      const met = (t.metrics && typeof t.metrics === 'object' ? t.metrics : {}) as Record<string, unknown>
+      const met = turnMet(t)
       const wpm = num(met.wpm)
-      const fillers = num(met.fillerCount)
+      const fillers = num(met.filler_count)
+      const fluency = fluencyFromFillerRate(num(met.filler_rate))
+      const confidence = turnConfidence(t.score)
       const text = typeof t.text === 'string' ? t.text.replace(/\s+/g, ' ').slice(0, 220) : ''
       lines.push(
         `  #${t.turnIndex} @${clock(t.audioStart)}` +
           (wpm !== null ? ` wpm=${Math.round(wpm)}` : '') +
           (fillers !== null ? ` fillers=${fillers}` : '') +
+          (fluency !== null ? ` fluency=${fluency}` : '') +
+          (confidence !== null ? ` confidence=${confidence}` : '') +
           (text ? ` — "${text}"` : ''),
       )
     }
@@ -155,7 +220,8 @@ function buildPrompt(context: string, history: Array<{ role: string; content: st
     .join('\n')
   return [
     'You are SpashtAI, a warm, concise communication coach answering questions about ONE practice session.',
-    'Ground every answer strictly in the SESSION data below. Cite timestamps (m:ss) when you reference a moment.',
+    'Ground every answer strictly in the SESSION data below.',
+    'Session-level values (skill scores, averages like fluency, overall stats) describe the WHOLE session — never attach a timestamp to them. Only cite a timestamp (m:ss) for a specific per-turn moment or a pause.',
     'If the data does not contain the answer, say so plainly — never invent numbers, pauses, or quotes.',
     'Keep replies short and practical (a few sentences).',
     '',
