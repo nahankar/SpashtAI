@@ -5,6 +5,7 @@ import { lockWritableSession, SessionDiscardedError, SessionMissingError } from 
 import { activeSegmentDurationSec } from '../analytics/sessionSegments'
 import { queuePaceReconciliation, requeuePaceReconciliationData } from './paceReconciliationWorker'
 import { awardSessionActivePoints } from './points'
+import { runSessionAnalysis } from '../routes/analytics'
 
 export const SESSION_INACTIVITY_TIMEOUT_MS = 24 * 60 * 60 * 1000
 const SWEEP_INTERVAL_MS = 15 * 60 * 1000
@@ -41,7 +42,7 @@ async function sessionLastActivityAt(db: ActivityClient, sessionId: string, star
 }
 
 export type InactiveCompletionResult =
-  | { completed: true; endedAt: Date; userId: string; prepareOwned: boolean }
+  | { completed: true; endedAt: Date; userId: string; prepareOwned: boolean; module: string }
   | { completed: false; reason: 'already_ended' | 'active' | 'discarded' | 'missing' }
 
 /**
@@ -64,6 +65,7 @@ export async function completeInactiveSession(
           startedAt: true,
           endedAt: true,
           durationSec: true,
+          module: true,
           preparationPractice: { select: { id: true } },
         },
       })
@@ -119,12 +121,31 @@ export async function completeInactiveSession(
         endedAt: lastActivity,
         userId: session.userId,
         prepareOwned: Boolean(session.preparationPractice),
+        module: session.module,
       } as const
     })
   } catch (error) {
     if (error instanceof SessionDiscardedError) return { completed: false, reason: 'discarded' }
     if (error instanceof SessionMissingError) return { completed: false, reason: 'missing' }
     throw error
+  }
+}
+
+/**
+ * Leave normally triggers /analyze from the browser; an abandoned session never
+ * does. Run the same pipeline with the same Pulse default as a normal Leave.
+ */
+export async function analyzeCompletedSession(sessionId: string): Promise<boolean> {
+  try {
+    const result = await runSessionAnalysis(sessionId, { source: 'elevate' })
+    if (result.status !== 200) {
+      logger.warn({ sessionId, status: result.status, body: result.body }, 'auto-complete analysis skipped')
+      return false
+    }
+    return true
+  } catch (err) {
+    logger.error({ err, sessionId }, 'auto-complete analysis failed')
+    return false
   }
 }
 
@@ -158,10 +179,13 @@ export async function sweepInactiveSessions(now = new Date()): Promise<number> {
           )
           queuePaceReconciliation(id)
           if (!result.prepareOwned) {
-            await awardSessionActivePoints(result.userId, id).catch((err) =>
-              logger.warn({ err, sessionId: id }, 'auto-complete points award skipped'),
-            )
+            try {
+              await awardSessionActivePoints(result.userId, id)
+            } catch (err) {
+              logger.warn({ err, sessionId: id }, 'auto-complete points award skipped')
+            }
           }
+          if (result.module === 'elevate') await analyzeCompletedSession(id)
         } catch (err) {
           logger.error({ err, sessionId: id }, 'inactive session completion failed')
         }

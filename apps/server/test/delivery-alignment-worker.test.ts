@@ -293,6 +293,20 @@ describe('durable automatic delivery alignment', () => {
     })
     expect(alignmentRetry(1, 'alignment_coverage_insufficient')).toMatchObject({ deliveryAlignmentStatus: 'unavailable' })
     expect(alignmentRetry(1, 'alignment_service_failed')).toMatchObject({ deliveryAlignmentStatus: 'retry' })
+    expect(alignmentRetry(1, 'complete_user_audio_required')).toMatchObject({ deliveryAlignmentStatus: 'unavailable' })
+  })
+
+  it('stops waiting when a segment recording is known to be missing', async () => {
+    mocks.resolve.mockResolvedValueOnce(null)
+    mocks.findSession.mockResolvedValue({ ...snapshot(), segments: [
+      { id: 'seg', audioStatus: 'available', recording: { recordingType: 'user' } },
+      { id: 'seg2', audioStatus: 'unavailable', recording: null },
+    ] })
+    await sweepDeliveryAlignment()
+    expect(mocks.spawn).not.toHaveBeenCalled()
+    expect(mocks.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      deliveryAlignmentStatus: 'unavailable', deliveryAlignmentError: 'complete_user_audio_required',
+    }) }))
   })
 
   it('invalidates stale coverage even when the selected pace came from live durations', async () => {

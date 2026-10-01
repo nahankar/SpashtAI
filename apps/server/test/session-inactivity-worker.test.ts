@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
     },
     award: vi.fn(),
     queuePace: vi.fn(),
+    analyze: vi.fn(),
   }
 })
 
@@ -27,7 +28,10 @@ vi.mock('../src/lib/paceReconciliationWorker', () => ({
   requeuePaceReconciliationData: () => ({ paceReconciliationStatus: 'pending' }),
 }))
 
+vi.mock('../src/routes/analytics', () => ({ runSessionAnalysis: mocks.analyze }))
+
 import {
+  analyzeCompletedSession,
   completeInactiveSession,
   latestActivityAt,
   sweepInactiveSessions,
@@ -45,11 +49,12 @@ function stubActivity({
   segmentCount = 0,
   closedSum = 0,
   prepare = false,
+  module = 'elevate',
 } = {}) {
   const { tx } = mocks
   tx.$queryRaw.mockResolvedValue([{ discardedAt: null }])
   tx.session.findUnique.mockResolvedValue({
-    id: 's1', userId: 'u1', startedAt: started, endedAt, durationSec: null,
+    id: 's1', userId: 'u1', startedAt: started, endedAt, durationSec: null, module,
     preparationPractice: prepare ? { id: 'p1' } : null,
   })
   tx.sessionSegment.aggregate.mockImplementation(async (args: { _sum?: unknown }) =>
@@ -68,6 +73,7 @@ describe('session inactivity worker', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.prisma.$transaction.mockImplementation(async (fn) => fn(mocks.tx))
+    mocks.analyze.mockResolvedValue({ status: 200, body: {} })
   })
 
   it('picks the latest activity timestamp', () => {
@@ -137,6 +143,7 @@ describe('session inactivity worker', () => {
     }))
     expect(mocks.queuePace).toHaveBeenCalledWith('s1')
     expect(mocks.award).toHaveBeenCalledWith('u1', 's1')
+    expect(mocks.analyze).toHaveBeenCalledWith('s1', { source: 'elevate' })
 
     vi.clearAllMocks()
     mocks.prisma.$transaction.mockImplementation(async (fn) => fn(mocks.tx))
@@ -144,6 +151,24 @@ describe('session inactivity worker', () => {
     stubActivity({ prepare: true })
     expect(await sweepInactiveSessions(NOW)).toBe(1)
     expect(mocks.award).not.toHaveBeenCalled()
+    expect(mocks.analyze).toHaveBeenCalledWith('s1', { source: 'elevate' })
+  })
+
+  it('runs the Leave analysis only for Elevate sessions', async () => {
+    mocks.analyze.mockResolvedValue({ status: 200, body: {} })
+    mocks.prisma.session.findMany.mockResolvedValueOnce([{ id: 's1' }])
+    stubActivity({ module: 'pitch' })
+    expect(await sweepInactiveSessions(NOW)).toBe(1)
+    expect(mocks.analyze).not.toHaveBeenCalled()
+  })
+
+  it('reports analysis failures without throwing', async () => {
+    mocks.analyze.mockResolvedValueOnce({ status: 400, body: { error: 'Transcript has no messages' } })
+    expect(await analyzeCompletedSession('s1')).toBe(false)
+    mocks.analyze.mockRejectedValueOnce(new Error('bedrock down'))
+    expect(await analyzeCompletedSession('s1')).toBe(false)
+    mocks.analyze.mockResolvedValueOnce({ status: 200, body: {} })
+    expect(await analyzeCompletedSession('s1')).toBe(true)
   })
 
   it('continues the sweep when one session fails', async () => {

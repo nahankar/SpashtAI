@@ -19,7 +19,9 @@ const JOB_TIMEOUT_MS = 15 * 60_000
 const MAX_ATTEMPTS = 5
 const REJECTED_EXIT_CODE = 3
 // Same audio and transcript reproduce these outcomes; retrying only delays the result.
-const TERMINAL_REASONS = new Set(['alignment_rejected', 'alignment_coverage_insufficient'])
+// A later recording upload requeues alignment, so terminal states still recover.
+const TERMINAL_REASONS = new Set(['alignment_rejected', 'alignment_coverage_insufficient', 'complete_user_audio_required'])
+const TERMINAL_SEGMENT_AUDIO = new Set(['failed', 'unavailable'])
 const script = join(dirname(fileURLToPath(import.meta.url)), '../../../agent/align_delivery.py')
 let running = false
 let timer: NodeJS.Timeout | null = null
@@ -129,6 +131,9 @@ async function processSession(sessionId: string, owner: string): Promise<void> {
     throw new Error('waiting_for_complete_transcript')
   }
   const resolved = await resolveElevateSessionAudio(sessionId, { requireCompleteSegments: true })
+  if (!resolved && snapshot.segments.some(s => TERMINAL_SEGMENT_AUDIO.has(s.audioStatus))) {
+    throw new Error('complete_user_audio_required')
+  }
   if (!resolved || !snapshot.turns.length) throw new Error('waiting_for_recording_or_transcript')
   // Room/composite recordings contain coach speech and cannot certify user delivery.
   const inputs = new Set(resolved.segments.map(s => s.segmentId))

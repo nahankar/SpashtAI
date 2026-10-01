@@ -64,8 +64,23 @@ const MIN_ANALYTICS_USER_WORDS = 5
  * 5. Save everything + auto-create Progress Pulse entries
  */
 export async function analyzeSession(req: Request, res: Response) {
-  const { sessionId } = req.params
-  const { autoTrackPulse, source = 'elevate', audioCapture = null } = req.body || {}
+  const result = await runSessionAnalysis(req.params.sessionId, req.body || {}, reqLog(req))
+  res.status(result.status).json(result.body)
+}
+
+export type SessionAnalysisInput = {
+  autoTrackPulse?: unknown
+  source?: 'elevate' | 'replay'
+  audioCapture?: unknown
+}
+
+/** Server-callable analytics pipeline; also used for sessions completed without a browser. */
+export async function runSessionAnalysis(
+  sessionId: string,
+  input: SessionAnalysisInput = {},
+  log: Pick<typeof logger, 'info' | 'error'> = logger,
+): Promise<{ status: number; body: unknown }> {
+  const { autoTrackPulse, source = 'elevate', audioCapture = null } = input
 
   try {
     // 1. Load session + transcript
@@ -80,7 +95,7 @@ export async function analyzeSession(req: Request, res: Response) {
     })
 
     if (!session) {
-      return res.status(404).json({ error: 'Session not found' })
+      return { status: 404, body: { error: 'Session not found' } }
     }
     const requestedAutoTrackPulse =
       typeof autoTrackPulse === 'boolean'
@@ -90,7 +105,7 @@ export async function analyzeSession(req: Request, res: Response) {
 
     const transcript = session.transcript
     if (!transcript) {
-      return res.status(400).json({ error: 'No transcript available for this session' })
+      return { status: 400, body: { error: 'No transcript available for this session' } }
     }
 
     const conversationData = transcript.conversationData as any
@@ -111,7 +126,7 @@ export async function analyzeSession(req: Request, res: Response) {
     }
 
     if (messages.length === 0) {
-      return res.status(400).json({ error: 'Transcript has no messages' })
+      return { status: 400, body: { error: 'Transcript has no messages' } }
     }
     // Endpointing often emits one-to-three-word debris around interruptions
     // ("and", "things", "you be great"). Keep it in the transcript, but do
@@ -460,7 +475,7 @@ export async function analyzeSession(req: Request, res: Response) {
       }
     }
 
-    res.json({
+    const body = {
       sessionId,
       skillScores: persistedScores,
       components: persistedComponents,
@@ -474,23 +489,24 @@ export async function analyzeSession(req: Request, res: Response) {
         topicCoherence: signals.topicCoherence.avgSimilarity,
       },
       pulseEntriesCreated: pulseCount,
-    })
+    }
     // Persist the queue transition even when audio is still uploading. The
     // worker re-resolves after commit, so neither a process crash nor a segment
     // arriving during analysis can strand partial acoustics.
     if (audioStatus === 'available' || audioStatus === 'pending') {
       scheduleElevateSessionAudioEnrichmentIfAnalyzed(sessionId)
     }
-    reqLog(req).info(
+    log.info(
       { event: 'analyze.succeeded', sessionId, source, pulseEntriesCreated: pulseCount },
       'session analyzed',
     )
+    return { status: 200, body }
   } catch (error: any) {
     if (error instanceof SessionDiscardedError) {
-      return res.status(410).json({ error: error.message })
+      return { status: 410, body: { error: error.message } }
     }
-    reqLog(req).error({ err: error, event: 'analyze.failed', sessionId, source }, 'analytics pipeline error')
-    res.status(500).json({ error: 'Analytics pipeline failed', details: error.message })
+    log.error({ err: error, event: 'analyze.failed', sessionId, source }, 'analytics pipeline error')
+    return { status: 500, body: { error: 'Analytics pipeline failed', details: error.message } }
   }
 }
 
