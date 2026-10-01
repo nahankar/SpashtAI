@@ -25,6 +25,9 @@ export type CreateInterviewJourneyInput = {
 }
 
 export const preparationInclude = {
+  user: {
+    select: { id: true, email: true, firstName: true, lastName: true },
+  },
   interview: true,
   stages: { orderBy: { sequence: 'asc' as const } },
   practices: { select: { id: true } },

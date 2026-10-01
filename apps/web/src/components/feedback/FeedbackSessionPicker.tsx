@@ -67,8 +67,8 @@ export function FeedbackSessionPicker({
       try {
         const headers = getAuthHeaders()
         const [elevateRes, replayRes] = await Promise.all([
-          fetch(`${API}/sessions`, { headers }),
-          fetch(`${API}/api/replay/sessions`, { headers }),
+          fetch(`${API}/sessions?scope=mine`, { headers }),
+          fetch(`${API}/api/replay/sessions?scope=mine`, { headers }),
         ])
         if (cancelled) return
         if (elevateRes.ok) {

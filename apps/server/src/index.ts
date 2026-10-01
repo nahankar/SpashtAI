@@ -111,6 +111,7 @@ import { startReplayDeletionWorker } from './lib/replayDeletionWorker'
 import { startPaceReconciliationWorker } from './lib/paceReconciliationWorker'
 import { startDeliveryAlignmentWorker } from './lib/deliveryAlignmentWorker'
 import { startAudioEnrichmentRetryWorker } from './analytics/audioEnrichment'
+import { startSessionInactivityWorker } from './lib/sessionInactivityWorker'
 
 const app = express()
 // Cloudflare → Nginx → Express; required for rate limiting and client IP
@@ -450,6 +451,7 @@ async function startServer() {
   startPaceReconciliationWorker()
   startDeliveryAlignmentWorker()
   startAudioEnrichmentRetryWorker()
+  startSessionInactivityWorker()
 
   // During `tsx watch` hot-reloads the previous process can still hold the port
   // for a brief moment when the new one starts. Instead of crashing on

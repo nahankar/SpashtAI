@@ -134,6 +134,11 @@ export type Preparation = {
   completedAt: string | null
   createdAt: string
   updatedAt: string
+  user?: {
+    firstName: string | null
+    lastName: string | null
+    email: string
+  } | null
   interview: InterviewPreparation
   stages: PreparationStage[]
   lastCompletedStage: PreparationStage | null

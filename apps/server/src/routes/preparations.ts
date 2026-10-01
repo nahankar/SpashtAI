@@ -45,6 +45,8 @@ import {
 } from '../services/preparations/createInterviewJourney'
 import { logInterview, LogInterviewError } from '../services/preparations/logInterview'
 import { trackFeatureUsage } from '../middleware/tracking'
+import { currentListRole, ownerListWhere } from '../lib/listAccess'
+import { isPrivilegedRole } from '../lib/userExportFlags'
 
 const router = Router()
 
@@ -116,7 +118,7 @@ function validationError(res: Response, error: ZodError) {
 router.get('/', async (req, res) => {
   try {
     const preparations = await prisma.preparation.findMany({
-      where: { userId: userId(req) },
+      where: ownerListWhere(userId(req), await currentListRole(req)),
       include: preparationInclude,
       orderBy: { updatedAt: 'desc' },
     })
@@ -168,7 +170,13 @@ router.post('/', trackFeatureUsage('prepare', 'journey_created'), async (req, re
 
 router.get('/:id', async (req, res) => {
   try {
-    const preparation = await getOwnedPreparationDetail(userId(req), req.params.id)
+    const privileged = isPrivilegedRole(await currentListRole(req))
+    const preparation = privileged
+      ? await prisma.preparation.findFirst({
+          where: { id: req.params.id },
+          include: preparationDetailInclude,
+        })
+      : await getOwnedPreparationDetail(userId(req), req.params.id)
     if (!preparation) return res.status(404).json({ error: 'Not found' })
     res.json({ preparation: withPreparationDetail(preparation) })
   } catch (error) {

@@ -21,22 +21,23 @@ import { deleteRecordingArtifact } from '../lib/sessionStorageCleanup'
 import { isValidInternalAgentRequest } from '../middleware/auth'
 import { scheduleElevateSessionAudioEnrichmentIfAnalyzed } from '../analytics/audioEnrichment'
 import { recordFeatureUsage } from '../middleware/tracking'
+import { currentListRole } from '../lib/listAccess'
 
 export async function listSessions(req: Request, res: Response) {
   try {
+    const privileged = isPrivilegedRole(await currentListRole(req))
     // Non-privileged users only see their own sessions. Admins/super-admins
-    // keep the full list so admin views don't regress.
-    const where = isPrivilegedRole(req.user?.role)
-      ? { discardedAt: null }
-      // Prepare owns linked practices. They stay available to support/admin
-      // through privileged reads, but are not standalone Elevate history.
+    // see every user's sessions. Prepare owns linked practices for everyone;
+    // they are shown in the journey, never in standalone Elevate history.
+    const where = privileged
+      ? { discardedAt: null, preparationPractice: null }
       : { userId: req.user!.userId, discardedAt: null, preparationPractice: null }
     const sessions = await prisma.session.findMany({
       where,
       orderBy: { startedAt: 'desc' },
       include: {
         user: {
-          select: { id: true, email: true }
+          select: { id: true, email: true, firstName: true, lastName: true }
         }
       }
     })
@@ -61,7 +62,7 @@ export async function listSessions(req: Request, res: Response) {
         ? { ...session, progressPulseStatus: 'tracked' }
         : session,
     )
-    const deletionWhere = isPrivilegedRole(req.user?.role)
+    const deletionWhere = privileged
       ? { discardedAt: { not: null } }
       : { userId: req.user!.userId, discardedAt: { not: null } }
     const deletions = await prisma.session.findMany({

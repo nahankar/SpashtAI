@@ -7,6 +7,8 @@ export type SortDir = 'asc' | 'desc'
 interface SessionFiltersProps {
   search: string
   onSearchChange: (v: string) => void
+  userSearch?: string
+  onUserSearchChange?: (v: string) => void
   sortField: SortField
   sortDir: SortDir
   onSortChange: (field: SortField, dir: SortDir) => void
@@ -17,11 +19,14 @@ interface SessionFiltersProps {
   totalCount: number
   filteredCount: number
   searchPlaceholder?: string
+  userSearchPlaceholder?: string
 }
 
 export function SessionFilters({
   search,
   onSearchChange,
+  userSearch,
+  onUserSearchChange,
   sortField,
   sortDir,
   onSortChange,
@@ -32,8 +37,10 @@ export function SessionFilters({
   totalCount,
   filteredCount,
   searchPlaceholder = 'Search sessions...',
+  userSearchPlaceholder = 'Filter by user name...',
 }: SessionFiltersProps) {
-  const hasActiveFilters = search || statusFilter !== 'all'
+  const hasUserFilter = userSearch !== undefined && onUserSearchChange !== undefined
+  const hasActiveFilters = search || userSearch || statusFilter !== 'all'
 
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-2">
@@ -42,6 +49,7 @@ export function SessionFilters({
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <input
           type="text"
+          aria-label={searchPlaceholder}
           placeholder={searchPlaceholder}
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
@@ -56,6 +64,30 @@ export function SessionFilters({
           </button>
         )}
       </div>
+
+      {hasUserFilter && (
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            aria-label="Filter by user name"
+            placeholder={userSearchPlaceholder}
+            value={userSearch}
+            onChange={(e) => onUserSearchChange(e.target.value)}
+            className="flex h-9 w-full rounded-md border border-input bg-background py-2 pl-9 pr-8 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+          {userSearch && (
+            <button
+              type="button"
+              aria-label="Clear user name filter"
+              onClick={() => onUserSearchChange('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Status filter */}
       <select
@@ -103,6 +135,7 @@ export function SessionFilters({
           <button
             onClick={() => {
               onSearchChange('')
+              onUserSearchChange?.('')
               onStatusFilterChange('all')
             }}
             className="underline hover:text-foreground"

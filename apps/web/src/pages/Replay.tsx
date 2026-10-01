@@ -49,6 +49,12 @@ import { getAuthHeaders } from '@/lib/api-client'
 import { recordCoachAction } from '@/lib/coach-api'
 import { getPreparation } from '@/lib/prepare-api'
 import { SessionFilters, type SortField, type SortDir } from '@/components/SessionFilters'
+import { useAuth } from '@/hooks/useAuth'
+import {
+  formatSessionOwner,
+  matchesSessionOwner,
+  type SessionOwner,
+} from '@/lib/adminUserFilter'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 
@@ -67,6 +73,7 @@ interface ReplaySessionSummary {
     transcriptionSource: string
   } | null
   uploadedFiles: { id: string; fileType: string; originalName: string }[]
+  user?: SessionOwner | null
 }
 
 function formatRelativeDate(dateString: string): string {
@@ -190,6 +197,7 @@ function EditSessionDialog({
 }
 
 export function Replay() {
+  const { isAdmin } = useAuth()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const confirm = useConfirm()
@@ -215,6 +223,7 @@ export function Replay() {
 
   const [selectedReplay, setSelectedReplay] = useState<Set<string>>(new Set())
   const [search, setSearch] = useState('')
+  const [userSearch, setUserSearch] = useState('')
   const [sortField, setSortField] = useState<SortField>('date')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
   const [statusFilter, setStatusFilter] = useState('all')
@@ -520,11 +529,15 @@ export function Replay() {
           (s.sessionName || '').toLowerCase().includes(q) ||
           s.meetingType.toLowerCase().includes(q) ||
           s.userRole.toLowerCase().includes(q) ||
-          (s.participantName || '').toLowerCase().includes(q)
+          (s.participantName || '').toLowerCase().includes(q) ||
+          s.id.toLowerCase().includes(q)
       )
     }
     if (statusFilter !== 'all') {
       result = result.filter((s) => s.status === statusFilter)
+    }
+    if (isAdmin && userSearch) {
+      result = result.filter((session) => matchesSessionOwner(session.user, userSearch))
     }
     result.sort((a, b) => {
       let cmp = 0
@@ -545,7 +558,7 @@ export function Replay() {
       return sortDir === 'asc' ? cmp : -cmp
     })
     return result
-  }, [sessions, search, sortField, sortDir, statusFilter])
+  }, [sessions, search, userSearch, sortField, sortDir, statusFilter, isAdmin])
 
   const replaySortOptions: { value: SortField; label: string }[] = [
     { value: 'date', label: 'Date' },
@@ -713,6 +726,9 @@ export function Replay() {
         <SessionFilters
           search={search}
           onSearchChange={setSearch}
+          searchPlaceholder={isAdmin ? 'Search by session name or ID...' : undefined}
+          userSearch={isAdmin ? userSearch : undefined}
+          onUserSearchChange={isAdmin ? setUserSearch : undefined}
           sortField={sortField}
           sortDir={sortDir}
           onSortChange={(f, d) => { setSortField(f); setSortDir(d) }}
@@ -790,6 +806,7 @@ export function Replay() {
                       )}
                     </div>
                     <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                      {isAdmin && <span>{formatSessionOwner(s.user)}</span>}
                       {s.sessionName && <span>{s.meetingType}</span>}
                       <span className="flex items-center gap-1">
                         <Calendar className="h-3 w-3" />

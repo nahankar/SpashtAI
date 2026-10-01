@@ -24,6 +24,7 @@ import {
   replayTranscriptionCachePath,
 } from '../lib/replayDeletionWorker'
 import { replaySessionAccessWhere } from '../lib/replay-access'
+import { currentListRole, ownerListWhere } from '../lib/listAccess'
 
 function ownedReplayWhere(req: Request, id: string) {
   return replaySessionAccessWhere(
@@ -1076,8 +1077,14 @@ router.get('/sessions', async (req: Request, res: Response) => {
   try {
     const userId = req.user!.userId
     const sessions = await prisma.replaySession.findMany({
-      where: { userId, preparationRecording: null },
+      where: {
+        ...ownerListWhere(userId, await currentListRole(req)),
+        preparationRecording: null,
+      },
       include: {
+        user: {
+          select: { id: true, email: true, firstName: true, lastName: true },
+        },
         result: {
           select: {
             overallScore: true,

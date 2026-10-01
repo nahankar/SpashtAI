@@ -64,6 +64,7 @@ import { isUsableProsody } from '@/lib/prosody'
 import { buildExperimentalMeasurementsSection } from '@/lib/pdfDeliveryMeasurements'
 import { hasAvailablePace, paceTrendTurns } from '@/lib/pace'
 import { markCoachHomeResultSeen, recordCoachAction } from '@/lib/coach-api'
+import { formatSessionOwner, matchesSessionOwner, type SessionOwner } from '@/lib/adminUserFilter'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 const IDLE_TIMEOUT_MS = 15 * 60 * 1000
@@ -148,7 +149,7 @@ async function saveSessionData(sessionId: string, metrics: unknown, transcript: 
 export function Elevate() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const { user, updateUser } = useAuth()
+  const { user, isAdmin, updateUser } = useAuth()
   const exportFlags = useUserExportFlags()
   const confirmDialog = useConfirm()
   const viewSessionId = searchParams.get('session')
@@ -314,6 +315,7 @@ export function Elevate() {
     words?: number
     fillerRate?: number
     progressPulseStatus?: string | null
+    user?: SessionOwner | null
   }
   const [pastSessions, setPastSessions] = useState<ElevateSessionItem[]>([])
   const [pendingDeletions, setPendingDeletions] = useState<Array<{
@@ -323,6 +325,7 @@ export function Elevate() {
   }>>([])
   const [pastLoading, setPastLoading] = useState(true)
   const [elevSearch, setElevSearch] = useState('')
+  const [elevUserSearch, setElevUserSearch] = useState('')
   const [elevSortField, setElevSortField] = useState<SortField>('date')
   const [elevSortDir, setElevSortDir] = useState<SortDir>('desc')
   const [elevStatusFilter, setElevStatusFilter] = useState('all')
@@ -342,13 +345,17 @@ export function Elevate() {
       result = result.filter(
         (s) =>
           (s.sessionName || '').toLowerCase().includes(q) ||
-          s.module.toLowerCase().includes(q)
+          s.module.toLowerCase().includes(q) ||
+          s.id.toLowerCase().includes(q)
       )
     }
     if (elevStatusFilter !== 'all') {
       result = result.filter((s) =>
         elevStatusFilter === 'completed' ? s.endedAt != null : s.endedAt == null
       )
+    }
+    if (isAdmin && elevUserSearch) {
+      result = result.filter((session) => matchesSessionOwner(session.user, elevUserSearch))
     }
     result.sort((a, b) => {
       let cmp = 0
@@ -369,7 +376,7 @@ export function Elevate() {
       return elevSortDir === 'asc' ? cmp : -cmp
     })
     return result
-  }, [pastSessions, elevSearch, elevSortField, elevSortDir, elevStatusFilter])
+  }, [pastSessions, elevSearch, elevUserSearch, elevSortField, elevSortDir, elevStatusFilter, isAdmin])
 
   const elevateSortOptions: { value: SortField; label: string }[] = [
     { value: 'date', label: 'Date' },
@@ -972,7 +979,8 @@ export function Elevate() {
           navigate(`/elevate?${params.toString()}`, { replace: true })
         }
 
-        if (session.endedAt) {
+        if (session.endedAt || (session.userId && user?.id && session.userId !== user.id)) {
+          // Admins viewing another user's session never join its live room.
           console.log('📊 Viewing completed session:', viewSessionId)
           void markCoachHomeResultSeen('elevate', viewSessionId).catch((error) =>
             console.warn('mark Coach Home Elevate result seen', error),
@@ -1054,6 +1062,7 @@ export function Elevate() {
     searchParams,
     user?.email,
     user?.firstName,
+    user?.id,
   ])
 
   // Initialize conversation when session ID is available
@@ -1859,6 +1868,9 @@ export function Elevate() {
           <SessionFilters
             search={elevSearch}
             onSearchChange={setElevSearch}
+            searchPlaceholder={isAdmin ? 'Search by session name or ID...' : undefined}
+            userSearch={isAdmin ? elevUserSearch : undefined}
+            onUserSearchChange={isAdmin ? setElevUserSearch : undefined}
             sortField={elevSortField}
             sortDir={elevSortDir}
             onSortChange={(f, d) => { setElevSortField(f); setElevSortDir(d) }}
@@ -1951,6 +1963,7 @@ export function Elevate() {
                           )}
                         </div>
                         <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
+                          {isAdmin && <span>{formatSessionOwner(s.user)}</span>}
                           <span>{formatRelDate(s.startedAt)}</span>
                           {done && s.durationSec != null && <span>{fmtDur(s.durationSec)}</span>}
                           {s.words != null && <span>{s.words} words</span>}
@@ -1960,11 +1973,17 @@ export function Elevate() {
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
-                      <Link to={`/elevate?session=${s.id}`}>
-                        <Button size="sm" variant="outline">
-                          {done ? 'View Results' : 'Resume'}
+                      {!done && isAdmin && s.user?.id && s.user.id !== user?.id ? (
+                        <Button size="sm" variant="outline" disabled title="Another user's live session can't be resumed">
+                          In progress
                         </Button>
-                      </Link>
+                      ) : (
+                        <Link to={`/elevate?session=${s.id}`}>
+                          <Button size="sm" variant="outline">
+                            {done ? 'View Results' : 'Resume'}
+                          </Button>
+                        </Link>
+                      )}
                       <Link
                         to={`/feedback/new?module=elevate&session=${encodeURIComponent(s.id)}`}
                         title="Report an issue with this session"

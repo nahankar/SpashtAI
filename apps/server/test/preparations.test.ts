@@ -57,6 +57,7 @@ const prismaMock = vi.hoisted(() => ({
     updateMany: vi.fn(),
   },
   replaySession: { deleteMany: vi.fn() },
+  user: { findUnique: vi.fn(async () => ({ role: 'USER' })) },
   progressPulse: { deleteMany: vi.fn() },
   featureUsage: { create: vi.fn() },
   platformFeatureFlag: {
@@ -219,6 +220,25 @@ describe('Prepare API ownership and validation', () => {
     expect(response.status).toBe(200)
     expect(prismaMock.preparation.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { userId: 'user-a' } }),
+    )
+  })
+
+  it('lists every user preparation for a current database admin', async () => {
+    prismaMock.user.findUnique.mockResolvedValueOnce({ role: 'ADMIN' })
+    prismaMock.preparation.findMany.mockResolvedValue([preparation])
+    const response = await request(appFor()).get('/api/preparations')
+    expect(response.status).toBe(200)
+    expect(prismaMock.preparation.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({ where: {} }),
+    )
+  })
+
+  it('lets a current database admin read another user journey detail', async () => {
+    prismaMock.user.findUnique.mockResolvedValueOnce({ role: 'SUPER_ADMIN' })
+    prismaMock.preparation.findFirst.mockResolvedValue(null)
+    await request(appFor('admin-1')).get(`/api/preparations/${PREPARATION_ID}`)
+    expect(prismaMock.preparation.findFirst).toHaveBeenLastCalledWith(
+      expect.objectContaining({ where: { id: PREPARATION_ID } }),
     )
   })
 

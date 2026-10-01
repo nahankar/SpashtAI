@@ -10,6 +10,8 @@ import { StageTracker } from '@/components/prepare/StageTracker'
 import { deletePreparation, listPreparations } from '@/lib/prepare-api'
 import { JOURNEY_FINISHED_STATUSES, type Preparation } from '@/lib/prepare-types'
 import { useConfirm } from '@/hooks/useConfirm'
+import { useAuth } from '@/hooks/useAuth'
+import { formatSessionOwner, matchesSessionOwner } from '@/lib/adminUserFilter'
 
 function formatDate(value: string | null | undefined) {
   if (!value) return null
@@ -24,9 +26,11 @@ function formatDate(value: string | null | undefined) {
 function JourneyRow({
   journey,
   onDelete,
+  showOwner,
 }: {
   journey: Preparation
   onDelete: (journey: Preparation) => void
+  showOwner: boolean
 }) {
   const finished = JOURNEY_FINISHED_STATUSES.includes(journey.status)
   const practiceCount = journey.practices?.length ?? 0
@@ -48,6 +52,7 @@ function JourneyRow({
             )}
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            {showOwner && <span>{formatSessionOwner(journey.user)}</span>}
             <span>{journey.interview.companyName || 'General interview'}</span>
             <span>Updated {formatDate(journey.updatedAt)}</span>
             {journey.nextStage?.scheduledAt && (
@@ -100,11 +105,13 @@ function JourneyRow({
 }
 
 export function InterviewJourneys() {
+  const { isAdmin } = useAuth()
   const confirm = useConfirm()
   const [journeys, setJourneys] = useState<Preparation[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [userSearch, setUserSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [sortField, setSortField] = useState<SortField>('date')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
@@ -133,8 +140,10 @@ export function InterviewJourneys() {
         || (statusFilter === 'active' && !finished)
         || (statusFilter === 'completed' && finished)
       if (!matchesStatus) return false
+      if (isAdmin && !matchesSessionOwner(journey.user, userSearch)) return false
       if (!query) return true
       return [
+        journey.id,
         journey.title,
         journey.interview.companyName,
         journey.interview.roleTitle,
@@ -149,7 +158,7 @@ export function InterviewJourneys() {
       else comparison = new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime()
       return sortDir === 'asc' ? comparison : -comparison
     })
-  }, [journeys, search, statusFilter, sortField, sortDir])
+  }, [journeys, search, userSearch, statusFilter, sortField, sortDir, isAdmin])
 
   async function remove(journey: Preparation) {
     const accepted = await confirm({
@@ -217,7 +226,9 @@ export function InterviewJourneys() {
           <SessionFilters
             search={search}
             onSearchChange={setSearch}
-            searchPlaceholder="Search interviews..."
+            userSearch={isAdmin ? userSearch : undefined}
+            onUserSearchChange={isAdmin ? setUserSearch : undefined}
+            searchPlaceholder={isAdmin ? 'Search by interview name or ID...' : 'Search interviews...'}
             sortField={sortField}
             sortDir={sortDir}
             onSortChange={(field, direction) => { setSortField(field); setSortDir(direction) }}
@@ -240,7 +251,12 @@ export function InterviewJourneys() {
           {filteredJourneys.length ? (
             <div className="grid gap-3">
               {filteredJourneys.map((journey) => (
-                <JourneyRow key={journey.id} journey={journey} onDelete={remove} />
+                <JourneyRow
+                  key={journey.id}
+                  journey={journey}
+                  onDelete={remove}
+                  showOwner={isAdmin}
+                />
               ))}
             </div>
           ) : (
