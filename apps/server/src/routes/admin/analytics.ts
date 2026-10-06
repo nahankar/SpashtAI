@@ -39,16 +39,16 @@ router.get('/overview', async (_req: Request, res: Response) => {
         },
       }),
       enabled.includes('elevate')
-        ? prisma.session.count({ where: { discardedAt: null, preparationPractice: null } })
+        ? prisma.session.count({ where: { discardedAt: null, purpose: 'COMMUNICATION', preparationPractice: null } })
         : Promise.resolve(0),
-      enabled.includes('replay') ? prisma.replaySession.count({ where: { preparationRecording: null } }) : Promise.resolve(0),
+      enabled.includes('replay') ? prisma.replaySession.count({ where: { purpose: 'COMMUNICATION', preparationRecording: null } }) : Promise.resolve(0),
       enabled.includes('elevate')
         ? prisma.session.count({
-            where: { startedAt: { gte: monthAgo }, discardedAt: null, preparationPractice: null },
+            where: { startedAt: { gte: monthAgo }, discardedAt: null, purpose: 'COMMUNICATION', preparationPractice: null },
           })
         : Promise.resolve(0),
       enabled.includes('replay')
-        ? prisma.replaySession.count({ where: { createdAt: { gte: monthAgo }, preparationRecording: null } })
+        ? prisma.replaySession.count({ where: { createdAt: { gte: monthAgo }, purpose: 'COMMUNICATION', preparationRecording: null } })
         : Promise.resolve(0),
       enabled.includes('prepare') ? prisma.preparation.count() : Promise.resolve(0),
       enabled.includes('prepare')

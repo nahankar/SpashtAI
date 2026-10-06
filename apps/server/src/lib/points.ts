@@ -1,4 +1,5 @@
 import { prisma } from './prisma'
+import { isStandaloneCommunication } from './activityPolicy'
 import { areRewardPointsEnabled } from './platformSettings'
 import { lockWritableSession } from './sessionDiscard'
 
@@ -83,9 +84,9 @@ export async function awardSessionActivePoints(
     await lockWritableSession(tx, sessionId)
     const session = await tx.session.findUnique({
       where: { id: sessionId },
-      select: { userId: true, sessionPointsAwarded: true },
+      select: { userId: true, sessionPointsAwarded: true, purpose: true, preparationPractice: { select: { id: true } } },
     })
-    if (!session || session.userId !== userId) {
+    if (!session || session.userId !== userId || !isStandaloneCommunication(session)) {
       return { awarded: 0, total: 0 }
     }
 

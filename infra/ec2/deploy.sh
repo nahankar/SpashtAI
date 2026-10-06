@@ -159,7 +159,6 @@ npm ci
 echo "==> Prisma"
 cd apps/server
 npm run prisma:generate
-npx prisma migrate deploy
 cd "${ROOT}"
 
 echo "==> Build server + web"
@@ -176,6 +175,20 @@ npm run build
 
 if [[ ! -f "${ROOT}/apps/web/dist/index.html" ]]; then
   echo "Frontend build did not produce apps/web/dist/index.html — refusing rsync --delete." >&2
+  exit 1
+fi
+
+# This migration adds constraints incompatible with old journey writers.
+# Let active voice sessions finish before running this maintenance deployment.
+# Keep both processes stopped on migration failure; restarting old code is unsafe.
+echo "==> Migration maintenance: stop API, workers and voice agent"
+for app in spashtai-api spashtai-agent; do
+  if pm2 describe "$app" >/dev/null 2>&1; then
+    pm2 stop "$app"
+  fi
+done
+if ! (cd apps/server && npx prisma migrate deploy); then
+  echo "Migration failed. API and agent remain stopped. Inspect and resolve the migration before restarting." >&2
   exit 1
 fi
 
@@ -201,7 +214,7 @@ sudo systemctl reload nginx
 
 echo "==> PM2 reload"
 if pm2 describe spashtai-api >/dev/null 2>&1; then
-  pm2 reload infra/ec2/pm2/ecosystem.config.cjs
+  pm2 restart infra/ec2/pm2/ecosystem.config.cjs --update-env
 else
   pm2 start infra/ec2/pm2/ecosystem.config.cjs
 fi

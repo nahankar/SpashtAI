@@ -55,10 +55,10 @@ describe('admin analytics', () => {
       },
     })
     expect(prismaMock.session.count).toHaveBeenNthCalledWith(1, {
-      where: { discardedAt: null, preparationPractice: null },
+      where: { discardedAt: null, purpose: 'COMMUNICATION', preparationPractice: null },
     })
     expect(prismaMock.replaySession.count).toHaveBeenNthCalledWith(1, {
-      where: { preparationRecording: null },
+      where: { purpose: 'COMMUNICATION', preparationRecording: null },
     })
   })
 })

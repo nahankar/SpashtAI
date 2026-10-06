@@ -622,13 +622,13 @@ function AppRoutes() {
 function App() {
   return (
     <BrowserRouter>
-      <FeatureFlagsProvider>
-        <AuthProvider>
+      <AuthProvider>
+        <FeatureFlagsProvider>
           <div className="min-h-screen bg-background text-foreground">
             <AppRoutes />
           </div>
-        </AuthProvider>
-      </FeatureFlagsProvider>
+        </FeatureFlagsProvider>
+      </AuthProvider>
     </BrowserRouter>
   )
 }

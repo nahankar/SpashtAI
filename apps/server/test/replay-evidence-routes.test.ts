@@ -27,7 +27,7 @@ describe('Replay evidence route access and identity invalidation', () => {
   })
   beforeEach(() => {
     vi.clearAllMocks()
-    row = { id: 'session', userId: 'owner', status: 'completed', learnerSelection: null, uploadedFiles: [],
+    row = { id: 'session', userId: 'owner', purpose: 'COMMUNICATION', status: 'completed', learnerSelection: null, uploadedFiles: [],
       result: { transcriptionSource: 'uploaded', transcriptText: 'private transcript', structuredTranscript: segments, deliveryEvidence: input,
         wordsPerMinute: 150, overallScore: 9, coachingInsights: { primaryImprovement: 'Old learner advice', meetingSummary: { topicsDiscussed: ['Project plan'], keyOutcomes: [], openQuestions: [] } } } }
     mocks.find.mockImplementation(async ({ where }: any) => where?.userId && where.userId !== row.userId ? null : row)

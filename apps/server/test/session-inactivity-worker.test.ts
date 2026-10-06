@@ -49,13 +49,14 @@ function stubActivity({
   segmentCount = 0,
   closedSum = 0,
   prepare = false,
+  purpose = 'COMMUNICATION',
   module = 'elevate',
   retainedAt = null as Date | null,
 } = {}) {
   const { tx } = mocks
   tx.$queryRaw.mockResolvedValue([{ discardedAt: null }])
   tx.session.findUnique.mockResolvedValue({
-    id: 's1', userId: 'u1', startedAt: started, endedAt, durationSec: null, module, retainedAt,
+    id: 's1', userId: 'u1', startedAt: started, endedAt, durationSec: null, purpose, module, retainedAt,
     preparationPractice: prepare ? { id: 'p1' } : null,
   })
   tx.sessionSegment.aggregate.mockImplementation(async (args: { _sum?: unknown }) =>
@@ -186,4 +187,12 @@ describe('session inactivity worker', () => {
       .mockImplementation(async (fn) => fn(mocks.tx))
     expect(await sweepInactiveSessions(NOW)).toBe(1)
   })
+  it('does not award ordinary points to an abandoned standalone interview', async () => {
+    mocks.prisma.session.findMany.mockResolvedValueOnce([{ id: 's1' }])
+    stubActivity({ purpose: 'INTERVIEW' })
+    expect(await sweepInactiveSessions(NOW)).toBe(1)
+    expect(mocks.award).not.toHaveBeenCalled()
+    expect(mocks.analyze).toHaveBeenCalledWith('s1', { source: 'elevate' })
+  })
+
 })

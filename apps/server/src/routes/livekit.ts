@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express'
 import { AccessToken, RoomServiceClient, AgentDispatchClient } from 'livekit-server-sdk'
 import { prisma } from '../lib/prisma'
+import { resolveLivekitAccess } from '../lib/livekitAccess'
 import { logger, reqLog } from '../lib/logger'
 
 function getLivekitConfig() {
@@ -73,30 +74,14 @@ function hasActiveDispatchJobs(dispatches: any[] | undefined): boolean {
 
 export async function getLivekitToken(req: Request, res: Response) {
   try {
-    const {
-      identity,
-      room,
-      sessionId,
-      segmentId,
-      userName,
-      focusArea,
-      focusContext,
-      sessionName,
-      turnDetection,
-      boothDemo,
-    } = req.query as Record<string, string | undefined>
-    if (!identity || !room) {
-      return res.status(400).json({ error: 'identity and room are required' })
-    }
-    if (sessionId) {
-      const session = await prisma.session.findUnique({
-        where: { id: sessionId },
-        select: { discardedAt: true },
-      })
-      if (session?.discardedAt) {
-        return res.status(410).json({ error: 'Session discarded' })
-      }
-    }
+    const { room: requestedRoom, sessionId, segmentId, turnDetection } = req.query as Record<string, string | undefined>
+    const access = await resolveLivekitAccess(req, { room: requestedRoom, sessionId, segmentId })
+    if ('error' in access) return res.status(access.status ?? 500).json({ error: access.error })
+    const { session, identity } = access
+    const room = access.segment.roomName
+    const userName = session.user.firstName || session.user.email.split('@')[0]
+    const { focusArea, focusContext, sessionName } = session
+    const boothDemo = session.focusArea === 'snapshot' ? '1' : undefined
 
     const { apiKey, apiSecret, lkUrl, httpUrl } = getLivekitConfig()
     if (!apiKey || !apiSecret || !lkUrl) {
@@ -136,11 +121,18 @@ export async function getLivekitToken(req: Request, res: Response) {
       turnDetection: normalizeTurnDetection(turnDetection),
     }
     try {
-      await roomService.createRoom({
+      const rooms = await roomService.listRooms([room])
+      if (rooms.length) throw new Error('room already exists')
+      const created = await roomService.createRoom({
         name: room,
         emptyTimeout: 60 * 10, // 10 minutes
         metadata: JSON.stringify(roomMeta),
       })
+      // createRoom can return an existing room during a concurrent creation.
+      const createdMeta = parseRoomMetadata(created.metadata)
+      if (createdMeta.sessionId !== sessionId || createdMeta.segmentId !== segmentId) {
+        return res.status(409).json({ error: 'Room belongs to another activity' })
+      }
       console.log(`✅ Room ${room} created (voice backend: ${voiceCfg.backend})`)
     } catch (roomError: any) {
       const msg = roomError?.message || String(roomError)
@@ -155,6 +147,9 @@ export async function getLivekitToken(req: Request, res: Response) {
             throw new Error('existing room could not be read')
           }
           const existingMeta = parseRoomMetadata(existingRoom.metadata)
+          if (existingMeta.sessionId !== sessionId || existingMeta.segmentId !== segmentId) {
+            return res.status(409).json({ error: 'Room belongs to another activity' })
+          }
           if (Object.prototype.hasOwnProperty.call(existingMeta, 'hushEnabled')) {
             roomMeta.hushEnabled = normalizeHushEnabled(existingMeta.hushEnabled)
           } else {
@@ -163,10 +158,11 @@ export async function getLivekitToken(req: Request, res: Response) {
           await roomService.updateRoomMetadata(room, JSON.stringify(roomMeta))
           console.log(`✅ Room ${room} metadata updated; Hush setting preserved`)
         } catch (metaErr: any) {
-          console.log(`ℹ️ Existing room metadata left unchanged: ${metaErr?.message || metaErr}`)
+          logger.warn({ err: metaErr }, 'Existing room could not be verified')
+          return res.status(503).json({ error: 'Unable to verify live room' })
         }
       } else {
-        console.log(`ℹ️ Room creation note: ${msg}`)
+        return res.status(503).json({ error: 'Unable to create live room' })
       }
     }
 
@@ -225,20 +221,28 @@ export async function getLivekitToken(req: Request, res: Response) {
 
 export async function dispatchAgent(req: Request, res: Response) {
   try {
-    const { room } = req.body as { room?: string }
-    if (!room) {
-      return res.status(400).json({ error: 'room is required' })
-    }
+    const { room, sessionId, segmentId } = req.body as { room?: string; sessionId?: string; segmentId?: string }
+    const access = await resolveLivekitAccess(req, { room, sessionId, segmentId })
+    if ('error' in access) return res.status(access.status ?? 500).json({ error: access.error })
 
     const { apiKey, apiSecret, httpUrl } = getLivekitConfig()
     if (!apiKey || !apiSecret || !httpUrl) {
       return res.status(500).json({ error: 'LiveKit env not configured' })
     }
 
+    const roomService = new RoomServiceClient(httpUrl, apiKey, apiSecret)
+    const existing = (await roomService.listRooms([room!]))[0]
+    const metadata = parseRoomMetadata(existing?.metadata)
+    if (metadata.sessionId !== sessionId || metadata.segmentId !== segmentId) {
+      return res.status(409).json({ error: 'Room belongs to another activity' })
+    }
+
     console.log(`🤖 Dispatching agent to room: ${room}`)
     const agentClient = new AgentDispatchClient(httpUrl, apiKey, apiSecret)
     // createDispatch(roomName, agentName, options)
-    const dispatch = await agentClient.createDispatch(room, '', {})
+    const dispatches = await agentClient.listDispatch(room!)
+    if (hasActiveDispatchJobs(dispatches as any[])) return res.json({ alreadyActive: true })
+    const dispatch = await agentClient.createDispatch(room!, '', { metadata: JSON.stringify({ sessionId }) })
     console.log(`✅ Agent dispatched:`, dispatch)
     
     res.json({ success: true, dispatch })

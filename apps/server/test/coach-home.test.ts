@@ -177,7 +177,7 @@ describe('Coach Home result visibility', () => {
         module: 'elevate',
         endedAt: { not: null },
         discardedAt: null,
-        preparationPractice: null,
+        purpose: 'COMMUNICATION', preparationPractice: null,
       },
       select: { id: true },
     })

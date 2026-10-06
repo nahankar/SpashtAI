@@ -24,9 +24,9 @@ describe('standalone Elevate history', () => {
   })
 
   it.each([
-    ['USER', { userId: 'u1', discardedAt: null, preparationPractice: null }],
-    ['ADMIN', { discardedAt: null, preparationPractice: null }],
-    ['SUPER_ADMIN', { discardedAt: null, preparationPractice: null }],
+    ['USER', { userId: 'u1', discardedAt: null, purpose: 'COMMUNICATION', preparationPractice: null }],
+    ['ADMIN', { discardedAt: null, purpose: 'COMMUNICATION', preparationPractice: null }],
+    ['SUPER_ADMIN', { discardedAt: null, purpose: 'COMMUNICATION', preparationPractice: null }],
   ])('excludes Prepare interview practices for %s', async (role, where) => {
     prisma.user.findUnique.mockResolvedValue({ role })
     await listSessions({ user: { userId: 'u1', role }, query: {} } as any, response())
@@ -37,7 +37,7 @@ describe('standalone Elevate history', () => {
     prisma.user.findUnique.mockResolvedValue({ role: 'ADMIN' })
     await listSessions({ user: { userId: 'u1', role: 'ADMIN' }, query: { scope: 'mine' } } as any, response())
     expect(prisma.session.findMany.mock.calls[0][0].where).toEqual({
-      userId: 'u1', discardedAt: null, preparationPractice: null,
+      userId: 'u1', discardedAt: null, purpose: 'COMMUNICATION', preparationPractice: null,
     })
   })
 })

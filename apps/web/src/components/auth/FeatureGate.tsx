@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 
 const FEATURE_LABELS: Record<PlatformFeature, string> = {
+  interviews: 'Interviews',
   elevate: 'Elevate',
   replay: 'Replay',
   prepare: 'Prepare',

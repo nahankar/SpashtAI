@@ -10,6 +10,7 @@ import { useFeatureFlags } from '@/contexts/FeatureFlagsContext'
 
 interface FeatureFlagRow {
   feature: string
+  audience: 'EVERYONE' | 'SELECTED_USERS'
   label: string
   description: string | null
   hidden: boolean
@@ -102,6 +103,7 @@ export function FeatureFlagsAdmin() {
         body: JSON.stringify({
           hidden: d.hidden,
           disabled: d.disabled,
+          audience: d.audience,
           overlayComment: d.overlayComment || null,
           overlayPosition: d.overlayPosition,
         }),
@@ -171,6 +173,20 @@ export function FeatureFlagsAdmin() {
                 {flag.description && (
                   <p className="text-sm text-muted-foreground">{flag.description}</p>
                 )}
+
+                {flag.feature === 'interviews' && <div className="space-y-1">
+                  <Label htmlFor={`${flag.feature}-audience`}>Audience</Label>
+                  <select
+                    id={`${flag.feature}-audience`}
+                    className="flex h-9 w-full rounded-md border bg-background px-3 text-sm"
+                    value={d.audience ?? 'EVERYONE'}
+                    onChange={(e) => patchDraft(flag.feature, { audience: e.target.value as 'EVERYONE' | 'SELECTED_USERS' })}
+                  >
+                    <option value="EVERYONE">Everyone</option>
+                    <option value="SELECTED_USERS">Selected users</option>
+                  </select>
+                </div>}
+                {flag.feature === 'interviews' && d.audience === 'SELECTED_USERS' && <PilotGrants feature={flag.feature} />}
 
                 <div className="flex flex-wrap gap-4">
                   <FlagToggle
@@ -242,4 +258,57 @@ export function FeatureFlagsAdmin() {
       </div>
     </div>
   )
+}
+
+function PilotGrants({ feature }: { feature: string }) {
+  const [users, setUsers] = useState<Array<{ id: string; email: string }>>([])
+  const [grantedIds, setGrantedIds] = useState<string[]>([])
+  const [grantEmails, setGrantEmails] = useState<Record<string, string>>({})
+  const [selectedId, setSelectedId] = useState('')
+  const [search, setSearch] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    const timer = window.setTimeout(() => { Promise.all([
+      apiClient<{ users: Array<{ id: string; email: string }> }>(`/api/admin/users?limit=100&search=${encodeURIComponent(search)}`),
+      apiClient<{ grants: Array<{ userId: string; user: { email: string } }> }>(`/api/admin/feature-flags/${feature}/grants`),
+    ]).then(([people, grants]) => {
+      if (!cancelled) {
+        setUsers(people.users); setGrantedIds(grants.grants.map(g => g.userId))
+        setGrantEmails(Object.fromEntries(grants.grants.map(g => [g.userId, g.user.email])))
+      }
+    }).catch(() => { if (!cancelled) setError('Could not load pilot users') })
+    }, 300)
+    return () => { cancelled = true; window.clearTimeout(timer) }
+  }, [feature, search])
+  async function change(userId: string, granted: boolean) {
+    setBusy(true)
+    try {
+      await apiClient(`/api/admin/feature-flags/${feature}/grants/${encodeURIComponent(userId)}`, {
+        method: 'PUT', body: JSON.stringify({ granted }),
+      })
+      setGrantedIds(ids => granted ? [...new Set([...ids, userId])] : ids.filter(id => id !== userId))
+      const email = users.find(u => u.id === userId)?.email
+      if (email) setGrantEmails(previous => ({ ...previous, [userId]: email }))
+      setSelectedId('')
+      setError(null)
+    } catch { setError('Could not update pilot access') }
+    finally { setBusy(false) }
+  }
+  return <div className="space-y-2 rounded-md border p-3">
+    <p className="text-sm font-medium">Pilot access</p>
+    <p className="text-xs text-muted-foreground">Invitations do not override Hide or Disabled. Audience changes take effect when you save the feature.</p>
+    <input aria-label="Find pilot user" placeholder="Find a user by email or name" className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={search} onChange={e => setSearch(e.target.value)} />
+    <select aria-label="Select pilot user" className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={selectedId} onChange={e => setSelectedId(e.target.value)}>
+      <option value="">Select a user</option>
+      {users.filter(u => !grantedIds.includes(u.id)).map(u => <option key={u.id} value={u.id}>{u.email}</option>)}
+    </select>
+    <Button size="sm" disabled={busy || !selectedId} onClick={() => change(selectedId, true)}>Grant access</Button>
+    {grantedIds.map(id => <div key={id} className="flex items-center justify-between gap-2 text-sm">
+      <span>{grantEmails[id] ?? users.find(u => u.id === id)?.email ?? id}</span>
+      <Button size="sm" variant="outline" disabled={busy} onClick={() => change(id, false)}>Revoke</Button>
+    </div>)}
+    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+  </div>
 }

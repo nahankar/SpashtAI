@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/prisma'
+import { activityCreationPolicy, isStandaloneCommunication } from '../lib/activityPolicy'
 import { logger, reqLog } from '../lib/logger'
 import { awardSessionActivePoints } from '../lib/points'
 import { areRewardPointsEnabled } from '../lib/platformSettings'
@@ -30,8 +31,8 @@ export async function listSessions(req: Request, res: Response) {
     // see every user's sessions. Prepare owns linked practices for everyone;
     // they are shown in the journey, never in standalone Elevate history.
     const where = privileged
-      ? { discardedAt: null, preparationPractice: null }
-      : { userId: req.user!.userId, discardedAt: null, preparationPractice: null }
+      ? { discardedAt: null, purpose: 'COMMUNICATION' as const, preparationPractice: null }
+      : { userId: req.user!.userId, discardedAt: null, purpose: 'COMMUNICATION' as const, preparationPractice: null }
     const sessions = await prisma.session.findMany({
       where,
       orderBy: { startedAt: 'desc' },
@@ -164,6 +165,7 @@ export async function createSession(req: Request, res: Response) {
           id,
           userId,
           module,
+          ...activityCreationPolicy(Boolean(preparationId), true),
           sessionName: sessionName?.trim() || null,
           focusArea: focusArea?.trim() || null,
           focusContext: focusContext?.trim() || null,
@@ -240,7 +242,7 @@ export async function endSession(req: Request, res: Response) {
     req.body.preparationId = session.preparationPractice ? 'prepare-owned' : null
     let pointsAwarded = 0
     let totalPoints = session.user.rewardPoints
-    if (!alreadyEnded && pointsOn && !session.preparationPractice) {
+    if (!alreadyEnded && pointsOn && isStandaloneCommunication(session)) {
       try {
         const pts = await awardSessionActivePoints(session.userId, id)
         pointsAwarded = pts.awarded

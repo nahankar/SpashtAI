@@ -47,7 +47,7 @@ app.use('/coach', coachRouter)
 const segments = [{ speaker: 'Alice', text: 'We have a clear plan for the project.' }]
 const input = legacyInput(segments, 'uploaded')
 const legacy = () => ({
-  id: 'replay', userId: 'owner', status: 'completed', sessionName: 'Meeting',
+  id: 'replay', userId: 'owner', purpose: 'COMMUNICATION', status: 'completed', sessionName: 'Meeting',
   createdAt: new Date(), meetingType: 'Review', focusAreas: [], learnerSelection: null,
   result: {
     transcriptText: segments[0].text, structuredTranscript: segments, transcriptionSource: 'uploaded',
@@ -93,7 +93,7 @@ describe('shared Replay evidence boundaries', () => {
   })
 
   it('retains owned Elevate write behavior', async () => {
-    mocks.session.mockResolvedValue({ module: 'elevate', preparationPractice: null })
+    mocks.session.mockResolvedValue({ module: 'elevate', purpose: 'COMMUNICATION', preparationPractice: null })
     mocks.create.mockResolvedValue({ count: 1 })
     expect((await request(app).post('/pulse').send({
       source: 'elevate', sessionId: 'e', entries: [{ skill: 'clarity', score: 8 }],

@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/prisma'
+import { isStandaloneCommunication } from '../lib/activityPolicy'
 import { replayResultView } from '../lib/replay-result-view'
 import type { ReplaySelection } from '../lib/replay-evidence'
 import { generateCoachResponse, interpretCoachResult } from '../coach/service'
@@ -452,7 +453,7 @@ async function summariseElevateSession(
   // Coach's generic result loop must not turn a journey-owned event into an
   // Elevate result card. A future journey-aware interpretation can consume the
   // bounded Prepare activity digest instead.
-  if (!session || session.preparationPractice) return null
+  if (!session || !isStandaloneCommunication(session)) return null
   const persistedPace = readPersistedPaceEvidence(session.metrics?.processingStatus)
   const expectedWords =
     persistedPace && typeof persistedPace === 'object'
@@ -483,7 +484,7 @@ async function summariseReplaySession(
     where: { id: sessionId, userId: ownerId },
     include: { result: true, preparationRecording: { select: { id: true } } },
   })
-  if (!replay?.result || replay.status !== 'completed' || replay.preparationRecording) return null
+  if (!replay?.result || replay.status !== 'completed' || !isStandaloneCommunication(replay)) return null
   const safe = replayResultView(replay.result, replay.learnerSelection as unknown as ReplaySelection | null)
   return {
     module: 'replay',

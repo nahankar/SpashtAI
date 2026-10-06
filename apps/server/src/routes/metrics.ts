@@ -1,5 +1,6 @@
 import { Request, Response } from 'express'
 import { prisma } from '../lib/prisma'
+import { isPrivilegedRole } from '../lib/userExportFlags'
 import {
   exportDenied,
   getElevateSessionOwnerId,
@@ -555,10 +556,15 @@ export async function downloadSessionTranscript(req: Request, res: Response) {
 export async function getUserSessionsMetrics(req: Request, res: Response) {
   try {
     const { userId } = req.params
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' })
+    if (req.user.userId !== userId && !isPrivilegedRole(req.user.role)) {
+      return res.status(403).json({ error: 'Access denied' })
+    }
     const { limit = 10, offset = 0 } = req.query
+    const activityWhere = { userId, discardedAt: null, purpose: 'COMMUNICATION' as const, preparationPractice: null }
 
     const sessions = await prisma.session.findMany({
-      where: { userId, discardedAt: null },
+      where: activityWhere,
       include: {
         metrics: true,
         transcript: {
@@ -575,11 +581,11 @@ export async function getUserSessionsMetrics(req: Request, res: Response) {
 
     // Calculate summary statistics
     const totalSessions = await prisma.session.count({
-      where: { userId, discardedAt: null },
+      where: activityWhere,
     })
     const avgMetrics = await prisma.sessionMetrics.aggregate({
       where: {
-        session: { userId, discardedAt: null }
+        session: activityWhere
       },
       _avg: {
         userWpm: true,

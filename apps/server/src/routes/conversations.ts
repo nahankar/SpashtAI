@@ -62,21 +62,12 @@ export async function addConversationMessage(req: Request, res: Response) {
       return res.status(400).json({ error: 'Role and content are required' })
     }
     
-    let session = await prisma.session.findUnique({
+    const session = await prisma.session.findUnique({
       where: { id: sessionId }
     })
     
     if (!session) {
-      if (!req.user?.userId) {
-        return res.status(404).json({ error: 'Session not found for internal message logging' })
-      }
-      session = await prisma.session.create({
-        data: {
-          id: sessionId,
-          userId: req.user.userId,
-          module: 'elevate'
-        }
-      })
+      return res.status(404).json({ error: 'Create the session before logging messages' })
     }
     
     const messageData = {

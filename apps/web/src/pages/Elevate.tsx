@@ -1014,7 +1014,7 @@ export function Elevate() {
           if (session.sessionName) u.searchParams.set('sessionName', session.sessionName)
           if (inboundBoothDemo || session.focusArea === 'snapshot') u.searchParams.set('boothDemo', '1')
 
-          const res = await fetch(u.toString(), { signal: controller.signal })
+          const res = await fetch(u.toString(), { signal: controller.signal, headers: getAuthHeaders() })
           if (!res.ok) throw new Error('Failed to get token')
           const json = await res.json()
           if (cancelled) {
@@ -1146,7 +1146,7 @@ export function Elevate() {
       }
       if (elevateSessionName.trim()) u.searchParams.set('sessionName', elevateSessionName.trim())
       if (inboundBoothDemo || focusArea === 'snapshot') u.searchParams.set('boothDemo', '1')
-      const res = await fetch(u.toString())
+      const res = await fetch(u.toString(), { headers: getAuthHeaders() })
       if (!res.ok) throw new Error('Failed to get token')
       const json = await res.json()
       setSessionId(resumeSessionId)
@@ -1365,8 +1365,8 @@ export function Elevate() {
       try {
         const response = await fetch(`${API_BASE_URL}/livekit/dispatch`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ room: roomName })
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ room: roomName, sessionId, segmentId })
         })
 
         if (response.ok) {
@@ -1379,7 +1379,7 @@ export function Elevate() {
     }, 15000)
 
     return () => clearTimeout(timer)
-  }, [joined, roomName, assistantState])
+  }, [joined, roomName, assistantState, sessionId, segmentId])
 
   const handleJoin = useCallback(async () => {
     // One guard for every launch surface.  Previously it only protected the
@@ -1439,7 +1439,7 @@ export function Elevate() {
       if (inboundContext) u.searchParams.set('focusContext', inboundContext)
       if (elevateSessionName.trim()) u.searchParams.set('sessionName', elevateSessionName.trim())
       if (inboundBoothDemo || focusArea === 'snapshot') u.searchParams.set('boothDemo', '1')
-      const res = await fetch(u.toString())
+      const res = await fetch(u.toString(), { headers: getAuthHeaders() })
       if (!res.ok) throw new Error('Failed to get token')
       const json = await res.json()
       

@@ -2,12 +2,12 @@ import type { Request, Response, NextFunction } from 'express'
 import { prisma } from './prisma'
 
 /** Product modules that may be shown in navigation and counted in Pulse. */
-export type PlatformFeature = 'elevate' | 'replay' | 'prepare' | 'quick_try'
+export type PlatformFeature = 'elevate' | 'replay' | 'prepare' | 'interviews' | 'quick_try'
 /** Controlled capabilities that are enabled from Admin but are not modules. */
 export type InternalFeature = 'delivery_moments' | 'session_chat'
 export type ConfigurableFeature = PlatformFeature | InternalFeature
 
-export const PLATFORM_FEATURES: PlatformFeature[] = ['elevate', 'replay', 'prepare', 'quick_try']
+export const PLATFORM_FEATURES: PlatformFeature[] = ['elevate', 'replay', 'prepare', 'interviews', 'quick_try']
 export const CONFIGURABLE_FEATURES: ConfigurableFeature[] = [
   ...PLATFORM_FEATURES,
   'delivery_moments',
@@ -16,6 +16,7 @@ export const CONFIGURABLE_FEATURES: ConfigurableFeature[] = [
 const PULSE_FEATURES: PlatformFeature[] = ['elevate', 'replay', 'prepare']
 
 export interface FeatureFlagPublicState {
+  audience?: 'EVERYONE' | 'SELECTED_USERS'
   hidden: boolean
   disabled: boolean
   overlayComment: string | null
@@ -26,6 +27,7 @@ const DEFAULT_FLAGS: Array<{
   feature: ConfigurableFeature
   label: string
   description: string
+  audience?: 'EVERYONE' | 'SELECTED_USERS'
   hidden: boolean
   disabled: boolean
 }> = [
@@ -49,6 +51,14 @@ const DEFAULT_FLAGS: Array<{
     description: 'Build and track preparation journeys for important conversations.',
     hidden: true,
     disabled: false,
+  },
+  {
+    feature: 'interviews',
+    audience: 'SELECTED_USERS',
+    label: 'Interviews',
+    description: 'Interview practice and journeys (pilot; not yet released).',
+    hidden: true,
+    disabled: true,
   },
   {
     feature: 'quick_try',
@@ -90,6 +100,7 @@ export function invalidateFeatureFlagCache(): void {
 }
 
 function rowToState(row: {
+  audience?: 'EVERYONE' | 'SELECTED_USERS'
   hidden?: boolean
   disabled?: boolean
   enabled?: boolean
@@ -99,6 +110,7 @@ function rowToState(row: {
   const hidden = row.hidden ?? (row.enabled === false)
   const disabled = row.disabled ?? false
   return {
+    audience: row.audience ?? 'EVERYONE',
     hidden,
     disabled: hidden ? false : disabled,
     overlayComment: row.overlayComment ?? null,
@@ -149,6 +161,7 @@ export async function getFeatureFlagsMap(): Promise<FeatureFlagsMap> {
     elevate: { hidden: false, disabled: false, overlayComment: null, overlayPosition: 'center' },
     replay: { hidden: false, disabled: false, overlayComment: null, overlayPosition: 'center' },
     prepare: { hidden: true, disabled: false, overlayComment: null, overlayPosition: 'center' },
+    interviews: { hidden: true, disabled: true, audience: 'SELECTED_USERS', overlayComment: null, overlayPosition: 'center' },
     quick_try: { hidden: true, disabled: false, overlayComment: null, overlayPosition: 'center' },
     delivery_moments: {
       hidden: true,
@@ -173,15 +186,22 @@ export async function getFeatureFlagsMap(): Promise<FeatureFlagsMap> {
   return map
 }
 
-export async function isFeatureAccessible(feature: ConfigurableFeature): Promise<boolean> {
+export async function isFeatureAccessible(feature: ConfigurableFeature, userId?: string): Promise<boolean> {
   const map = await getFeatureFlagsMap()
   const s = map[feature]
-  return !s.hidden && !s.disabled
+  if (s.hidden || s.disabled) return false
+  if (s.audience !== 'SELECTED_USERS') return true
+  if (!userId) return false
+  return Boolean(await prisma.userFeatureGrant.findUnique({ where: { userId_feature: { userId, feature } } }))
 }
 
-export async function isFeatureVisible(feature: ConfigurableFeature): Promise<boolean> {
+export async function isFeatureVisible(feature: ConfigurableFeature, userId?: string): Promise<boolean> {
   const map = await getFeatureFlagsMap()
-  return !map[feature].hidden
+  const state = map[feature]
+  if (state.hidden) return false
+  if (state.audience !== 'SELECTED_USERS') return true
+  if (!userId) return false
+  return Boolean(await prisma.userFeatureGrant.findUnique({ where: { userId_feature: { userId, feature } } }))
 }
 
 export async function getEnabledFeatures(): Promise<PlatformFeature[]> {
@@ -195,9 +215,9 @@ export async function isFeatureEnabled(feature: PlatformFeature): Promise<boolea
 }
 
 export function requireFeature(feature: PlatformFeature) {
-  return async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      if (await isFeatureAccessible(feature)) {
+      if (await isFeatureAccessible(feature, req.user?.userId)) {
         next()
         return
       }

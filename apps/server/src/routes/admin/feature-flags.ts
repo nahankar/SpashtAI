@@ -29,14 +29,22 @@ router.put('/:feature', async (req: Request, res: Response) => {
       return res.status(400).json({ error: `Unknown feature: ${feature}` })
     }
 
-    const { hidden, disabled, overlayComment, overlayPosition } = req.body as {
+    const { hidden, disabled, overlayComment, overlayPosition, audience } = req.body as {
+      audience?: 'EVERYONE' | 'SELECTED_USERS'
       hidden?: boolean
       disabled?: boolean
       overlayComment?: string | null
       overlayPosition?: string
     }
 
+    if (audience !== undefined && !['EVERYONE', 'SELECTED_USERS'].includes(audience)) {
+      return res.status(400).json({ error: 'Invalid feature audience' })
+    }
+    if (audience === 'SELECTED_USERS' && feature !== 'interviews') {
+      return res.status(400).json({ error: 'Selected-user audience is currently supported only for Interviews' })
+    }
     const data: Record<string, unknown> = {}
+    if (audience !== undefined) data.audience = audience
     if (typeof hidden === 'boolean') data.hidden = hidden
     if (typeof disabled === 'boolean') data.disabled = disabled
     if (overlayComment !== undefined) data.overlayComment = overlayComment
@@ -65,6 +73,31 @@ router.put('/:feature', async (req: Request, res: Response) => {
     console.error('Feature flag update error:', err)
     res.status(500).json({ error: 'Failed to update feature flag' })
   }
+})
+
+router.get('/:feature/grants', async (req, res) => {
+  if (req.params.feature !== 'interviews') return res.status(400).json({ error: 'Pilot grants are supported only for Interviews' })
+  try {
+    const grants = await prisma.userFeatureGrant.findMany({ where: { feature: req.params.feature }, select: { userId: true, grantedBy: true, createdAt: true, user: { select: { email: true } } } })
+    res.json({ grants })
+  } catch { res.status(500).json({ error: 'Failed to read pilot grants' }) }
+})
+
+router.put('/:feature/grants/:userId', async (req, res) => {
+  if (req.params.feature !== 'interviews' || typeof req.body?.granted !== 'boolean') {
+    return res.status(400).json({ error: 'Known feature and boolean granted are required' })
+  }
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.params.userId }, select: { id: true } })
+    if (!user) return res.status(404).json({ error: 'User not found' })
+    await ensureFeatureFlags()
+    const key = { userId: req.params.userId, feature: req.params.feature }
+    if (req.body.granted) await prisma.userFeatureGrant.upsert({
+      where: { userId_feature: key }, update: { grantedBy: req.user!.userId }, create: { ...key, grantedBy: req.user!.userId },
+    })
+    else await prisma.userFeatureGrant.deleteMany({ where: key })
+    res.json({ success: true })
+  } catch { res.status(500).json({ error: 'Failed to update pilot grant' }) }
 })
 
 export default router

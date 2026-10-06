@@ -7,6 +7,7 @@
 
 import type { SkillScores } from './skillScores'
 import { prisma } from '../lib/prisma'
+import { isPulseEligible } from '../lib/activityPolicy'
 import { lockWritableSession } from '../lib/sessionDiscard'
 import { eligiblePulseWhere } from './pulseEligibility'
 
@@ -100,6 +101,11 @@ export async function saveSkillScoresToPulse(
 
   return prisma.$transaction(async (tx) => {
     if (source === 'elevate') await lockWritableSession(tx, sessionId)
+    const activity = await tx.session.findUnique({
+      where: { id: sessionId },
+      select: { userId: true, purpose: true, focusArea: true, preparationPractice: { select: { id: true } } },
+    })
+    if (!activity || activity.userId !== userId || !isPulseEligible(activity)) return 0
     const already = await tx.progressPulse.count({ where: { sessionId } })
     if (already > 0) {
       await tx.session.update({

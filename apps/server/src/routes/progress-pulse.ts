@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express'
 import { prisma } from '../lib/prisma'
+import { isPulseEligible, resolveContextScope } from '../lib/activityPolicy'
 import { Prisma } from '@prisma/client'
 import { getEnabledFeatures, isFeatureEnabled, type PlatformFeature } from '../lib/featureFlags'
 import { buildPrepareJourneyContext } from '../lib/prepareCoachingContext'
@@ -181,14 +182,14 @@ export async function recordProgressPulse(req: Request, res: Response) {
         await tx.$queryRaw`SELECT id FROM "Session" WHERE id = ${id} AND "userId" = ${userId} FOR UPDATE`
         const session = await tx.session.findFirst({
           where: { id, userId, discardedAt: null },
-          select: { module: true, preparationPractice: { select: { id: true } } },
+          select: { purpose: true, focusArea: true, module: true, preparationPractice: { select: { id: true } } },
         })
         if (!session || data.some(row => row.sessionId === id && row.source !== session.module)) {
           return { kind: 'not_found' as const }
         }
         // Prepare practices have event-specific feedback and must never be
         // admitted through this legacy, client-supplied Pulse writer.
-        if (session.preparationPractice) return { kind: 'prepare_owned' as const }
+        if (!isPulseEligible(session)) return { kind: 'prepare_owned' as const }
       }
       const created = await tx.progressPulse.createMany({ data })
       await tx.session.updateMany({ where: { userId, id: { in: data.map(row => row.sessionId!) } },
@@ -251,6 +252,7 @@ export async function trackElevateProgressPulse(req: Request, res: Response) {
       select: {
         id: true,
         focusArea: true,
+        purpose: true,
         metrics: { select: { skillScores: true } },
         preparationPractice: { select: { id: true } },
       },
@@ -259,7 +261,7 @@ export async function trackElevateProgressPulse(req: Request, res: Response) {
     if (session.focusArea === 'snapshot') {
       return res.status(400).json({ error: 'Communication Snapshot sessions are not tracked in Progress Pulse' })
     }
-    if (session.preparationPractice) {
+    if (!isPulseEligible(session)) {
       return res.status(400).json({ error: 'Interview practice is tracked in its Prepare journey, not Progress Pulse' })
     }
 
@@ -354,6 +356,24 @@ async function buildCoachingContext(
   replaySessionId?: string,
   elevateSessionId?: string,
 ) {
+    if (elevateSessionId) {
+      const activity = await prisma.session.findFirst({
+        where: { id: elevateSessionId, userId, discardedAt: null },
+        select: { purpose: true, contextScope: true, focusContext: true, configurationSnapshot: true,
+          preparationPractice: { select: { id: true } } },
+      })
+      if (!activity) throw new Error('Session not found')
+      const scope = resolveContextScope(activity)
+      if (scope === 'JOURNEY') {
+        const journey = await buildPrepareJourneyContext(elevateSessionId, userId)
+        if (!journey) throw new Error('Journey context unavailable')
+        return { focusArea, prepareJourney: journey }
+      }
+      if (scope !== 'COMMUNICATION_PROFILE') {
+        return { focusArea, skillSummaries: {}, replayInsights: null, lastPracticeSummary: null,
+          elevateSessionCount: 0, focusContext: activity.focusContext }
+      }
+    }
     const enabled = await getEnabledFeatures()
 
     // 1. All Progress Pulse scores (latest per skill + trend) — enabled sources only
@@ -380,8 +400,8 @@ async function buildCoachingContext(
     let replayInsights: any = null
     if (enabled.includes('replay')) {
     const replayWhere: Prisma.ReplaySessionWhereInput = replaySessionId
-      ? { id: replaySessionId, userId, preparationRecording: null }
-      : { userId, status: 'completed', preparationRecording: null }
+      ? { id: replaySessionId, userId, purpose: 'COMMUNICATION', preparationRecording: null }
+      : { userId, status: 'completed', purpose: 'COMMUNICATION', preparationRecording: null }
 
     const latestReplay = await prisma.replaySession.findFirst({
       where: replayWhere,
@@ -475,7 +495,7 @@ async function buildCoachingContext(
         focusArea: focusArea || undefined,
         endedAt: { not: null },
         discardedAt: null,
-        preparationPractice: null,
+        purpose: 'COMMUNICATION', preparationPractice: null,
       },
       orderBy: { startedAt: 'desc' },
       select: {
@@ -547,7 +567,7 @@ async function buildCoachingContext(
         focusArea: focusArea || undefined,
         endedAt: { not: null },
         discardedAt: null,
-        preparationPractice: null,
+        purpose: 'COMMUNICATION', preparationPractice: null,
       },
     })
     }
@@ -617,7 +637,12 @@ export async function getCoachingContextForAgent(req: Request, res: Response) {
         where: { id: sessionId },
         select: { userId: true },
       })
-      if (replaySession) userId = replaySession.userId
+      if (replaySession) {
+        // Recorded sessions have no live coach or communication-profile scope.
+        // Never route their ID through the Elevate context loader.
+        return res.json({ focusArea, skillSummaries: {}, replayInsights: null,
+          lastPracticeSummary: null, elevateSessionCount: 0 })
+      }
     }
 
     if (!userId) {

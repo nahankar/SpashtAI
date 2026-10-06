@@ -143,16 +143,18 @@ describe('discarded Elevate session lifecycle', () => {
 
   it('blocks new LiveKit tokens for tombstoned sessions', async () => {
     mocks.prisma.session.findUnique.mockResolvedValue({
-      discardedAt: new Date(),
+      discardedAt: new Date(), userId: "user-1",
     })
     const res = response()
 
     await getLivekitToken(
       {
+        user: { userId: 'user-1' },
         query: {
           identity: 'user-1',
           room: 'room-1',
           sessionId: 'session-discarding',
+          segmentId: 'seg1',
         },
       } as any,
       res,

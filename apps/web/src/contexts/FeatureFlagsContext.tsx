@@ -1,6 +1,8 @@
+import { getAuthHeaders } from '@/lib/api-client'
+import { useAuth } from '@/hooks/useAuth'
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 
-export type PlatformFeature = 'elevate' | 'replay' | 'prepare' | 'quick_try'
+export type PlatformFeature = 'elevate' | 'replay' | 'prepare' | 'interviews' | 'quick_try'
 
 export interface FeatureFlagState {
   hidden: boolean
@@ -22,6 +24,7 @@ const DEFAULT_FLAGS: FeatureFlags = {
   elevate: DEFAULT_FLAG,
   replay: DEFAULT_FLAG,
   prepare: { ...DEFAULT_FLAG, hidden: true },
+  interviews: { ...DEFAULT_FLAG, hidden: true, disabled: true },
   quick_try: { ...DEFAULT_FLAG, hidden: true },
 }
 
@@ -56,18 +59,20 @@ function normalizeFlag(raw: unknown): FeatureFlagState {
 }
 
 export function FeatureFlagsProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth()
   const [flags, setFlags] = useState<FeatureFlags>(DEFAULT_FLAGS)
   const [loading, setLoading] = useState(true)
 
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/features`)
+      const res = await fetch(`${API_BASE_URL}/api/features`, { headers: getAuthHeaders() })
       if (!res.ok) throw new Error('Failed to load feature flags')
       const data = await res.json()
       setFlags({
         elevate: normalizeFlag(data.features?.elevate),
         replay: normalizeFlag(data.features?.replay),
         prepare: normalizeFlag(data.features?.prepare ?? { hidden: true }),
+        interviews: normalizeFlag(data.features?.interviews ?? { hidden: true, disabled: true }),
         quick_try: normalizeFlag(data.features?.quick_try ?? { hidden: true }),
       })
     } catch (err) {
@@ -80,7 +85,7 @@ export function FeatureFlagsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     refresh()
-  }, [refresh])
+  }, [refresh, user?.id])
 
   const getFlag = useCallback((feature: PlatformFeature) => flags[feature], [flags])
   const isVisible = useCallback((feature: PlatformFeature) => !flags[feature].hidden, [flags])

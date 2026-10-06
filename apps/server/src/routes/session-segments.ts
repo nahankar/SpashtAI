@@ -115,6 +115,7 @@ export async function createSessionSegment(req: Request, res: Response) {
         if (raced?.sessionId === sessionId && raced.roomName === roomName) {
           return res.status(200).json({ segment: raced, idempotent: true })
         }
+        return res.status(409).json({ error: 'Session segment or room is already in use' })
       }
       throw error
     }

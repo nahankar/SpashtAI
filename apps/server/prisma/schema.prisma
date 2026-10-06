@@ -20,6 +20,24 @@ enum Gender {
   PREFER_NOT_TO_SAY
 }
 
+enum ActivityPurpose {
+  COMMUNICATION
+  INTERVIEW
+  GOAL_PREPARATION
+}
+
+enum ContextScope {
+  SESSION_ONLY
+  COMMUNICATION_PROFILE
+  JOURNEY
+  EXPLICIT_SOURCE
+}
+
+enum FeatureAudience {
+  EVERYONE
+  SELECTED_USERS
+}
+
 enum PreparationType {
   INTERVIEW
 }
@@ -146,6 +164,7 @@ model User {
   feedback                UserFeedback[]
   coachThreads            CoachThread[]
   coachHomeResultReceipts CoachHomeResultReceipt[]
+  featureGrants           UserFeatureGrant[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -391,7 +410,11 @@ model Session {
   id                   String    @id @default(cuid())
   user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId               String
-  module               String // elevate | pitch | fluency
+  module               String // execution engine; product purpose is separate
+  purpose              ActivityPurpose @default(COMMUNICATION)
+  contextScope         ContextScope @default(SESSION_ONLY)
+  communicationProfile String @default("communication-v1")
+  configurationSnapshot Json?
   sessionName          String?
   focusArea            String? // e.g. clarity, confidence, filler_words
   focusContext         String? // free-text context from Replay C2A or user input
@@ -455,6 +478,7 @@ model Session {
   @@index([paceReconciliationStatus, nextPaceReconciliationAt])
   @@index([paceReconciliationStatus, paceReconciliationLeaseUntil])
   @@index([deliveryAlignmentStatus, deliveryAlignmentNextAt])
+  @@index([userId, purpose, startedAt])
 }
 
 // One CPU-heavy alignment at a time across API processes. The owner token
@@ -614,6 +638,11 @@ model ReplaySession {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId String
 
+  purpose              ActivityPurpose @default(COMMUNICATION)
+  contextScope         ContextScope @default(SESSION_ONLY)
+  communicationProfile String @default("communication-v1")
+  configurationSnapshot Json?
+
   sessionName     String?
   meetingType     String
   userRole        String
@@ -641,6 +670,7 @@ model ReplaySession {
 
   @@index([userId, createdAt])
   @@index([userId, status, createdAt])
+  @@index([userId, purpose, createdAt])
 }
 
 model ReplayUpload {
@@ -741,7 +771,9 @@ model ProgressPulse {
 
 // ── Platform feature flags (global until multi-tenant) ──
 model PlatformFeatureFlag {
-  feature         String   @unique // "elevate" | "replay"
+  feature         String   @unique // product or internal capability
+  audience        FeatureAudience @default(EVERYONE)
+  grants          UserFeatureGrant[]
   label           String
   description     String?  @db.Text
   enabled         Boolean  @default(true) // legacy; migrated to hidden/disabled
@@ -752,6 +784,18 @@ model PlatformFeatureFlag {
   updatedBy       String?
   updatedAt       DateTime @updatedAt
   createdAt       DateTime @default(now())
+}
+
+model UserFeatureGrant {
+  id        String @id @default(cuid())
+  userId    String
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  feature   String
+  flag      PlatformFeatureFlag @relation(fields: [feature], references: [feature], onDelete: Cascade)
+  grantedBy String?
+  createdAt DateTime @default(now())
+
+  @@unique([userId, feature])
 }
 
 // Admin-editable LLM prompts for the live Elevate coach (agent loads at session start).

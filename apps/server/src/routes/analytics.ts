@@ -10,6 +10,7 @@
 import { Request, Response } from 'express'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/prisma'
+import { isPulseEligible } from '../lib/activityPolicy'
 import { logger, reqLog } from '../lib/logger'
 import {
   calculateSkillScores,
@@ -101,7 +102,7 @@ export async function runSessionAnalysis(
       typeof autoTrackPulse === 'boolean'
         ? autoTrackPulse
         : source === 'elevate' && session.focusArea !== 'snapshot'
-    const shouldAutoTrackPulse = !session.preparationPractice && requestedAutoTrackPulse
+    const shouldAutoTrackPulse = isPulseEligible(session) && requestedAutoTrackPulse
 
     const transcript = session.transcript
     if (!transcript) {

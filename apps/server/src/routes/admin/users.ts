@@ -45,8 +45,8 @@ router.get('/', async (req: Request, res: Response) => {
         hideAudioDownload: true,
         _count: {
           select: {
-            sessions: { where: { preparationPractice: null } },
-            replaySessions: { where: { preparationRecording: null } },
+            sessions: { where: { purpose: 'COMMUNICATION', preparationPractice: null } },
+            replaySessions: { where: { purpose: 'COMMUNICATION', preparationRecording: null } },
           },
         },
         },
@@ -105,8 +105,8 @@ router.get('/:id', async (req: Request, res: Response) => {
         enableUltra: true,
         _count: {
           select: {
-            sessions: { where: { preparationPractice: null } },
-            replaySessions: { where: { preparationRecording: null } },
+            sessions: { where: { purpose: 'COMMUNICATION', preparationPractice: null } },
+            replaySessions: { where: { purpose: 'COMMUNICATION', preparationRecording: null } },
             preparations: true,
             featureUsage: true,
           },
@@ -473,7 +473,7 @@ router.get('/:id/sessions', async (req: Request, res: Response) => {
   try {
     const [elevateSessions, replaySessions] = await Promise.all([
       prisma.session.findMany({
-        where: { userId: req.params.id, discardedAt: null, preparationPractice: null },
+        where: { userId: req.params.id, discardedAt: null, purpose: 'COMMUNICATION', preparationPractice: null },
         orderBy: { startedAt: 'desc' },
         take: 50,
         select: {
@@ -485,7 +485,7 @@ router.get('/:id/sessions', async (req: Request, res: Response) => {
         },
       }),
       prisma.replaySession.findMany({
-        where: { userId: req.params.id, preparationRecording: null },
+        where: { userId: req.params.id, purpose: 'COMMUNICATION', preparationRecording: null },
         orderBy: { createdAt: 'desc' },
         take: 50,
         select: {

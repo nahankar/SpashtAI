@@ -10,6 +10,7 @@ import { existsSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { prisma } from '../lib/prisma'
+import { activityCreationPolicy, isStandaloneCommunication, isPulseEligible } from '../lib/activityPolicy'
 import { logger, reqLog } from '../lib/logger'
 import {
   exportDenied,
@@ -279,7 +280,7 @@ router.post('/sessions/:id/track-progress', async (req: Request, res: Response) 
         include: { result: true, preparationRecording: { select: { id: true } } },
       })
       if (!session) return { code: 404, error: 'Replay session not found' }
-      if (session.preparationRecording) {
+      if (!isPulseEligible(session)) {
         return { code: 409, error: 'This interview recording belongs to a Prepare journey, not Progress Pulse' }
       }
       if (session.status !== 'completed' || !session.result) return { code: 409, error: 'Wait for analysis to finish' }
@@ -370,6 +371,7 @@ router.post('/sessions', trackFeatureUsage(
       const created = await tx.replaySession.create({
         data: {
           userId,
+          ...activityCreationPolicy(Boolean(preparationId), false),
           sessionName: sessionName?.trim() || null,
           meetingType: preparationId ? 'Interview' : meetingType?.trim() || 'General Meeting',
           userRole: preparationId ? 'Candidate' : userRole?.trim() || 'Participant',
@@ -1079,7 +1081,7 @@ router.get('/sessions', async (req: Request, res: Response) => {
     const sessions = await prisma.replaySession.findMany({
       where: {
         ...ownerListWhere(userId, await currentListRole(req)),
-        preparationRecording: null,
+        purpose: 'COMMUNICATION', preparationRecording: null,
       },
       include: {
         user: {

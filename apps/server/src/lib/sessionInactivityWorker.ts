@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client'
 import { prisma } from './prisma'
+import { isStandaloneCommunication } from './activityPolicy'
 import { logger } from './logger'
 import { lockWritableSession, SessionDiscardedError, SessionMissingError } from './sessionDiscard'
 import { activeSegmentDurationSec } from '../analytics/sessionSegments'
@@ -42,7 +43,7 @@ async function sessionLastActivityAt(db: ActivityClient, sessionId: string, star
 }
 
 export type InactiveCompletionResult =
-  | { completed: true; endedAt: Date; userId: string; prepareOwned: boolean; module: string }
+  | { completed: true; endedAt: Date; userId: string; prepareOwned: boolean; module: string; rewardEligible: boolean }
   | { completed: false; reason: 'already_ended' | 'active' | 'retained' | 'discarded' | 'missing' }
 
 /**
@@ -67,6 +68,7 @@ export async function completeInactiveSession(
           retainedAt: true,
           durationSec: true,
           module: true,
+          purpose: true,
           preparationPractice: { select: { id: true } },
         },
       })
@@ -124,6 +126,7 @@ export async function completeInactiveSession(
         userId: session.userId,
         prepareOwned: Boolean(session.preparationPractice),
         module: session.module,
+        rewardEligible: isStandaloneCommunication(session),
       } as const
     })
   } catch (error) {
@@ -180,7 +183,7 @@ export async function sweepInactiveSessions(now = new Date()): Promise<number> {
             'inactive session completed',
           )
           queuePaceReconciliation(id)
-          if (!result.prepareOwned) {
+          if (result.rewardEligible) {
             try {
               await awardSessionActivePoints(result.userId, id)
             } catch (err) {

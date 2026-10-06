@@ -237,9 +237,9 @@ app.use('/api/session-chat', requireAuth, sessionChatRouter)
 // Protected: Prepare interview journeys
 app.use('/api/preparations', requireAuth, requireFeature('prepare'), preparationsRouter)
 
-// Public: LiveKit (has its own auth via API keys) — Elevate only
-app.get('/livekit/token', requireFeature('elevate'), getLivekitToken)
-app.post('/livekit/dispatch', requireFeature('elevate'), dispatchAgent)
+// Authenticated LiveKit access, bound to an owned active session segment.
+app.get('/livekit/token', requireAuth, requireFeature('elevate'), getLivekitToken)
+app.post('/livekit/dispatch', requireAuth, requireFeature('elevate'), dispatchAgent)
 
 // Public: personas (read-only reference data)
 app.get('/personas', listPersonas)
