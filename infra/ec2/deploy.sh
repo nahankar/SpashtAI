@@ -8,6 +8,10 @@
 # Env:
 #   SKIP_GIT_PULL=1     skip `git pull origin main`
 #   SKIP_HEALTH_WAIT=1  skip waiting for /health after PM2 reload
+#   FORCE_MAINTENANCE=1 stop for pending migrations even if voice sessions look active
+#
+# Pending migrations run in a maintenance window (API, workers and voice agent
+# stopped). Deploys without pending migrations reload processes as before.
 #
 # Safety: never git reset --hard, git clean, or prisma migrate reset.
 set -euo pipefail
@@ -85,7 +89,28 @@ recover_overlays_if_reset_to_git() {
   done
 }
 
-trap restore_overlays EXIT
+# Maintenance state for the EXIT trap. A failed migration keeps processes
+# stopped (old code may be incompatible); any other failure after the stop
+# restarts the newly built release so a late nginx/rsync error is not an outage.
+PROCESSES_STOPPED=0
+MIGRATION_FAILED=0
+PROCESSES_RESTARTED=0
+
+restart_after_maintenance() {
+  pm2 restart infra/ec2/pm2/ecosystem.config.cjs --update-env && pm2 save
+}
+
+on_exit() {
+  local status=$?
+  restore_overlays
+  if [[ "${PROCESSES_STOPPED}" -eq 1 && "${PROCESSES_RESTARTED}" -ne 1 && "${MIGRATION_FAILED}" -ne 1 ]]; then
+    echo "Deploy failed after maintenance stop; restarting the built release." >&2
+    restart_after_maintenance || echo "Restart failed; inspect pm2 status." >&2
+  fi
+  exit "${status}"
+}
+
+trap on_exit EXIT
 
 echo "==> Preflight"
 # Only restore from backup when the working copy currently matches Git (interrupted checkout --).
@@ -178,23 +203,6 @@ if [[ ! -f "${ROOT}/apps/web/dist/index.html" ]]; then
   exit 1
 fi
 
-# This migration adds constraints incompatible with old journey writers.
-# Let active voice sessions finish before running this maintenance deployment.
-# Keep both processes stopped on migration failure; restarting old code is unsafe.
-echo "==> Migration maintenance: stop API, workers and voice agent"
-for app in spashtai-api spashtai-agent; do
-  if pm2 describe "$app" >/dev/null 2>&1; then
-    pm2 stop "$app"
-  fi
-done
-if ! (cd apps/server && npx prisma migrate deploy); then
-  echo "Migration failed. API and agent remain stopped. Inspect and resolve the migration before restarting." >&2
-  exit 1
-fi
-
-echo "==> Sync web dist to /var/www/spashtai"
-sudo rsync -a --delete apps/web/dist/ /var/www/spashtai/
-
 echo "==> Nginx vhosts"
 sudo cp infra/ec2/nginx/cloudflare-real-ip.conf /etc/nginx/snippets/cloudflare-real-ip.conf
 sudo cp infra/ec2/nginx/spasht.ai.conf infra/ec2/nginx/api.spasht.ai.conf /etc/nginx/sites-available/
@@ -212,13 +220,67 @@ sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t
 sudo systemctl reload nginx
 
+echo "==> Migration status"
+set +e
+MIGRATION_STATUS="$(cd apps/server && npx prisma migrate status 2>&1)"
+set -e
+if grep -q "Database schema is up to date" <<<"${MIGRATION_STATUS}"; then
+  PENDING_MIGRATIONS=0
+  echo "    No pending migrations; processes reload without maintenance."
+elif grep -qE "not yet been applied" <<<"${MIGRATION_STATUS}" && ! grep -qiE "failed" <<<"${MIGRATION_STATUS}"; then
+  PENDING_MIGRATIONS=1
+  grep -A20 -E "not yet been applied" <<<"${MIGRATION_STATUS}" | sed 's/^/    /'
+else
+  echo "${MIGRATION_STATUS}" >&2
+  echo "Could not determine a safe migration state. Nothing was stopped." >&2
+  exit 1
+fi
+
+if [[ "${PENDING_MIGRATIONS}" -eq 1 && "${FORCE_MAINTENANCE:-}" != "1" ]]; then
+  # Live segments stay open until Leave or Pause; a recent open segment means
+  # a learner may be mid-conversation.
+  ACTIVE_SEGMENTS="$(cd apps/server && node -e '
+    const { PrismaClient } = require("@prisma/client"); const p = new PrismaClient();
+    p.$queryRawUnsafe(`SELECT count(*)::int AS c FROM "SessionSegment" WHERE "endedAt" IS NULL AND "startedAt" > now() - interval \x273 hours\x27`)
+      .then(r => { console.log(r[0].c); return p.$disconnect() })
+      .catch(e => { console.error(e.message); process.exit(1) })
+  ')"
+  if [[ "${ACTIVE_SEGMENTS}" != "0" ]]; then
+    echo "${ACTIVE_SEGMENTS} voice segment(s) started in the last 3 hours are still open." >&2
+    echo "Wait for them to finish, or rerun with FORCE_MAINTENANCE=1." >&2
+    exit 1
+  fi
+fi
+
+if [[ "${PENDING_MIGRATIONS}" -eq 1 ]]; then
+  echo "==> Migration maintenance: stop API, workers and voice agent"
+  PROCESSES_STOPPED=1
+  for app in spashtai-api spashtai-agent; do
+    if pm2 describe "$app" >/dev/null 2>&1; then
+      pm2 stop "$app"
+    fi
+  done
+  if ! (cd apps/server && npx prisma migrate deploy); then
+    MIGRATION_FAILED=1
+    echo "Migration failed. API and agent remain stopped. Inspect and resolve the migration before restarting." >&2
+    exit 1
+  fi
+fi
+
+echo "==> Sync web dist to /var/www/spashtai"
+sudo rsync -a --delete apps/web/dist/ /var/www/spashtai/
+
 echo "==> PM2 reload"
-if pm2 describe spashtai-api >/dev/null 2>&1; then
-  pm2 restart infra/ec2/pm2/ecosystem.config.cjs --update-env
+if [[ "${PROCESSES_STOPPED}" -eq 1 ]]; then
+  restart_after_maintenance
+  PROCESSES_RESTARTED=1
+elif pm2 describe spashtai-api >/dev/null 2>&1; then
+  pm2 reload infra/ec2/pm2/ecosystem.config.cjs
+  pm2 save
 else
   pm2 start infra/ec2/pm2/ecosystem.config.cjs
+  pm2 save
 fi
-pm2 save
 
 if [[ "${SKIP_HEALTH_WAIT:-}" != "1" ]]; then
   echo "==> Wait for API health"
