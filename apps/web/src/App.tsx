@@ -40,6 +40,9 @@ import { FeedbackDetail } from '@/pages/feedback/FeedbackDetail'
 import { Pricing } from '@/pages/Pricing'
 import { TermsPage, PrivacyPage } from '@/pages/legal/Terms'
 import { AdminLegal } from '@/pages/admin/Legal'
+import { QuestionBank } from '@/pages/admin/QuestionBank'
+import { QuestionBankEditor } from '@/pages/admin/QuestionBankEditor'
+import { QuestionBankImports } from '@/pages/admin/QuestionBankImports'
 import { FeatureFlagsProvider, useFeatureFlags } from '@/contexts/FeatureFlagsContext'
 import { FeatureGate } from '@/components/auth/FeatureGate'
 import { PublicFooter } from '@/components/layout/PublicFooter'
@@ -613,6 +616,10 @@ function AppRoutes() {
             <Route path="tickers" element={<AdminTickers />} />
             <Route path="pricing" element={<AdminPricing />} />
             <Route path="legal" element={<AdminLegal />} />
+            <Route path="interview-bank" element={<QuestionBank />} />
+            <Route path="interview-bank/new" element={<QuestionBankEditor />} />
+            <Route path="interview-bank/versions/:id" element={<QuestionBankEditor />} />
+            <Route path="interview-bank/imports" element={<QuestionBankImports />} />
           </Route>
         </Route>
       </Routes>

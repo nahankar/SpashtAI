@@ -13,6 +13,7 @@ const links = [
   { to: '/admin/voice-backend', label: 'Voice Backend', end: false },
   { to: '/admin/features', label: 'Feature Flags', end: false },
   { to: '/admin/agent-prompts', label: 'Coach Prompts', end: false },
+  { to: '/admin/interview-bank', label: 'Interview Question Bank', end: false },
   { to: '/admin/tickers', label: 'Tickers', end: false },
   { to: '/admin/pricing', label: 'Pricing', end: false },
   { to: '/admin/legal', label: 'Legal', end: false },
