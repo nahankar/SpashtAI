@@ -9,6 +9,13 @@ export function elevateAdapter(api: LiveSessionApi, config: LaunchConfig): Activ
         focusArea: config.focusArea || null, focusContext: config.focusContext || null,
         preparationId: null, stageId: null, startedAt }
     },
+    async createActivity(id, startedAt) {
+      const response = await api.request('/sessions', { method: 'POST', body: JSON.stringify(this.creationBody(id, startedAt)) })
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}))
+        throw new Error(body.error || 'Failed to create Elevate session')
+      }
+    },
     async cleanupFailedJoin(id) { await api.request(`/sessions/${id}`, { method: 'DELETE' }).catch(() => null) },
     async discard(id) {
       const response = await api.request(`/sessions/${id}`, { method: 'DELETE' })

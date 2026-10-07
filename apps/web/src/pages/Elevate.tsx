@@ -29,6 +29,7 @@ import { SessionStatusBar } from '@/components/layout/AgentVisualizer'
 import { toast } from 'sonner'
 import { getAuthHeaders } from '@/lib/api-client'
 import { shouldReturnToElevateList } from '@/lib/elevateNavigation'
+import { isReadOnlySession, liveResultLocation } from '@/features/live-session/navigation'
 import { logEvent } from '@/lib/remoteLogger'
 import { FOCUS_AREAS, PRACTICE_FOCUS_AREAS, getFocusAreaLabel, EXERCISE_PREVIEWS } from '@/lib/focus-areas'
 import { pulseSkillLabel } from '@/lib/pulse-skills'
@@ -824,7 +825,7 @@ export function Elevate() {
           navigate(`/elevate?${params.toString()}`, { replace: true })
         }
 
-        if (session.endedAt || (session.userId && user?.id && session.userId !== user.id)) {
+        if (isReadOnlySession(session, user?.id)) {
           // Admins viewing another user's session never join its live room.
           console.log('📊 Viewing completed session:', viewSessionId)
           void markCoachHomeResultSeen('elevate', viewSessionId).catch((error) =>
@@ -954,10 +955,6 @@ export function Elevate() {
     loadPastSessions({ silent: true })
 
     if (currentSessionId && launchedFromCoach) {
-      const params = new URLSearchParams({
-        elevateResult: currentSessionId,
-      })
-      if (originCoachThreadId) params.set('thread', originCoachThreadId)
       if (originCoachThreadId) {
         void recordCoachAction(originCoachThreadId, {
           module: 'elevate',
@@ -965,7 +962,7 @@ export function Elevate() {
           targetId: currentSessionId,
         }).catch(() => undefined)
       }
-      navigate(`/coach?${params.toString()}`)
+      navigate(liveResultLocation(currentSessionId, { launchedFromCoach, originCoachThreadId }))
     } else if (currentSessionId) {
       setShowHistory(false)
       setResultsTab('playback')
@@ -973,12 +970,8 @@ export function Elevate() {
       setIsCompletedSessionView(true)
       setViewSessionPulse(trackIt ? 'tracked' : null)
       setSessionId(currentSessionId)
-      const resultParams = new URLSearchParams({ session: currentSessionId })
-      if (prepareLaunch) {
-        resultParams.set('preparationId', prepareLaunch.preparationId)
-        if (prepareLaunch.stageId) resultParams.set('stageId', prepareLaunch.stageId)
-      }
-      navigate(`/elevate?${resultParams.toString()}`)
+      navigate(liveResultLocation(currentSessionId, { launchedFromCoach,
+        preparationId: prepareLaunch?.preparationId, stageId: prepareLaunch?.stageId }))
     } else {
       setShowHistory(true)
       navigate('/elevate')

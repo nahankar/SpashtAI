@@ -39,6 +39,7 @@ describe('live transport characterization', () => {
     const { api, calls } = fixture(); const abort = new AbortController()
     await api.fetchLiveToken({ room: 'r', sessionId: 's', segmentId: 'seg' }, abort.signal)
     await api.requestAgentDispatch('r', 's', 'seg')
+    expect(calls[0].url).toBe('http://api/livekit/token?room=r&sessionId=s&segmentId=seg')
     expect(calls[0].init?.signal).toBe(abort.signal)
     expect(calls[0].init?.headers).toMatchObject({ Authorization: 'Bearer first' })
     expect(JSON.parse(String(calls[1].init?.body))).toEqual({ room: 'r', sessionId: 's', segmentId: 'seg' })

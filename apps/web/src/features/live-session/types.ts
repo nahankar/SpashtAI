@@ -31,6 +31,7 @@ export interface ActivityAdapter {
   kind: 'elevate' | 'prepare'
   preparationId: string | null
   creationBody(id: string, startedAt: string): Record<string, unknown>
+  createActivity(id: string, startedAt: string): Promise<void>
   cleanupFailedJoin(id: string, linked: boolean): Promise<void>
   discard(id: string): Promise<void>
   trackPulse: boolean; skipPulseCall: boolean

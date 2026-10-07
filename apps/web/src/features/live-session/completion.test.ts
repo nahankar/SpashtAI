@@ -56,10 +56,11 @@ describe('completion and discard characterization', () => {
     expect(f.calls[0].method).toBe(kind === 'prepare' ? 'POST' : 'DELETE')
     expect(f.effects.discardFinished).toHaveBeenCalledOnce()
   })
-  it('keeps the live room and recorder when discard is rejected', async () => {
+  it.each(['elevate', 'prepare'])('keeps the live room and recorder when %s discard is rejected', async kind => {
     const f = await joined(); const capture = recorder(); const before = f.controller.getSnapshot()
     f.fetcher.mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Completed journey practice cannot be discarded' }), { status: 409 }))
-    await f.controller.discard(capture, prepareAdapter(f.api, { ...f.config, preparationId: 'journey' }))
+    const adapter = kind === 'prepare' ? prepareAdapter(f.api, { ...f.config, preparationId: 'journey' }) : elevateAdapter(f.api, f.config)
+    await f.controller.discard(capture, adapter)
     expect(f.controller.getSnapshot()).toEqual(before)
     expect(capture.discard).not.toHaveBeenCalled(); expect(f.effects.clearActiveSession).not.toHaveBeenCalled()
     expect(f.effects.toast).toHaveBeenCalledWith('error', 'Completed journey practice cannot be discarded')
@@ -79,4 +80,16 @@ describe('completion and discard characterization', () => {
     resolve({ ok: true, audioCapture: 'uploaded' }); await first
     expect(f.calls.filter(c => c.path.endsWith('/end'))).toHaveLength(1)
   })
+  it('guards a second discard while the first deletion is pending', async () => {
+    const f = await joined(); const capture = recorder(); let resolve!: (value: Response) => void
+    f.fetcher.mockReturnValueOnce(new Promise(r => { resolve = r }))
+    const adapter = elevateAdapter(f.api, f.config)
+    const first = f.controller.discard(capture, adapter)
+    await f.controller.discard(capture, adapter)
+    expect(f.fetcher).toHaveBeenCalledTimes(3) // two resume requests plus one deletion
+    resolve(new Response('{}')); await first
+    expect(capture.discard).toHaveBeenCalledOnce()
+    expect(f.effects.discardFinished).toHaveBeenCalledOnce()
+  })
+
 })

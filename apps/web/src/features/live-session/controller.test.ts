@@ -20,14 +20,16 @@ describe('live controller start and resume characterization', () => {
     expect(f.controller.getSnapshot().token).toBeTruthy()
     expect(f.effects.log).toHaveBeenCalledWith('event', 'elevate.session_join', expect.objectContaining({ focusArea: config.focusArea || null }))
   })
-  it.each([0, 1, 2])('cleans up a failed start at request %i', async failedStep => {
+  it.each([['elevate', 0], ['elevate', 1], ['elevate', 2], ['prepare', 0], ['prepare', 1], ['prepare', 2]] as const)('cleans up a failed %s start at request %i', async (kind, failedStep) => {
     const f = fixture(); let step = 0
     const original = f.fetcher.getMockImplementation()!
     f.fetcher.mockImplementation(async (...args) => { if (step++ === failedStep) return new Response(JSON.stringify({ error: 'denied' }), { status: 500 }); return original(...args) })
-    await f.controller.start(f.config, elevateAdapter(f.api, f.config))
+    const config = { ...f.config, preparationId: kind === 'prepare' ? 'journey' : undefined }
+    await f.controller.start(config, kind === 'prepare' ? prepareAdapter(f.api, config) : elevateAdapter(f.api, config))
     expect(f.controller.getSnapshot().token).toBeNull()
     expect(f.controller.getSnapshot().isJoining).toBe(false)
-    expect(f.calls.at(-1)?.method).toBe('DELETE')
+    expect(f.calls.at(-1)?.method).toBe(kind === 'prepare' && failedStep > 0 ? 'POST' : 'DELETE')
+    if (kind === 'prepare' && failedStep > 0) expect(f.calls.at(-1)?.path).toMatch(/\/discard$/)
     if (failedStep === 2) expect(f.calls.at(-2)?.body.audioStatus).toBe('unavailable')
     expect(f.effects.log).toHaveBeenCalledWith('error', 'elevate.session_join_failed', expect.any(Error))
   })
@@ -92,4 +94,34 @@ describe('live controller start and resume characterization', () => {
     expect(vi.mocked(f.effects.addMessage).mock.calls[0][2]).not.toBe(first)
     expect(f.effects.addMessage).toHaveBeenCalledWith('user', 'Second answer', expect.stringMatching(/::user_turn_1$/), false)
   })
+  it('does not create a segment for an already aborted history effect', async () => {
+    const f = fixture(); const abort = new AbortController(); abort.abort()
+    await f.controller.resume('existing', abort.signal, true)
+    expect(f.fetcher).not.toHaveBeenCalled()
+    expect(f.controller.getSnapshot().isResuming).toBe(false)
+  })
+  it('keeps assistant feedback UI-only, strips thinking, and suppresses identical final messages', async () => {
+    const f = fixture(); await f.controller.resume('existing')
+    const room = f.controller.getSnapshot().roomName
+    f.controller.handleMessage({ role: 'assistant', id: 'answer', content: '<thinking>private</thinking>Useful feedback', partial: true })
+    expect(f.effects.upsertStreamingMessage).toHaveBeenCalledWith('assistant', 'Useful feedback', `${room}::answer`)
+    f.controller.handleMessage({ role: 'assistant', id: 'answer', content: 'Useful feedback' })
+    expect(f.effects.addMessage).toHaveBeenCalledWith('assistant', 'Useful feedback', `${room}::answer`, false)
+    vi.mocked(f.effects.messages).mockReturnValue([{ id: `${room}::answer`, role: 'assistant', content: 'Useful feedback' }])
+    f.controller.handleMessage({ role: 'assistant', id: 'answer', content: 'Useful feedback' })
+    expect(f.effects.addMessage).toHaveBeenCalledOnce()
+  })
+
+  it('delegates launch transport to the adapter without hardcoding the creation endpoint', async () => {
+    const f = fixture(); const adapter = elevateAdapter(f.api, f.config)
+    adapter.createActivity = async (id, startedAt) => {
+      await f.api.request('/custom-activity-launch', { method: 'POST', body: JSON.stringify({ id, startedAt }) })
+    }
+    await f.controller.start(f.config, adapter)
+    expect(f.calls[0].path).toBe('/custom-activity-launch')
+    expect(f.calls[1].path).toBe(`/sessions/${f.calls[0].body.id}/segments`)
+    expect(f.controller.getSnapshot().sessionId).toBe(f.calls[0].body.id)
+    expect(f.controller.getSnapshot().token).not.toBeNull()
+  })
+
 })

@@ -40,11 +40,7 @@ export class LiveSessionController {
       if (config.preparationPending) throw new Error(config.preparationError || 'Interview journey is still loading')
       id = `session_${this.deps.now().getTime()}_${this.deps.random().toString(36).substr(2, 9)}`
       const room = this.state.roomName || this.roomName()
-      const response = await this.deps.api.request('/sessions', { method: 'POST', body: JSON.stringify(adapter.creationBody(id, this.deps.now().toISOString())) })
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}))
-        throw new Error(body.error || 'Failed to create Elevate session')
-      }
+      await adapter.createActivity(id, this.deps.now().toISOString())
       linked = adapter.kind === 'prepare'
       segment = await this.deps.api.createSessionSegment(id, room)
       const connection = await this.deps.api.fetchLiveToken(this.query(id, segment, room))
