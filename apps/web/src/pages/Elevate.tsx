@@ -29,7 +29,7 @@ import { SessionStatusBar } from '@/components/layout/AgentVisualizer'
 import { toast } from 'sonner'
 import { getAuthHeaders } from '@/lib/api-client'
 import { shouldReturnToElevateList } from '@/lib/elevateNavigation'
-import { isReadOnlySession, liveResultLocation } from '@/features/live-session/navigation'
+import { isReadOnlySession, liveResultLocation, resumeLaunchLocation } from '@/features/live-session/navigation'
 import { logEvent } from '@/lib/remoteLogger'
 import { FOCUS_AREAS, PRACTICE_FOCUS_AREAS, getFocusAreaLabel, EXERCISE_PREVIEWS } from '@/lib/focus-areas'
 import { pulseSkillLabel } from '@/lib/pulse-skills'
@@ -160,6 +160,34 @@ export function Elevate() {
       targetId,
     }).catch(() => undefined)
   }, [launchedFromCoach, originCoachThreadId, sessionId, viewSessionId])
+
+  // A refresh during journey practice reloads its launch URL. Resume this
+  // browser's unfinished practice for the same journey instead of offering a
+  // second launch (standalone Elevate refreshes to its history list).
+  const [resumeCheckPending, setResumeCheckPending] = useState(
+    () => Boolean(inboundNewSession && inboundPreparationId && !viewSessionId && localStorage.getItem('spashtai_active_session')),
+  )
+  useEffect(() => {
+    if (!resumeCheckPending) return
+    const activeId = localStorage.getItem('spashtai_active_session')
+    if (!activeId || !user?.id) {
+      setResumeCheckPending(false)
+      return
+    }
+    let cancelled = false
+    fetch(`${API_BASE_URL}/sessions/${encodeURIComponent(activeId)}`, { headers: getAuthHeaders() })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (cancelled) return
+        const target = resumeLaunchLocation(data?.session, {
+          viewerId: user.id, preparationId: inboundPreparationId, params: searchParams,
+        })
+        if (target) navigate(target, { replace: true })
+        setResumeCheckPending(false)
+      })
+      .catch(() => { if (!cancelled) setResumeCheckPending(false) })
+    return () => { cancelled = true }
+  }, [resumeCheckPending, user?.id, inboundPreparationId, searchParams, navigate])
 
   useEffect(() => {
     if (!inboundPreparationId) {
@@ -1432,10 +1460,10 @@ export function Elevate() {
             </div>
           ) : !joined && !viewSessionId && !sessionId ? (
             <div className="grid gap-3">
-              {prepareLaunchLoading && (
+              {(prepareLaunchLoading || resumeCheckPending) && (
                 <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading interview journey…
+                  {resumeCheckPending ? 'Checking for a practice in progress…' : 'Loading interview journey…'}
                 </div>
               )}
               {prepareLaunchError && (
@@ -1520,6 +1548,7 @@ export function Elevate() {
                     isJoining ||
                     !elevateSessionName.trim() ||
                     prepareLaunchLoading ||
+                    resumeCheckPending ||
                     Boolean(prepareLaunchError) ||
                     prepareLaunchForeign
                   }
