@@ -1,3 +1,8 @@
+import { stripThinkingBlocks } from '@/lib/stripThinking'
+import { useLiveSession } from '@/features/live-session/useLiveSession'
+import { elevateAdapter } from '@/features/live-session/adapters/elevate'
+import { prepareAdapter } from '@/features/live-session/adapters/prepare'
+import type { LaunchConfig } from '@/features/live-session/types'
 import { liveSessionApi } from '@/features/live-session/browser'
 import { LiveSessionRoom } from '@/features/live-session/components/LiveSessionRoom'
 import { useWakeLock } from '@/features/live-session/useWakeLock'
@@ -40,7 +45,6 @@ import { Trash2, CheckSquare, Square, Target, ArrowRight, Play, ChevronDown, Che
 import { generateSessionPdf, type SessionReport } from '@/lib/generate-session-pdf'
 import { type SessionRecorderHandle } from '@/components/session/SessionRecorder'
 import { settleRecordingBeforePause } from '@/lib/pauseCapture'
-import { stripThinkingBlocks } from '@/lib/stripThinking'
 import {
   UserTurnBubble,
   normalizeTurnMetricsFromApi,
@@ -57,7 +61,7 @@ import { markCoachHomeResultSeen, recordCoachAction } from '@/lib/coach-api'
 import { formatSessionOwner, matchesSessionOwner, type SessionOwner } from '@/lib/adminUserFilter'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
-const { createSessionSegment, closeSessionSegment } = liveSessionApi
+const { closeSessionSegment } = liveSessionApi
 
 interface PaceTurn {
   role?: string
@@ -110,26 +114,10 @@ export function Elevate() {
   const [focusArea, setFocusArea] = useState(
     inboundFocus && inboundFocus !== 'snapshot' ? inboundFocus : ''
   )
-  const [roomName, setRoomName] = useState('') // Empty initially, generated per session
-  const [token, setToken] = useState<string | null>(null)
-  const [url, setUrl] = useState<string | null>(null)
-  const [isJoining, setIsJoining] = useState(false)
-  const joiningRef = useRef(false)
   const recorderRef = useRef<SessionRecorderHandle>(null)
   const intentionalDisconnectSegmentsRef = useRef(new Set<string>())
   const handledDisconnectSegmentsRef = useRef(new Set<string>())
   const pauseRequestedAtRef = useRef<Date | null>(null)
-  const [isLeaving, setIsLeaving] = useState(false)
-  const [segmentId, setSegmentId] = useState<string | null>(null)
-  const [isPausing, setIsPausing] = useState(false)
-  const [pauseAudioFailure, setPauseAudioFailure] = useState<
-    'failed' | 'unavailable' | null
-  >(null)
-  const [isResuming, setIsResuming] = useState(false)
-  const resumingRef = useRef(false)
-  const [assistantState, setAssistantState] = useState<'restarting' | 'ready' | 'recovering' | 'unknown'>('unknown')
-  const [isSessionPaused, setIsSessionPaused] = useState(false)
-  const [pauseReason, setPauseReason] = useState<'intentional' | 'disconnected' | null>(null)
   const [isCompletedSessionView, setIsCompletedSessionView] = useState(false)
   const [loadingViewedSession, setLoadingViewedSession] = useState(Boolean(viewSessionId))
   const [pulseBusy, setPulseBusy] = useState(false)
@@ -151,6 +139,17 @@ export function Elevate() {
   } | null>(null)
   const [prepareLaunchLoading, setPrepareLaunchLoading] = useState(Boolean(inboundPreparationId))
   const [prepareLaunchError, setPrepareLaunchError] = useState<string | null>(null)
+
+  const live = useLiveSession({
+    resetMetrics: () => resetMetrics(), clearMessages: () => clearMessages(), hideHistory: () => setShowHistory(false),
+    sessionChanged: id => setSessionId(id), toast: (kind, message) => toast[kind](message), log: logEvent,
+    messages: () => messagesRef.current, addMessage: (...args) => addMessage(...args),
+    upsertStreamingMessage: (...args) => upsertStreamingMessage(...args), rewardPoints: points => updateUser({ rewardPoints: points }),
+    left: () => {}, discarded: () => {}, discardFinished: () => {},
+  })
+  const { roomName, token, url, isJoining, isLeaving, segmentId, isPausing, pauseAudioFailure, isResuming,
+    assistantState, isSessionPaused, pauseReason, setToken, setUrl, setRoomName, setSegmentId, setIsLeaving,
+    setIsPausing, setAssistantState, setIsSessionPaused, setPauseReason, setPauseAudioFailure } = live
 
   useEffect(() => {
     const targetId = viewSessionId || sessionId
@@ -770,80 +769,9 @@ export function Elevate() {
     messagesRef.current = messages
   }, [messages])
 
-  // Each pause→resume connects to a NEW LiveKit room while keeping the same
-  // sessionId, and the agent restarts turn numbering at 1 (user_turn_1,
-  // assistant_greeting, …). Without per-connection namespacing those ids collide
-  // with the pre-resume segment's bubbles and silently overwrite them. We prefix
-  // every live id with the current room so each connection's turns are distinct.
-  const currentSegmentRef = useRef('')
-  useEffect(() => {
-    currentSegmentRef.current = roomName
-  }, [roomName])
-
-  const handleNewMessage = useCallback(
-    (message: { id?: string; role: string; content: string; partial?: boolean }) => {
-      if (isSessionPaused) {
-        console.log('⏸️ Dropping message while session is paused')
-        return
-      }
-      let finalContent = message.content?.trim() || ''
-      if (message.role === 'assistant') {
-        finalContent = stripThinkingBlocks(finalContent)
-      }
-      if (!finalContent || finalContent === '[]' || finalContent.length < 2) {
-        return
-      }
-
-      // Namespace every live id with the current connection segment so a
-      // paused→resumed session (new room, agent restarts at turn 1) cannot
-      // overwrite the previous segment's bubbles. Partials and the final of the
-      // same turn arrive within one segment, so they still share one bubble.
-      const seg = currentSegmentRef.current
-      const nsId = (rawId?: string) =>
-        rawId ? (seg ? `${seg}::${rawId}` : rawId) : undefined
-
-      // Stitched user turns share one bubble per turn (id = user_turn_N):
-      //  • partials stream the live text (UI only, not persisted)
-      //  • the agent's committed final (partial=false) is authoritative — it
-      //    updates that same bubble in place and persists it. Using the same
-      //    streamId for both prevents the duplicate/divergent bubbles caused by
-      //    a separate finalize path racing the committed publish.
-      if (message.role === 'user' && message.id?.startsWith('user_turn_')) {
-        const storeId = nsId(message.id)!
-        if (message.partial) {
-          upsertStreamingMessage('user', finalContent, storeId)
-        } else {
-          // Agent's conversation_logger persists this turn server-side; keep the
-          // browser write UI-only to avoid duplicate transcript entries.
-          addMessage('user', finalContent, storeId, false)
-        }
-        return
-      }
-
-      if (message.partial) {
-        const streamId = nsId(message.id) || `stream_${seg}_${message.role}`
-        upsertStreamingMessage(
-          message.role as 'user' | 'assistant',
-          finalContent,
-          streamId,
-        )
-        return
-      }
-
-      const storeId = nsId(message.id)
-      const isDuplicate = messagesRef.current.some(
-        (msg) =>
-          msg.role === message.role &&
-          msg.content === finalContent &&
-          (storeId ? msg.id === storeId : true),
-      )
-      if (isDuplicate) return
-
-      // UI-only: the agent is the single writer for the persisted transcript.
-      addMessage(message.role as 'user' | 'assistant', finalContent, storeId, false)
-    },
-    [isSessionPaused, upsertStreamingMessage, addMessage],
-  )
+  const handleNewMessage = useCallback((message: { id?: string; role: string; content: string; partial?: boolean }) => {
+    live.controller.handleMessage(message)
+  }, [live.controller])
 
   const handleConversationRestart = useCallback(() => {
     clearMessages()
@@ -864,7 +792,6 @@ export function Elevate() {
     setLoadingViewedSession(true)
     setIsCompletedSessionView(false)
     ;(async () => {
-      let createdSegmentId: string | null = null
       try {
         const response = await fetch(`${API_BASE_URL}/sessions/${viewSessionId}`, {
           headers: getAuthHeaders(),
@@ -926,51 +853,15 @@ export function Elevate() {
           setSessionId(viewSessionId)
           await loadConversation(viewSessionId)
 
-          const newRoomName = `room_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
-          const newSegmentId = await createSessionSegment(viewSessionId, newRoomName)
-          createdSegmentId = newSegmentId
-          const u = new URL(`${API_BASE_URL}/livekit/token`)
-          u.searchParams.set('identity', identity)
-          u.searchParams.set('room', newRoomName)
-          u.searchParams.set('sessionId', viewSessionId)
-          u.searchParams.set('segmentId', newSegmentId)
-          u.searchParams.set('userName', user?.firstName || user?.email?.split('@')[0] || '')
-          if (session.focusArea) u.searchParams.set('focusArea', session.focusArea)
-          if (session.focusContext) u.searchParams.set('focusContext', session.focusContext)
-          if (session.sessionName) u.searchParams.set('sessionName', session.sessionName)
-          if (inboundBoothDemo || session.focusArea === 'snapshot') u.searchParams.set('boothDemo', '1')
-
-          const res = await fetch(u.toString(), { signal: controller.signal, headers: getAuthHeaders() })
-          if (!res.ok) throw new Error('Failed to get token')
-          const json = await res.json()
-          if (cancelled) {
-            await closeSessionSegment(
-              viewSessionId,
-              newSegmentId,
-              'unavailable',
-            ).catch(() => undefined)
-            createdSegmentId = null
-            return
-          }
-
-          setToken(json.token)
-          setUrl(json.url)
-          setRoomName(newRoomName)
-          setSegmentId(newSegmentId)
-          createdSegmentId = null
-          setIsSessionPaused(false)
-          resetMetrics()
+          await live.controller.resume(viewSessionId, {
+            sessionName: session.sessionName || '', focusArea: session.focusArea || '', focusContext: session.focusContext || '',
+            boothDemo: inboundBoothDemo, identity, userName: user?.firstName || user?.email?.split('@')[0] || '',
+          }, controller.signal, true)
+          if (cancelled) return
           localStorage.setItem('spashtai_active_session', viewSessionId)
           localStorage.setItem('spashtai_session_timestamp', Date.now().toString())
         }
       } catch (error) {
-        if (createdSegmentId) {
-          await closeSessionSegment(
-            viewSessionId,
-            createdSegmentId,
-            'unavailable',
-          ).catch(() => undefined)
-        }
         if (cancelled || (error instanceof DOMException && error.name === 'AbortError')) return
         console.error('Error checking/resuming session:', error)
       } finally {
@@ -983,6 +874,7 @@ export function Elevate() {
     }
   }, [
     viewSessionId,
+    live.controller,
     identity,
     inboundBoothDemo,
     inboundPreparationId,
@@ -1048,65 +940,14 @@ export function Elevate() {
     setRoomName('')
     setSegmentId(null)
     setAssistantState('unknown')
-  }, [])
+  }, [setAssistantState, setIsSessionPaused, setPauseReason, setRoomName, setSegmentId, setToken, setUrl])
 
   const resumeLiveSession = useCallback(async (resumeSessionId: string) => {
-    if (resumingRef.current) return
-    resumingRef.current = true
-    setIsResuming(true)
-    let createdSegmentId: string | null = null
-    try {
-      const newRoomName = `room_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
-      const newSegmentId = await createSessionSegment(resumeSessionId, newRoomName)
-      createdSegmentId = newSegmentId
-      const u = new URL(`${API_BASE_URL}/livekit/token`)
-      u.searchParams.set('identity', identity)
-      u.searchParams.set('room', newRoomName)
-      u.searchParams.set('sessionId', resumeSessionId)
-      u.searchParams.set('segmentId', newSegmentId)
-      u.searchParams.set('userName', user?.firstName || user?.email?.split('@')[0] || '')
-      if (focusArea) u.searchParams.set('focusArea', focusArea)
-      if (inboundContext || viewFocusContext) {
-        u.searchParams.set('focusContext', inboundContext || viewFocusContext || '')
-      }
-      if (elevateSessionName.trim()) u.searchParams.set('sessionName', elevateSessionName.trim())
-      if (inboundBoothDemo || focusArea === 'snapshot') u.searchParams.set('boothDemo', '1')
-      const res = await fetch(u.toString(), { headers: getAuthHeaders() })
-      if (!res.ok) throw new Error('Failed to get token')
-      const json = await res.json()
-      setSessionId(resumeSessionId)
-      setToken(json.token)
-      setUrl(json.url)
-      setRoomName(newRoomName)
-      setSegmentId(newSegmentId)
-      setIsSessionPaused(false)
-      setPauseReason(null)
-      setPauseAudioFailure(null)
-      resetMetrics()
-    } catch (error) {
-      if (createdSegmentId) {
-        await closeSessionSegment(
-          resumeSessionId,
-          createdSegmentId,
-          'unavailable',
-        ).catch(() => undefined)
-      }
-      throw error
-    } finally {
-      resumingRef.current = false
-      setIsResuming(false)
-    }
-  }, [
-    elevateSessionName,
-    focusArea,
-    identity,
-    inboundBoothDemo,
-    inboundContext,
-    resetMetrics,
-    user?.email,
-    user?.firstName,
-    viewFocusContext,
-  ])
+    await live.controller.resume(resumeSessionId, {
+      sessionName: elevateSessionName, focusArea, focusContext: inboundContext || viewFocusContext || '',
+      boothDemo: inboundBoothDemo, identity, userName: user?.firstName || user?.email?.split('@')[0] || '',
+    })
+  }, [live.controller, elevateSessionName, focusArea, inboundContext, viewFocusContext, inboundBoothDemo, identity, user])
 
   const finishPause = useCallback(
     async (audioStatus: 'available' | 'failed' | 'unavailable') => {
@@ -1122,7 +963,7 @@ export function Elevate() {
       intentionalDisconnectSegmentsRef.current.add(segmentId)
       pauseLiveSession('intentional')
     },
-    [pauseLiveSession, segmentId, sessionId],
+    [pauseLiveSession, segmentId, sessionId, setPauseAudioFailure],
   )
 
   const handlePause = useCallback(async () => {
@@ -1149,7 +990,7 @@ export function Elevate() {
     } finally {
       setIsPausing(false)
     }
-  }, [finishPause, isPausing, segmentId, sessionId])
+  }, [finishPause, isPausing, segmentId, sessionId, setIsPausing, setPauseAudioFailure])
 
   const retryPauseUpload = useCallback(async () => {
     if (isPausing) return
@@ -1166,7 +1007,7 @@ export function Elevate() {
     } finally {
       setIsPausing(false)
     }
-  }, [finishPause, isPausing])
+  }, [finishPause, isPausing, setIsPausing, setPauseAudioFailure])
 
   const pauseWithoutReplayAudio = useCallback(async () => {
     if (!pauseAudioFailure) return
@@ -1176,7 +1017,7 @@ export function Elevate() {
     } finally {
       setIsPausing(false)
     }
-  }, [finishPause, pauseAudioFailure])
+  }, [finishPause, pauseAudioFailure, setIsPausing])
 
   const continueInNewSegmentAfterPauseFailure = useCallback(async () => {
     if (!pauseAudioFailure || !sessionId) return
@@ -1191,7 +1032,7 @@ export function Elevate() {
     } finally {
       setIsPausing(false)
     }
-  }, [finishPause, pauseAudioFailure, resumeLiveSession, sessionId])
+  }, [finishPause, pauseAudioFailure, resumeLiveSession, sessionId, setIsPausing])
 
   useWakeLock(joined)
   const { idleWarning, resetIdleTimer } = useIdleWarning(joined, sessionId)
@@ -1222,116 +1063,16 @@ export function Elevate() {
     return () => clearTimeout(timer)
   }, [joined, roomName, assistantState, sessionId, segmentId])
 
+  const launchConfig = useCallback((): LaunchConfig => ({
+    sessionName: elevateSessionName, focusArea, focusContext: inboundContext,
+    boothDemo: inboundBoothDemo, identity, userName: user?.firstName || user?.email?.split('@')[0] || '',
+    preparationId: prepareLaunch?.preparationId, stageId: prepareLaunch?.stageId,
+    preparationPending: Boolean(inboundPreparationId && !prepareLaunch), preparationError: prepareLaunchError,
+  }), [elevateSessionName, focusArea, inboundContext, inboundBoothDemo, identity, user, prepareLaunch, inboundPreparationId, prepareLaunchError])
   const handleJoin = useCallback(async () => {
-    // One guard for every launch surface.  Previously it only protected the
-    // Prepare path, allowing rapid standalone clicks to create parallel rooms.
-    if (joiningRef.current) return
-    joiningRef.current = true
-    setIsJoining(true)
-    let createdLinkedSessionId: string | null = null
-    let createdSessionId: string | null = null
-    let createdSegmentId: string | null = null
-    try {
-      if (inboundPreparationId && !prepareLaunch) {
-        throw new Error(prepareLaunchError || 'Interview journey is still loading')
-      }
-
-      // 1. Create session ID and room name
-      const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-      createdSessionId = newSessionId
-      const uniqueRoomName = roomName || `room_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
-
-      // 2. Create session in database FIRST (agent needs this for coaching context lookup)
-      const sessionResponse = await fetch(`${API_BASE_URL}/sessions`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          id: newSessionId,
-          module: 'elevate',
-          sessionName: elevateSessionName.trim() || null,
-          focusArea: focusArea || null,
-          focusContext: inboundContext || null,
-          preparationId: prepareLaunch?.preparationId || null,
-          stageId: prepareLaunch?.stageId || null,
-          startedAt: new Date().toISOString()
-        })
-      })
-      
-      if (!sessionResponse.ok) {
-        const body = await sessionResponse.json().catch(() => ({}))
-        throw new Error(body.error || 'Failed to create Elevate session')
-      }
-      // The server creates the Prepare association in the same transaction as
-      // the session, before the room and agent can observe it.
-      if (prepareLaunch) {
-        createdLinkedSessionId = newSessionId
-      }
-
-      // 3. Get LiveKit token (creates room — agent will start after this)
-      const newSegmentId = await createSessionSegment(newSessionId, uniqueRoomName)
-      createdSegmentId = newSegmentId
-      const u = new URL(`${API_BASE_URL}/livekit/token`)
-      u.searchParams.set('identity', identity)
-      u.searchParams.set('room', uniqueRoomName)
-      u.searchParams.set('sessionId', newSessionId)
-      u.searchParams.set('segmentId', newSegmentId)
-      u.searchParams.set('userName', user?.firstName || user?.email?.split('@')[0] || '')
-      if (focusArea) u.searchParams.set('focusArea', focusArea)
-      if (inboundContext) u.searchParams.set('focusContext', inboundContext)
-      if (elevateSessionName.trim()) u.searchParams.set('sessionName', elevateSessionName.trim())
-      if (inboundBoothDemo || focusArea === 'snapshot') u.searchParams.set('boothDemo', '1')
-      const res = await fetch(u.toString(), { headers: getAuthHeaders() })
-      if (!res.ok) throw new Error('Failed to get token')
-      const json = await res.json()
-      
-      // 4. Set up LiveKit connection
-      setToken(json.token)
-      setUrl(json.url)
-      setSessionId(newSessionId)
-      setRoomName(uniqueRoomName)
-      setSegmentId(newSegmentId)
-      setIsSessionPaused(false)
-      setPauseReason(null)
-      resetMetrics()
-      logEvent('event', 'elevate.session_join', { sessionId: newSessionId, focusArea: focusArea || null })
-    } catch (error) {
-      if (createdSessionId && createdSegmentId) {
-        await closeSessionSegment(
-          createdSessionId,
-          createdSegmentId,
-          'unavailable',
-        ).catch(() => undefined)
-      }
-      if (createdLinkedSessionId && prepareLaunch) {
-        await fetch(
-          `${API_BASE_URL}/api/preparations/${encodeURIComponent(prepareLaunch.preparationId)}/practices/${encodeURIComponent(createdLinkedSessionId)}/discard`,
-          { method: 'POST', headers: getAuthHeaders() },
-        ).catch(() => null)
-      } else if (createdSessionId) {
-        await fetch(`${API_BASE_URL}/sessions/${createdSessionId}`, {
-          method: 'DELETE', headers: getAuthHeaders(),
-        }).catch(() => null)
-      }
-      logEvent('error', 'elevate.session_join_failed', error)
-      console.error('Error joining session:', error)
-      toast.error(error instanceof Error ? error.message : 'Failed to start session')
-    } finally {
-      joiningRef.current = false
-      setIsJoining(false)
-    }
-  }, [
-    identity,
-    roomName,
-    elevateSessionName,
-    focusArea,
-    inboundContext,
-    inboundBoothDemo,
-    inboundPreparationId,
-    prepareLaunch,
-    prepareLaunchError,
-    resetMetrics,
-    user,
-  ])
+    const config = launchConfig()
+    await live.controller.start(config, prepareLaunch ? prepareAdapter(liveSessionApi, config) : elevateAdapter(liveSessionApi, config))
+  }, [launchConfig, live.controller, prepareLaunch])
 
   // Called when LiveKit disconnects unexpectedly (refresh, network drop, etc.)
   // Does NOT end the session — leaves it resumable.
@@ -1533,7 +1274,7 @@ export function Elevate() {
       navigate('/elevate')
     }
     setIsLeaving(false)
-  }, [sessionId, segmentId, clearMessages, resetMetrics, navigate, updateUser, loadPastSessions, prepareLaunch, isLeaving, inboundBoothDemo, focusArea, launchedFromCoach, originCoachThreadId])
+  }, [sessionId, segmentId, clearMessages, resetMetrics, navigate, updateUser, loadPastSessions, prepareLaunch, isLeaving, inboundBoothDemo, focusArea, launchedFromCoach, originCoachThreadId, setAssistantState, setIsLeaving, setIsSessionPaused, setRoomName, setSegmentId, setToken, setUrl])
 
   // A Prepare attempt is removable until it has been completed. The server
   // enforces the same boundary using endedAt, so stale client state is safe.
@@ -1612,7 +1353,7 @@ export function Elevate() {
       navigate('/elevate')
     }
     setIsLeaving(false)
-  }, [sessionId, segmentId, clearMessages, resetMetrics, navigate, confirmDialog, prepareLaunch, isLeaving, viewSessionName, elevateSessionName, canDiscardPreparePractice])
+  }, [sessionId, segmentId, clearMessages, resetMetrics, navigate, confirmDialog, prepareLaunch, isLeaving, viewSessionName, elevateSessionName, setAssistantState, setIsLeaving, setIsSessionPaused, setRoomName, setSegmentId, setToken, setUrl])
 
   // Return from a viewed session's results back to the Elevate session list.
   const handleBackToElevate = useCallback(() => {
