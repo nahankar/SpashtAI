@@ -165,6 +165,10 @@ model User {
   coachThreads            CoachThread[]
   coachHomeResultReceipts CoachHomeResultReceipt[]
   featureGrants           UserFeatureGrant[]
+  bankVersionsCreated     QuestionBankVersion[] @relation("BankVersionCreator")
+  bankVersionsReviewed    QuestionBankVersion[] @relation("BankVersionReviewer")
+  bankVersionsPublished   QuestionBankVersion[] @relation("BankVersionPublisher")
+  bankImports             QuestionImportBatch[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1039,4 +1043,130 @@ model CoachHomeResultReceipt {
 
   @@unique([userId, module, targetId])
   @@index([userId, seenAt])
+}
+
+
+// Phase 2a: shared authored bank, separate from a user's journey question memory.
+enum BankVersionStatus {
+  DRAFT
+  REVIEWED
+  PUBLISHED
+  RETIRED
+}
+
+enum BankRightsBasis {
+  UNRECORDED
+  OWNED
+  LICENSED
+  REWRITTEN
+}
+
+enum BankEvaluationMode {
+  TECHNICAL
+  SCENARIO
+  BEHAVIORAL
+}
+
+model QuestionBankItem {
+  id                 String @id @default(cuid())
+  namespace          String
+  externalQid        String
+  publishedVersionId String? @unique
+  publishedVersion   QuestionBankVersion? @relation("PublishedBankVersion", fields: [publishedVersionId], references: [id], onDelete: Restrict)
+  versions           QuestionBankVersion[] @relation("BankItemVersions")
+  createdAt          DateTime @default(now())
+
+  @@unique([namespace, externalQid])
+}
+
+model QuestionBankVersion {
+  id                       String @id @default(cuid())
+  questionId               String
+  question                 QuestionBankItem @relation("BankItemVersions", fields: [questionId], references: [id], onDelete: Restrict)
+  publishedFor             QuestionBankItem? @relation("PublishedBankVersion")
+  version                  Int
+  revision                 Int @default(1)
+  status                   BankVersionStatus @default(DRAFT)
+  questionText             String @db.Text
+  track                    String?
+  category                 String?
+  topic                    String?
+  difficulty               String?
+  experienceBand           String?
+  frequency                String?
+  questionType             String?
+  roleArchetype            String?
+  tags                     String[] @default([])
+  trendNote                String? @db.Text
+  sourceFile               String?
+  sourceSheet              String?
+  importHash               String?
+  sourceQuestionText       String? @db.Text
+  sourceAnswer             String? @db.Text
+  explanation              String @default("") @db.Text
+  exampleAnswer            String @default("") @db.Text
+  publicCriteria           Json @default("[]")
+  evaluationMode           BankEvaluationMode?
+  verbalSuitable           Boolean @default(false)
+  expectedDepth            String @default("") @db.Text
+  referenceSources         String[] @default([])
+  rightsBasis              BankRightsBasis @default(UNRECORDED)
+  rightsNotes              String @default("") @db.Text
+  learnerContentRewritten  Boolean @default(false)
+  rubricIndependentlyAuthored Boolean @default(false)
+  createdById              String?
+  createdBy                User? @relation("BankVersionCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  reviewedById             String?
+  reviewedBy               User? @relation("BankVersionReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt               DateTime?
+  publishedById            String?
+  publishedBy              User? @relation("BankVersionPublisher", fields: [publishedById], references: [id], onDelete: SetNull)
+  publishedAt              DateTime?
+  retiredAt                DateTime?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+  evaluatorSpec            QuestionEvaluatorSpec?
+  importRows               QuestionImportRow[]
+
+  @@unique([questionId, version])
+  @@index([status, track, difficulty])
+}
+
+model QuestionEvaluatorSpec {
+  versionId String @id
+  version   QuestionBankVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  rubric    Json
+}
+
+model QuestionImportBatch {
+  id          String @id @default(cuid())
+  fingerprint String @unique
+  fileHash    String
+  namespace   String
+  mode        String
+  mapping     Json
+  status      String @default("PREVIEW")
+  revision    Int @default(1)
+  importedById String?
+  importedBy  User? @relation(fields: [importedById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+  confirmedAt DateTime?
+  rows        QuestionImportRow[]
+}
+
+model QuestionImportRow {
+  id              String @id @default(cuid())
+  batchId         String
+  batch           QuestionImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  rowNumber       Int
+  raw             Json
+  normalized      Json
+  errors          String[] @default([])
+  warnings        String[] @default([])
+  status          String @default("READY")
+  outcome         String?
+  resultVersionId String?
+  resultVersion   QuestionBankVersion? @relation(fields: [resultVersionId], references: [id], onDelete: SetNull)
+
+  @@unique([batchId, rowNumber])
 }
