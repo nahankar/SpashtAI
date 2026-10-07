@@ -1,3 +1,4 @@
+import { createLiveSessionApi } from '@/features/live-session/api'
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { SessionFilters, type SortField, type SortDir } from '@/components/SessionFilters'
 import { useSearchParams, useNavigate, Link } from 'react-router-dom'
@@ -69,40 +70,12 @@ import { markCoachHomeResultSeen, recordCoachAction } from '@/lib/coach-api'
 import { formatSessionOwner, matchesSessionOwner, type SessionOwner } from '@/lib/adminUserFilter'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
+const { createSessionSegment, closeSessionSegment, saveSessionData } = createLiveSessionApi({
+  baseUrl: API_BASE_URL, fetch: (...args) => fetch(...args), headers: getAuthHeaders,
+  now: () => new Date(), randomId: () => crypto.randomUUID(),
+})
 const IDLE_TIMEOUT_MS = 15 * 60 * 1000
 const IDLE_WARNING_MS = 14 * 60 * 1000
-
-async function createSessionSegment(sessionId: string, roomName: string): Promise<string> {
-  const segmentId = crypto.randomUUID()
-  const response = await fetch(`${API_BASE_URL}/sessions/${sessionId}/segments`, {
-    method: 'POST',
-    headers: getAuthHeaders(),
-    body: JSON.stringify({
-      segmentId,
-      roomName,
-      startedAt: new Date().toISOString(),
-    }),
-  })
-  if (!response.ok) throw new Error('Failed to start session segment')
-  return segmentId
-}
-
-async function closeSessionSegment(
-  sessionId: string,
-  segmentId: string,
-  audioStatus: 'available' | 'pending' | 'failed' | 'unavailable',
-  endedAt: Date = new Date(),
-): Promise<void> {
-  const response = await fetch(
-    `${API_BASE_URL}/sessions/${sessionId}/segments/${segmentId}`,
-    {
-      method: 'PATCH',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ endedAt: endedAt.toISOString(), audioStatus }),
-    },
-  )
-  if (!response.ok) throw new Error('Failed to close session segment')
-}
 
 interface PaceTurn {
   role?: string
@@ -117,35 +90,6 @@ interface ProgressPulseItem {
   skill: string
   currentScore: number
   delta?: number | null
-}
-
-// Helper function to save session data to backend
-async function saveSessionData(sessionId: string, metrics: unknown, transcript: unknown) {
-  try {
-    const metricsResponse = await fetch(`${API_BASE_URL}/sessions/${sessionId}/metrics`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(metrics)
-    })
-    
-    if (!metricsResponse.ok) {
-      throw new Error(`Failed to save metrics: ${metricsResponse.statusText}`)
-    }
-
-    const transcriptResponse = await fetch(`${API_BASE_URL}/sessions/${sessionId}/transcript`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(transcript)
-    })
-    
-    if (!transcriptResponse.ok) {
-      throw new Error(`Failed to save transcript: ${transcriptResponse.statusText}`)
-    }
-
-    console.log('✅ Session data saved successfully')
-  } catch (error) {
-    console.error('❌ Failed to save session data:', error)
-  }
 }
 
 export function Elevate() {
