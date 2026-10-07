@@ -8,7 +8,7 @@ import { readyDraft } from './fixtures/bank-draft'
 // to the disposable loopback database used by the documented verification script.
 const testDb = vi.hoisted(() => {
   const url = process.env.BANK_TEST_DATABASE_URL
-  if (url && !/^postgresql:\/\/postgres@127\.0\.0\.1:55441\/(postgres|upgrade_bank)$/.test(url)) throw new Error('Bank tests require the isolated test database on port 55441')
+  if (url && !/^postgresql:\/\/postgres@127\.0\.0\.1:55441\/(postgres|upgrade_bank|review_bank|review_upgrade)$/.test(url)) throw new Error('Bank tests require the isolated test database on port 55441')
   return { url }
 })
 vi.mock('../src/lib/prisma', async () => {
@@ -35,9 +35,19 @@ describe.skipIf(!testDb.url)('question bank PostgreSQL workflow (isolated opt-in
     expect((await request(app).get('/bank/questions')).status).toBe(401)
     expect((await request(app).get('/bank/questions').auth(token('USER'), { type: 'bearer' })).status).toBe(403)
     const id = await reviewed()
-    expect((await request(app).post(`/bank/versions/${id}/publish`).auth(token('ADMIN'), { type: 'bearer' }).send({ revision: 2 })).status).toBe(403)
-    expect((await request(app).post(`/bank/versions/${id}/publish`).auth(token('SUPER_ADMIN'), { type: 'bearer' }).send({ revision: 2 })).status).toBe(200)
-    expect((await request(app).post(`/bank/versions/${id}/retire`).auth(token('ADMIN'), { type: 'bearer' }).send({ revision: 3 })).status).toBe(403)
+    const staleSuperAdmin = token('SUPER_ADMIN')
+    const staleAdmin = token('ADMIN')
+    await db.user.update({ where: { id: actor }, data: { role: 'ADMIN' } })
+    expect((await request(app).post(`/bank/versions/${id}/publish`).auth(staleSuperAdmin, { type: 'bearer' }).send({ revision: 2 })).status).toBe(403)
+    expect((await detail(id)).version.status).toBe('REVIEWED')
+    await db.user.update({ where: { id: actor }, data: { role: 'SUPER_ADMIN' } })
+    expect((await request(app).post(`/bank/versions/${id}/publish`).auth(staleAdmin, { type: 'bearer' }).send({ revision: 2 })).status).toBe(200)
+    await db.user.update({ where: { id: actor }, data: { role: 'ADMIN' } })
+    expect((await request(app).post(`/bank/versions/${id}/retire`).auth(staleSuperAdmin, { type: 'bearer' }).send({ revision: 3 })).status).toBe(403)
+    expect((await detail(id)).version.status).toBe('PUBLISHED')
+    await db.user.update({ where: { id: actor }, data: { role: 'SUPER_ADMIN' } })
+    const deletedUser = signToken({ userId: 'deleted-bank-publisher', email: 'deleted@example.invalid', role: 'SUPER_ADMIN' })
+    expect((await request(app).post(`/bank/versions/${id}/retire`).auth(deletedUser, { type: 'bearer' }).send({ revision: 3 })).status).toBe(403)
   })
   it('returns only allowed learner content through the authenticated preview', async () => {
     const id = await createReady()
@@ -80,6 +90,30 @@ describe.skipIf(!testDb.url)('question bank PostgreSQL workflow (isolated opt-in
       await tx.questionBankItem.update({ where: { id: (await detail(second)).version.questionId }, data: { publishedVersionId: null } })
       await tx.questionBankItem.update({ where: { id: questionId }, data: { publishedVersionId: second } })
     })).rejects.toThrow('publication pointer')
+  })
+  it('enforces one published version for direct database writes and concurrent publishing', async () => {
+    const first = await reviewed(); await transition(first, 2, 'publish', actor)
+    const second = await forkVersion(first, actor); await transition(second, 1, 'review', actor)
+    await expect(db.questionBankVersion.update({ where: { id: second }, data: { status: 'PUBLISHED', publishedAt: new Date(), publishedById: actor } })).rejects.toMatchObject({ code: 'P2002' })
+    expect((await detail(second)).version.status).toBe('REVIEWED')
+    const third = await forkVersion(first, actor); await transition(third, 1, 'review', actor)
+    await Promise.all([transition(second, 2, 'publish', actor), transition(third, 2, 'publish', actor)])
+    const versions = await db.questionBankVersion.findMany({ where: { questionId: (await detail(first)).version.questionId } })
+    expect(versions.filter(v => v.status === 'PUBLISHED')).toHaveLength(1)
+    expect(versions.filter(v => v.status === 'RETIRED')).toHaveLength(2)
+    const item = (await detail(first)).version.question
+    expect(item.publishedVersionId).toBe(versions.find(v => v.status === 'PUBLISHED')!.id)
+  })
+  it('allows only nulling published actor fields and prevents reassignment after nulling', async () => {
+    const id = await reviewed(); await transition(id, 2, 'publish', actor)
+    const other = await db.user.create({ data: { email: `${namespace}_other@example.invalid` } })
+    try {
+      for (const field of ['createdById', 'reviewedById', 'publishedById'] as const) {
+        await expect(db.questionBankVersion.update({ where: { id }, data: { [field]: other.id } })).rejects.toThrow('immutable')
+        await db.questionBankVersion.update({ where: { id }, data: { [field]: null } })
+        await expect(db.questionBankVersion.update({ where: { id }, data: { [field]: actor } })).rejects.toThrow('immutable')
+      }
+    } finally { await db.user.delete({ where: { id: other.id } }) }
   })
   it('imports once across retries/concurrent confirmations and stores no uploaded file', async () => {
     const options = importOptionsSchema.parse({ namespace: `${namespace}_csv`, mode: 'ADD_ONLY', mapping: { externalQid: 'QID', questionText: 'Question', sourceAnswer: 'Answer' } })

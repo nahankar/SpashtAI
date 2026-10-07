@@ -3,7 +3,8 @@
 Branch: `codex/interviews-phase2-bank-evaluator`, based on `a039411`.
 Pilot: **Automation Testing**. This checkpoint has no LLM calls, evaluator jobs,
 answer snapshots, live attempts or changes to learner navigation. It is suitable
-for a hidden content-preparation rollout. No merge or deployment is included.
+for a hidden content-preparation rollout. The original implementation handoff
+excluded merge/deployment; the subsequent review explicitly authorized both.
 
 ## Accepted sequence
 
@@ -36,7 +37,10 @@ Published and retired content/rubrics are protected by database triggers. A
 published pointer must identify a published version belonging to the same item;
 deferred constraint checks permit atomic retirement/replacement. Account deletion
 nulls author/reviewer/publisher/importer foreign keys rather than deleting shared
-bank content. Existing audit records retain opaque actor IDs. Draft revisions
+bank content. Existing audit records retain opaque actor IDs.
+Published actor fields can only change to NULL, not be reassigned. A partial
+unique index enforces at most one `PUBLISHED` version for each question even
+when writes bypass the Admin API. Draft revisions
 prevent stale edits. Item locks serialize edits, forks and publication; advisory
 identity locks serialize concurrent creation/import of a namespace/QID.
 
@@ -80,6 +84,9 @@ The reusable template contains a synthetic Automation Testing row.
 
 Admin can import, author/edit/fork, review and inspect learner previews.
 **SUPER_ADMIN alone can publish or retire** (enforced by the API, not just UI).
+These actions read the current database role, rejecting demoted/deleted admins
+with otherwise valid old tokens; a failed role lookup grants no access. The
+list-only `scope=mine` parameter does not change publication authorization.
 All bank endpoints require login and Admin access, independently of the hidden
 learner Interviews flag. No public/learner bank endpoint is introduced here.
 The existing `interviews` flag/defaults and grants are unchanged.
@@ -250,4 +257,30 @@ Elevate personalisation stays `COMMUNICATION_PROFILE`; Quick Practice remains
 | `af641e9` | Admin bank UI, transport tests and shared learner wire contract |
 
 The final documentation commit records verification and the Phase 2b handoff.
-These commits are local on the requested branch; no push, merge or deploy was run.
+At the original handoff these commits were local only.
+
+## Pre-merge review fixes
+
+- Added `QuestionBankVersion_one_published`, a partial unique index on question
+  ID where status is `PUBLISHED`, to the unreleased 2a migration. EC2 preflight
+  confirmed this migration had not run and the bank tables did not exist.
+  Fresh disposable databases were initialized to test the revised migration;
+  the existing preview database was not rewritten.
+- Publication/retirement check the current database role, independent of JWT
+  role snapshots. Tests cover demotion, promotion from an old Admin token,
+  deleted identities, role lookup failure and both publication actions.
+- Published/retired actor fields allow NULL only. Direct reassignment and restoring
+  a nulled actor are rejected, while account deletion still succeeds.
+- A different reviewer from the last editor is deferred: it requires explicit
+  last-editor tracking and a two-person operating policy. It is not silently
+  introduced as a release requirement.
+- Full review checks: **437 server tests pass**, including 11 isolated database
+  tests; **204 web tests pass**. Typechecks/build pass. Lint retains only the
+  existing Replay warning. Clean install and an upgrade with an existing session
+  succeed with the revised index. Competing publications leave one published
+  version and atomically retire the earlier publication.
+
+The authorized release uses the existing EC2 maintenance deployment path,
+preserves configuration files, keeps Interviews hidden/disabled, and does not
+import or publish workbook content in production. Phase 2b has not started and
+must remain separate from this release.

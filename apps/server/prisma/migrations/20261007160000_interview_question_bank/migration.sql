@@ -117,6 +117,9 @@ CREATE INDEX "QuestionBankVersion_status_track_difficulty_idx" ON "public"."Ques
 -- CreateIndex
 CREATE UNIQUE INDEX "QuestionBankVersion_questionId_version_key" ON "public"."QuestionBankVersion"("questionId", "version");
 
+-- One published version per question, even for writes outside the Admin API.
+CREATE UNIQUE INDEX "QuestionBankVersion_one_published" ON "public"."QuestionBankVersion"("questionId") WHERE status = 'PUBLISHED';
+
 -- CreateIndex
 CREATE UNIQUE INDEX "QuestionImportBatch_fingerprint_key" ON "public"."QuestionImportBatch"("fingerprint");
 
@@ -159,6 +162,9 @@ BEGIN
     IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'Published bank versions cannot be deleted'; END IF;
     IF (to_jsonb(NEW) - ARRAY['status','retiredAt','updatedAt','createdById','reviewedById','publishedById'])
        IS DISTINCT FROM (to_jsonb(OLD) - ARRAY['status','retiredAt','updatedAt','createdById','reviewedById','publishedById'])
+       OR (NEW."createdById" IS DISTINCT FROM OLD."createdById" AND NEW."createdById" IS NOT NULL)
+       OR (NEW."reviewedById" IS DISTINCT FROM OLD."reviewedById" AND NEW."reviewedById" IS NOT NULL)
+       OR (NEW."publishedById" IS DISTINCT FROM OLD."publishedById" AND NEW."publishedById" IS NOT NULL)
        OR (OLD.status = 'PUBLISHED' AND NEW.status NOT IN ('PUBLISHED','RETIRED'))
        OR (OLD.status = 'RETIRED' AND NEW.status <> 'RETIRED') THEN
       RAISE EXCEPTION 'Published bank content is immutable; create a draft version';
