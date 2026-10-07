@@ -50,7 +50,7 @@ async function saveSessionData(sessionId: string, metrics: unknown, transcript: 
       headers: getAuthHeaders(),
       body: JSON.stringify(metrics)
     })
-    
+
     if (!metricsResponse.ok) {
       throw new Error(`Failed to save metrics: ${metricsResponse.statusText}`)
     }
@@ -60,7 +60,7 @@ async function saveSessionData(sessionId: string, metrics: unknown, transcript: 
       headers: getAuthHeaders(),
       body: JSON.stringify(transcript)
     })
-    
+
     if (!transcriptResponse.ok) {
       throw new Error(`Failed to save transcript: ${transcriptResponse.statusText}`)
     }

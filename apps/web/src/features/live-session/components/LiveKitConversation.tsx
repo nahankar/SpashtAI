@@ -155,10 +155,10 @@ export function LiveKitConversation({
       if (isSessionPaused) {
         return
       }
-      
+
       const text = new TextDecoder().decode(payload)
       console.log(`📨 Data channel received on ${topic}:`, text)
-      
+
       // Process different topics
       switch (topic) {
         case 'lk.transcription':
@@ -169,7 +169,7 @@ export function LiveKitConversation({
           })
           processPayload(text, 'dataChannel')
           break
-          
+
         case 'lk.control':
           try {
             const parsed = JSON.parse(text) as { type?: string; text?: string }
@@ -192,7 +192,7 @@ export function LiveKitConversation({
             console.log('⚠️ Invalid control payload', error)
           }
           break
-          
+
         case 'lk.conversation':
           try {
             const conversationData = JSON.parse(text)
@@ -206,7 +206,7 @@ export function LiveKitConversation({
               )
               break
             }
-            
+
             // Final coach turns — one id per utterance from the agent
             if (conversationData.type === 'assistant') {
               const content = stripThinkingBlocks(
@@ -240,14 +240,14 @@ export function LiveKitConversation({
               }
             } else if (conversationData.type === 'user') {
               const content = conversationData.text || conversationData.content || ''
-              const timestamp = conversationData.timestamp 
-                ? new Date(conversationData.timestamp).toISOString() 
+              const timestamp = conversationData.timestamp
+                ? new Date(conversationData.timestamp).toISOString()
                 : new Date().toISOString()
-              
+
               if (content) {
-                onNewMessageRef.current({ 
-                  role: 'user', 
-                  content, 
+                onNewMessageRef.current({
+                  role: 'user',
+                  content,
                   id: conversationData.id,
                   timestamp,
                   partial: conversationData.final === false,
@@ -263,7 +263,7 @@ export function LiveKitConversation({
             console.log('⚠️ Invalid conversation payload', error)
           }
           break
-          
+
         case 'lk.metrics':
           try {
             const metricsUpdate = JSON.parse(text)
@@ -273,7 +273,7 @@ export function LiveKitConversation({
             console.log('⚠️ Invalid metrics payload', error)
           }
           break
-          
+
         case 'lk.session':
           try {
             const sessionData = JSON.parse(text)
@@ -287,7 +287,7 @@ export function LiveKitConversation({
             console.log('⚠️ Invalid session payload', error)
           }
           break
-          
+
         case 'lk.settings':
           // Coach patience is auto-selected by the agent; ignore setting acks.
           break
@@ -298,7 +298,7 @@ export function LiveKitConversation({
     }
 
     room.on(RoomEvent.DataReceived, handleData)
-    
+
     return () => {
       room.off(RoomEvent.DataReceived, handleData)
     }
@@ -309,4 +309,3 @@ export function LiveKitConversation({
 
   return null
 }
-

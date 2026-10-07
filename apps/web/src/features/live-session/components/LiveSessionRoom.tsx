@@ -63,8 +63,8 @@ export function LiveSessionRoom({ token, url, sessionId, segmentId, roomName, re
                   />
                   <div className="flex flex-wrap items-center gap-2 py-2">
                     <Button onClick={handleLeave}>Leave</Button>
-                    <Button 
-                      variant="outline" 
+                    <Button
+                      variant="outline"
                       onClick={() => setShowMetrics(!showMetrics)}
                     >
                       {showMetrics ? 'Hide Metrics' : 'Show Metrics'}

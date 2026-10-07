@@ -28,7 +28,7 @@ export function ConnectionStatus({ assistantState }: { assistantState: 'restarti
   }, [room])
 
   const effectiveState = assistantState === 'unknown' && agentPresent ? 'ready' : assistantState
-  
+
   const getOverallStatus = () => {
     if (!isConnected && !isConnecting) return { text: 'Disconnected', color: 'text-red-600' }
     if (isConnecting) return { text: 'Connecting to room...', color: 'text-yellow-600' }
@@ -38,9 +38,9 @@ export function ConnectionStatus({ assistantState }: { assistantState: 'restarti
     if (effectiveState === 'recovering') return { text: 'Recovering...', color: 'text-yellow-600' }
     return { text: 'Connected', color: 'text-green-600' }
   }
-  
+
   const status = getOverallStatus()
-  
+
   return (
     <div className="flex items-center gap-2 text-sm">
       <span className={status.color}>
@@ -52,4 +52,3 @@ export function ConnectionStatus({ assistantState }: { assistantState: 'restarti
     </div>
   )
 }
-
