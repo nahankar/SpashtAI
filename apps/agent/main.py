@@ -1709,10 +1709,10 @@ async def entrypoint(ctx: JobContext):
         }
         
         # Build personalized agent instructions from room metadata
-        user_name = room_meta.get('userName', '').strip() or None
-        focus_area = room_meta.get('focusArea', '').strip() or None
-        focus_context = room_meta.get('focusContext', '').strip() or None
-        session_name = room_meta.get('sessionName', '').strip() or None
+        user_name = str(room_meta.get('userName') or '').strip() or None
+        focus_area = str(room_meta.get('focusArea') or '').strip() or None
+        focus_context = str(room_meta.get('focusContext') or '').strip() or None
+        session_name = str(room_meta.get('sessionName') or '').strip() or None
         booth_demo = str(room_meta.get('boothDemo', '')).strip().lower() in {
             '1',
             'true',

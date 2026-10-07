@@ -97,6 +97,20 @@ describe('LiveKit room Hush metadata', () => {
     expect(mocks.tokenOptions).toHaveBeenCalledWith({ identity: 'user_u1' })
   })
 
+  it('omits empty saved fields instead of sending null to the agent', async () => {
+    mocks.findUnique.mockResolvedValue({ id: 's1', userId: 'u1', endedAt: null, discardedAt: null,
+      focusArea: null, focusContext: null, sessionName: null, user: { firstName: 'Learner', email: 'learner@example.com' } })
+    mocks.listRooms.mockResolvedValue([])
+    mocks.createRoom.mockImplementation(async (options) => ({ metadata: options.metadata }))
+    const res = response()
+    await getLivekitToken(tokenRequest('empty-room'), res)
+    expect(res.statusCode).toBe(200)
+    const metadata = JSON.parse(mocks.createRoom.mock.calls[0][0].metadata)
+    for (const key of ['focusArea', 'focusContext', 'sessionName']) {
+      expect(metadata).not.toHaveProperty(key)
+    }
+  })
+
   it('keeps the Hush decision from an existing room on token refresh', async () => {
     mocks.createRoom.mockRejectedValue(new Error('room already exists'))
     mocks.listRooms.mockResolvedValue([{ metadata: JSON.stringify({ sessionId: 's1', segmentId: 'seg1', hushEnabled: false }) }])

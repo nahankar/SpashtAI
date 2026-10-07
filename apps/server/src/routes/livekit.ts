@@ -80,7 +80,11 @@ export async function getLivekitToken(req: Request, res: Response) {
     const { session, identity } = access
     const room = access.segment.roomName
     const userName = session.user.firstName || session.user.email.split('@')[0]
-    const { focusArea, focusContext, sessionName } = session
+    // The agent's metadata contract treats absent keys as empty. Saved
+    // sessions store empty values as null, so omit them rather than sending null.
+    const focusArea = session.focusArea ?? undefined
+    const focusContext = session.focusContext ?? undefined
+    const sessionName = session.sessionName ?? undefined
     const boothDemo = session.focusArea === 'snapshot' ? '1' : undefined
 
     const { apiKey, apiSecret, lkUrl, httpUrl } = getLivekitConfig()
