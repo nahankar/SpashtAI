@@ -8,3 +8,12 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
   }
   next()
 }
+
+/** Shared publication and retirement are restricted to SUPER_ADMIN. */
+export function requireSuperAdmin(req: Request, res: Response, next: NextFunction): void {
+  if (req.user?.role !== 'SUPER_ADMIN') {
+    res.status(403).json({ error: 'Super admin access required to publish or retire questions' })
+    return
+  }
+  next()
+}

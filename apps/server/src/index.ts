@@ -84,6 +84,7 @@ import adminTickersRouter from './routes/admin/tickers'
 import adminPricingRouter from './routes/admin/pricing'
 import adminLegalRouter from './routes/admin/legal'
 import adminPlatformRouter from './routes/admin/platform'
+import adminInterviewBankRouter from './routes/admin/interview-bank'
 import preparationsRouter from './routes/preparations'
 import legalRouter from './routes/legal'
 import { getPublicTickers } from './routes/tickers'
@@ -161,6 +162,8 @@ app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   credentials: true,
 }))
+// Bank rubrics can contain multiple evidence anchors; keep the larger bound scoped to Admin.
+app.use('/api/admin/interview-bank', express.json({ limit: '1mb' }))
 app.use(express.json())
 
 app.use('/api/', apiLimiter)
@@ -222,6 +225,8 @@ app.use('/api/admin/tickers', requireAuth, requireAdmin, adminTickersRouter)
 app.use('/api/admin/pricing', requireAuth, requireAdmin, adminPricingRouter)
 app.use('/api/admin/legal', requireAuth, requireAdmin, adminLegalRouter)
 app.use('/api/admin/platform', requireAuth, requireAdmin, adminPlatformRouter)
+// Bank authoring stays available to admins while learner Interviews is hidden.
+app.use('/api/admin/interview-bank', requireAuth, requireAdmin, adminInterviewBankRouter)
 app.use('/api/admin/feedback', requireAuth, requireAdmin, adminFeedbackRouter)
 
 // Protected: product event tracking (page views, etc.)
