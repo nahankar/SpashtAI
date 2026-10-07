@@ -1,5 +1,5 @@
 import type { LiveSessionApi } from './api'
-import type { ActivityAdapter, LaunchConfig, LiveSessionEffects, LiveSessionState, ChatMessage, RecorderPort, AudioStatus } from './types'
+import type { ActivityAdapter, LaunchConfig, LiveSessionEffects, LiveSessionState, ChatMessage, RecorderPort, AudioStatus, CaptureReport } from './types'
 import { settleRecordingBeforePause } from '@/lib/pauseCapture'
 import { stripThinkingBlocks } from '@/lib/stripThinking'
 
@@ -160,6 +160,54 @@ export class LiveSessionController {
       const status = result?.audioCapture === 'uploaded' ? 'available' : result?.audioCapture ?? 'pending'
       await this.deps.api.closeSessionSegment(sessionId, segmentId, status, endedAt).catch(error => console.warn('Failed to close disconnected segment:', error))
     }
+  }
+  private clearLive() {
+    this.patch({ token: null, url: null, sessionId: null, roomName: '', segmentId: null,
+      isSessionPaused: false, assistantState: 'unknown' })
+    this.deps.effects.clearMessages()
+    this.deps.effects.resetMetrics()
+    this.deps.effects.clearActiveSession()
+  }
+  async leave(recorder: RecorderPort | null, adapter: ActivityAdapter) {
+    if (this.state.isLeaving) return
+    this.patch({ isLeaving: true })
+    const endedAt = this.deps.now()
+    const { sessionId, segmentId } = this.state
+    if (sessionId) this.deps.effects.log('event', 'elevate.session_leave', { sessionId })
+    let capture: { ok: boolean; audioCapture: CaptureReport } = { ok: false, audioCapture: 'pending' }
+    try { capture = await recorder?.finalize() ?? capture }
+    catch { capture = { ok: false, audioCapture: 'failed' } }
+    if (sessionId && segmentId) {
+      await this.deps.api.closeSessionSegment(sessionId, segmentId,
+        capture.audioCapture === 'uploaded' ? 'available' : capture.audioCapture,
+        this.pauseRequestedAt ?? endedAt).catch(error => console.warn('Failed to close final segment:', error))
+    }
+    if (segmentId) this.intentionalDisconnectSegments.add(segmentId)
+    this.clearLive()
+    try {
+      if (sessionId) await adapter.complete(sessionId, capture.audioCapture, this.deps.effects, this.deps.now)
+      this.deps.effects.left(sessionId, adapter.trackPulse)
+    } finally { this.patch({ isLeaving: false }) }
+  }
+  async discard(recorder: RecorderPort | null, adapter: ActivityAdapter, viewedSessionId?: string | null) {
+    if (this.state.isLeaving) return
+    this.patch({ isLeaving: true })
+    const segmentId = this.state.segmentId
+    const sessionId = viewedSessionId ?? this.state.sessionId
+    try {
+      if (sessionId) {
+        try { await adapter.discard(sessionId); this.deps.effects.discarded(sessionId) }
+        catch (error) {
+          console.error('Failed to discard session:', error)
+          this.deps.effects.toast('error', error instanceof Error ? error.message : 'Could not start secure discard. Please retry.')
+          return
+        }
+      }
+      await recorder?.discard().catch(error => console.warn('Failed to stop discarded browser recording:', error))
+      if (segmentId) this.intentionalDisconnectSegments.add(segmentId)
+      this.clearLive()
+      this.deps.effects.discardFinished()
+    } finally { this.patch({ isLeaving: false }) }
   }
   handleMessage(message: Pick<ChatMessage, 'id' | 'role' | 'content'> & { partial?: boolean }) {
     if (this.state.isSessionPaused) return

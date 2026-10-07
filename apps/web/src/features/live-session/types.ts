@@ -36,6 +36,7 @@ export interface ActivityAdapter {
   discard(id: string): Promise<void>
   trackPulse: boolean; skipPulseCall: boolean
   endBody(endedAt: string): Record<string, unknown>
+  complete(id: string, capture: CaptureReport, effects: LiveSessionEffects, now: () => Date): Promise<void>
 }
 export interface LiveSessionEffects {
   resetMetrics(): void; clearMessages(): void; hideHistory(): void
@@ -45,6 +46,7 @@ export interface LiveSessionEffects {
   messages(): readonly { id?: string; role: string; content: string }[]
   addMessage(role: 'user' | 'assistant', text: string, id?: string, persist?: boolean): Promise<void>
   upsertStreamingMessage(role: 'user' | 'assistant', text: string, id: string): void
+  clearActiveSession(): void
   rewardPoints(points: number): void
   left(id: string | null, trackPulse: boolean): void
   discarded(id: string): void

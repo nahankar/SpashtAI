@@ -1,3 +1,4 @@
+import { completeLiveActivity } from '../completion'
 import type { ActivityAdapter, LaunchConfig } from '../types'
 import type { LiveSessionApi } from '../api'
 export function elevateAdapter(api: LiveSessionApi, config: LaunchConfig): ActivityAdapter {
@@ -18,6 +19,7 @@ export function elevateAdapter(api: LiveSessionApi, config: LaunchConfig): Activ
     },
     trackPulse: !(config.boothDemo || config.focusArea === 'snapshot'),
     skipPulseCall: config.boothDemo || config.focusArea === 'snapshot',
+    async complete(id, capture, effects, now) { await completeLiveActivity(api, this, id, capture, effects, now) },
     endBody(endedAt) { return { endedAt, preparationId: null } },
   }
 }

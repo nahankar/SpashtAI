@@ -5,9 +5,6 @@ import { prepareAdapter } from '@/features/live-session/adapters/prepare'
 import type { LaunchConfig } from '@/features/live-session/types'
 import { liveSessionApi } from '@/features/live-session/browser'
 import { LiveSessionRoom } from '@/features/live-session/components/LiveSessionRoom'
-import { useWakeLock } from '@/features/live-session/useWakeLock'
-import { useIdleWarning } from '@/features/live-session/useIdleWarning'
-import { useUnloadTextMetrics } from '@/features/live-session/useUnloadTextMetrics'
 import type { ChatMessage } from '@/features/live-session/types'
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { SessionFilters, type SortField, type SortDir } from '@/components/SessionFilters'
@@ -60,8 +57,6 @@ import { markCoachHomeResultSeen, recordCoachAction } from '@/lib/coach-api'
 import { formatSessionOwner, matchesSessionOwner, type SessionOwner } from '@/lib/adminUserFilter'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
-const { closeSessionSegment } = liveSessionApi
-
 interface PaceTurn {
   role?: string
   metrics?: {
@@ -114,8 +109,6 @@ export function Elevate() {
     inboundFocus && inboundFocus !== 'snapshot' ? inboundFocus : ''
   )
   const recorderRef = useRef<SessionRecorderHandle>(null)
-  const intentionalDisconnectSegmentsRef = useRef(new Set<string>())
-  const pauseRequestedAtRef = useRef<Date | null>(null)
   const [isCompletedSessionView, setIsCompletedSessionView] = useState(false)
   const [loadingViewedSession, setLoadingViewedSession] = useState(Boolean(viewSessionId))
   const [pulseBusy, setPulseBusy] = useState(false)
@@ -143,11 +136,14 @@ export function Elevate() {
     sessionChanged: id => setSessionId(id), toast: (kind, message) => toast[kind](message), log: logEvent,
     messages: () => messagesRef.current, addMessage: (...args) => addMessage(...args),
     upsertStreamingMessage: (...args) => upsertStreamingMessage(...args), rewardPoints: points => updateUser({ rewardPoints: points }),
-    left: () => {}, discarded: () => {}, discardFinished: () => {},
-  })
+    clearActiveSession: () => {
+      localStorage.removeItem('spashtai_active_session')
+      localStorage.removeItem('spashtai_session_timestamp')
+    },
+    left: (id, track) => onSessionLeft(id, track), discarded: id => onDiscarded(id), discardFinished: () => onDiscardFinished(),
+  }, sessionId)
   const { roomName, token, url, isJoining, isLeaving, segmentId, isPausing, pauseAudioFailure, isResuming,
-    assistantState, isSessionPaused, pauseReason, setToken, setUrl, setRoomName, setSegmentId, setIsLeaving,
-    setAssistantState, setIsSessionPaused } = live
+    assistantState, isSessionPaused, pauseReason, setAssistantState, idleWarning, resetIdleTimer } = live
 
   useEffect(() => {
     const targetId = viewSessionId || sessionId
@@ -927,7 +923,6 @@ export function Elevate() {
     clearMessages()
     resetMetrics()
   }, [viewSessionId, clearMessages, resetMetrics])
-  const fallbackDispatchAttemptedRef = useRef<string | null>(null)
 
   const resumeConfig = useCallback((): LaunchConfig => ({
     sessionName: elevateSessionName, focusArea, focusContext: inboundContext || viewFocusContext || '',
@@ -938,35 +933,6 @@ export function Elevate() {
   const retryPauseUpload = useCallback(async () => { await live.controller.retryPauseUpload(recorderRef.current) }, [live.controller])
   const pauseWithoutReplayAudio = useCallback(async () => { await live.controller.pauseWithoutReplayAudio() }, [live.controller])
   const continueInNewSegmentAfterPauseFailure = useCallback(async () => { await live.controller.continueInNewSegment(resumeConfig()) }, [live.controller, resumeConfig])
-
-  useWakeLock(joined)
-  const { idleWarning, resetIdleTimer } = useIdleWarning(joined, sessionId)
-  useUnloadTextMetrics(sessionId)
-
-  // Fallback recovery: if assistant remains unknown for too long, request manual dispatch once.
-  useEffect(() => {
-    if (!joined || !roomName || assistantState !== 'unknown') return
-    if (fallbackDispatchAttemptedRef.current === roomName) return
-
-    const timer = setTimeout(async () => {
-      try {
-        const response = await fetch(`${API_BASE_URL}/livekit/dispatch`, {
-          method: 'POST',
-          headers: getAuthHeaders(),
-          body: JSON.stringify({ room: roomName, sessionId, segmentId })
-        })
-
-        if (response.ok) {
-          fallbackDispatchAttemptedRef.current = roomName
-          console.log('🛟 Fallback dispatch triggered for room:', roomName)
-        }
-      } catch (error) {
-        console.warn('⚠️ Fallback dispatch failed:', error)
-      }
-    }, 15000)
-
-    return () => clearTimeout(timer)
-  }, [joined, roomName, assistantState, sessionId, segmentId])
 
   const launchConfig = useCallback((): LaunchConfig => ({
     sessionName: elevateSessionName, focusArea, focusContext: inboundContext,
@@ -987,120 +953,7 @@ export function Elevate() {
 
   // Called only when user explicitly clicks "Leave".
   // Ends the session permanently.
-  const handleLeave = useCallback(async () => {
-    if (isLeaving) return
-    setIsLeaving(true)
-    const leaveRequestedAt = new Date()
-    const currentSessionId = sessionId
-    if (currentSessionId) logEvent('event', 'elevate.session_leave', { sessionId: currentSessionId })
-
-    let capture: { ok: boolean; audioCapture: 'uploaded' | 'pending' | 'failed' | 'unavailable' } = {
-      ok: false,
-      audioCapture: 'pending',
-    }
-    try {
-      capture = (await recorderRef.current?.finalize()) ?? capture
-    } catch {
-      capture = { ok: false, audioCapture: 'failed' }
-    }
-    if (currentSessionId && segmentId) {
-      await closeSessionSegment(
-        currentSessionId,
-        segmentId,
-        capture.audioCapture === 'uploaded' ? 'available' : capture.audioCapture,
-        pauseRequestedAtRef.current ?? leaveRequestedAt,
-      ).catch((error) => console.warn('Failed to close final segment:', error))
-    }
-
-    if (segmentId) intentionalDisconnectSegmentsRef.current.add(segmentId)
-    setToken(null)
-    setUrl(null)
-    setSessionId(null)
-    setRoomName('')
-    setSegmentId(null)
-    setIsSessionPaused(false)
-    setAssistantState('unknown')
-    clearMessages()
-    resetMetrics()
-
-    localStorage.removeItem('spashtai_active_session')
-    localStorage.removeItem('spashtai_session_timestamp')
-
-    // Snapshot / booth is a first impression, not a Pulse sample.
-    // Every other finished session is tracked. The results page can remove it.
-    // Journey practices are measured for their event results, never added to
-    // the user's global communication trend in Progress Pulse.
-    const trackIt = !(inboundBoothDemo || focusArea === 'snapshot' || prepareLaunch)
-
-    if (currentSessionId) {
-      try {
-        const endRes = await fetch(`${API_BASE_URL}/sessions/${currentSessionId}/end`, {
-          method: 'POST',
-          headers: getAuthHeaders(),
-          body: JSON.stringify({
-            endedAt: new Date().toISOString(),
-            preparationId: prepareLaunch?.preparationId || null,
-          })
-        })
-        if (endRes.ok) {
-          const endData = await endRes.json().catch(() => ({}))
-          if (typeof endData.totalPoints === 'number') {
-            updateUser({ rewardPoints: endData.totalPoints })
-          }
-        }
-
-        // Run legacy text metrics (keeps backward compatibility)
-        await fetch(`${API_BASE_URL}/sessions/${currentSessionId}/calculate-text-metrics`, {
-          method: 'POST',
-          headers: getAuthHeaders()
-        })
-      } catch (err) {
-        console.warn('Failed to finalize session:', err)
-      }
-
-      // Snapshot / booth is a first impression, not a Pulse sample.
-      // Every other finished session is tracked. The results page can remove it.
-
-      // Run the full analytics pipeline (signal extraction + skill scores + coaching insights)
-      try {
-        const analyzeRes = await fetch(`${API_BASE_URL}/sessions/${currentSessionId}/analyze`, {
-          method: 'POST',
-          headers: getAuthHeaders(),
-          body: JSON.stringify({
-            autoTrackPulse: trackIt,
-            source: 'elevate',
-            audioCapture: capture.audioCapture,
-          }),
-        })
-        if (analyzeRes.ok) {
-          const result = await analyzeRes.json()
-          if (trackIt && result.pulseEntriesCreated > 0) {
-            toast.success(`Session tracked — ${result.pulseEntriesCreated} skills updated in Progress Pulse`)
-          } else if (trackIt) {
-            toast.success('Session tracked in Progress Pulse')
-          }
-        } else {
-          console.warn('Analytics pipeline returned', analyzeRes.status)
-          if (trackIt) toast.success('Session tracked in Progress Pulse')
-        }
-      } catch {
-        console.warn('Analytics pipeline unavailable, session still saved')
-        if (trackIt) toast.success('Session saved')
-      }
-
-      if (!trackIt && !prepareLaunch) {
-        try {
-          await fetch(`${API_BASE_URL}/api/progress-pulse/skip`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ sessionId: currentSessionId, source: 'elevate' }),
-          })
-        } catch {
-          // non-critical
-        }
-      }
-    }
-
+  const onSessionLeft = (currentSessionId: string | null, trackIt: boolean) => {
     setPastSessions((prev) =>
       prev.map((s) =>
         s.id === currentSessionId
@@ -1147,41 +1000,18 @@ export function Elevate() {
       setShowHistory(true)
       navigate('/elevate')
     }
-    setIsLeaving(false)
-  }, [sessionId, segmentId, clearMessages, resetMetrics, navigate, updateUser, loadPastSessions, prepareLaunch, isLeaving, inboundBoothDemo, focusArea, launchedFromCoach, originCoachThreadId, setAssistantState, setIsLeaving, setIsSessionPaused, setRoomName, setSegmentId, setToken, setUrl])
+  }
+  const activityAdapter = () => {
+    const config = launchConfig()
+    return prepareLaunch ? prepareAdapter(liveSessionApi, config) : elevateAdapter(liveSessionApi, config)
+  }
+  const handleLeave = async () => { await live.controller.leave(recorderRef.current, activityAdapter()) }
 
   // A Prepare attempt is removable until it has been completed. The server
   // enforces the same boundary using endedAt, so stale client state is safe.
   const canDiscardPreparePractice = !prepareLaunch || !isCompletedSessionView
 
-  const handleDiscard = useCallback(async () => {
-    if (isLeaving) return
-    const yes = await confirmDialog({
-      title: prepareLaunch ? 'Discard this interview practice?' : 'Discard this session?',
-      description: prepareLaunch
-        ? 'This in-progress practice will be removed completely. Completed practices remain on the interview journey.'
-        : 'This will permanently delete the session and all its data. This cannot be undone.',
-      confirmLabel: 'Discard',
-      cancelLabel: 'Keep session',
-    })
-    if (!yes) return
-
-    setIsLeaving(true)
-    const currentSessionId = sessionId
-
-    if (currentSessionId) {
-      try {
-        const discardUrl = prepareLaunch
-          ? `${API_BASE_URL}/api/preparations/${encodeURIComponent(prepareLaunch.preparationId)}/practices/${encodeURIComponent(currentSessionId)}/discard`
-          : `${API_BASE_URL}/sessions/${currentSessionId}`
-        const response = await fetch(discardUrl, {
-          method: prepareLaunch ? 'POST' : 'DELETE',
-          headers: getAuthHeaders(),
-        })
-        if (!response.ok) {
-          const body = await response.json().catch(() => ({} as { error?: string }))
-          throw new Error(body.error || `Discard failed with HTTP ${response.status}`)
-        }
+  const onDiscarded = (currentSessionId: string) => {
         setPastSessions((prev) => prev.filter((s) => s.id !== currentSessionId))
         setPendingDeletions((prev) => [
           {
@@ -1195,39 +1025,29 @@ export function Elevate() {
         toast.success(prepareLaunch
           ? 'Interview practice discarded.'
           : 'Discarding session securely. Cleanup will retry automatically.')
-      } catch (error) {
-        console.error('Failed to discard session:', error)
-        setIsLeaving(false)
-        toast.error(error instanceof Error ? error.message : 'Could not start secure discard. Please retry.')
-        return
-      }
-    }
-
-    await recorderRef.current?.discard().catch((error) => {
-      console.warn('Failed to stop discarded browser recording:', error)
-    })
-    if (segmentId) intentionalDisconnectSegmentsRef.current.add(segmentId)
-
-    setToken(null)
-    setUrl(null)
-    setSessionId(null)
-    setRoomName('')
-    setSegmentId(null)
-    setIsSessionPaused(false)
-    setAssistantState('unknown')
-    clearMessages()
-    resetMetrics()
-    localStorage.removeItem('spashtai_active_session')
-    localStorage.removeItem('spashtai_session_timestamp')
-
+  }
+  const onDiscardFinished = () => {
     if (prepareLaunch) {
       navigate(`/prepare/interviews/${encodeURIComponent(prepareLaunch.preparationId)}`)
     } else {
       setShowHistory(true)
       navigate('/elevate')
     }
-    setIsLeaving(false)
-  }, [sessionId, segmentId, clearMessages, resetMetrics, navigate, confirmDialog, prepareLaunch, isLeaving, viewSessionName, elevateSessionName, setAssistantState, setIsLeaving, setIsSessionPaused, setRoomName, setSegmentId, setToken, setUrl])
+  }
+  const handleDiscard = async () => {
+    if (isLeaving) return
+    const yes = await confirmDialog({
+      title: prepareLaunch ? 'Discard this interview practice?' : 'Discard this session?',
+      description: prepareLaunch
+        ? 'This in-progress practice will be removed completely. Completed practices remain on the interview journey.'
+        : 'This will permanently delete the session and all its data. This cannot be undone.',
+      confirmLabel: 'Discard',
+      cancelLabel: 'Keep session',
+    })
+    if (!yes) return
+
+    await live.controller.discard(recorderRef.current, activityAdapter(), sessionId)
+  }
 
   // Return from a viewed session's results back to the Elevate session list.
   const handleBackToElevate = useCallback(() => {
