@@ -85,6 +85,8 @@ import adminPricingRouter from './routes/admin/pricing'
 import adminLegalRouter from './routes/admin/legal'
 import adminPlatformRouter from './routes/admin/platform'
 import adminInterviewBankRouter from './routes/admin/interview-bank'
+import interviewFollowUpsRouter from './routes/internal/interview-followups'
+import { startBankFollowUpWorker } from './interviews/bank/followUps'
 import preparationsRouter from './routes/preparations'
 import legalRouter from './routes/legal'
 import { getPublicTickers } from './routes/tickers'
@@ -162,8 +164,9 @@ app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   credentials: true,
 }))
-// Bank rubrics can contain multiple evidence anchors; keep the larger bound scoped to Admin.
+// Authored learning content and bulk selections have a bounded Admin payload.
 app.use('/api/admin/interview-bank', express.json({ limit: '1mb' }))
+app.use('/internal/sessions/:sessionId/interview-followups', express.json({ limit: '1mb' }))
 app.use(express.json())
 
 app.use('/api/', apiLimiter)
@@ -227,6 +230,7 @@ app.use('/api/admin/legal', requireAuth, requireAdmin, adminLegalRouter)
 app.use('/api/admin/platform', requireAuth, requireAdmin, adminPlatformRouter)
 // Bank authoring stays available to admins while learner Interviews is hidden.
 app.use('/api/admin/interview-bank', requireAuth, requireAdmin, adminInterviewBankRouter)
+app.use('/internal/sessions', interviewFollowUpsRouter)
 app.use('/api/admin/feedback', requireAuth, requireAdmin, adminFeedbackRouter)
 
 // Protected: product event tracking (page views, etc.)
@@ -458,6 +462,7 @@ async function startServer() {
   startDeliveryAlignmentWorker()
   startAudioEnrichmentRetryWorker()
   startSessionInactivityWorker()
+  startBankFollowUpWorker()
 
   // During `tsx watch` hot-reloads the previous process can still hold the port
   // for a brief moment when the new one starts. Instead of crashing on

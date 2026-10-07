@@ -19,9 +19,9 @@ describe('bounded CSV import', () => {
   it('preserves unknown metadata and source answers privately, without synthesizing rubrics', () => {
     const data = read('QID,Question,Answer\nAUTO-1,What is isolation?,Source explanation')
     const [row] = normalizeRows(data.headers, data.rows, options)
-    expect(row.status).toBe('READY'); expect(row.normalized.sourceAnswer).toBe('Source explanation')
-    expect(row.normalized.draft).toMatchObject({ track: null, rightsBasis: 'UNRECORDED', exampleAnswer: '', explanation: '', rubric: null })
-    expect(row.warnings).toContain('Track is unknown; assign it during review')
+    expect(row.status).toBe('READY'); expect(row.normalized.sources.sourceAnswer).toBe('Source explanation')
+    expect(row.normalized.draft).toMatchObject({ questionText: 'What is isolation?' })
+    expect(row.warnings).toContain('Track defaults to General; confirm it before activation')
   })
   it('records errors per row and warns on exact text duplicates', () => {
     const data = read('QID,Question,Answer\nAUTO-1,Same question?,\nAUTO-1,Same  question?,\nBAD ID,Another question?,answer\nAUTO-3,Question?')
@@ -38,6 +38,17 @@ describe('bounded CSV import', () => {
     expect(importFingerprint('a', options)).toBe(importFingerprint('a', { ...options, mapping: { sourceAnswer: 'Answer', questionText: 'Question', externalQid: 'QID' } }))
     expect(importFingerprint('b', options)).not.toBe(importFingerprint('a', options))
     expect(importFingerprint('a', { ...options, mode: 'UPDATE_BY_QID' })).not.toBe(importFingerprint('a', options))
+  })
+  it('imports Copilot fields without importing approval, and distinguishes omitted from blank columns', () => {
+    const mapping = { externalQid: 'QID', questionText: 'Question', explanation: 'Learner Explanation', goodAnswerPoints: 'Good Answer Points', verbalSuitable: 'Verbal Suitable', approved: 'Approved', active: 'Active' }
+    const data = read('QID,Question,Learner Explanation,Good Answer Points,Verbal Suitable,Approved,Active\nQ-1,How do tests work?,Explain,Point,FALSE,TRUE,FALSE')
+    const [row] = normalizeRows(data.headers, data.rows, { ...options, mapping })
+    expect(row.normalized.draft).toMatchObject({ explanation: 'Explain', goodAnswerPoints: 'Point', verbalSuitable: false })
+    expect(row.normalized.draft).not.toHaveProperty('exampleAnswer')
+    expect(row.normalized.draft).not.toHaveProperty('approved')
+    expect(row.warnings.join(' ')).toContain('imported flags are ignored')
+    const [empty] = normalizeRows(data.headers, [['Q-2','How do tests work?','','','maybe','FALSE','FALSE']], { ...options, mapping })
+    expect(empty.normalized.draft).toMatchObject({ explanation: '' }); expect(empty.status).toBe('ERROR')
   })
   it('neutralizes spreadsheet formulas only in downloaded reports', () => {
     expect(csvCell(' =SUM(A1)')).toBe('"\' =SUM(A1)"')

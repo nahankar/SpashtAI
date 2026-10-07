@@ -8,6 +8,5 @@
   "tags": [],
   "explanation": "Independent setup prevents test coupling.",
   "exampleAnswer": "I reset state and avoid shared mutable fixtures.",
-  "criteria": [{ "id": "isolation", "label": "Test isolation" }],
   "expectedDepth": "Explain isolation and give one example."
 }

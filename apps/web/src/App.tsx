@@ -618,6 +618,7 @@ function AppRoutes() {
             <Route path="legal" element={<AdminLegal />} />
             <Route path="interview-bank" element={<QuestionBank />} />
             <Route path="interview-bank/new" element={<QuestionBankEditor />} />
+            <Route path="interview-bank/questions/:id" element={<QuestionBankEditor />} />
             <Route path="interview-bank/versions/:id" element={<QuestionBankEditor />} />
             <Route path="interview-bank/imports" element={<QuestionBankImports />} />
           </Route>

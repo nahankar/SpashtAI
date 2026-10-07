@@ -1,28 +1,57 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiClient } from '@/lib/api-client'
-import { BANK_API } from '@/lib/interview-bank'
+import { BANK_API, bankWrite, bankStatus, type BankAction, type BankQuestion } from '@/lib/interview-bank'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-interface Listing { versions: { id: string; version: number; status: string; questionText: string; track: string | null; difficulty: string | null; question: { externalQid: string; namespace: string } }[]; total: number }
+interface Listing { questions: BankQuestion[]; total: number }
 export function QuestionBank() {
   const [search, setSearch] = useState(''); const [status, setStatus] = useState(''); const [page, setPage] = useState(1)
-  const [data, setData] = useState<Listing | null>(null); const [error, setError] = useState('')
+  const [data, setData] = useState<Listing | null>(null); const [error, setError] = useState(''); const [message, setMessage] = useState('')
+  const [selected, setSelected] = useState<Record<string,number>>({}); const [busy, setBusy] = useState(false); const [deleting, setDeleting] = useState(false); const [reload, setReload] = useState(0)
+  const lifetime = useRef<AbortController | null>(null)
+  useEffect(() => { const controller = new AbortController(); lifetime.current = controller; return () => controller.abort() }, [])
+  useEffect(() => { setSelected({}); setDeleting(false); setMessage('') }, [search, status])
   useEffect(() => {
     const controller = new AbortController(); setData(null); setError('')
     const query = new URLSearchParams({ page: String(page), search }); if (status) query.set('status', status)
-    void apiClient<Listing>(`${BANK_API}/questions?${query}`, { signal: controller.signal }).then(d => { if (!controller.signal.aborted) setData(d) }).catch(e => { if (!controller.signal.aborted) setError(String(e.message)) })
+    void apiClient<Listing>(`${BANK_API}/questions?${query}`, { signal: controller.signal }).then(d => { if (!controller.signal.aborted) setData(d) }).catch(e => { if (!controller.signal.aborted) setError(e.message) })
     return () => controller.abort()
-  }, [search, status, page])
+  }, [search, status, page, reload])
+  const count = Object.keys(selected).length
+  async function action(action: BankAction) {
+    const signal = lifetime.current!.signal; setBusy(true); setError(''); setMessage('')
+    try {
+      const result = await bankWrite<{ changed: number }>('/questions/bulk', { action, questions: Object.entries(selected).map(([id,revision]) => ({ id, revision })) }, 'POST', signal)
+      if (!signal.aborted) { setMessage(`${result.changed} question${result.changed === 1 ? '' : 's'} ${action === 'delete' ? 'deleted' : action === 'approve' ? 'approved' : action === 'deactivate' ? 'deactivated' : action === 'activate' ? 'activated' : 'approved and activated'}.`); setSelected({}); setDeleting(false); setPage(1); setReload(v => v+1) }
+    } catch (e) { if (!signal.aborted) setError(e instanceof Error ? e.message : 'Request failed') } finally { if (!signal.aborted) setBusy(false) }
+  }
+  async function selectAllMatching() {
+    const signal = lifetime.current!.signal; setBusy(true); setError('')
+    try {
+      const result = await bankWrite<{ questions: { id: string; revision: number }[] }>('/questions/selection', { search, ...(status ? { status } : {}) }, 'POST', signal)
+      if (!signal.aborted) setSelected(Object.fromEntries(result.questions.map(q => [q.id,q.revision])))
+    } catch (e) { if (!signal.aborted) setError(e instanceof Error ? e.message : 'Selection failed') } finally { if (!signal.aborted) setBusy(false) }
+  }
+  const pageSelected = !!data?.questions.length && data.questions.every(q => selected[q.id] !== undefined)
   return <div className="space-y-6 max-w-5xl">
-    <div><h1 className="text-2xl font-semibold">Interview question bank</h1><p className="text-muted-foreground mt-2">Prepare and review content for the Automation Testing pilot. Importing creates private drafts; publishing requires content rights and a complete rubric.</p></div>
+    <div><h1 className="text-2xl font-semibold">Interview question bank</h1><p className="text-muted-foreground mt-2">One editable copy of each question. Approve content, then activate it for practice. Imported and generated questions start as inactive drafts.</p></div>
     <div className="flex flex-wrap gap-3"><Button asChild><Link to="/admin/interview-bank/new">Write a question</Link></Button><Button variant="outline" asChild><Link to="/admin/interview-bank/imports">Import CSV</Link></Button></div>
-    <div className="flex flex-wrap gap-3"><Input className="max-w-sm" aria-label="Search question or QID" placeholder="Search question or QID" value={search} onChange={e => { setSearch(e.target.value); setPage(1) }} />
-      <select className="rounded-md border bg-background p-2" aria-label="Filter question status" value={status} onChange={e => { setStatus(e.target.value); setPage(1) }}><option value="">All statuses</option>{['DRAFT','REVIEWED','PUBLISHED','RETIRED'].map(s => <option key={s}>{s}</option>)}</select></div>
-    {error && <p role="alert" className="text-destructive">{error}</p>}
+    <div className="flex flex-wrap gap-3"><Input disabled={busy} className="max-w-sm" aria-label="Search question or QID" placeholder="Search question or QID" value={search} onChange={e => { setSearch(e.target.value); setPage(1) }} />
+      <select disabled={busy} className="rounded-md border bg-background p-2" aria-label="Filter question status" value={status} onChange={e => { setStatus(e.target.value); setPage(1) }}><option value="">All questions</option><option value="DRAFT">Draft</option><option value="APPROVED">Approved · inactive</option><option value="ACTIVE">Active</option><option value="INACTIVE">All inactive</option></select></div>
+    {error && <p role="alert" className="text-destructive">{error}</p>}{message && <p role="status">{message}</p>}
     {!data && !error && <p role="status">Loading questions…</p>}
-    {data && <><p className="text-sm text-muted-foreground">{data.total} question versions</p><div className="space-y-3">{data.versions.map(v => <Link key={v.id} to={`/admin/interview-bank/versions/${v.id}`} className="block rounded-xl border p-4 hover:bg-accent focus-visible:ring-2">
-      <div className="text-xs text-muted-foreground">{v.question.namespace} / {v.question.externalQid} · Version {v.version} · {v.status}</div><h2 className="font-medium mt-2">{v.questionText}</h2><p className="text-sm text-muted-foreground mt-1">{v.track || 'Track needs review'} · {v.difficulty || 'Difficulty needs review'}</p></Link>)}{!data.total && <p>No questions yet. Write one or import a CSV to begin.</p>}</div>
-      <div className="flex items-center gap-3"><Button variant="outline" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Previous</Button><span>Page {page}</span><Button variant="outline" disabled={page * 30 >= data.total} onClick={() => setPage(p => p + 1)}>Next</Button></div></>}
+    {data && <><div className="flex gap-4 items-center flex-wrap"><p className="text-sm text-muted-foreground">{data.total} question{data.total === 1 ? '' : 's'} · {count} selected</p>
+      <label className="text-sm flex gap-2 items-center"><input type="checkbox" disabled={busy || !data.questions.length} checked={pageSelected} onChange={e => { const checked = e.target.checked; setSelected(previous => { const next = { ...previous }; for (const q of data.questions) { if (checked) next[q.id]=q.revision; else delete next[q.id] } return next }) }} />Select this page</label>
+      {data.total > 30 && <Button variant="outline" disabled={busy} onClick={() => void selectAllMatching()}>Select all {data.total} matching questions</Button>}
+      {count > 0 && <Button variant="outline" disabled={busy} onClick={() => { setSelected({}); setDeleting(false) }}>Clear selection</Button>}
+    </div>
+    {count > 0 && <div className="flex flex-wrap gap-2">{(['approve','approve_activate','activate','deactivate'] as const).map(actionName => <Button key={actionName} variant="outline" disabled={busy} onClick={() => void action(actionName)}>{{ approve:'Approve', approve_activate:'Approve and activate', activate:'Activate', deactivate:'Deactivate' }[actionName]} selected</Button>)}<Button variant="destructive" disabled={busy} onClick={() => setDeleting(true)}>Delete selected</Button></div>}
+    {deleting && <div role="alertdialog" aria-label="Bulk deletion confirmation" className="rounded-xl border p-5 space-y-3"><p>Permanently delete {count} selected questions? Their current content will be removed.</p><div className="flex gap-3"><Button variant="destructive" disabled={busy || !count} onClick={() => void action('delete')}>Confirm delete {count} questions</Button><Button variant="outline" disabled={busy} onClick={() => setDeleting(false)}>Cancel</Button></div></div>}
+    <div className="space-y-3">{data.questions.map(q => <div key={q.id} className="rounded-xl border p-4 flex items-start gap-3">
+      <input className="mt-1" type="checkbox" aria-label={`Select ${q.externalQid}`} disabled={busy} checked={selected[q.id] !== undefined} onChange={e => { const checked=e.target.checked; setSelected(previous => { const next={ ...previous }; if (checked) next[q.id]=q.revision; else delete next[q.id]; return next }) }} />
+      <Link to={`/admin/interview-bank/questions/${q.id}`} className="flex-1 hover:underline focus-visible:ring-2"><div className="text-xs text-muted-foreground">{q.namespace} / {q.externalQid} · {bankStatus(q)}{q.origin === 'GENERATED_FOLLOW_UP' ? ' · Generated follow-up' : ''}</div><h2 className="font-medium mt-2">{q.questionText}</h2><p className="text-sm text-muted-foreground mt-1">{q.track} · {q.difficulty}</p></Link>
+    </div>)}{!data.total && <p>No questions yet. Write one or import a CSV to begin.</p>}</div>
+    <div className="flex items-center gap-3"><Button variant="outline" disabled={busy || page === 1} onClick={() => setPage(p => p - 1)}>Previous</Button><span>Page {page}</span><Button variant="outline" disabled={busy || page * 30 >= data.total} onClick={() => setPage(p => p + 1)}>Next</Button></div></>}
   </div>
 }

@@ -41,7 +41,7 @@ export function QuestionBankImports() {
       // One bounded chunk at a time. Closing the screen cancels further requests;
       // already committed rows remain resumable from import history.
       const result = await apiClient<{ remaining: number }>(`${BANK_API}/imports/${id}/confirm`, { method: 'POST', body: '{}', signal })
-      remaining = result.remaining; if (!signal.aborted) setProgress(remaining ? `${remaining} rows left. You can return and resume if interrupted.` : 'Import complete. All created versions are drafts.')
+      remaining = result.remaining; if (!signal.aborted) setProgress(remaining ? `${remaining} rows left. You can return and resume if interrupted.` : 'Import complete. New and changed questions are unapproved and inactive.')
     }
     if (!signal.aborted) { await loadBatch(id, page, signal); const data = await apiClient<{ batches: BatchSummary[] }>(`${BANK_API}/imports`, { signal }); setHistory(data.batches) }
   }) }
@@ -54,13 +54,13 @@ export function QuestionBankImports() {
       <div className="flex flex-wrap gap-3"><Button disabled={busy || !file} onClick={inspect}>Inspect columns</Button><Button variant="outline" disabled={busy} onClick={() => void task(async () => { await downloadBankFile('/imports/template', 'question-bank-template.csv') })}>Download template</Button></div>
     </section>
     {inspection && <section className="border rounded-xl p-5 space-y-4"><h2 className="font-semibold">2. Map columns · {inspection.rowCount} rows</h2>
-      <div className="grid sm:grid-cols-2 gap-4"><label className="text-sm space-y-1 block">Namespace<Input disabled={busy} value={namespace} onChange={e => setNamespace(e.target.value)} /></label><label className="text-sm space-y-1 block">Import mode<select className="w-full border rounded-md bg-background p-2" disabled={busy} value={mode} onChange={e => setMode(e.target.value)}><option value="ADD_ONLY">Add new QIDs only</option><option value="UPDATE_BY_QID">Create a new draft for changed QIDs</option></select></label></div>
-      <p className="text-sm text-muted-foreground">Updates preserve published versions. Unknown values stay unassigned; imported answers remain private reference material.</p>
+      <div className="grid sm:grid-cols-2 gap-4"><label className="text-sm space-y-1 block">Namespace<Input disabled={busy} value={namespace} onChange={e => setNamespace(e.target.value)} /></label><label className="text-sm space-y-1 block">Import mode<select className="w-full border rounded-md bg-background p-2" disabled={busy} value={mode} onChange={e => setMode(e.target.value)}><option value="ADD_ONLY">Add new QIDs only</option><option value="UPDATE_BY_QID">Update existing questions by QID</option></select></label></div>
+      <p className="text-sm text-muted-foreground">Updates overwrite mapped fields on the same question. Omitted columns are preserved. Approval and activation happen in the app; imported flags are ignored.</p>
       <div className="grid sm:grid-cols-2 gap-3">{inspection.fields.map(field => <label key={field} className="text-sm space-y-1 block">{inspection.defaultColumns[field]}{['externalQid','questionText'].includes(field) && ' (required)'}<select disabled={busy} className="w-full border rounded-md bg-background p-2" value={mapping[field] ?? ''} onChange={e => setMapping(m => ({ ...m, [field]: e.target.value }))}><option value="">Not mapped</option>{inspection.headers.map(h => <option key={h}>{h}</option>)}</select></label>)}</div>
       <Button disabled={busy || !mapping.externalQid || !mapping.questionText} onClick={previewImport}>Validate and preview rows</Button>
     </section>}
     {batch && <section className="border rounded-xl p-5 space-y-4"><h2 className="font-semibold">3. Review rows · {batch.batch.status}</h2><p className="text-sm">{totalRows} rows · {Object.entries(batch.counts).map(([s,c]) => `${c} ${s.toLowerCase()}`).join(' · ')}</p>
-      <p className="text-sm text-muted-foreground">Rows with errors are skipped. Warnings require editorial review before publication.</p>
+      <p className="text-sm text-muted-foreground">Rows with errors are skipped. Warnings need review before activation.</p>
       <div className="flex flex-wrap gap-3"><Button disabled={busy || !batch.counts.READY} onClick={confirm}>{batch.batch.status === 'IMPORTING' ? 'Resume import' : 'Confirm valid rows as drafts'}</Button><Button variant="outline" disabled={busy} onClick={() => void task(async () => { await downloadBankFile(`/imports/${batch.batch.id}/report`, 'question-import-report.csv') })}>Download row report</Button></div>
       {progress && <p role="status" className="text-sm">{progress}</p>}
       <div className="space-y-2">{batch.rows.map(row => <div key={row.id} className="border rounded-lg p-3 text-sm"><p className="font-medium">Row {row.rowNumber} · {row.normalized.externalQid || 'Missing QID'} · {row.status}</p>{row.outcome && <p>{row.outcome}</p>}{row.errors.map(e => <p className="text-destructive" key={e}>{e}</p>)}{row.warnings.map(w => <p className="text-muted-foreground" key={w}>{w}</p>)}</div>)}</div>

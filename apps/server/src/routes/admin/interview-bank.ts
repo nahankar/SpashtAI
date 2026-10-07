@@ -2,16 +2,22 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import multer from 'multer'
 import { z } from 'zod'
 import { prisma } from '../../lib/prisma'
-import { requireAdmin, requireSuperAdmin } from '../../middleware/admin'
+import { requireAdmin } from '../../middleware/admin'
 import { reqLog } from '../../lib/logger'
 import { BankError, CSV_LIMITS, csvCell, parseCsv } from '../../interviews/bank/csv'
 import { DEFAULT_COLUMNS, IMPORT_FIELDS, importOptionsSchema } from '../../interviews/bank/import'
 import { draftSchema, editSchema, identitySchema, revisionSchema } from '../../interviews/bank/schemas'
 import { learnerPreview } from '../../interviews/bank/views'
-import { confirmImport, createQuestion, detail, editVersion, forkVersion, previewImport, transition } from '../../interviews/bank/service'
+import { confirmImport, createQuestion, detail, editQuestion, previewImport, bulkAction, questionAction } from '../../interviews/bank/service'
 
 const router = Router()
 router.use(requireAdmin)
+router.use((req, res, next) => {
+  void prisma.user.findUnique({ where: { id: req.user!.userId }, select: { role: true } }).then(user => {
+    if (user?.role !== 'ADMIN' && user?.role !== 'SUPER_ADMIN') { res.status(403).json({ error: 'Current Admin access required' }); return }
+    next()
+  }).catch(next)
+})
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: CSV_LIMITS.bytes, files: 1, fields: 1, fieldSize: 16000, parts: 3 },
   fileFilter: (_req, file, done) => done(null, file.originalname.toLowerCase().endsWith('.csv')) })
 function asyncRoute(fn: (req: Request, res: Response) => Promise<unknown>) {
@@ -19,47 +25,60 @@ function asyncRoute(fn: (req: Request, res: Response) => Promise<unknown>) {
 }
 function csvUpload(req: Request) { if (!req.file) throw new BankError(400, 'Choose a UTF-8 .csv file'); return req.file.buffer }
 const pageSchema = z.coerce.number().int().min(1).max(10000).default(1)
+function listWhere(query: Request['query']) {
+  const search = z.string().max(160).default('').parse(query.search)
+  const track = z.string().max(160).optional().parse(query.track)
+  const status = z.enum(['DRAFT', 'APPROVED', 'ACTIVE', 'INACTIVE']).optional().parse(query.status)
+  const where = { ...(track ? { track } : {}),
+    ...(status === 'DRAFT' ? { approved: false } : status === 'APPROVED' ? { approved: true, active: false } : status === 'ACTIVE' ? { active: true } : status === 'INACTIVE' ? { active: false } : {}),
+    ...(search ? { OR: [{ questionText: { contains: search, mode: 'insensitive' as const } }, { externalQid: { contains: search, mode: 'insensitive' as const } }] } : {}) }
+  return where
+}
 router.get('/questions', asyncRoute(async (req, res) => {
   const page = pageSchema.parse(req.query.page)
-  const search = z.string().max(160).default('').parse(req.query.search)
-  const track = z.string().max(160).optional().parse(req.query.track)
-  const status = z.enum(['DRAFT', 'REVIEWED', 'PUBLISHED', 'RETIRED']).optional().parse(req.query.status)
-  const where = { ...(status ? { status } : {}), ...(track ? { track } : {}),
-    ...(search ? { OR: [{ questionText: { contains: search, mode: 'insensitive' as const } }, { question: { externalQid: { contains: search, mode: 'insensitive' as const } } }] } : {}) }
-  const [versions, total] = await Promise.all([
-    prisma.questionBankVersion.findMany({ where, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], skip: (page - 1) * 30, take: 30,
-      select: { id: true, version: true, status: true, questionText: true, track: true, difficulty: true, question: { select: { externalQid: true, namespace: true } } } }),
-    prisma.questionBankVersion.count({ where }),
+  const where = listWhere(req.query)
+  const [questions, total] = await Promise.all([
+    prisma.questionBankQuestion.findMany({ where, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], skip: (page - 1) * 30, take: 30,
+      select: { id: true, revision: true, approved: true, active: true, questionText: true, track: true, difficulty: true, externalQid: true, namespace: true, origin: true } }),
+    prisma.questionBankQuestion.count({ where }),
   ])
-  res.json({ versions, total, page })
+  res.json({ questions, total, page })
 }))
+router.post('/questions/selection', asyncRoute(async (req, res) => {
+  const filters = z.object({ search: z.string().max(160).optional(), track: z.string().max(160).optional(), status: z.enum(['DRAFT','APPROVED','ACTIVE','INACTIVE']).optional() }).strict().parse(req.body)
+  const where = listWhere(filters)
+  const questions = await prisma.questionBankQuestion.findMany({ where, orderBy: { id: 'asc' }, take: 2001, select: { id: true, revision: true } })
+  if (questions.length > 2000) throw new BankError(400, 'Narrow your filters to at most 2,000 questions for one bulk action')
+  res.json({ questions })
+}))
+router.post('/questions/bulk', asyncRoute(async (req, res) => { res.json(await bulkAction(req.body, req.user!.userId)) }))
 router.post('/questions', asyncRoute(async (req, res) => {
   const body = z.object({ identity: identitySchema, draft: draftSchema }).strict().parse(req.body)
   const id = await createQuestion(body.identity, body.draft, req.user!.userId)
   res.status(201).json(await detail(id))
 }))
-router.get('/versions/:id', asyncRoute(async (req, res) => { res.json(await detail(req.params.id)) }))
-router.get('/versions/:id/learner-preview', asyncRoute(async (req, res) => {
+router.get('/questions/:id', asyncRoute(async (req, res) => { res.json(await detail(req.params.id)) }))
+router.get('/questions/:id/learner-preview', asyncRoute(async (req, res) => {
   const data = await detail(req.params.id)
-  res.json({ status: data.version.status, preview: learnerPreview(data.draft) })
+  res.json({ status: data.question.active ? 'ACTIVE' : data.question.approved ? 'APPROVED' : 'DRAFT', preview: learnerPreview(data.draft) })
 }))
-router.put('/versions/:id', asyncRoute(async (req, res) => {
+router.put('/questions/:id', asyncRoute(async (req, res) => {
   const body = editSchema.parse(req.body)
-  await editVersion(req.params.id, body.revision, body.draft, req.user!.userId)
+  await editQuestion(req.params.id, body.revision, body.draft, req.user!.userId)
   res.json(await detail(req.params.id))
 }))
-router.post('/versions/:id/fork', asyncRoute(async (req, res) => {
-  z.object({}).strict().parse(req.body)
-  const id = await forkVersion(req.params.id, req.user!.userId)
-  res.status(201).json(await detail(id))
+router.delete('/questions/:id', asyncRoute(async (req, res) => {
+  const body = revisionSchema.parse(req.body)
+  res.json(await questionAction(req.params.id, body.revision, 'delete', req.user!.userId))
 }))
-for (const action of ['review', 'publish', 'retire'] as const) {
-  router.post(`/versions/:id/${action}`, ...(action === 'review' ? [] : [requireSuperAdmin]), asyncRoute(async (req, res) => {
-    const { revision } = revisionSchema.parse(req.body)
-    await transition(req.params.id, revision, action, req.user!.userId)
-    res.json(await detail(req.params.id))
-  }))
-}
+router.post('/questions/:id/:action', asyncRoute(async (req, res) => {
+  const { revision } = revisionSchema.parse(req.body)
+  const action = z.enum(['approve', 'activate', 'deactivate', 'approve_activate']).parse(req.params.action)
+  await questionAction(req.params.id, revision, action, req.user!.userId)
+  res.json(await detail(req.params.id))
+}))
+// The retained copy's old editor links remain usable after migration.
+router.get('/versions/:id', asyncRoute(async (req, res) => { res.json(await detail(req.params.id)) }))
 router.post('/imports/inspect', upload.single('file'), asyncRoute(async (req, res) => {
   const data = parseCsv(csvUpload(req))
   res.json({ headers: data.headers, rowCount: data.rows.length, defaultColumns: DEFAULT_COLUMNS, fields: IMPORT_FIELDS })
@@ -75,7 +94,7 @@ router.get('/imports', asyncRoute(async (_req, res) => {
 }))
 router.get('/imports/template', (_req, res) => {
   res.type('text/csv').attachment('question-bank-template.csv').send(
-    [Object.values(DEFAULT_COLUMNS), ['AUTO-001', 'Automation Testing', 'Testing', 'Isolation', 'How do you keep automated tests independent?', '', 'Medium', '2-5', 'Core', 'Technical', 'QA Engineer', 'isolation,fixtures', '', '', '']]
+    [Object.values(DEFAULT_COLUMNS), IMPORT_FIELDS.map(key => ({ externalQid: 'AUTO-001', track: 'Automation Testing', category: 'Testing', topic: 'Isolation', questionText: 'How do you keep automated tests independent?', difficulty: 'Medium', experienceBand: '2-5', frequency: 'Core', questionType: 'Technical', roleArchetype: 'IC', goodAnswerPoints: 'Independent state; isolated fixtures', verbalSuitable: 'TRUE', approved: 'FALSE', active: 'FALSE' } as Record<string,string>)[key] ?? '')]
       .map(row => row.map(csvCell).join(',')).join('\r\n'))
 })
 router.get('/imports/:id', asyncRoute(async (req, res) => {
