@@ -28,6 +28,7 @@ import { StageTracker } from '@/components/prepare/StageTracker'
 import { useConfirm } from '@/hooks/useConfirm'
 import { useFeatureFlags } from '@/contexts/FeatureFlagsContext'
 import { useAuth } from '@/hooks/useAuth'
+import { formatSessionOwner } from '@/lib/adminUserFilter'
 import { AutoCompleteNotice, RetainCheckbox } from '@/components/session/SessionRetain'
 import type { RetainResult } from '@/lib/sessionRetain'
 import {
@@ -317,6 +318,8 @@ export function InterviewJourney() {
   }
 
   const ownJourney = !journey.user?.id || journey.user.id === user?.id
+  // Admins can read any journey, but launches and edits are owner-only on the server.
+  const readOnly = !ownJourney
 
   return (
     <div className="space-y-6">
@@ -353,7 +356,7 @@ export function InterviewJourney() {
             )}
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
+        {!readOnly && <div className="flex flex-wrap gap-2">
           {journey.nextStage && livePracticeAvailable && (
             <Link to={practiceHref(journey.id, journey.nextStage.id)}>
               <Button variant="outline">
@@ -386,8 +389,14 @@ export function InterviewJourney() {
               {editingOverview ? 'Cancel editing' : 'Edit journey'}
             </Button>
           )}
-        </div>
+        </div>}
       </div>
+
+      {readOnly && (
+        <div role="status" className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+          You are viewing {formatSessionOwner(journey.user)}'s interview journey. It is read-only: only the owner can start practice, log interviews or make changes.
+        </div>
+      )}
 
       <StageTracker stages={journey.stages} />
 
@@ -399,6 +408,7 @@ export function InterviewJourney() {
             size="sm"
             variant={journey.status === status ? 'default' : 'outline'}
             className="h-7 rounded-full text-xs"
+            disabled={readOnly}
             onClick={() => changeJourneyStatus(status)}
           >
             {status.toLowerCase()}
@@ -499,14 +509,14 @@ export function InterviewJourney() {
         </TabsContent>
 
         <TabsContent value="activity" className="mt-5 space-y-4">
-          <div className="flex flex-wrap gap-2">
+          {!readOnly && <div className="flex flex-wrap gap-2">
             {livePracticeAvailable ? <Link to={practiceHref(journey.id, journey.nextStage?.id)}>
               <Button size="sm"><Dumbbell className="mr-2 h-4 w-4" /> New interview practice</Button>
             </Link> : <Button size="sm" disabled title="Live practice is currently unavailable"><Dumbbell className="mr-2 h-4 w-4" /> New interview practice</Button>}
             {recordingAvailable ? <Link to={recordingHref(journey.id, journey.nextStage?.id)}>
               <Button size="sm" variant="outline">New interview event recording</Button>
             </Link> : <Button size="sm" variant="outline" disabled title="Interview recording is currently unavailable">New interview event recording</Button>}
-          </div>
+          </div>}
           <AutoCompleteNotice
             scope="interview"
             count={ownJourney
@@ -549,7 +559,7 @@ export function InterviewJourney() {
                           />
                         )}
                         <Link to={practiceResultHref(journey.id, practice.sessionId)}>
-                          <Button size="sm" variant="outline">{completed ? 'View results' : 'Resume'}</Button>
+                          <Button size="sm" variant="outline">{completed || readOnly ? 'View results' : 'Resume'}</Button>
                         </Link>
                       </div>
                     </CardContent>
@@ -573,11 +583,11 @@ export function InterviewJourney() {
                           <p className="mt-2 text-sm text-muted-foreground">Analysis complete</p>
                         )}
                       </div>
-                      <Link to={completed
+                      {(completed || !readOnly) && <Link to={completed
                         ? `/replay/${encodeURIComponent(recording.replaySessionId)}?preparationId=${encodeURIComponent(journey.id)}`
                         : `/replay?session=${encodeURIComponent(recording.replaySessionId)}&preparationId=${encodeURIComponent(journey.id)}`}>
                         <Button size="sm" variant="outline">{completed ? 'View results' : 'Continue upload'}</Button>
-                      </Link>
+                      </Link>}
                     </CardContent>
                   </Card>
                 )
@@ -642,7 +652,7 @@ export function InterviewJourney() {
                           </p>
                         )}
                       </div>
-                      <div className="flex gap-1">
+                      {!readOnly && <div className="flex gap-1">
                         <Button size="icon" variant="ghost" disabled={index === 0} onClick={() => moveStage(index, -1)} aria-label={`Move ${stage.name} up`}><ArrowUp className="h-4 w-4" /></Button>
                         <Button size="icon" variant="ghost" disabled={index === journey.stages.length - 1} onClick={() => moveStage(index, 1)} aria-label={`Move ${stage.name} down`}><ArrowDown className="h-4 w-4" /></Button>
                         <Button size="sm" variant="outline" onClick={() => openLog(stage.id)}>
@@ -659,9 +669,9 @@ export function InterviewJourney() {
                         </Link> : <Button size="sm" variant="outline" disabled title="Interview recording is currently unavailable">Recording</Button>}
                         <Button size="sm" variant="outline" onClick={() => setEditingStage(stage.id)}>Edit</Button>
                         <Button size="icon" variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => removeStage(stage)} aria-label={`Remove ${stage.name}`}><Trash2 className="h-4 w-4" /></Button>
-                      </div>
+                      </div>}
                     </div>
-                    <div className="flex flex-wrap gap-1.5">
+                    {!readOnly && <div className="flex flex-wrap gap-1.5">
                       {STAGE_PIPELINE_STATUSES.map((status) => (
                         <Button
                           key={status}
@@ -681,7 +691,7 @@ export function InterviewJourney() {
                       >
                         completed
                       </Button>
-                    </div>
+                    </div>}
                     {(stage.questionCount || stage.reflection || stage.practiceCount) && (
                       <p className="text-xs text-muted-foreground">
                         {stage.questionCount ? `${stage.questionCount} question${stage.questionCount === 1 ? '' : 's'}` : ''}
@@ -707,7 +717,7 @@ export function InterviewJourney() {
             </Card>
           ))}
 
-          <Card className="border-dashed">
+          {!readOnly && <Card className="border-dashed">
             <CardContent className="flex flex-col gap-3 py-4 sm:flex-row">
               <Input
                 value={newStageName}
@@ -720,11 +730,11 @@ export function InterviewJourney() {
                 <Plus className="mr-2 h-4 w-4" /> Add stage
               </Button>
             </CardContent>
-          </Card>
+          </Card>}
         </TabsContent>
 
         <TabsContent value="questions" className="mt-5">
-          <QuestionMemory journey={journey} onChanged={() => load(true)} />
+          <QuestionMemory journey={journey} onChanged={() => load(true)} readOnly={readOnly} />
         </TabsContent>
       </Tabs>
 

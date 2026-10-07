@@ -123,6 +123,8 @@ export function Elevate() {
     stageId: string | null
     journeyTitle: string
     stageName: string | null
+    /** Journey owner; admins may view other users' journeys but cannot launch practice in them. */
+    ownerId: string | null
   } | null>(null)
   const [prepareLaunchLoading, setPrepareLaunchLoading] = useState(Boolean(inboundPreparationId))
   const [prepareLaunchError, setPrepareLaunchError] = useState<string | null>(null)
@@ -183,6 +185,7 @@ export function Elevate() {
           stageId: stage?.id ?? null,
           journeyTitle: journey.title,
           stageName: stage?.name ?? null,
+          ownerId: journey.user?.id ?? null,
         })
         setPrepareLaunchError(null)
         setFocusArea((current) => current || 'interview_practice')
@@ -813,6 +816,7 @@ export function Elevate() {
             stageId: session.preparationPractice.stageId,
             journeyTitle: session.preparationPractice.preparation.title,
             stageName: session.preparationPractice.stage?.name ?? null,
+            ownerId: session.userId ?? null,
           })
           // Repair old/shared direct links so the app shell, breadcrumb, and
           // every subsequent navigation keep the activity in its journey.
@@ -924,10 +928,12 @@ export function Elevate() {
     preparationId: prepareLaunch?.preparationId, stageId: prepareLaunch?.stageId,
     preparationPending: Boolean(inboundPreparationId && !prepareLaunch), preparationError: prepareLaunchError,
   }), [elevateSessionName, focusArea, inboundContext, inboundBoothDemo, prepareLaunch, inboundPreparationId, prepareLaunchError])
+  const prepareLaunchForeign = Boolean(prepareLaunch?.ownerId && user?.id && prepareLaunch.ownerId !== user.id)
   const handleJoin = useCallback(async () => {
+    if (prepareLaunchForeign) return
     const config = launchConfig()
     await live.controller.start(config, prepareLaunch ? prepareAdapter(liveSessionApi, config) : elevateAdapter(liveSessionApi, config))
-  }, [launchConfig, live.controller, prepareLaunch])
+  }, [launchConfig, live.controller, prepareLaunch, prepareLaunchForeign])
 
   // Called when LiveKit disconnects unexpectedly (refresh, network drop, etc.)
   // Does NOT end the session — leaves it resumable.
@@ -1437,6 +1443,11 @@ export function Elevate() {
                   {prepareLaunchError}
                 </div>
               )}
+              {prepareLaunchForeign && (
+                <div role="status" className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+                  This interview journey belongs to another user. Only the owner can start practice in it.
+                </div>
+              )}
               {prepareLaunch && (
                 <div className="rounded-md border bg-primary/5 px-3 py-2">
                   <p className="text-sm font-medium">
@@ -1509,7 +1520,8 @@ export function Elevate() {
                     isJoining ||
                     !elevateSessionName.trim() ||
                     prepareLaunchLoading ||
-                    Boolean(prepareLaunchError)
+                    Boolean(prepareLaunchError) ||
+                    prepareLaunchForeign
                   }
                 >
                   {isJoining && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

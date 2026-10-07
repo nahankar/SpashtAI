@@ -31,9 +31,12 @@ function matchesFilter(
 export function QuestionMemory({
   journey,
   onChanged,
+  readOnly = false,
 }: {
   journey: Preparation
   onChanged: () => Promise<void>
+  /** Admins viewing another user's journey can read questions but not change them. */
+  readOnly?: boolean
 }) {
   const [filter, setFilter] = useState<'ALL' | 'ACTUAL' | 'PRACTICE'>('ALL')
   const [draft, setDraft] = useState('')
@@ -148,7 +151,7 @@ export function QuestionMemory({
                           {sourceLabel(question.source)}
                         </p>
                       </div>
-                      <Button
+                      {!readOnly && <Button
                         size="icon"
                         variant="ghost"
                         className="text-muted-foreground hover:text-destructive"
@@ -156,7 +159,7 @@ export function QuestionMemory({
                         aria-label="Delete question"
                       >
                         <Trash2 className="h-4 w-4" />
-                      </Button>
+                      </Button>}
                     </li>
                   ))}
                 </ul>
@@ -174,14 +177,14 @@ export function QuestionMemory({
                       className="flex items-start justify-between gap-3 rounded-md border px-3 py-2"
                     >
                       <p className="text-sm">{question.questionText}</p>
-                      <Button
+                      {!readOnly && <Button
                         size="icon"
                         variant="ghost"
                         onClick={() => removeQuestion(question)}
                         aria-label="Delete question"
                       >
                         <Trash2 className="h-4 w-4" />
-                      </Button>
+                      </Button>}
                     </li>
                   ))}
                 </ul>
@@ -191,7 +194,7 @@ export function QuestionMemory({
         </>
       )}
 
-      <Card className="border-dashed">
+      {!readOnly && <Card className="border-dashed">
         <CardContent className="space-y-3 py-4">
           <Textarea
             value={draft}
@@ -226,7 +229,7 @@ export function QuestionMemory({
             </Button>
           </div>
         </CardContent>
-      </Card>
+      </Card>}
     </div>
   )
 }
