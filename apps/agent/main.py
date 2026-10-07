@@ -2909,5 +2909,10 @@ if __name__ == "__main__":
             entrypoint_fnc=entrypoint,
             prewarm_fnc=prewarm,
             num_idle_processes=1,
+            # Spawning the next idle process imports the full agent stack. While a
+            # live job and post-session alignment load the CPU this exceeded the
+            # 10s default, the pool dropped the process, and the next room
+            # waited with no worker (seen locally on resume and in production).
+            initialize_process_timeout=30.0,
         )
     )
