@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { fixture, recorder } from './test-fixtures'
 import { elevateAdapter } from './adapters/elevate'
 import { prepareAdapter } from './adapters/prepare'
-async function joined() { const f = fixture(); await f.controller.resume('existing', f.config); f.calls.length = 0; return f }
+async function joined() { const f = fixture(); await f.controller.resume('existing'); f.calls.length = 0; return f }
 describe('completion and discard characterization', () => {
   it.each(['ordinary', 'snapshot', 'booth', 'prepare', 'coach'])('preserves completion policy and request order: %s', async kind => {
     const f = await joined(); const capture = recorder()

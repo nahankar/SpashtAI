@@ -29,13 +29,8 @@ export class LiveSessionController {
     for (const listener of this.listeners) listener()
   }
   private roomName() { return `room_${this.deps.now().getTime()}_${this.deps.random().toString(36).substr(2, 5)}` }
-  private query(config: LaunchConfig, sessionId: string, segmentId: string, room: string) {
-    const query: Record<string, string> = { identity: config.identity, room, sessionId, segmentId, userName: config.userName }
-    if (config.focusArea) query.focusArea = config.focusArea
-    if (config.focusContext) query.focusContext = config.focusContext
-    if (config.sessionName.trim()) query.sessionName = config.sessionName.trim()
-    if (config.boothDemo || config.focusArea === 'snapshot') query.boothDemo = '1'
-    return query
+  private query(sessionId: string, segmentId: string, room: string) {
+    return { room, sessionId, segmentId }
   }
   async start(config: LaunchConfig, adapter: ActivityAdapter) {
     if (this.state.isJoining) return
@@ -52,7 +47,7 @@ export class LiveSessionController {
       }
       linked = adapter.kind === 'prepare'
       segment = await this.deps.api.createSessionSegment(id, room)
-      const connection = await this.deps.api.fetchLiveToken(this.query(config, id, segment, room))
+      const connection = await this.deps.api.fetchLiveToken(this.query(id, segment, room))
       this.patch({ token: connection.token, url: connection.url, sessionId: id, roomName: room, segmentId: segment,
         isSessionPaused: false, pauseReason: null })
       this.deps.effects.resetMetrics()
@@ -64,7 +59,7 @@ export class LiveSessionController {
       this.deps.effects.toast('error', error instanceof Error ? error.message : 'Failed to start session')
     } finally { this.patch({ isJoining: false }) }
   }
-  async resume(sessionId: string, config: LaunchConfig, signal?: AbortSignal, fromHistory = false) {
+  async resume(sessionId: string, signal?: AbortSignal, fromHistory = false) {
     // An aborted Strict Mode attempt must not block its replacement attempt.
     if (this.state.isResuming && !fromHistory) return
     const generation = ++this.resumeGeneration
@@ -76,7 +71,7 @@ export class LiveSessionController {
       const room = this.roomName()
       segment = await this.deps.api.createSessionSegment(sessionId, room)
       if (cancelled()) return
-      const connection = await this.deps.api.fetchLiveToken(this.query(config, sessionId, segment, room), signal)
+      const connection = await this.deps.api.fetchLiveToken(this.query(sessionId, segment, room), signal)
       if (cancelled()) return
       this.patch({ sessionId, token: connection.token, url: connection.url, roomName: room, segmentId: segment,
         isSessionPaused: false, ...(fromHistory ? {} : { pauseReason: null, pauseAudioFailure: null }) })
@@ -136,11 +131,11 @@ export class LiveSessionController {
     try { await this.finishPause(this.state.pauseAudioFailure) }
     finally { this.patch({ isPausing: false }) }
   }
-  async continueInNewSegment(config: LaunchConfig) {
+  async continueInNewSegment() {
     if (!this.state.pauseAudioFailure || !this.state.sessionId) return
     const id = this.state.sessionId
     this.patch({ isPausing: true })
-    try { await this.finishPause(this.state.pauseAudioFailure); await this.resume(id, config) }
+    try { await this.finishPause(this.state.pauseAudioFailure); await this.resume(id) }
     catch (error) {
       console.error('Failed to continue after audio save failure:', error)
       this.deps.effects.toast('error', 'Could not reconnect. Your conversation is saved.')

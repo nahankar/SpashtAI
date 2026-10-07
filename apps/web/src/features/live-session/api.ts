@@ -77,9 +77,11 @@ async function saveSessionData(sessionId: string, metrics: unknown, transcript: 
       method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ room, sessionId, segmentId }),
     })
   }
-  async function fetchLiveToken(query: Record<string, string>, signal?: AbortSignal) {
+  async function fetchLiveToken(query: { room: string; sessionId: string; segmentId: string }, signal?: AbortSignal) {
     const url = new URL(`${baseUrl}/livekit/token`)
-    for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value)
+    url.searchParams.set('room', query.room)
+    url.searchParams.set('sessionId', query.sessionId)
+    url.searchParams.set('segmentId', query.segmentId)
     const response = await request(url.toString(), { headers: getAuthHeaders(), ...(signal ? { signal } : {}) })
     if (!response.ok) throw new Error('Failed to get token')
     return response.json() as Promise<{ token: string; url: string }>

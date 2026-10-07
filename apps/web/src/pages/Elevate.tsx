@@ -96,10 +96,6 @@ export function Elevate() {
   const inboundBoothDemo = quickTryOn && inboundSnapshotRequest
   const coachLaunchRecorded = useRef(false)
   
-  const [identity] = useState(() => {
-    const name = user?.firstName || user?.email?.split('@')[0] || 'user'
-    return `${name}-${Math.floor(Math.random() * 9999)}`
-  })
   const [elevateSessionName, setElevateSessionName] = useState(
     inboundContext && inboundFocus !== 'snapshot'
       ? `Practice: ${inboundContext.slice(0, 60)}`
@@ -115,7 +111,6 @@ export function Elevate() {
   const [viewSessionName, setViewSessionName] = useState<string | null>(null)
   const [viewSessionPulse, setViewSessionPulse] = useState<string | null>(null)
   const [viewFocusArea, setViewFocusArea] = useState<string | null>(null)
-  const [viewFocusContext, setViewFocusContext] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<string | null>(viewSessionId) // Initialize with URL param if present
   const [showMetrics, setShowMetrics] = useState(true)
   const [turnMetricsByIndex, setTurnMetricsByIndex] = useState<Record<number, TurnMetrics>>({})
@@ -809,7 +804,6 @@ export function Elevate() {
         setViewSessionName(session.sessionName || null)
         setViewSessionPulse(session.progressPulseStatus || null)
         setViewFocusArea(session.focusArea || null)
-        setViewFocusContext(session.focusContext || null)
         if (session.focusArea) setFocusArea(session.focusArea)
         if (session.sessionName) setElevateSessionName(session.sessionName)
         if (!inboundPreparationId && session.preparationPractice) {
@@ -847,10 +841,7 @@ export function Elevate() {
           setSessionId(viewSessionId)
           await loadConversation(viewSessionId)
 
-          await live.controller.resume(viewSessionId, {
-            sessionName: session.sessionName || '', focusArea: session.focusArea || '', focusContext: session.focusContext || '',
-            boothDemo: inboundBoothDemo, identity, userName: user?.firstName || user?.email?.split('@')[0] || '',
-          }, controller.signal, true)
+          await live.controller.resume(viewSessionId, controller.signal, true)
           if (cancelled) return
           localStorage.setItem('spashtai_active_session', viewSessionId)
           localStorage.setItem('spashtai_session_timestamp', Date.now().toString())
@@ -869,15 +860,12 @@ export function Elevate() {
   }, [
     viewSessionId,
     live.controller,
-    identity,
     inboundBoothDemo,
     inboundPreparationId,
     navigate,
     loadConversation,
     resetMetrics,
     searchParams,
-    user?.email,
-    user?.firstName,
     user?.id,
   ])
 
@@ -913,7 +901,6 @@ export function Elevate() {
       setViewSessionName(null)
       setViewSessionPulse(null)
       setViewFocusArea(null)
-      setViewFocusContext(null)
       setShowHistory(true)
     }
   }
@@ -924,22 +911,18 @@ export function Elevate() {
     resetMetrics()
   }, [viewSessionId, clearMessages, resetMetrics])
 
-  const resumeConfig = useCallback((): LaunchConfig => ({
-    sessionName: elevateSessionName, focusArea, focusContext: inboundContext || viewFocusContext || '',
-    boothDemo: inboundBoothDemo, identity, userName: user?.firstName || user?.email?.split('@')[0] || '',
-  }), [elevateSessionName, focusArea, inboundContext, viewFocusContext, inboundBoothDemo, identity, user])
-  const resumeLiveSession = useCallback(async (id: string) => { await live.controller.resume(id, resumeConfig()) }, [live.controller, resumeConfig])
+  const resumeLiveSession = useCallback(async (id: string) => { await live.controller.resume(id) }, [live.controller])
   const handlePause = useCallback(async () => { await live.controller.pause(recorderRef.current) }, [live.controller])
   const retryPauseUpload = useCallback(async () => { await live.controller.retryPauseUpload(recorderRef.current) }, [live.controller])
   const pauseWithoutReplayAudio = useCallback(async () => { await live.controller.pauseWithoutReplayAudio() }, [live.controller])
-  const continueInNewSegmentAfterPauseFailure = useCallback(async () => { await live.controller.continueInNewSegment(resumeConfig()) }, [live.controller, resumeConfig])
+  const continueInNewSegmentAfterPauseFailure = useCallback(async () => { await live.controller.continueInNewSegment() }, [live.controller])
 
   const launchConfig = useCallback((): LaunchConfig => ({
     sessionName: elevateSessionName, focusArea, focusContext: inboundContext,
-    boothDemo: inboundBoothDemo, identity, userName: user?.firstName || user?.email?.split('@')[0] || '',
+    boothDemo: inboundBoothDemo,
     preparationId: prepareLaunch?.preparationId, stageId: prepareLaunch?.stageId,
     preparationPending: Boolean(inboundPreparationId && !prepareLaunch), preparationError: prepareLaunchError,
-  }), [elevateSessionName, focusArea, inboundContext, inboundBoothDemo, identity, user, prepareLaunch, inboundPreparationId, prepareLaunchError])
+  }), [elevateSessionName, focusArea, inboundContext, inboundBoothDemo, prepareLaunch, inboundPreparationId, prepareLaunchError])
   const handleJoin = useCallback(async () => {
     const config = launchConfig()
     await live.controller.start(config, prepareLaunch ? prepareAdapter(liveSessionApi, config) : elevateAdapter(liveSessionApi, config))

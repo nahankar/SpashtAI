@@ -16,7 +16,7 @@ describe('live controller start and resume characterization', () => {
     expect(f.calls[0].body).toMatchObject({ module: 'elevate', sessionName: config.sessionName || null,
       focusArea: config.focusArea || null, focusContext: config.focusContext || null, preparationId: config.preparationId || null, stageId: config.stageId || null })
     expect(f.calls[1].path).toMatch(/\/segments$/)
-    expect(f.calls[2].path).toMatch(/^\/livekit\/token\?/)
+    expect([...new URL(`http://api${f.calls[2].path}`).searchParams.keys()]).toEqual(['room', 'sessionId', 'segmentId'])
     expect(f.controller.getSnapshot().token).toBeTruthy()
     expect(f.effects.log).toHaveBeenCalledWith('event', 'elevate.session_join', expect.objectContaining({ focusArea: config.focusArea || null }))
   })
@@ -49,23 +49,23 @@ describe('live controller start and resume characterization', () => {
     await f.controller.start(f.config, elevateAdapter(f.api, f.config))
     expect(f.fetcher).toHaveBeenCalledOnce(); pending.resolve(new Response('{}')); await start
     const segment = deferred<Response>(); f.fetcher.mockReturnValueOnce(segment.promise)
-    const resume = f.controller.resume('session', f.config)
-    await f.controller.resume('session', f.config)
+    const resume = f.controller.resume('session')
+    await f.controller.resume('session')
     segment.resolve(new Response('{}')); await resume
     expect(f.calls.filter(c => c.path.includes('/token?'))).toHaveLength(2)
   })
   it('closes a new segment when resume token fails', async () => {
     const f = fixture(); f.fetcher.mockResolvedValueOnce(new Response('{}')).mockRejectedValueOnce(new Error('token failed'))
-    await expect(f.controller.resume('existing', f.config)).rejects.toThrow('token failed')
+    await expect(f.controller.resume('existing')).rejects.toThrow('token failed')
     expect(f.calls.at(-1)?.body.audioStatus).toBe('unavailable')
     expect(f.calls.some(c => c.method === 'DELETE')).toBe(false)
   })
   it('cleans an aborted Strict Mode attempt without clobbering its replacement', async () => {
     const f = fixture(); const pending = deferred<Response>(); const abort = new AbortController()
     f.fetcher.mockReturnValueOnce(pending.promise)
-    const first = f.controller.resume('existing', f.config, abort.signal, true)
+    const first = f.controller.resume('existing', abort.signal, true)
     abort.abort()
-    await f.controller.resume('existing', f.config, new AbortController().signal, true)
+    await f.controller.resume('existing', new AbortController().signal, true)
     const replacement = f.controller.getSnapshot()
     pending.resolve(new Response('{}')); await first
     expect(f.controller.getSnapshot()).toEqual(replacement)
@@ -74,20 +74,20 @@ describe('live controller start and resume characterization', () => {
   it('ignores a late token after cancellation and seals its segment', async () => {
     const f = fixture(); const token = deferred<Response>(); const abort = new AbortController()
     f.fetcher.mockResolvedValueOnce(new Response('{}')).mockReturnValueOnce(token.promise)
-    const resume = f.controller.resume('existing', f.config, abort.signal, true)
+    const resume = f.controller.resume('existing', abort.signal, true)
     await vi.waitFor(() => expect(f.fetcher).toHaveBeenCalledTimes(2))
     abort.abort(); token.resolve(new Response(JSON.stringify({ token: 'late', url: 'wss://late' }))); await resume
     expect(f.controller.getSnapshot().token).toBeNull()
     expect(f.calls.at(-1)?.body.audioStatus).toBe('unavailable')
   })
   it('keeps room-prefixed user turn IDs distinct across resume and drops paused messages', async () => {
-    const f = fixture(); await f.controller.resume('existing', f.config)
+    const f = fixture(); await f.controller.resume('existing')
     f.controller.handleMessage({ role: 'user', id: 'user_turn_1', content: 'First answer', partial: true })
     const first = vi.mocked(f.effects.upsertStreamingMessage).mock.calls[0][2]
     f.controller.patch({ isSessionPaused: true })
     f.controller.handleMessage({ role: 'user', id: 'user_turn_1', content: 'Dropped' })
     expect(f.effects.addMessage).not.toHaveBeenCalled()
-    await f.controller.resume('existing', f.config)
+    await f.controller.resume('existing')
     f.controller.handleMessage({ role: 'user', id: 'user_turn_1', content: 'Second answer' })
     expect(vi.mocked(f.effects.addMessage).mock.calls[0][2]).not.toBe(first)
     expect(f.effects.addMessage).toHaveBeenCalledWith('user', 'Second answer', expect.stringMatching(/::user_turn_1$/), false)

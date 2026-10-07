@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fixture, recorder } from './test-fixtures'
-async function joined() { const f = fixture(); await f.controller.resume('existing', f.config); f.calls.length = 0; return f }
+async function joined() { const f = fixture(); await f.controller.resume('existing'); f.calls.length = 0; return f }
 describe('shared pause and disconnect behavior', () => {
   it('closes successful recording before releasing the room', async () => {
     const f = await joined(); const capture = recorder(); const room = f.controller.getSnapshot().roomName
@@ -28,7 +28,7 @@ describe('shared pause and disconnect behavior', () => {
     const previousRoom = f.controller.getSnapshot().roomName
     if (action === 'retry') await f.controller.retryPauseUpload(capture)
     if (action === 'without') await f.controller.pauseWithoutReplayAudio()
-    if (action === 'continue') await f.controller.continueInNewSegment(f.config)
+    if (action === 'continue') await f.controller.continueInNewSegment()
     expect(f.calls[0].body.audioStatus).toBe(action === 'retry' ? 'available' : 'failed')
     if (action === 'continue') {
       expect(f.calls.map(c => c.method)).toEqual(['PATCH', 'POST', 'GET'])
@@ -46,7 +46,7 @@ describe('shared pause and disconnect behavior', () => {
   it('ignores intentional and stale disconnects after resume', async () => {
     const f = await joined(); const old = f.controller.getSnapshot(); const capture = recorder()
     await f.controller.pause(capture)
-    await f.controller.resume('existing', f.config)
+    await f.controller.resume('existing')
     const current = f.controller.getSnapshot()
     await f.controller.onDisconnected(capture, old)
     expect(f.controller.getSnapshot()).toEqual(current)

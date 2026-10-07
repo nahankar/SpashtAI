@@ -16,7 +16,6 @@ export interface RecorderPort {
 }
 export interface LaunchConfig {
   sessionName: string; focusArea: string; focusContext: string; boothDemo: boolean
-  identity: string; userName: string
   preparationId?: string | null; stageId?: string | null
   preparationPending?: boolean; preparationError?: string | null
 }

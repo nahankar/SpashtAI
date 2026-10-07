@@ -17,7 +17,7 @@ export function fixture() {
   const api = createLiveSessionApi({ baseUrl: 'http://api', fetch: fetcher as typeof fetch, headers: () => ({ Authorization: 'Bearer user' }),
     now: () => new Date('2026-10-07T00:00:00Z'), randomId: () => `segment-${++id}` })
   const controller = new LiveSessionController({ api, now: () => new Date('2026-10-07T00:00:00Z'), random: () => { random += 0.1; return random }, effects })
-  const config: LaunchConfig = { sessionName: '', focusArea: '', focusContext: '', boothDemo: false, identity: 'ignored', userName: 'Learner' }
+  const config: LaunchConfig = { sessionName: '', focusArea: '', focusContext: '', boothDemo: false }
   return { controller, api, config, calls, effects, fetcher }
 }
 
