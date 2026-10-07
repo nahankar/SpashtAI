@@ -44,7 +44,6 @@ import { useConfirm } from '@/hooks/useConfirm'
 import { Trash2, CheckSquare, Square, Target, ArrowRight, Play, ChevronDown, ChevronUp, BarChart3, CheckCircle2, Download, Loader2, Bug, TrendingUp } from 'lucide-react'
 import { generateSessionPdf, type SessionReport } from '@/lib/generate-session-pdf'
 import { type SessionRecorderHandle } from '@/components/session/SessionRecorder'
-import { settleRecordingBeforePause } from '@/lib/pauseCapture'
 import {
   UserTurnBubble,
   normalizeTurnMetricsFromApi,
@@ -116,7 +115,6 @@ export function Elevate() {
   )
   const recorderRef = useRef<SessionRecorderHandle>(null)
   const intentionalDisconnectSegmentsRef = useRef(new Set<string>())
-  const handledDisconnectSegmentsRef = useRef(new Set<string>())
   const pauseRequestedAtRef = useRef<Date | null>(null)
   const [isCompletedSessionView, setIsCompletedSessionView] = useState(false)
   const [loadingViewedSession, setLoadingViewedSession] = useState(Boolean(viewSessionId))
@@ -149,7 +147,7 @@ export function Elevate() {
   })
   const { roomName, token, url, isJoining, isLeaving, segmentId, isPausing, pauseAudioFailure, isResuming,
     assistantState, isSessionPaused, pauseReason, setToken, setUrl, setRoomName, setSegmentId, setIsLeaving,
-    setIsPausing, setAssistantState, setIsSessionPaused, setPauseReason, setPauseAudioFailure } = live
+    setAssistantState, setIsSessionPaused } = live
 
   useEffect(() => {
     const targetId = viewSessionId || sessionId
@@ -931,108 +929,15 @@ export function Elevate() {
   }, [viewSessionId, clearMessages, resetMetrics])
   const fallbackDispatchAttemptedRef = useRef<string | null>(null)
 
-  const pauseLiveSession = useCallback((reason: 'intentional' | 'disconnected') => {
-    setShowHistory(false)
-    setIsSessionPaused(true)
-    setPauseReason(reason)
-    setToken(null)
-    setUrl(null)
-    setRoomName('')
-    setSegmentId(null)
-    setAssistantState('unknown')
-  }, [setAssistantState, setIsSessionPaused, setPauseReason, setRoomName, setSegmentId, setToken, setUrl])
-
-  const resumeLiveSession = useCallback(async (resumeSessionId: string) => {
-    await live.controller.resume(resumeSessionId, {
-      sessionName: elevateSessionName, focusArea, focusContext: inboundContext || viewFocusContext || '',
-      boothDemo: inboundBoothDemo, identity, userName: user?.firstName || user?.email?.split('@')[0] || '',
-    })
-  }, [live.controller, elevateSessionName, focusArea, inboundContext, viewFocusContext, inboundBoothDemo, identity, user])
-
-  const finishPause = useCallback(
-    async (audioStatus: 'available' | 'failed' | 'unavailable') => {
-      if (!sessionId || !segmentId) return
-      await closeSessionSegment(
-        sessionId,
-        segmentId,
-        audioStatus,
-        pauseRequestedAtRef.current ?? new Date(),
-      )
-      setPauseAudioFailure(null)
-      pauseRequestedAtRef.current = null
-      intentionalDisconnectSegmentsRef.current.add(segmentId)
-      pauseLiveSession('intentional')
-    },
-    [pauseLiveSession, segmentId, sessionId, setPauseAudioFailure],
-  )
-
-  const handlePause = useCallback(async () => {
-    if (isPausing || !sessionId || !segmentId) return
-    pauseRequestedAtRef.current = new Date()
-    setIsPausing(true)
-    try {
-      const recorder = recorderRef.current
-      if (!recorder) {
-        setPauseAudioFailure('unavailable')
-        return
-      }
-      const audioCapture = await settleRecordingBeforePause(recorder, () => {
-        toast.info('Saving this part before pausing…')
-      })
-      if (audioCapture === 'uploaded') {
-        await finishPause('available')
-        return
-      }
-      setPauseAudioFailure(audioCapture === 'unavailable' ? 'unavailable' : 'failed')
-    } catch (error) {
-      console.error('Failed to pause session:', error)
-      setPauseAudioFailure('failed')
-    } finally {
-      setIsPausing(false)
-    }
-  }, [finishPause, isPausing, segmentId, sessionId, setIsPausing, setPauseAudioFailure])
-
-  const retryPauseUpload = useCallback(async () => {
-    if (isPausing) return
-    setIsPausing(true)
-    try {
-      const capture = await recorderRef.current?.retryUpload()
-      if (capture?.audioCapture === 'uploaded') {
-        await finishPause('available')
-      } else if (capture?.audioCapture === 'pending') {
-        toast.info('Audio is still uploading. Please wait a moment.')
-      } else {
-        setPauseAudioFailure(capture?.audioCapture === 'unavailable' ? 'unavailable' : 'failed')
-      }
-    } finally {
-      setIsPausing(false)
-    }
-  }, [finishPause, isPausing, setIsPausing, setPauseAudioFailure])
-
-  const pauseWithoutReplayAudio = useCallback(async () => {
-    if (!pauseAudioFailure) return
-    setIsPausing(true)
-    try {
-      await finishPause(pauseAudioFailure)
-    } finally {
-      setIsPausing(false)
-    }
-  }, [finishPause, pauseAudioFailure, setIsPausing])
-
-  const continueInNewSegmentAfterPauseFailure = useCallback(async () => {
-    if (!pauseAudioFailure || !sessionId) return
-    const continuingSessionId = sessionId
-    setIsPausing(true)
-    try {
-      await finishPause(pauseAudioFailure)
-      await resumeLiveSession(continuingSessionId)
-    } catch (error) {
-      console.error('Failed to continue after audio save failure:', error)
-      toast.error('Could not reconnect. Your conversation is saved.')
-    } finally {
-      setIsPausing(false)
-    }
-  }, [finishPause, pauseAudioFailure, resumeLiveSession, sessionId, setIsPausing])
+  const resumeConfig = useCallback((): LaunchConfig => ({
+    sessionName: elevateSessionName, focusArea, focusContext: inboundContext || viewFocusContext || '',
+    boothDemo: inboundBoothDemo, identity, userName: user?.firstName || user?.email?.split('@')[0] || '',
+  }), [elevateSessionName, focusArea, inboundContext, viewFocusContext, inboundBoothDemo, identity, user])
+  const resumeLiveSession = useCallback(async (id: string) => { await live.controller.resume(id, resumeConfig()) }, [live.controller, resumeConfig])
+  const handlePause = useCallback(async () => { await live.controller.pause(recorderRef.current) }, [live.controller])
+  const retryPauseUpload = useCallback(async () => { await live.controller.retryPauseUpload(recorderRef.current) }, [live.controller])
+  const pauseWithoutReplayAudio = useCallback(async () => { await live.controller.pauseWithoutReplayAudio() }, [live.controller])
+  const continueInNewSegmentAfterPauseFailure = useCallback(async () => { await live.controller.continueInNewSegment(resumeConfig()) }, [live.controller, resumeConfig])
 
   useWakeLock(joined)
   const { idleWarning, resetIdleTimer } = useIdleWarning(joined, sessionId)
@@ -1077,39 +982,8 @@ export function Elevate() {
   // Called when LiveKit disconnects unexpectedly (refresh, network drop, etc.)
   // Does NOT end the session — leaves it resumable.
   const handleDisconnected = useCallback(async () => {
-    if (segmentId && handledDisconnectSegmentsRef.current.has(segmentId)) return
-    if (segmentId) handledDisconnectSegmentsRef.current.add(segmentId)
-    if (
-      segmentId &&
-      intentionalDisconnectSegmentsRef.current.delete(segmentId)
-    ) {
-      return
-    }
-    console.log('🔌 LiveKit disconnected — session remains resumable')
-    const disconnectedSessionId = sessionId
-    const disconnectedSegmentId = segmentId
-    const disconnectedAt = new Date()
-    const finalizePromise = recorderRef.current?.finalize().catch(() => null)
-    pauseLiveSession('disconnected')
-    if (disconnectedSessionId && disconnectedSegmentId) {
-      const capture = await finalizePromise
-      const audioStatus =
-        capture?.audioCapture === 'uploaded'
-          ? 'available'
-          : capture?.audioCapture === 'unavailable'
-            ? 'unavailable'
-            : capture?.audioCapture === 'failed'
-              ? 'failed'
-              : 'pending'
-      await closeSessionSegment(
-        disconnectedSessionId,
-        disconnectedSegmentId,
-        audioStatus,
-        disconnectedAt,
-      ).catch((error) => console.warn('Failed to close disconnected segment:', error))
-    }
-    // Keep sessionId, localStorage, and messages intact so resume works
-  }, [pauseLiveSession, segmentId, sessionId])
+    await live.controller.onDisconnected(recorderRef.current, { sessionId, segmentId })
+  }, [live.controller, sessionId, segmentId])
 
   // Called only when user explicitly clicks "Leave".
   // Ends the session permanently.

@@ -1,5 +1,6 @@
 import type { LiveSessionApi } from './api'
-import type { ActivityAdapter, LaunchConfig, LiveSessionEffects, LiveSessionState, ChatMessage } from './types'
+import type { ActivityAdapter, LaunchConfig, LiveSessionEffects, LiveSessionState, ChatMessage, RecorderPort, AudioStatus } from './types'
+import { settleRecordingBeforePause } from '@/lib/pauseCapture'
 import { stripThinkingBlocks } from '@/lib/stripThinking'
 
 export interface ControllerDependencies {
@@ -14,6 +15,9 @@ export class LiveSessionController {
   }
   private listeners = new Set<() => void>()
   private resumeGeneration = 0
+  private intentionalDisconnectSegments = new Set<string>()
+  private handledDisconnectSegments = new Set<string>()
+  private pauseRequestedAt: Date | null = null
   constructor(privateDeps: ControllerDependencies) { this.deps = privateDeps }
   private deps: ControllerDependencies
   getSnapshot = () => this.state
@@ -82,6 +86,79 @@ export class LiveSessionController {
     finally {
       if (segment) await this.deps.api.closeSessionSegment(sessionId, segment, 'unavailable').catch(() => undefined)
       if (generation === this.resumeGeneration) this.patch({ isResuming: false })
+    }
+  }
+  private pauseLiveSession(reason: 'intentional' | 'disconnected') {
+    this.deps.effects.hideHistory()
+    this.patch({ isSessionPaused: true, pauseReason: reason, token: null, url: null,
+      roomName: '', segmentId: null, assistantState: 'unknown' })
+  }
+  private async finishPause(audioStatus: Exclude<AudioStatus, 'pending'>) {
+    const { sessionId, segmentId } = this.state
+    if (!sessionId || !segmentId) return
+    await this.deps.api.closeSessionSegment(sessionId, segmentId, audioStatus, this.pauseRequestedAt ?? this.deps.now())
+    this.intentionalDisconnectSegments.add(segmentId)
+    // Leave/discard or a newer connection may have settled while closure awaited.
+    if (this.state.segmentId !== segmentId) return
+    this.patch({ pauseAudioFailure: null })
+    this.pauseRequestedAt = null
+    this.pauseLiveSession('intentional')
+  }
+  async pause(recorder: RecorderPort | null) {
+    if (this.state.isPausing || !this.state.sessionId || !this.state.segmentId) return
+    this.pauseRequestedAt = this.deps.now()
+    this.patch({ isPausing: true })
+    const segment = this.state.segmentId
+    try {
+      if (!recorder) { this.patch({ pauseAudioFailure: 'unavailable' }); return }
+      const capture = await settleRecordingBeforePause(recorder, () => this.deps.effects.toast('info', 'Saving this part before pausing…'))
+      if (this.state.segmentId !== segment) return
+      if (capture === 'uploaded') { await this.finishPause('available'); return }
+      this.patch({ pauseAudioFailure: capture === 'unavailable' ? 'unavailable' : 'failed' })
+    } catch (error) {
+      console.error('Failed to pause session:', error)
+      if (this.state.segmentId === segment) this.patch({ pauseAudioFailure: 'failed' })
+    } finally { this.patch({ isPausing: false }) }
+  }
+  async retryPauseUpload(recorder: RecorderPort | null) {
+    if (this.state.isPausing) return
+    this.patch({ isPausing: true })
+    try {
+      const capture = await recorder?.retryUpload()
+      if (capture?.audioCapture === 'uploaded') await this.finishPause('available')
+      else if (capture?.audioCapture === 'pending') this.deps.effects.toast('info', 'Audio is still uploading. Please wait a moment.')
+      else this.patch({ pauseAudioFailure: capture?.audioCapture === 'unavailable' ? 'unavailable' : 'failed' })
+    } finally { this.patch({ isPausing: false }) }
+  }
+  async pauseWithoutReplayAudio() {
+    if (!this.state.pauseAudioFailure) return
+    this.patch({ isPausing: true })
+    try { await this.finishPause(this.state.pauseAudioFailure) }
+    finally { this.patch({ isPausing: false }) }
+  }
+  async continueInNewSegment(config: LaunchConfig) {
+    if (!this.state.pauseAudioFailure || !this.state.sessionId) return
+    const id = this.state.sessionId
+    this.patch({ isPausing: true })
+    try { await this.finishPause(this.state.pauseAudioFailure); await this.resume(id, config) }
+    catch (error) {
+      console.error('Failed to continue after audio save failure:', error)
+      this.deps.effects.toast('error', 'Could not reconnect. Your conversation is saved.')
+    } finally { this.patch({ isPausing: false }) }
+  }
+  async onDisconnected(recorder: RecorderPort | null, binding: { sessionId: string | null; segmentId: string | null }) {
+    const { sessionId, segmentId } = binding
+    if (segmentId && this.handledDisconnectSegments.has(segmentId)) return
+    if (segmentId) this.handledDisconnectSegments.add(segmentId)
+    if (segmentId && this.intentionalDisconnectSegments.delete(segmentId)) return
+    if (segmentId !== this.state.segmentId) return
+    const endedAt = this.deps.now()
+    const capture = recorder?.finalize().catch(() => null)
+    this.pauseLiveSession('disconnected')
+    if (sessionId && segmentId) {
+      const result = await capture
+      const status = result?.audioCapture === 'uploaded' ? 'available' : result?.audioCapture ?? 'pending'
+      await this.deps.api.closeSessionSegment(sessionId, segmentId, status, endedAt).catch(error => console.warn('Failed to close disconnected segment:', error))
     }
   }
   handleMessage(message: Pick<ChatMessage, 'id' | 'role' | 'content'> & { partial?: boolean }) {
