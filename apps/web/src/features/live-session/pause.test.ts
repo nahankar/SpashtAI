@@ -2,6 +2,20 @@ import { describe, expect, it, vi } from 'vitest'
 import { fixture, recorder } from './test-fixtures'
 async function joined() { const f = fixture(); await f.controller.resume('existing'); f.calls.length = 0; return f }
 describe('shared pause and disconnect behavior', () => {
+  it('abandons a pending pause when Leave ends the segment first (intentional change)', async () => {
+    const f = await joined(); const capture = recorder('pending'); let resolve!: (value: { ok: boolean; audioCapture: 'uploaded' }) => void
+    vi.mocked(capture.waitForFinalization).mockReturnValue(new Promise(r => { resolve = r }))
+    const pause = f.controller.pause(capture)
+    await vi.waitFor(() => expect(capture.waitForFinalization).toHaveBeenCalledOnce())
+    vi.mocked(capture.finalize).mockResolvedValue({ ok: true, audioCapture: 'uploaded' })
+    await f.controller.leave(capture, (await import('./adapters/elevate')).elevateAdapter(f.api, f.config))
+    const segmentCloses = () => f.calls.filter(c => c.method === 'PATCH').length
+    expect(segmentCloses()).toBe(1)
+    resolve({ ok: true, audioCapture: 'uploaded' }); await pause
+    // The pause must not close the already-closed segment again or re-enter a paused state.
+    expect(segmentCloses()).toBe(1)
+    expect(f.controller.getSnapshot()).toMatchObject({ sessionId: null, isSessionPaused: false, pauseReason: null, isPausing: false })
+  })
   it('closes successful recording before releasing the room', async () => {
     const f = await joined(); const capture = recorder(); const room = f.controller.getSnapshot().roomName
     const listener = vi.fn(); f.controller.subscribe(listener)

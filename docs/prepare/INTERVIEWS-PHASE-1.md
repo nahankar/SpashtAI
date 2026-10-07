@@ -88,6 +88,22 @@ The controller intentionally retains the existing overlapping boolean flags inst
 
 The token URL now contains **exactly `room`, `sessionId`, `segmentId`**, in that order. It never sends `turnDetection`, identity, user name, focus area/context, session name or booth/demo metadata. The unused client identity and viewed focus-context state were removed. Authentication headers and history AbortSignal remain attached. Phase 0 already derives identity, coaching metadata and the per-room Hush decision from authenticated, persisted server state.
 
+## Intentional behavior changes
+
+Apart from the token request above, the extraction makes two deliberate lifecycle corrections. Both remove double-handling of a segment that is already closed; neither changes a normal flow.
+
+- **Leave during a pending pause.** If Leave finalizes and closes the segment while Pause is still waiting for its audio upload, the pending pause now stops when it settles. Previously it could close the same segment a second time and put the ended session back into a paused state. Covered by `pause.test.ts` ("abandons a pending pause when Leave ends the segment first").
+- **Stale disconnects.** A disconnect event from a previous room after pause/resume is ignored, so it cannot pause the resumed room. Covered by `pause.test.ts` ("ignores intentional and stale disconnects after resume").
+
+Adapters are built from closures rather than `this`-bound methods, so a destructured or passed-around adapter method keeps working (`adapters.test.ts`). The controller is created once through lazy `useState` initialisation instead of `useMemo`, which React may recompute.
+
+## Deferred to Phase 3 (Quick Practice)
+
+These are design improvements, not Phase 1 defects. They change ownership boundaries that the Interviews launch path needs, so they belong with the first interview adapter rather than in a behavior-preserving extraction.
+
+1. **Bind the adapter at start.** Leave and Discard currently rebuild the adapter from page state at the time of the action (matching the previous page behavior). For Interviews, the controller should keep the adapter used by `start()` — and accept one in `resume()` for history resume — so completion, Pulse and discard policy cannot drift if page state changes mid-session.
+2. **One owner for `sessionId`.** The page and the controller each hold a `sessionId`, synchronised through the `sessionChanged` effect, and the page still sets it directly for read-only/completed views. Make the controller the single owner of the live session id and keep the page's viewed-results id as a separate, explicitly named value.
+
 ## Phase 3 interview adapter extension
 
 Once interview launch and evaluation endpoints exist:
@@ -104,7 +120,7 @@ This phase creates the reusable connection machinery. It does not yet make the I
 
 ## Verification
 
-- Web: **181 tests across 23 files pass**, including **54 new tests** across six live-session test files; tests run in Node with existing Vitest and no new browser/test packages.
+- Web: **185 tests across 24 files pass**, including **58 new tests** across seven live-session test files; tests run in Node with existing Vitest and no new browser/test packages.
 - Web typecheck passes. ESLint: zero errors and one pre-existing Replay dependency warning. The Elevate `canDiscardPreparePractice` warning is resolved.
 - Web and server production builds pass. Existing Browserslist/baseline-data and bundle-size notices remain.
 - Server: **399 tests across 49 files pass**. The first run had 398/399 passing because the fresh worktree lacked its ignored `apps/server/audio_storage` runtime directory. Created that directory; a subsequent sandbox run could not open test-server ports (`EPERM`). The final run outside the sandbox passes all tests. No server/test source was changed.
