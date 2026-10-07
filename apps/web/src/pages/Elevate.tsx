@@ -1,28 +1,17 @@
-import { createLiveSessionApi } from '@/features/live-session/api'
+import { liveSessionApi } from '@/features/live-session/browser'
+import { LiveSessionRoom } from '@/features/live-session/components/LiveSessionRoom'
+import { useWakeLock } from '@/features/live-session/useWakeLock'
+import { useIdleWarning } from '@/features/live-session/useIdleWarning'
+import { useUnloadTextMetrics } from '@/features/live-session/useUnloadTextMetrics'
+import type { ChatMessage } from '@/features/live-session/types'
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { SessionFilters, type SortField, type SortDir } from '@/components/SessionFilters'
 import { useSearchParams, useNavigate, Link } from 'react-router-dom'
-import {
-  LiveKitRoom,
-  RoomAudioRenderer,
-  StartAudio,
-  useConnectionState,
-  useRoomContext,
-  useVoiceAssistant
-} from '@livekit/components-react'
-import '@livekit/components-styles'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import {
-  ParticipantEvent,
-  RoomEvent,
-  Track,
-  type RemoteParticipant,
-} from 'livekit-client'
-import { AUDIO_CAPTURE } from '@/lib/audioCapture'
 import { RealTimeMetrics } from '@/components/analytics/RealTimeMetrics'
 import { SessionMetrics } from '@/components/analytics/SessionMetrics'
 import { SessionMetricsSummary } from '@/components/analytics/SessionMetricsSummary'
@@ -32,10 +21,9 @@ import { CoachingInsightsCard } from '@/components/analytics/CoachingInsightsCar
 import { SnapshotReveal } from '@/components/elevate/SnapshotReveal'
 import { PaceTrendCard, type PacePoint } from '@/components/analytics/PaceTrend'
 import { SessionReplay } from '@/pages/SessionReplay'
-import { useRealTimeMetrics, useSessionMetrics, useSessionTurns, type LiveMetricsUpdate } from '@/hooks/useSessionMetrics'
-import { useAudioRecording } from '@/hooks/useAudioRecording'
+import { useRealTimeMetrics, useSessionMetrics, useSessionTurns } from '@/hooks/useSessionMetrics'
 import { useConversationPersistence } from '@/hooks/useConversationPersistence'
-import { AgentVisualizer, SessionStatusBar } from '@/components/layout/AgentVisualizer'
+import { SessionStatusBar } from '@/components/layout/AgentVisualizer'
 import { toast } from 'sonner'
 import { getAuthHeaders } from '@/lib/api-client'
 import { shouldReturnToElevateList } from '@/lib/elevateNavigation'
@@ -48,11 +36,10 @@ import { applyRetainResult } from '@/lib/sessionRetain'
 import { useFeatureFlags } from '@/contexts/FeatureFlagsContext'
 import { useUserExportFlags } from '@/hooks/useUserExportFlags'
 import { useConfirm } from '@/hooks/useConfirm'
-import { Trash2, CheckSquare, Square, Target, ArrowRight, Play, ChevronDown, ChevronUp, BarChart3, CheckCircle2, Download, Loader2, Mic, MicOff, Bug, TrendingUp } from 'lucide-react'
+import { Trash2, CheckSquare, Square, Target, ArrowRight, Play, ChevronDown, ChevronUp, BarChart3, CheckCircle2, Download, Loader2, Bug, TrendingUp } from 'lucide-react'
 import { generateSessionPdf, type SessionReport } from '@/lib/generate-session-pdf'
-import { CoachAudioBootstrap } from '@/components/session/CoachAudioBootstrap'
-import { SessionRecorder, type SessionRecorderHandle } from '@/components/session/SessionRecorder'
-import { pauseAfterSealingRecording, settleRecordingBeforePause } from '@/lib/pauseCapture'
+import { type SessionRecorderHandle } from '@/components/session/SessionRecorder'
+import { settleRecordingBeforePause } from '@/lib/pauseCapture'
 import { stripThinkingBlocks } from '@/lib/stripThinking'
 import {
   UserTurnBubble,
@@ -70,12 +57,7 @@ import { markCoachHomeResultSeen, recordCoachAction } from '@/lib/coach-api'
 import { formatSessionOwner, matchesSessionOwner, type SessionOwner } from '@/lib/adminUserFilter'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
-const { createSessionSegment, closeSessionSegment, saveSessionData } = createLiveSessionApi({
-  baseUrl: API_BASE_URL, fetch: (...args) => fetch(...args), headers: getAuthHeaders,
-  now: () => new Date(), randomId: () => crypto.randomUUID(),
-})
-const IDLE_TIMEOUT_MS = 15 * 60 * 1000
-const IDLE_WARNING_MS = 14 * 60 * 1000
+const { createSessionSegment, closeSessionSegment } = liveSessionApi
 
 interface PaceTurn {
   role?: string
@@ -1056,7 +1038,6 @@ export function Elevate() {
     resetMetrics()
   }, [viewSessionId, clearMessages, resetMetrics])
   const fallbackDispatchAttemptedRef = useRef<string | null>(null)
-  const wakeLockRef = useRef<WakeLockSentinel | null>(null)
 
   const pauseLiveSession = useCallback((reason: 'intentional' | 'disconnected') => {
     setShowHistory(false)
@@ -1212,93 +1193,9 @@ export function Elevate() {
     }
   }, [finishPause, pauseAudioFailure, resumeLiveSession, sessionId])
 
-  // ── Screen Wake Lock: prevent macOS from sleeping during active voice session ──
-  useEffect(() => {
-    if (!joined) {
-      wakeLockRef.current?.release().catch(() => {})
-      wakeLockRef.current = null
-      return
-    }
-
-    let released = false
-    const acquire = async () => {
-      try {
-        if (!('wakeLock' in navigator)) return
-        wakeLockRef.current = await navigator.wakeLock.request('screen')
-        wakeLockRef.current.addEventListener('release', () => {
-          if (!released) console.log('🔓 Wake lock released by browser')
-        })
-        console.log('🔒 Screen wake lock acquired — Mac will stay awake')
-      } catch {
-        console.log('⚠️ Wake lock unavailable (tab may be hidden)')
-      }
-    }
-
-    acquire()
-
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible' && joined) acquire()
-    }
-    document.addEventListener('visibilitychange', handleVisibility)
-
-    return () => {
-      released = true
-      document.removeEventListener('visibilitychange', handleVisibility)
-      wakeLockRef.current?.release().catch(() => {})
-      wakeLockRef.current = null
-    }
-  }, [joined])
-
-  // ── Idle detection: auto-pause after 15 min of inactivity ──
-  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const warningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [idleWarning, setIdleWarning] = useState(false)
-
-  const resetIdleTimer = useCallback(() => {
-    setIdleWarning(false)
-    if (warningTimerRef.current) clearTimeout(warningTimerRef.current)
-    if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
-    if (!joined || !sessionId) return
-
-    warningTimerRef.current = setTimeout(() => {
-      setIdleWarning(true)
-    }, IDLE_WARNING_MS)
-
-    idleTimerRef.current = setTimeout(() => {
-      // Do not auto-pause: disconnecting LiveKit splits recordings and can
-      // overwrite persisted turns. Warn only until pause is segmented.
-      console.log('💤 Idle timeout — staying connected (pause is disabled)')
-    }, IDLE_TIMEOUT_MS)
-  }, [joined, sessionId])
-
-  useEffect(() => {
-    if (!joined) return
-    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll']
-    const handler = () => resetIdleTimer()
-    events.forEach(e => window.addEventListener(e, handler, { passive: true }))
-    resetIdleTimer()
-    return () => {
-      events.forEach(e => window.removeEventListener(e, handler))
-      if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
-      if (warningTimerRef.current) clearTimeout(warningTimerRef.current)
-    }
-  }, [joined, resetIdleTimer])
-
-  // ── Save session on tab close / navigate away ──
-  useEffect(() => {
-    const handler = () => {
-      if (sessionId) {
-        fetch(`${API_BASE_URL}/sessions/${sessionId}/calculate-text-metrics`, {
-          method: 'POST',
-          headers: getAuthHeaders(),
-          body: JSON.stringify({}),
-          keepalive: true,
-        }).catch(() => {})
-      }
-    }
-    window.addEventListener('beforeunload', handler)
-    return () => window.removeEventListener('beforeunload', handler)
-  }, [sessionId])
+  useWakeLock(joined)
+  const { idleWarning, resetIdleTimer } = useIdleWarning(joined, sessionId)
+  useUnloadTextMetrics(sessionId)
 
   // Fallback recovery: if assistant remains unknown for too long, request manual dispatch once.
   useEffect(() => {
@@ -2435,35 +2332,35 @@ export function Elevate() {
                 </>
               )}
               {url && token && (
-                <LiveKitRoom
+                <LiveSessionRoom
                   token={token}
-                  serverUrl={url}
-                  connectOptions={{ autoSubscribe: true }}
-                  video={false}
-                  audio={AUDIO_CAPTURE}
-                  onDisconnected={handleDisconnected}
-                >
-                  <RoomAudioRenderer muted={isPausing || pauseAudioFailure != null} />
-                  <CoachAudioBootstrap />
-                  <SessionRecorder
-                    key={segmentId}
-                    ref={recorderRef}
-                    sessionId={sessionId}
-                    segmentId={segmentId}
-                  />
-                  <StartAudio label="Click to enable coach audio" />
-                  <div className="flex justify-center w-full mb-2">
-                    <AgentVisualizer className="bg-muted/20 rounded-lg w-full" isPaused={isSessionPaused} compact />
-                  </div>
-                  <ConnectionStatus assistantState={assistantState} />
-                  <LiveKitConversation
-                    key={roomName}
-                    sessionId={sessionId}
-                    isSessionPaused={isSessionPaused}
-                    onNewMessage={handleNewMessage}
-                    onStateChange={setAssistantState}
-                    onRestart={handleConversationRestart}
-                    onTurnMetrics={(text, metrics, turnIndex) => {
+                  url={url}
+                  sessionId={sessionId}
+                  segmentId={segmentId}
+                  roomName={roomName}
+                  recorderRef={recorderRef}
+                  isPausing={isPausing}
+                  pauseAudioFailure={pauseAudioFailure}
+                  isSessionPaused={isSessionPaused}
+                  isLeaving={isLeaving}
+                  assistantState={assistantState}
+                  handleDisconnected={handleDisconnected}
+                  handleNewMessage={handleNewMessage}
+                  setAssistantState={setAssistantState}
+                  handleConversationRestart={handleConversationRestart}
+                  updateMetrics={updateMetrics}
+                  handleLeave={handleLeave}
+                  showMetrics={showMetrics}
+                  setShowMetrics={setShowMetrics}
+                  handlePause={handlePause}
+                  exportFlags={exportFlags}
+                  canDiscardPreparePractice={canDiscardPreparePractice}
+                  isPrepare={!!prepareLaunch}
+                  handleDiscard={handleDiscard}
+                  retryPauseUpload={retryPauseUpload}
+                  pauseWithoutReplayAudio={pauseWithoutReplayAudio}
+                  continueInNewSegmentAfterPauseFailure={continueInNewSegmentAfterPauseFailure}
+                  onTurnMetrics={(text, metrics, turnIndex) => {
                       if (turnIndex != null && turnIndex > 0) {
                         // Metrics only — the bubble text is driven by live interim
                         // partials + the committed final, not by turn_metrics
@@ -2480,73 +2377,7 @@ export function Elevate() {
                         setTurnMetricsByText((prev) => ({ ...prev, [key]: metrics }))
                       }
                     }}
-                    onMetricsUpdate={updateMetrics}
-                  />
-                  <div className="flex flex-wrap items-center gap-2 py-2">
-                    <Button onClick={handleLeave}>Leave</Button>
-                    <Button 
-                      variant="outline" 
-                      onClick={() => setShowMetrics(!showMetrics)}
-                    >
-                      {showMetrics ? 'Hide Metrics' : 'Show Metrics'}
-                    </Button>
-                    <InRoomControls
-                      sessionId={sessionId}
-                      onSealRecording={() => recorderRef.current?.seal() ?? Promise.resolve()}
-                      onPauseSession={handlePause}
-                      isPausing={isPausing}
-                      inputBlocked={isPausing || pauseAudioFailure != null}
-                      enableAudioRecord={exportFlags.enableAudioExport}
-                    />
-                    {canDiscardPreparePractice && (
-                      <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={handleDiscard} disabled={isLeaving}>
-                        {prepareLaunch ? 'Discard interview practice' : 'Discard Session'}
-                      </Button>
-                    )}
-                  </div>
-                  {pauseAudioFailure && (
-                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
-                      <p className="text-sm font-medium">Replay audio could not be saved</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Retry saving, pause without this part of the replay, or continue in a new
-                        recording segment.
-                      </p>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <Button size="sm" onClick={retryPauseUpload} disabled={isPausing}>
-                          {isPausing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                          Retry saving audio
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={pauseWithoutReplayAudio}
-                          disabled={isPausing}
-                        >
-                          Pause without replay audio
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={continueInNewSegmentAfterPauseFailure}
-                          disabled={isPausing}
-                        >
-                          Continue in a new recording segment
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                  {isPausing && !pauseAudioFailure && (
-                    <div
-                      className="rounded-lg border border-border bg-muted/40 p-3 text-sm"
-                      role="status"
-                    >
-                      <span className="inline-flex items-center gap-2">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Saving this recording segment before pausing. Your microphone is muted.
-                      </span>
-                    </div>
-                  )}
-                </LiveKitRoom>
+                />
               )}
               <ChatPanel
                 messages={messages}
@@ -2605,515 +2436,7 @@ export function Elevate() {
   )
 }
 
-function ConnectionStatus({ assistantState }: { assistantState: 'restarting' | 'ready' | 'recovering' | 'unknown' }) {
-  const state = useConnectionState()
-  const room = useRoomContext()
-  const isConnected = state === 'connected'
-  const isConnecting = state === 'connecting'
-
-  const [agentPresent, setAgentPresent] = useState(false)
-
-  useEffect(() => {
-    if (!room) return
-
-    const checkAgent = () => {
-      for (const p of room.remoteParticipants.values()) {
-        if (p.name?.toLowerCase().includes('assistant') || p.identity?.startsWith('agent')) {
-          setAgentPresent(true)
-          return
-        }
-      }
-    }
-
-    checkAgent()
-    const onJoin = () => checkAgent()
-    room.on(RoomEvent.ParticipantConnected, onJoin)
-    return () => { room.off(RoomEvent.ParticipantConnected, onJoin) }
-  }, [room])
-
-  const effectiveState = assistantState === 'unknown' && agentPresent ? 'ready' : assistantState
-  
-  const getOverallStatus = () => {
-    if (!isConnected && !isConnecting) return { text: 'Disconnected', color: 'text-red-600' }
-    if (isConnecting) return { text: 'Connecting to room...', color: 'text-yellow-600' }
-    if (isConnected && effectiveState === 'unknown') return { text: 'Waiting for assistant...', color: 'text-yellow-600' }
-    if (isConnected && effectiveState === 'ready') return { text: 'Ready', color: 'text-green-600' }
-    if (effectiveState === 'restarting') return { text: 'Assistant restarting...', color: 'text-yellow-600' }
-    if (effectiveState === 'recovering') return { text: 'Recovering...', color: 'text-yellow-600' }
-    return { text: 'Connected', color: 'text-green-600' }
-  }
-  
-  const status = getOverallStatus()
-  
-  return (
-    <div className="flex items-center gap-2 text-sm">
-      <span className={status.color}>
-        {status.text}
-      </span>
-      {(isConnecting || (isConnected && effectiveState === 'unknown')) && (
-        <span className="inline-block w-4 h-4 border-2 border-yellow-600 border-t-transparent rounded-full animate-spin" />
-      )}
-    </div>
-  )
-}
-
 // Official LiveKit conversation component using built-in patterns
-function LiveKitConversation({
-  sessionId,
-  isSessionPaused,
-  onNewMessage,
-  onStateChange,
-  onRestart,
-  onMetricsUpdate,
-  onTurnMetrics,
-}: {
-  sessionId: string | null
-  isSessionPaused: boolean
-  onNewMessage: (message: ChatMessage & { partial?: boolean }) => void
-  onStateChange: (state: 'restarting' | 'ready' | 'recovering' | 'unknown') => void
-  onRestart: () => void
-  onMetricsUpdate: (metrics: LiveMetricsUpdate) => void
-  onTurnMetrics?: (text: string, metrics: TurnMetrics, turnIndex?: number) => void
-}) {
-  const connectionState = useConnectionState()
-  const room = useRoomContext()
-  const { agentTranscriptions } = useVoiceAssistant()
-  const seenFragmentsRef = useRef<Map<string, string>>(new Map())
-  const lastControlStateRef = useRef<string>('unknown')
-  const onNewMessageRef = useRef(onNewMessage)
-  const lastAgentStreamRef = useRef<{ id: string; text: string; final: boolean } | null>(null)
-  const activeAssistantMsgIdRef = useRef<string | null>(null)
-
-  useEffect(() => {
-    lastAgentStreamRef.current = null
-    activeAssistantMsgIdRef.current = null
-    seenFragmentsRef.current.clear()
-  }, [sessionId])
-
-  useEffect(() => {
-    onNewMessageRef.current = onNewMessage
-  }, [onNewMessage])
-
-  // Live typing indicator while coach speaks (finals come from lk.conversation)
-  useEffect(() => {
-    if (isSessionPaused || agentTranscriptions.length === 0) return
-    const latest = agentTranscriptions[agentTranscriptions.length - 1]
-    if (latest.final) return
-    const text = stripThinkingBlocks(latest.text?.trim() || '')
-    if (!text) return
-
-    const streamId = activeAssistantMsgIdRef.current || latest.id || `agent-live-${Date.now()}`
-    activeAssistantMsgIdRef.current = streamId
-
-    onNewMessageRef.current({
-      role: 'assistant',
-      content: text,
-      id: streamId,
-      partial: true,
-      timestamp: new Date().toISOString(),
-    })
-  }, [agentTranscriptions, isSessionPaused])
-
-  const processPayload = useCallback(
-    (payload: string, source: 'dataChannel' | 'roomEvent') => {
-      try {
-        const parsed = JSON.parse(payload) as {
-          type?: string
-          text?: string
-          final?: boolean
-          replace?: boolean
-          id?: string
-          timestamp?: number
-        }
-
-        if (!parsed?.type || !parsed?.text) {
-          console.log('⚠️ Ignoring non-conversation payload', { parsed, source })
-          return
-        }
-
-        // Coach speech is streamed via useVoiceAssistant agentTranscriptions
-        if (parsed.type === 'assistant') return
-
-        const key = parsed.id || `${parsed.type}`
-        const existing = seenFragmentsRef.current.get(key) || ''
-
-        if (parsed.replace) {
-          console.log('♻️ Replacement message received', { key, source })
-          seenFragmentsRef.current.delete(key)
-          const role = parsed.type === 'assistant' ? 'assistant' : 'user'
-          onNewMessageRef.current({ role, content: parsed.text, id: parsed.id, timestamp: new Date().toISOString() })
-          return
-        }
-
-        const next = `${existing}${parsed.text}`
-
-        if (parsed.final) {
-          seenFragmentsRef.current.delete(key)
-          const role = parsed.type === 'assistant' ? 'assistant' : 'user'
-          onNewMessageRef.current({
-            role,
-            content: next,
-            id: parsed.id || key,
-            partial: false,
-            timestamp: new Date().toISOString(),
-          })
-          return
-        }
-
-        seenFragmentsRef.current.set(key, next)
-        const role = parsed.type === 'assistant' ? 'assistant' : 'user'
-        onNewMessageRef.current({
-          role,
-          content: next,
-          id: parsed.id || key,
-          partial: true,
-          timestamp: new Date().toISOString(),
-        })
-      } catch (error) {
-        console.log('❌ LiveKit message parse error:', error, { payload, source })
-      }
-    },
-    [],
-  )
-
-
-
-  // Detect agent participant joining as a secondary "ready" signal
-  useEffect(() => {
-    if (!room) return
-    const check = (p: RemoteParticipant) => {
-      const name = (p.name || '').toLowerCase()
-      const identity = (p.identity || '').toLowerCase()
-      if (name.includes('assistant') || identity.startsWith('agent')) {
-        if (lastControlStateRef.current === 'unknown') {
-          lastControlStateRef.current = 'ready'
-          onStateChange('ready')
-        }
-      }
-    }
-    for (const p of room.remoteParticipants.values()) check(p)
-    room.on(RoomEvent.ParticipantConnected, check)
-    return () => { room.off(RoomEvent.ParticipantConnected, check) }
-  }, [room, onStateChange])
-
-  // Direct room event handling for data channels (more reliable than useDataChannel hooks)
-  useEffect(() => {
-    if (!room) return
-
-    const handleData = (payload: Uint8Array, participant?: RemoteParticipant, _kind?: unknown, topic?: string) => {
-      if (!topic) return
-
-      if (isSessionPaused) {
-        return
-      }
-      
-      const text = new TextDecoder().decode(payload)
-      console.log(`📨 Data channel received on ${topic}:`, text)
-      
-      // Process different topics
-      switch (topic) {
-        case 'lk.transcription':
-          console.log('📱 LiveKit transcription received:', {
-            participantId: participant?.identity,
-            topic,
-            connected: connectionState
-          })
-          processPayload(text, 'dataChannel')
-          break
-          
-        case 'lk.control':
-          try {
-            const parsed = JSON.parse(text) as { type?: string; text?: string }
-            if (parsed?.type === 'session_state' && parsed.text) {
-              const stateText = parsed.text.toLowerCase()
-              let state: 'restarting' | 'ready' | 'recovering' | 'unknown' = 'unknown'
-              if (stateText.includes('ready')) state = 'ready'
-              else if (stateText.includes('recovering')) state = 'recovering'
-              else if (stateText.includes('restart')) state = 'restarting'
-
-              if (lastControlStateRef.current !== state) {
-                lastControlStateRef.current = state
-                onStateChange(state)
-                if (state === 'restarting') {
-                  onRestart()
-                }
-              }
-            }
-          } catch (error) {
-            console.log('⚠️ Invalid control payload', error)
-          }
-          break
-          
-        case 'lk.conversation':
-          try {
-            const conversationData = JSON.parse(text)
-            console.log('💬 Conversation data received:', conversationData)
-
-            if (conversationData.type === 'turn_metrics' && conversationData.turnMetrics) {
-              onTurnMetrics?.(
-                conversationData.text || '',
-                conversationData.turnMetrics as TurnMetrics,
-                typeof conversationData.turnIndex === 'number' ? conversationData.turnIndex : undefined,
-              )
-              break
-            }
-            
-            // Final coach turns — one id per utterance from the agent
-            if (conversationData.type === 'assistant') {
-              const content = stripThinkingBlocks(
-                conversationData.text || conversationData.content || '',
-              )
-              const timestamp = conversationData.timestamp
-                ? new Date(conversationData.timestamp).toISOString()
-                : new Date().toISOString()
-
-              if (content) {
-                // Reuse the live-streamed bubble's id so the authoritative
-                // final REPLACES the streaming partial in place rather than
-                // creating a second identical bubble. The live coach text is
-                // streamed under activeAssistantMsgIdRef (from the TTS
-                // transcription); the agent's own item id differs, so using it
-                // here would never reconcile with the partial. Fall back to the
-                // item id only when no live stream was active for this turn.
-                const finalId =
-                  activeAssistantMsgIdRef.current ||
-                  conversationData.id ||
-                  `assistant-${Date.now()}`
-                onNewMessageRef.current({
-                  role: 'assistant',
-                  content,
-                  id: finalId,
-                  timestamp,
-                  partial: false,
-                })
-                activeAssistantMsgIdRef.current = null
-                lastAgentStreamRef.current = null
-              }
-            } else if (conversationData.type === 'user') {
-              const content = conversationData.text || conversationData.content || ''
-              const timestamp = conversationData.timestamp 
-                ? new Date(conversationData.timestamp).toISOString() 
-                : new Date().toISOString()
-              
-              if (content) {
-                onNewMessageRef.current({ 
-                  role: 'user', 
-                  content, 
-                  id: conversationData.id,
-                  timestamp,
-                  partial: conversationData.final === false,
-                })
-              }
-            }
-            // Legacy format support
-            else if (conversationData.type === 'conversation_message') {
-              const messageText = `${conversationData.role}: ${conversationData.content}`
-              processPayload(messageText, 'dataChannel')
-            }
-          } catch (error) {
-            console.log('⚠️ Invalid conversation payload', error)
-          }
-          break
-          
-        case 'lk.metrics':
-          try {
-            const metricsUpdate = JSON.parse(text)
-            console.log('📊 Received metrics update:', metricsUpdate)
-            onMetricsUpdate(metricsUpdate)
-          } catch (error) {
-            console.log('⚠️ Invalid metrics payload', error)
-          }
-          break
-          
-        case 'lk.session':
-          try {
-            const sessionData = JSON.parse(text)
-            if (sessionData.type === 'session_complete') {
-              console.log('🏁 Session completed, saving metrics:', sessionData)
-              if (sessionId) {
-                saveSessionData(sessionId, sessionData.metrics, sessionData.transcript)
-              }
-            }
-          } catch (error) {
-            console.log('⚠️ Invalid session payload', error)
-          }
-          break
-          
-        case 'lk.settings':
-          // Coach patience is auto-selected by the agent; ignore setting acks.
-          break
-
-        default:
-          console.log('📨 Unknown data channel topic:', topic)
-      }
-    }
-
-    room.on(RoomEvent.DataReceived, handleData)
-    
-    return () => {
-      room.off(RoomEvent.DataReceived, handleData)
-    }
-  }, [room, connectionState, processPayload, onStateChange, onRestart, onMetricsUpdate, onTurnMetrics, sessionId, isSessionPaused])
-
-  // Remove duplicate - handled by first useEffect above
-  // This second useEffect was causing messages to be missed!
-
-  return null
-}
-
-function InRoomControls({
-  sessionId,
-  onSealRecording,
-  onPauseSession,
-  isPausing,
-  inputBlocked,
-  enableAudioRecord = false,
-}: {
-  sessionId: string | null
-  onSealRecording: () => Promise<void>
-  onPauseSession: () => Promise<void>
-  isPausing: boolean
-  inputBlocked: boolean
-  /** Admin-enabled: live “Record My Audio” download during the session. */
-  enableAudioRecord?: boolean
-}) {
-  const room = useRoomContext()
-  const { isRecording, startRecording, stopRecording } = useAudioRecording()
-  const [micEnabled, setMicEnabled] = useState(
-    () => room.localParticipant.isMicrophoneEnabled,
-  )
-  const [isTogglingMic, setIsTogglingMic] = useState(false)
-
-  useEffect(() => {
-    const syncMicState = () => {
-      setMicEnabled(room.localParticipant.isMicrophoneEnabled)
-    }
-
-    syncMicState()
-    room.localParticipant.on(ParticipantEvent.TrackMuted, syncMicState)
-    room.localParticipant.on(ParticipantEvent.TrackUnmuted, syncMicState)
-    room.localParticipant.on(ParticipantEvent.LocalTrackPublished, syncMicState)
-    room.localParticipant.on(ParticipantEvent.LocalTrackUnpublished, syncMicState)
-
-    return () => {
-      room.localParticipant.off(ParticipantEvent.TrackMuted, syncMicState)
-      room.localParticipant.off(ParticipantEvent.TrackUnmuted, syncMicState)
-      room.localParticipant.off(ParticipantEvent.LocalTrackPublished, syncMicState)
-      room.localParticipant.off(ParticipantEvent.LocalTrackUnpublished, syncMicState)
-    }
-  }, [room])
-
-  const toggleMicrophone = useCallback(async () => {
-    if (isTogglingMic) return
-    setIsTogglingMic(true)
-    try {
-      await room.localParticipant.setMicrophoneEnabled(!micEnabled)
-      setMicEnabled(room.localParticipant.isMicrophoneEnabled)
-      toast.success(micEnabled ? 'Microphone muted' : 'Microphone unmuted')
-    } catch (error) {
-      console.warn('Failed to change microphone state:', error)
-      toast.error(micEnabled ? 'Could not mute microphone' : 'Could not unmute microphone')
-    } finally {
-      setIsTogglingMic(false)
-    }
-  }, [isTogglingMic, micEnabled, room])
-
-  const requestPause = useCallback(async () => {
-    const muted = await pauseAfterSealingRecording({
-      sealRecording: onSealRecording,
-      muteMicrophone: async () => {
-        await room.localParticipant.setMicrophoneEnabled(false)
-        setMicEnabled(false)
-      },
-      settlePause: onPauseSession,
-    })
-    if (!muted) {
-      toast.error('Could not mute the microphone. This recording segment is still being saved.')
-    }
-  }, [onPauseSession, onSealRecording, room])
-
-  const handleToggleRecording = useCallback(async () => {
-    if (isRecording) {
-      const blob = await stopRecording()
-      if (!blob) {
-        toast.error('No audio captured for download')
-        return
-      }
-
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-      const safeSessionId = sessionId || 'session'
-      const filename = `spashtai-user-audio-${safeSessionId}-${timestamp}.webm`
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = filename
-      document.body.appendChild(a)
-      a.click()
-      window.URL.revokeObjectURL(url)
-      document.body.removeChild(a)
-      toast.success('Audio downloaded. You can now validate WPM in external tools.')
-      return
-    }
-
-    const publications = Array.from(room.localParticipant.trackPublications.values())
-    const micPublication = publications.find((publication) => publication.source === Track.Source.Microphone)
-    const mediaStreamTrack = micPublication?.track?.mediaStreamTrack
-
-    if (!mediaStreamTrack) {
-      toast.error('Microphone track not ready yet. Please try again in a second.')
-      return
-    }
-
-    startRecording(new MediaStream([mediaStreamTrack]))
-    toast.success('Recording started')
-  }, [isRecording, room, sessionId, startRecording, stopRecording])
-
-  return (
-    <>
-      <Button
-        variant="outline"
-        onClick={toggleMicrophone}
-        disabled={isTogglingMic || inputBlocked}
-        aria-pressed={!micEnabled}
-        title={
-          micEnabled
-            ? 'Mute your microphone while keeping the coach active'
-            : 'Unmute your microphone'
-        }
-      >
-        {isTogglingMic ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : micEnabled ? (
-          <MicOff className="h-4 w-4" />
-        ) : (
-          <Mic className="h-4 w-4" />
-        )}
-        {micEnabled ? 'Mute' : 'Unmute'}
-      </Button>
-      <Button variant="secondary" onClick={requestPause} disabled={inputBlocked}>
-        {isPausing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-        Pause
-      </Button>
-      {enableAudioRecord && (
-        <Button
-          variant={isRecording ? 'destructive' : 'outline'}
-          onClick={handleToggleRecording}
-          disabled={inputBlocked}
-        >
-          {isRecording ? 'Stop & Download Audio' : 'Record My Audio'}
-        </Button>
-      )}
-    </>
-  )
-}
-
-interface ChatMessage {
-  id?: string;
-  role: string;
-  content: string;
-  timestamp: string;
-}
-
 function normalizeTurnText(text: string): string {
   return text.replace(/\s+/g, ' ').trim().toLowerCase()
 }
