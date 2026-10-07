@@ -97,6 +97,13 @@ Apart from the token request above, the extraction makes two deliberate lifecycl
 
 Adapters are built from closures rather than `this`-bound methods, so a destructured or passed-around adapter method keeps working (`adapters.test.ts`). The controller is created once through lazy `useState` initialisation instead of `useMemo`, which React may recompute.
 
+## Also shipped with Phase 1
+
+- **Refresh during journey practice resumes it.** A journey practice keeps its launch URL (`newSession=true&preparationId=…`). On load, if this browser's active session is the owner's unfinished practice for the same journey, the page replaces the URL with `?session=…&preparationId=…&stageId=…` and the existing history-resume path reconnects it. Ended, discarded, other-user, other-journey and standalone sessions start fresh. Start is disabled while that check runs. Standalone Elevate is unchanged (refresh returns to the history list, where the session can be resumed).
+- **Read-only journeys for admins.** Admins viewing another user's journey see a notice and no launch or edit controls; Start Session is disabled for a journey owned by someone else.
+- **Agent worker start-up.** Spare agent processes get 30 s to initialise instead of LiveKit's 10 s default, which previously left a resumed room waiting with no worker.
+- **Appearance (Light / Dark / System)** in the profile menu, stored per browser (`spashtai_theme`), defaulting to Light. Fixed light tints used by alerts and verdict badges have dark-mode mappings in `index.css`, and the logo has a light-wordmark variant.
+
 ## Deferred to Phase 3 (Quick Practice)
 
 These are design improvements, not Phase 1 defects. They change ownership boundaries that the Interviews launch path needs, so they belong with the first interview adapter rather than in a behavior-preserving extraction.

@@ -91,3 +91,82 @@
   display: flex;
   animation: ticker-scroll 40s linear infinite;
 }
+
+/* Dark mode compatibility for fixed light tints (alerts, badges, verdicts).
+   Generated for the colour utilities used in src; extend if new tints are added. */
+.dark .bg-white { background-color: hsl(var(--card)); }
+.dark .bg-gray-100 { background-color: hsl(var(--muted)); }
+.dark .text-gray-500, .dark .text-gray-600 { color: hsl(var(--muted-foreground)); }
+.dark .text-gray-700, .dark .text-gray-800, .dark .text-gray-900 { color: hsl(var(--foreground)); }
+.dark .bg-amber-100 { background-color: rgb(120 53 15 / 0.45); }
+.dark .bg-amber-300 { background-color: rgb(146 64 14 / 0.6); }
+.dark .bg-amber-50 { background-color: rgb(120 53 15 / 0.3); }
+.dark .bg-blue-100 { background-color: rgb(30 58 138 / 0.45); }
+.dark .bg-blue-50 { background-color: rgb(30 58 138 / 0.3); }
+.dark .bg-emerald-100 { background-color: rgb(6 78 59 / 0.45); }
+.dark .bg-emerald-50 { background-color: rgb(6 78 59 / 0.3); }
+.dark .bg-gray-100 { background-color: rgb(17 24 39 / 0.45); }
+.dark .bg-green-100 { background-color: rgb(20 83 45 / 0.45); }
+.dark .bg-green-50 { background-color: rgb(20 83 45 / 0.3); }
+.dark .bg-indigo-100 { background-color: rgb(49 46 129 / 0.45); }
+.dark .bg-orange-100 { background-color: rgb(124 45 18 / 0.45); }
+.dark .bg-orange-300 { background-color: rgb(154 52 18 / 0.6); }
+.dark .bg-orange-50 { background-color: rgb(124 45 18 / 0.3); }
+.dark .bg-purple-100 { background-color: rgb(88 28 135 / 0.45); }
+.dark .bg-red-100 { background-color: rgb(127 29 29 / 0.45); }
+.dark .bg-red-50 { background-color: rgb(127 29 29 / 0.3); }
+.dark .bg-sky-100 { background-color: rgb(12 74 110 / 0.45); }
+.dark .bg-sky-200 { background-color: rgb(7 89 133 / 0.6); }
+.dark .bg-slate-100 { background-color: rgb(15 23 42 / 0.45); }
+.dark .bg-teal-100 { background-color: rgb(19 78 74 / 0.45); }
+.dark .bg-violet-50 { background-color: rgb(76 29 149 / 0.3); }
+.dark .bg-yellow-100 { background-color: rgb(113 63 18 / 0.45); }
+.dark .bg-yellow-50 { background-color: rgb(113 63 18 / 0.3); }
+.dark .border-amber-200 { border-color: rgb(146 64 14 / 0.8); }
+.dark .border-amber-300 { border-color: rgb(146 64 14 / 0.8); }
+.dark .border-blue-200 { border-color: rgb(30 64 175 / 0.8); }
+.dark .border-emerald-200 { border-color: rgb(6 95 70 / 0.8); }
+.dark .border-emerald-300 { border-color: rgb(6 95 70 / 0.8); }
+.dark .border-green-200 { border-color: rgb(22 101 52 / 0.8); }
+.dark .border-green-300 { border-color: rgb(22 101 52 / 0.8); }
+.dark .border-orange-200 { border-color: rgb(154 52 18 / 0.8); }
+.dark .border-red-200 { border-color: rgb(153 27 27 / 0.8); }
+.dark .border-red-300 { border-color: rgb(153 27 27 / 0.8); }
+.dark .border-sky-200 { border-color: rgb(7 89 133 / 0.8); }
+.dark .border-slate-200 { border-color: rgb(30 41 59 / 0.8); }
+.dark .border-violet-200 { border-color: rgb(91 33 182 / 0.8); }
+.dark .border-violet-300 { border-color: rgb(91 33 182 / 0.8); }
+.dark .border-yellow-200 { border-color: rgb(133 77 14 / 0.8); }
+.dark .text-amber-600 { color: rgb(251 191 36); }
+.dark .text-amber-700 { color: rgb(252 211 77); }
+.dark .text-amber-800 { color: rgb(252 211 77); }
+.dark .text-amber-900 { color: rgb(253 230 138); }
+.dark .text-blue-600 { color: rgb(96 165 250); }
+.dark .text-blue-700 { color: rgb(147 197 253); }
+.dark .text-blue-800 { color: rgb(147 197 253); }
+.dark .text-blue-900 { color: rgb(191 219 254); }
+.dark .text-emerald-600 { color: rgb(52 211 153); }
+.dark .text-emerald-700 { color: rgb(110 231 183); }
+.dark .text-emerald-800 { color: rgb(110 231 183); }
+.dark .text-emerald-900 { color: rgb(167 243 208); }
+.dark .text-gray-600 { color: rgb(156 163 175); }
+.dark .text-gray-700 { color: rgb(209 213 219); }
+.dark .text-green-600 { color: rgb(74 222 128); }
+.dark .text-green-700 { color: rgb(134 239 172); }
+.dark .text-green-800 { color: rgb(134 239 172); }
+.dark .text-indigo-700 { color: rgb(165 180 252); }
+.dark .text-orange-600 { color: rgb(251 146 60); }
+.dark .text-orange-700 { color: rgb(253 186 116); }
+.dark .text-orange-800 { color: rgb(253 186 116); }
+.dark .text-orange-900 { color: rgb(254 215 170); }
+.dark .text-purple-700 { color: rgb(216 180 254); }
+.dark .text-red-600 { color: rgb(248 113 113); }
+.dark .text-red-700 { color: rgb(252 165 165); }
+.dark .text-red-800 { color: rgb(252 165 165); }
+.dark .text-sky-700 { color: rgb(125 211 252); }
+.dark .text-slate-700 { color: rgb(203 213 225); }
+.dark .text-teal-700 { color: rgb(94 234 212); }
+.dark .text-violet-900 { color: rgb(221 214 254); }
+.dark .text-yellow-600 { color: rgb(250 204 21); }
+.dark .text-yellow-700 { color: rgb(253 224 71); }
+.dark .text-yellow-800 { color: rgb(253 224 71); }

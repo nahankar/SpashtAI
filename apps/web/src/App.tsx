@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { BrowserRouter, Link, Navigate, Route, Routes, useLocation, useSearchParams } from 'react-router-dom'
 import { Menu, RotateCcw, X } from 'lucide-react'
 import { AuthProvider } from '@/contexts/AuthContext'
+import { ThemeToggle } from '@/components/layout/ThemeToggle'
 import { useAuth } from '@/hooks/useAuth'
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 import { Coach } from '@/pages/Coach'
@@ -195,8 +196,10 @@ function UserDropdown() {
       {open && (
         <div
           onMouseLeave={() => setOpen(false)}
-          className="absolute right-0 top-full mt-5 w-44 rounded-md border bg-popover p-1 text-popover-foreground shadow-md z-50"
+          className="absolute right-0 top-full mt-5 w-56 rounded-md border bg-popover p-1 text-popover-foreground shadow-md z-50"
         >
+          <ThemeToggle className="px-2 pb-2 pt-1.5" />
+          <div className="my-1 h-px bg-border" role="separator" />
           <button
             onClick={() => { setOpen(false); logout() }}
             className="flex w-full items-center rounded-sm px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
@@ -376,6 +379,7 @@ function Navbar() {
               {isAdmin && (
                 <Link className={cn(navLinkClass, 'text-primary font-medium')} to="/admin" onClick={() => setMobileOpen(false)}>Admin</Link>
               )}
+              <ThemeToggle className="py-2" />
               <button
                 type="button"
                 className={cn(navLinkClass, 'w-full text-left')}

@@ -3,8 +3,9 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 import '@livekit/components-styles'
-import { Toaster } from 'sonner'
 import { ConfirmProvider } from '@/hooks/useConfirm'
+import { ThemeProvider } from '@/contexts/ThemeContext'
+import { ThemedToaster } from '@/components/layout/ThemedToaster'
 import { initRemoteLogger } from '@/lib/remoteLogger'
 
 // Operational logging only; no-op unless enabled. Must run before render so it
@@ -13,9 +14,11 @@ initRemoteLogger()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ConfirmProvider>
-      <App />
-      <Toaster richColors closeButton />
-    </ConfirmProvider>
+    <ThemeProvider>
+      <ConfirmProvider>
+        <App />
+        <ThemedToaster />
+      </ConfirmProvider>
+    </ThemeProvider>
   </StrictMode>,
 )
