@@ -7,13 +7,13 @@ export interface EvaluatorConfig {
   usage: { _count: number; _sum: { inputTokens: number | null; outputTokens: number | null } }
 }
 export interface Assessment {
-  id: string; status: string; attempts: number; errorCode: string | null; bankChanged: boolean; afterExample: boolean; createdAt: string
+  id: string; status: string; attempts: number; errorCode: string | null; bankChanged: boolean; afterExample: boolean; configCurrent: boolean; createdAt: string
   config: { label: string; modelId: string; region: string; prompt: string; schema: string; rubric: string; policy: string }
   snapshot: { answerText: string; assistance: string; source: string; textSource: string; textRevision: number;
     questionSnapshot: { externalQid: string; questionText: string; revision: number; track: string; topic: string; difficulty: string } }
   usage: { id: string; latencyMs: number; inputTokens: number | null; outputTokens: number | null; outcome: string }[]
   result: null | {
-    classification: string; strengths: string[]; gaps: string[]; misconceptions: string[]; guidance: string; uncertainty: string[]
+    classification: string; strengths: string[]; gaps: string[]; misconceptions: string[]; guidance: string; uncertainty: string[]; validationNotes?: string[]
     criteria: { criterion: string; finding: string; explanation: string; evidence: string[] }[]
     next: { action: string; source: string; questionText: string | null; topic: string | null; needsReview: boolean }
   }

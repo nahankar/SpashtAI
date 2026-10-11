@@ -87,8 +87,12 @@ export function InterviewEvaluator() {
     {test && <section aria-label="Evaluation result" className="rounded-xl border p-5 space-y-4">
       <div className="flex justify-between gap-3"><h2 className="text-lg font-semibold">{labels[test.status] ?? test.status}{test.result ? ` · ${labels[test.result.classification]}` : ''}</h2><Button size="sm" variant="outline" disabled={busy} onClick={() => setDeleting(true)}>Delete test</Button></div>
       {isTestPending(test.status) && <p role="status">Your test is saved. Evaluation continues in the background; you can return to it later.</p>}
-      {test.errorCode && <p role="alert">{test.errorCode === 'TIMEOUT' ? 'The model timed out.' : `Evaluation needs attention: ${test.errorCode}.`} No grade was invented.</p>}
-      {['FAILED','CANCELLED'].includes(test.status) && test.attempts < (config?.limits.attempts ?? 3) && <Button variant="outline" disabled={busy || !config?.accessible} onClick={() => void action('retry')}>Retry evaluation</Button>}
+      {test.errorCode && <p role="alert">{test.errorCode.startsWith('INVALID_OUTPUT') ? `The model returned feedback that could not be validated (${test.errorCode}). Your answer has been saved.` : test.errorCode === 'TIMEOUT' ? 'The model timed out.' : `Evaluation needs attention: ${test.errorCode}.`} No grade was invented.</p>}
+      {['FAILED','CANCELLED'].includes(test.status) && <>
+        {test.configCurrent && test.attempts < (config?.limits.attempts ?? 3) && <Button variant="outline" disabled={busy || !config?.accessible} onClick={() => void action('retry')}>Retry evaluation</Button>}
+        {!test.configCurrent && <p className="text-sm text-muted-foreground">The evaluator has been updated. Create a new test with your saved answer; this original test will be preserved.</p>}
+        <Button variant="outline" disabled={busy || !config?.accessible} onClick={() => { setAnswer(test.snapshot.answerText); setAssistance(test.snapshot.assistance); setModel(config!.models.find(m => m.modelId === test.config.modelId)?.key ?? 'nova2_lite') }}>Use saved answer in a new test</Button>
+      </>}
       {test.bankChanged && <p className="text-sm text-muted-foreground">The bank question has changed or was deleted. This result uses its saved question and guidance.</p>}
       {test.afterExample && <p className="font-medium text-sm">After example · This answer does not demonstrate independent recall.</p>}
       {test.snapshot.assistance === 'HINT' && <p className="text-sm">Answered with a hint.</p>}

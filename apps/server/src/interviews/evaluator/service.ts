@@ -69,7 +69,8 @@ export async function assessmentDetail(id: string, actorId: string) {
   const row = await ownedAssessment(id, actorId)
   const current = row.snapshot.questionId ? await prisma.questionBankQuestion.findUnique({ where: { id: row.snapshot.questionId }, select: { revision: true } }) : null
   const question = questionSnapshotSchema.parse(row.snapshot.questionSnapshot)
-  return { ...row, bankChanged: !current || current.revision !== question.revision, afterExample: row.snapshot.assistance === 'EXAMPLE' }
+  return { ...row, bankChanged: !current || current.revision !== question.revision, afterExample: row.snapshot.assistance === 'EXAMPLE',
+    configCurrent: Object.keys(CONFIGS).some(key => hash(configFor(key as keyof typeof CONFIGS)) === hash(row.config)) }
 }
 export async function deleteAssessment(id: string, actorId: string) {
   await prisma.$transaction(async tx => {

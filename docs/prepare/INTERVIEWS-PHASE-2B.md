@@ -44,6 +44,12 @@ by evaluator testing. Do not confuse this preview with main's API 4000/database.
   the evaluator's instructions. Strict JSON contracts reject extra scores,
   missing/duplicate criteria, invented evidence and malformed outputs. Failed
   validation is a failed test with measured usage, never an invented verdict.
+  A negative Reasoning/Depth finding with no quote is instead left unassessed,
+  with a server-owned validation note visible in the report. This removes an
+  unsupported finding without changing the model's classification or inventing
+  evidence. Accuracy findings, positive/partial findings without evidence and
+  quotes absent from the answer still fail validation. Validation failures save
+  a content-free reason code; raw model output is not logged or retained.
 - Correct/Partial/Incorrect map in application code to Deepen/Clarify/Simplify.
   Their generated follow-ups are proposals requiring relevance/difficulty
   review, not yet spoken live. Does not know maps to Change topic: the server
@@ -90,6 +96,9 @@ Transient timeout/unavailability gets bounded backoff; access/invalid-output
 failures require review. Expired leases fail explicitly and can be manually
 retried within the bound. SDK retries are disabled to avoid uncounted calls.
 Old configurations cannot be retried after their code changes; submit anew.
+Failed tests offer **Use saved answer in a new test**, which copies the answer,
+model and assistance into the form. Submission captures current bank guidance
+and configuration; the original failed test and its immutable snapshot remain.
 
 Input/output-token usage and latency are visible. Dollar cost is deliberately
 unconfigured; no pricing assumption is presented as measured cost. A crash
@@ -106,7 +115,7 @@ stability, grants/demotion, deduplication, leases/concurrency, quota deletion,
 retries/timeouts, deletion races, bank changes and actual topic switching.
 Rendering checks cover escaped evidence, uncertainties, generated proposals
 and unavailable-topic fallback. Clean install and upgrade migrations pass.
-Final regression results: 462 server tests and 209 web tests pass; web/server
+Final regression results: 466 server tests and 210 web tests pass; web/server
 builds and typechecks pass. ESLint has zero errors and the existing Replay
 dependency warning. One existing Replay test failed intermittently, then passed
 its focused recheck and the final full suite. Fresh and upgraded database schema
@@ -129,6 +138,21 @@ These are measured model-call durations, not live end-to-end latency promises.
 The first output-instruction draft exposed unsupported empty-evidence findings;
 the stricter format example/evidence instructions fixed the tested cases. This
 does not prove broad reliability. Results remain `calibrated: false`.
+
+The real SM-NEW-061 hybrid-retrospective sample exposed the same missing-evidence
+failure outside those eight synthetic cases: Nova returned DEPTH/NOT_MET with
+empty evidence. Prompt `interview-answer-4` / schema `interview-result-2` make
+the omission distinction explicit and enforce the safe downgrade described
+above. They also distinguish vague/missing detail from misconceptions, preserve
+the spelling of quotes, keep optional depth optional, and require follow-ups
+that fit the actual answer. The exact user-provided answer completed through
+the local Admin UI in 3.5s with PARTIAL, exact evidence, no misconceptions and
+a relevant clarification question. The original failed test was preserved.
+Regression checks cover the empty-evidence response, strict rejection of
+invented quotes/unsupported positive or accuracy findings, stored validation
+notes, and new-test deduplication across configurations. No database migration
+or environment-file change was needed. This remains a pilot, not a claim of
+expert calibration or broad model reliability.
 
 Before live grading, obtain independent expert labels and held-out cases across
 tracks/difficulties, inspect criterion/follow-up disagreements and incomplete

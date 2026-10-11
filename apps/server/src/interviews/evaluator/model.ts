@@ -13,6 +13,8 @@ uncertainty: array of unresolved subject/rubric uncertainties (at most 4)
 followUpQuestion: one actual question ending with ?; for CORRECT deepen within the topic and experience level, PARTIAL probe one missing concept, INCORRECT ask a simpler prerequisite. For NOT_ANSWERED use an empty string; the application selects a different topic. Do not answer the follow-up yourself.
 No numerical score. Strengths must describe subject knowledge, never fluent/clear/concise communication. Do not reproduce private bank guidance as a long passage. Assistance is reported by the application; do not pretend a response after an example demonstrates independent recall.
 CRITICAL evidence rule: For ALL THREE criteria, including DEPTH, MET/PARTIAL/NOT_MET MUST have at least one exact quotation. The same quote may support multiple criteria. If you cannot quote evidence for a criterion, use NOT_ASSESSED. Never emit MET with evidence: []. For NOT_ANSWERED use NOT_ASSESSED and [] for all three criteria. Empty strengths/gaps/misconceptions/uncertainty are [], not strings. Quote the exact original punctuation and spelling; do not paraphrase quotations.
+Missing detail alone is not quoted evidence of poor reasoning or depth. Put missing concepts in gaps; use NOT_ASSESSED for REASONING/DEPTH when there is no supporting quotation. Reserve NOT_MET for a demonstrated problem supported by an exact quote. Typographical or grammatical errors are not subject errors. Recognize the meaning of the whole answer, including implicit valid alternatives, without correcting its evidence quotes. Do not list as missing a concept the candidate expressed in different words.
+For every difficulty, items labeled Optional depth in the blueprint are optional: their absence must not lower the classification or be listed as required gaps. Misconceptions must be demonstrably false subject claims the candidate actually made; vagueness, omitted detail and spelling errors are not misconceptions. Keep misconceptions empty when there is no false claim. Follow-ups should probe a real gap or deepen a demonstrated concept; do not imply the candidate made a claim they never made, and do not mechanically copy a bank follow-up if it does not fit this answer.
 The shape below is a FORMAT EXAMPLE only. Replace its findings and text with this answer's actual evidence. Do not copy the placeholder quote:
 {"classification":"CORRECT","criteria":[{"criterion":"ACCURACY","finding":"MET","evidence":["EXACT SUBSTRING FROM candidateAnswer"],"explanation":"Subject-specific rationale."},{"criterion":"REASONING","finding":"NOT_ASSESSED","evidence":[],"explanation":"Reasoning was not demonstrated."},{"criterion":"DEPTH","finding":"NOT_ASSESSED","evidence":[],"explanation":"No further depth established."}],"strengths":["Correct subject concept."],"gaps":[],"misconceptions":[],"guidance":"Useful subject guidance.","uncertainty":[],"followUpQuestion":"One actual follow-up question?"}`
 
@@ -37,7 +39,11 @@ export async function evaluateAnswer(question: QuestionSnapshot, answer: string,
     if (response.stopReason !== 'end_turn') throw new EvaluationFailure('INCOMPLETE_OUTPUT', false, { inputTokens, outputTokens, latencyMs: Date.now() - start })
     const output = (response.output?.message?.content ?? []).map(block => block.text ?? '').join('')
     let result: EvaluationResult
-    try { result = parseResult(output, answer) } catch { throw new EvaluationFailure('INVALID_OUTPUT', false, { inputTokens, outputTokens, latencyMs: Date.now() - start }) }
+    try { result = parseResult(output, answer) } catch (error) {
+      // Persist only a bounded, content-free reason; never model text or Zod input.
+      const reason = error instanceof Error && ['INVALID_CRITERIA', 'MISSING_EVIDENCE', 'UNSUPPORTED_EVIDENCE', 'INVALID_FOLLOW_UP'].includes(error.message) ? `_${error.message}` : ''
+      throw new EvaluationFailure(`INVALID_OUTPUT${reason}`, false, { inputTokens, outputTokens, latencyMs: Date.now() - start })
+    }
     return { result, inputTokens, outputTokens, latencyMs: Date.now() - start }
   } catch (error) {
     if (error instanceof EvaluationFailure) throw error

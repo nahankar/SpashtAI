@@ -9,7 +9,7 @@ const testDb = vi.hoisted(() => {
 })
 vi.mock('../src/lib/prisma', async () => { const { PrismaClient } = await import('@prisma/client'); return { prisma: new PrismaClient({ datasourceUrl: testDb.url || 'postgresql://postgres@127.0.0.1:55441/simple_bank' }) } })
 import { prisma } from '../src/lib/prisma'
-import { hash } from '../src/interviews/evaluator/contracts'
+import { hash, parseResult } from '../src/interviews/evaluator/contracts'
 import { assessmentDetail, claimAssessment, deleteAssessment, enqueueAssessment, finishAssessment, retryAssessment } from '../src/interviews/evaluator/service'
 import { EvaluationFailure } from '../src/interviews/evaluator/model'
 import { readyDraft } from './fixtures/bank-draft'
@@ -94,6 +94,24 @@ describe.skipIf(!testDb.url)('durable Admin evaluator PostgreSQL contracts', () 
     expect((await request(app).get(`/eval/tests/${saved.id}`).auth(token(superAdmin, 'SUPER_ADMIN'), { type: 'bearer' })).status).toBe(200)
     await deleteAssessment(saved.id, superAdmin)
     expect(await prisma.interviewAssessment.findUnique({ where: { id: saved.id } })).toBeNull()
+  })
+  it('persists validation notes and preserves old failed tests across evaluator upgrades', async () => {
+    const old = await submit(); const oldJob = await claim()
+    await finishAssessment(oldJob, new EvaluationFailure('INVALID_OUTPUT', false, { inputTokens: 100, outputTokens: 30, latencyMs: 25 }))
+    const oldConfig = { ...(oldJob.config as any), prompt: 'interview-answer-2', schema: 'interview-result-1' }
+    const { source, questionHash, answerHash, assistance, language, textSource, textRevision } = oldJob.snapshot
+    await prisma.interviewAssessment.update({ where: { id: old.id }, data: { config: oldConfig,
+      inputKey: hash({ ownerId: actor, source, questionHash, answerHash, config: oldConfig, assistance, language, textSource, textRevision }) } })
+    expect(await assessmentDetail(old.id, actor)).toMatchObject({ configCurrent: false, status: 'FAILED', result: null })
+    await expect(retryAssessment(old.id, actor)).rejects.toMatchObject({ status: 409 })
+    const current = await submit(); expect(current.id).not.toBe(old.id)
+    const output = correctEvaluation(); output.criteria[2].finding = 'NOT_MET'
+    await finishAssessment(await claim(), { result: parseResult(JSON.stringify(output), testAnswer), inputTokens: 120, outputTokens: 40, latencyMs: 30 })
+    const saved = await assessmentDetail(current.id, actor)
+    expect(saved).toMatchObject({ configCurrent: true, status: 'COMPLETED', snapshot: { answerText: testAnswer } })
+    expect(saved.result).toMatchObject({ validationNotes: [expect.stringContaining('Answer depth')], classification: 'CORRECT' })
+    expect((await assessmentDetail(old.id, actor)).status).toBe('FAILED')
+    expect((await submit()).id).toBe(current.id)
   })
   it('fences deleted content from a finishing worker while preserving anonymous usage', async () => {
     const saved = await submit(); const job = await claim()

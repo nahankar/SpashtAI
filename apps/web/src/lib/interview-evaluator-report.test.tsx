@@ -17,6 +17,13 @@ describe('interview evaluation feedback display', () => {
     const html = renderToStaticMarkup(<InterviewEvaluationFeedback result={result} />)
     expect(html).toContain('AI-generated follow-up proposal'); expect(html).toContain('What is an independent fixture?')
   })
+  it('discloses an unsupported negative finding left unassessed', () => {
+    const html = renderToStaticMarkup(<InterviewEvaluationFeedback result={{ ...result,
+      criteria: [{ criterion: 'DEPTH', finding: 'NOT_ASSESSED', evidence: [], explanation: 'Supporting evidence was not provided.' }],
+      validationNotes: ['Answer depth: the model returned Needs improvement without evidence. The finding was changed to Not established; no evidence was invented.'] }} />)
+    expect(html).toContain('no evidence was invented'); expect(html).toContain('Not established')
+    expect(html).toContain('Supporting evidence was not provided.')
+  })
   it('shows an honest unavailable-topic fallback with no invented question', () => {
     const html = renderToStaticMarkup(<InterviewEvaluationFeedback result={{ ...result, next: { action: 'SWITCH_TOPIC', source: 'NONE_AVAILABLE', questionText: null, topic: null, needsReview: false } }} />)
     expect(html).toContain('No active question from a different topic'); expect(html).not.toContain('What is an independent fixture?')
