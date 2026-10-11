@@ -43,6 +43,7 @@ import { AdminLegal } from '@/pages/admin/Legal'
 import { QuestionBank } from '@/pages/admin/QuestionBank'
 import { QuestionBankEditor } from '@/pages/admin/QuestionBankEditor'
 import { QuestionBankImports } from '@/pages/admin/QuestionBankImports'
+import { InterviewEvaluator } from '@/pages/admin/InterviewEvaluator'
 import { FeatureFlagsProvider, useFeatureFlags } from '@/contexts/FeatureFlagsContext'
 import { FeatureGate } from '@/components/auth/FeatureGate'
 import { PublicFooter } from '@/components/layout/PublicFooter'
@@ -619,6 +620,7 @@ function AppRoutes() {
             <Route path="interview-bank" element={<QuestionBank />} />
             <Route path="interview-bank/new" element={<QuestionBankEditor />} />
             <Route path="interview-bank/questions/:id" element={<QuestionBankEditor />} />
+            <Route path="interview-bank/questions/:id/test" element={<InterviewEvaluator />} />
             <Route path="interview-bank/versions/:id" element={<QuestionBankEditor />} />
             <Route path="interview-bank/imports" element={<QuestionBankImports />} />
           </Route>

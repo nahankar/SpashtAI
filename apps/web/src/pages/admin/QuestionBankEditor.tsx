@@ -77,6 +77,7 @@ export function QuestionBankEditor() {
     <div className="flex flex-wrap gap-3">
       <Button disabled={busy || !dirty} onClick={() => void act('save')}>Save question</Button>
       {data && <><Button variant="outline" disabled={busy || dirty} onClick={() => void act('preview')}>Learner preview</Button>
+        <Button variant="outline" disabled={busy || dirty} onClick={() => navigate(`/admin/interview-bank/questions/${id}/test`)}>Test answer</Button>
         {!data.question.approved && <Button variant="outline" disabled={busy || dirty} onClick={() => void act('approve')}>Approve</Button>}
         {!data.question.active && <Button disabled={busy || dirty || !!data.blockers.length} onClick={() => void act(data.question.approved ? 'activate' : 'approve_activate')}>{data.question.approved ? 'Activate' : 'Approve and activate'}</Button>}
         {data.question.active && <Button variant="outline" disabled={busy || dirty} onClick={() => void act('deactivate')}>Deactivate</Button>}
