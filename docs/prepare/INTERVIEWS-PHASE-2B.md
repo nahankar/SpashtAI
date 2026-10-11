@@ -100,6 +100,13 @@ Failed tests offer **Use saved answer in a new test**, which copies the answer,
 model and assistance into the form. Submission captures current bank guidance
 and configuration; the original failed test and its immutable snapshot remain.
 
+Each two-second worker tick first reads the feature's hidden/disabled state.
+Missing, hidden or disabled flags return before opening a job transaction or
+calling the model. Claims recheck the flag transactionally, and completion still
+rechecks current owner access. Seven-day budget retention is a separate hourly
+task per API process, including when the pilot is off; overlapping cleanup is
+prevented and today's quotas are never reset.
+
 Input/output-token usage and latency are visible. Dollar cost is deliberately
 unconfigured; no pricing assumption is presented as measured cost. A crash
 after invocation but before persistence can leave usage unknown; the expired
@@ -115,7 +122,7 @@ stability, grants/demotion, deduplication, leases/concurrency, quota deletion,
 retries/timeouts, deletion races, bank changes and actual topic switching.
 Rendering checks cover escaped evidence, uncertainties, generated proposals
 and unavailable-topic fallback. Clean install and upgrade migrations pass.
-Final regression results: 466 server tests and 210 web tests pass; web/server
+Final regression results: 472 server tests and 210 web tests pass; web/server
 builds and typechecks pass. ESLint has zero errors and the existing Replay
 dependency warning. One existing Replay test failed intermittently, then passed
 its focused recheck and the final full suite. Fresh and upgraded database schema
@@ -162,3 +169,24 @@ Complex questions. Then implement Phase 3 capture/ownership, thinking pauses/
 turn stitching, adaptive session policy, a 5–8 second voice feedback budget and
 background reuse, reports and “Ask this session”. Keep technical accuracy out
 of Progress Pulse unless a later product decision explicitly changes that.
+
+## Merge handoff and Phase 3 gates
+
+The dormant internal follow-up router and bank worker are unregistered in this
+release. Existing queue/service integration tests remain; Phase 3 must review
+the real producer before exposing the handoff behind a default-off flag.
+Worker regression tests cover the disabled/hidden/missing flag, transactional
+recheck, hourly-only cleanup, duplicate starts and cleanup overlap.
+
+Opus's supplied read-only production precheck reports 1,649 items with one draft
+each, no published or multi-version items and no recorded rights. This supports
+lossless consolidation for that inspected state, not for arbitrary later data.
+The deploy owner should repeat the precheck and take a database backup directly
+before merge/deploy. No production action is performed by this review.
+
+Before learner access, require recorded provenance/rights confirmation when
+activating (including bulk activation), and explicitly decide SUPER_ADMIN vs
+ADMIN for activation. Recommended initial policy: Admin authoring/review, Super
+Admin activation, with current roles read from the database. Approval and AI
+authorship alone do not confirm rights. Keep the one-copy editing workflow.
+See [Phase 3 implementation checkpoints](INTERVIEWS-PHASE-3.md).

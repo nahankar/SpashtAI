@@ -85,8 +85,6 @@ import adminPricingRouter from './routes/admin/pricing'
 import adminLegalRouter from './routes/admin/legal'
 import adminPlatformRouter from './routes/admin/platform'
 import adminInterviewBankRouter from './routes/admin/interview-bank'
-import interviewFollowUpsRouter from './routes/internal/interview-followups'
-import { startBankFollowUpWorker } from './interviews/bank/followUps'
 import adminInterviewEvaluatorRouter from './routes/admin/interview-evaluator'
 import { startInterviewEvaluatorWorker } from './interviews/evaluator/service'
 import preparationsRouter from './routes/preparations'
@@ -169,7 +167,6 @@ app.use(cors({
 // Authored learning content and bulk selections have a bounded Admin payload.
 app.use('/api/admin/interview-bank', express.json({ limit: '1mb' }))
 app.use('/api/admin/interview-evaluator', express.json({ limit: '100kb' }))
-app.use('/internal/sessions/:sessionId/interview-followups', express.json({ limit: '1mb' }))
 app.use(express.json())
 
 app.use('/api/', apiLimiter)
@@ -234,7 +231,8 @@ app.use('/api/admin/platform', requireAuth, requireAdmin, adminPlatformRouter)
 // Bank authoring stays available to admins while learner Interviews is hidden.
 app.use('/api/admin/interview-bank', requireAuth, requireAdmin, adminInterviewBankRouter)
 app.use('/api/admin/interview-evaluator', requireAuth, requireAdmin, adminInterviewEvaluatorRouter)
-app.use('/internal/sessions', interviewFollowUpsRouter)
+// Phase 3 must supply and review the post-session enrichment producer before
+// mounting interview-followups or starting the shared-bank materialisation worker.
 app.use('/api/admin/feedback', requireAuth, requireAdmin, adminFeedbackRouter)
 
 // Protected: product event tracking (page views, etc.)
@@ -466,7 +464,6 @@ async function startServer() {
   startDeliveryAlignmentWorker()
   startAudioEnrichmentRetryWorker()
   startSessionInactivityWorker()
-  startBankFollowUpWorker()
   startInterviewEvaluatorWorker()
 
   // During `tsx watch` hot-reloads the previous process can still hold the port

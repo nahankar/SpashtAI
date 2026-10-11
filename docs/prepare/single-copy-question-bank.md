@@ -34,7 +34,7 @@ Take a database backup before release. Validation covered clean installation, up
 
 ## Generated follow-ups: async handoff
 
-The durable queue and worker are implemented. The future interview engine must first capture the exact follow-up asked, then enrich it after the session with generic question content: track, question, good answer points, explanation, example and follow-up guidance. It submits up to 50 enriched questions per request to:
+The durable queue and worker are implemented but **not registered in the API process**. There is no reachable submission endpoint or running bank worker in this release. Phase 3 must supply and review the enrichment producer before registering them behind a default-off feature flag. The future interview engine must first capture the exact follow-up asked, then enrich it after the session with generic question content: track, question, good answer points, explanation, example and follow-up guidance. The reserved handoff accepts up to 50 enriched questions per request at:
 
 `POST /internal/sessions/:sessionId/interview-followups`
 

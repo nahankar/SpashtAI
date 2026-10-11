@@ -157,7 +157,10 @@ export async function finishAssessment(job: Claim, invocation: Invocation | Eval
   })
 }
 export async function sweepAssessments() {
-  await prisma.interviewEvaluatorBudget.deleteMany({ where: { day: { lt: new Date(Date.now() - 7 * 86400000).toISOString().slice(0,10) } } })
+  // Cheap off-switch before opening any job transaction. claimAssessment still
+  // rechecks inside its transaction to fence flag changes during this read.
+  const flag = await prisma.platformFeatureFlag.findUnique({ where: { feature: FEATURE }, select: { hidden: true, disabled: true } })
+  if (!flag || flag.hidden || flag.disabled) return false
   const job = await claimAssessment(); if (!job) return false
   let invocation: Invocation | EvaluationFailure
   try { invocation = await evaluateAnswer(questionSnapshotSchema.parse(job.snapshot.questionSnapshot), job.snapshot.answerText, job.config as ReturnType<typeof configFor>, job.snapshot.assistance) }
@@ -165,7 +168,11 @@ export async function sweepAssessments() {
   await finishAssessment(job, invocation)
   return true
 }
+export async function cleanupEvaluatorBudgets() {
+  await prisma.interviewEvaluatorBudget.deleteMany({ where: { day: { lt: new Date(Date.now() - 7 * 86400000).toISOString().slice(0,10) } } })
+}
 let timer: NodeJS.Timeout | null = null; let running = false
+let cleanupTimer: NodeJS.Timeout | null = null; let cleaning = false
 export function startInterviewEvaluatorWorker() {
   if (timer) return
   timer = setInterval(() => {
@@ -175,6 +182,17 @@ export function startInterviewEvaluatorWorker() {
       .finally(() => { running = false })
   }, 2000)
   timer.unref?.()
+  if (!cleanupTimer) {
+    // Retention maintenance is independent of pilot access, once per hour per
+    // API process. The idempotent delete cannot reset today's quota.
+    cleanupTimer = setInterval(() => {
+      if (cleaning) return
+      cleaning = true
+      void cleanupEvaluatorBudgets().catch(error => logger.error({ event: 'interview_evaluator.budget_cleanup_failed', errorType: error instanceof Error ? error.name : 'unknown' }, 'Evaluator budget cleanup failed'))
+        .finally(() => { cleaning = false })
+    }, 3600000)
+    cleanupTimer.unref?.()
+  }
 }
 export async function evaluatorConfig(actorId: string) {
   const usage = await prisma.interviewEvaluatorUsage.aggregate({ where: { assessment: { snapshot: { ownerId: actorId } } }, _sum: { inputTokens: true, outputTokens: true, latencyMs: true }, _count: true })
