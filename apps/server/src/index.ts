@@ -87,6 +87,8 @@ import adminPlatformRouter from './routes/admin/platform'
 import adminInterviewBankRouter from './routes/admin/interview-bank'
 import interviewFollowUpsRouter from './routes/internal/interview-followups'
 import { startBankFollowUpWorker } from './interviews/bank/followUps'
+import adminInterviewEvaluatorRouter from './routes/admin/interview-evaluator'
+import { startInterviewEvaluatorWorker } from './interviews/evaluator/service'
 import preparationsRouter from './routes/preparations'
 import legalRouter from './routes/legal'
 import { getPublicTickers } from './routes/tickers'
@@ -166,6 +168,7 @@ app.use(cors({
 }))
 // Authored learning content and bulk selections have a bounded Admin payload.
 app.use('/api/admin/interview-bank', express.json({ limit: '1mb' }))
+app.use('/api/admin/interview-evaluator', express.json({ limit: '100kb' }))
 app.use('/internal/sessions/:sessionId/interview-followups', express.json({ limit: '1mb' }))
 app.use(express.json())
 
@@ -230,6 +233,7 @@ app.use('/api/admin/legal', requireAuth, requireAdmin, adminLegalRouter)
 app.use('/api/admin/platform', requireAuth, requireAdmin, adminPlatformRouter)
 // Bank authoring stays available to admins while learner Interviews is hidden.
 app.use('/api/admin/interview-bank', requireAuth, requireAdmin, adminInterviewBankRouter)
+app.use('/api/admin/interview-evaluator', requireAuth, requireAdmin, adminInterviewEvaluatorRouter)
 app.use('/internal/sessions', interviewFollowUpsRouter)
 app.use('/api/admin/feedback', requireAuth, requireAdmin, adminFeedbackRouter)
 
@@ -463,6 +467,7 @@ async function startServer() {
   startAudioEnrichmentRetryWorker()
   startSessionInactivityWorker()
   startBankFollowUpWorker()
+  startInterviewEvaluatorWorker()
 
   // During `tsx watch` hot-reloads the previous process can still hold the port
   // for a brief moment when the new one starts. Instead of crashing on

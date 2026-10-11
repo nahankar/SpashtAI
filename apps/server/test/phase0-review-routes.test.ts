@@ -3,10 +3,11 @@ const mocks = vi.hoisted(() => ({
   session: { findUnique: vi.fn(), create: vi.fn(), findMany: vi.fn(), count: vi.fn() },
   sessionMetrics: { aggregate: vi.fn() },
   platformFeatureFlag: { findUnique: vi.fn(), update: vi.fn() },
+  user: { findUnique: vi.fn() },
 }))
 vi.mock('../src/lib/prisma', () => ({ prisma: mocks }))
 vi.mock('../src/lib/featureFlags', () => ({
-  CONFIGURABLE_FEATURES: ['interviews', 'elevate', 'replay'], ensureFeatureFlags: vi.fn(), invalidateFeatureFlagCache: vi.fn(),
+  CONFIGURABLE_FEATURES: ['interviews', 'interview_evaluator', 'elevate', 'replay'], ensureFeatureFlags: vi.fn(), invalidateFeatureFlagCache: vi.fn(),
 }))
 import { getUserSessionsMetrics } from '../src/routes/metrics'
 import { addConversationMessage } from '../src/routes/conversations'
@@ -48,12 +49,14 @@ describe('Phase 0 review boundaries', () => {
     expect(mocks.session.create).not.toHaveBeenCalled()
   })
   it('rejects selected-user audience on Elevate and accepts it on Interviews', async () => {
-    const app = express(); app.use(express.json()); app.use(router)
+    mocks.user.findUnique.mockResolvedValue({ role: 'ADMIN' })
+    const app = express(); app.use(express.json()); app.use((req, _res, next) => { req.user = { userId: 'admin', email: 'admin@example.invalid', role: 'ADMIN' }; next() }); app.use(router)
     expect((await request(app).put('/elevate').send({ audience: 'SELECTED_USERS' })).status).toBe(400)
     expect(mocks.platformFeatureFlag.update).not.toHaveBeenCalled()
     mocks.platformFeatureFlag.findUnique.mockResolvedValue({ hidden: true, disabled: true })
     mocks.platformFeatureFlag.update.mockResolvedValue({ feature: 'interviews' })
     expect((await request(app).put('/interviews').send({ audience: 'SELECTED_USERS' })).status).toBe(200)
     expect(mocks.platformFeatureFlag.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ audience: 'SELECTED_USERS' }) }))
+    expect((await request(app).put('/interview_evaluator').send({ audience: 'SELECTED_USERS' })).status).toBe(200)
   })
 })

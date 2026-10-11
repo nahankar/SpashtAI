@@ -4,7 +4,7 @@ import { prisma } from './prisma'
 /** Product modules that may be shown in navigation and counted in Pulse. */
 export type PlatformFeature = 'elevate' | 'replay' | 'prepare' | 'interviews' | 'quick_try'
 /** Controlled capabilities that are enabled from Admin but are not modules. */
-export type InternalFeature = 'delivery_moments' | 'session_chat'
+export type InternalFeature = 'delivery_moments' | 'session_chat' | 'interview_evaluator'
 export type ConfigurableFeature = PlatformFeature | InternalFeature
 
 export const PLATFORM_FEATURES: PlatformFeature[] = ['elevate', 'replay', 'prepare', 'interviews', 'quick_try']
@@ -12,6 +12,7 @@ export const CONFIGURABLE_FEATURES: ConfigurableFeature[] = [
   ...PLATFORM_FEATURES,
   'delivery_moments',
   'session_chat',
+  'interview_evaluator',
 ]
 const PULSE_FEATURES: PlatformFeature[] = ['elevate', 'replay', 'prepare']
 
@@ -31,6 +32,11 @@ const DEFAULT_FLAGS: Array<{
   hidden: boolean
   disabled: boolean
 }> = [
+  {
+    feature: 'interview_evaluator', label: 'Interview evaluator · Admin pilot',
+    description: 'Test sample answers against bank guidance. Admin role and an individual grant are required. Separate from voice and Pulse.',
+    audience: 'SELECTED_USERS', hidden: true, disabled: true,
+  },
   {
     feature: 'elevate',
     label: 'Elevate',
@@ -158,6 +164,7 @@ export async function getFeatureFlagsMap(): Promise<FeatureFlagsMap> {
   await ensureFeatureFlags()
   const rows = await prisma.platformFeatureFlag.findMany()
   const map: FeatureFlagsMap = {
+    interview_evaluator: { hidden: true, disabled: true, audience: 'SELECTED_USERS', overlayComment: null, overlayPosition: 'center' },
     elevate: { hidden: false, disabled: false, overlayComment: null, overlayPosition: 'center' },
     replay: { hidden: false, disabled: false, overlayComment: null, overlayPosition: 'center' },
     prepare: { hidden: true, disabled: false, overlayComment: null, overlayPosition: 'center' },

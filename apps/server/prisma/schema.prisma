@@ -168,6 +168,7 @@ model User {
   bankQuestionsCreated    QuestionBankQuestion[] @relation("BankQuestionCreator")
   bankQuestionsApproved   QuestionBankQuestion[] @relation("BankQuestionApprover")
   bankImports             QuestionImportBatch[]
+  interviewAnswerSnapshots InterviewAnswerSnapshot[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1089,9 +1090,86 @@ model QuestionBankQuestion {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
   importRows        QuestionImportRow[]
+  answerSnapshots   InterviewAnswerSnapshot[]
 
   @@unique([namespace, externalQid])
   @@index([active, approved, track, difficulty])
+}
+
+enum InterviewAnswerSource {
+  ADMIN_TEST
+  LIVE_ATTEMPT
+  RECORDING
+}
+
+// Authoritative graded input, independent of edits/deletion of the bank question.
+model InterviewAnswerSnapshot {
+  id               String @id @default(cuid())
+  ownerId          String
+  owner            User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  source           InterviewAnswerSource @default(ADMIN_TEST)
+  attemptId        String?
+  recordingId      String?
+  questionId       String?
+  question         QuestionBankQuestion? @relation(fields: [questionId], references: [id], onDelete: SetNull)
+  questionSnapshot Json
+  questionHash     String
+  answerText       String @db.Text
+  answerHash       String
+  textSource       String @default("ADMIN_TYPED")
+  textRevision     Int @default(1)
+  language         String @default("en")
+  assistance       String @default("NONE")
+  createdAt        DateTime @default(now())
+  assessment       InterviewAssessment?
+
+  @@index([ownerId, createdAt])
+}
+
+// One assessment is also one durable job. A lease fences concurrent workers.
+model InterviewAssessment {
+  id            String @id @default(cuid())
+  snapshotId    String @unique
+  snapshot      InterviewAnswerSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  inputKey      String @unique
+  config        Json
+  status        String @default("PENDING")
+  attempts      Int @default(0)
+  nextAt        DateTime @default(now())
+  leaseToken    String?
+  leaseUntil    DateTime?
+  errorCode     String?
+  result        Json?
+  createdAt     DateTime @default(now())
+  completedAt   DateTime?
+  usage         InterviewEvaluatorUsage[]
+
+  @@index([status, nextAt])
+}
+
+// Content-free invocation accounting survives deletion, with its link removed.
+model InterviewEvaluatorUsage {
+  id            String @id @default(cuid())
+  invocationKey String @unique
+  assessmentId  String?
+  assessment    InterviewAssessment? @relation(fields: [assessmentId], references: [id], onDelete: SetNull)
+  modelId       String
+  region        String
+  inputTokens   Int?
+  outputTokens  Int?
+  latencyMs     Int
+  outcome       String
+  createdAt     DateTime @default(now())
+
+  @@index([createdAt, modelId])
+}
+
+// Short-lived content-free counters; deleting a test cannot reset its quota.
+model InterviewEvaluatorBudget {
+  scope String
+  day   String
+  used  Int @default(0)
+  @@id([scope, day])
 }
 
 // Enriched follow-ups enter the shared bank only after the session ends.

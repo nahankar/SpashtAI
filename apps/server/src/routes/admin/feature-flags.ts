@@ -8,6 +8,13 @@ import {
 } from '../../lib/featureFlags'
 
 const router = Router()
+router.use((req, res, next) => {
+  if (!req.user?.userId) { res.status(403).json({ error: 'Admin access required' }); return }
+  void prisma.user.findUnique({ where: { id: req.user.userId }, select: { role: true } }).then(user => {
+    if (!user || !['ADMIN','SUPER_ADMIN'].includes(user.role)) { res.status(403).json({ error: 'Current Admin access required' }); return }
+    next()
+  }).catch(next)
+})
 
 router.get('/', async (_req: Request, res: Response) => {
   try {
@@ -40,7 +47,7 @@ router.put('/:feature', async (req: Request, res: Response) => {
     if (audience !== undefined && !['EVERYONE', 'SELECTED_USERS'].includes(audience)) {
       return res.status(400).json({ error: 'Invalid feature audience' })
     }
-    if (audience === 'SELECTED_USERS' && feature !== 'interviews') {
+    if (audience === 'SELECTED_USERS' && !['interviews','interview_evaluator'].includes(feature)) {
       return res.status(400).json({ error: 'Selected-user audience is currently supported only for Interviews' })
     }
     const data: Record<string, unknown> = {}
@@ -76,7 +83,7 @@ router.put('/:feature', async (req: Request, res: Response) => {
 })
 
 router.get('/:feature/grants', async (req, res) => {
-  if (req.params.feature !== 'interviews') return res.status(400).json({ error: 'Pilot grants are supported only for Interviews' })
+  if (!['interviews','interview_evaluator'].includes(req.params.feature)) return res.status(400).json({ error: 'Pilot grants are supported only for interview capabilities' })
   try {
     const grants = await prisma.userFeatureGrant.findMany({ where: { feature: req.params.feature }, select: { userId: true, grantedBy: true, createdAt: true, user: { select: { email: true } } } })
     res.json({ grants })
@@ -84,7 +91,7 @@ router.get('/:feature/grants', async (req, res) => {
 })
 
 router.put('/:feature/grants/:userId', async (req, res) => {
-  if (req.params.feature !== 'interviews' || typeof req.body?.granted !== 'boolean') {
+  if (!['interviews','interview_evaluator'].includes(req.params.feature) || typeof req.body?.granted !== 'boolean') {
     return res.status(400).json({ error: 'Known feature and boolean granted are required' })
   }
   try {
