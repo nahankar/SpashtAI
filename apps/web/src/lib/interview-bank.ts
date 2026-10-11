@@ -14,7 +14,7 @@ export function emptyDraft(): BankDraft {
 }
 export interface BankQuestion {
   id: string; revision: number; approved: boolean; active: boolean; namespace: string; externalQid: string
-  questionText: string; track: string; difficulty: string; origin: string
+  questionText: string; track: string; category: string; difficulty: string; origin: string
 }
 export interface BankDetail {
   draft: BankDraft; blockers: string[]

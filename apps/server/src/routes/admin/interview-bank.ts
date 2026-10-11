@@ -25,27 +25,40 @@ function asyncRoute(fn: (req: Request, res: Response) => Promise<unknown>) {
 }
 function csvUpload(req: Request) { if (!req.file) throw new BankError(400, 'Choose a UTF-8 .csv file'); return req.file.buffer }
 const pageSchema = z.coerce.number().int().min(1).max(10000).default(1)
+const listFiltersSchema = z.object({
+  search: z.string().max(160).optional(), track: z.string().max(160).optional(),
+  category: z.string().max(160).optional(), difficulty: draftSchema.shape.difficulty.optional(),
+  status: z.enum(['DRAFT', 'APPROVED', 'ACTIVE', 'INACTIVE']).optional(),
+}).strict()
 function listWhere(query: Request['query']) {
-  const search = z.string().max(160).default('').parse(query.search)
-  const track = z.string().max(160).optional().parse(query.track)
-  const status = z.enum(['DRAFT', 'APPROVED', 'ACTIVE', 'INACTIVE']).optional().parse(query.status)
-  const where = { ...(track ? { track } : {}),
+  const { search, track, category, difficulty, status } = listFiltersSchema.parse({
+    search: query.search, track: query.track, category: query.category, difficulty: query.difficulty, status: query.status,
+  })
+  const where = { ...(track ? { track } : {}), ...(category ? { category } : {}), ...(difficulty ? { difficulty } : {}),
     ...(status === 'DRAFT' ? { approved: false } : status === 'APPROVED' ? { approved: true, active: false } : status === 'ACTIVE' ? { active: true } : status === 'INACTIVE' ? { active: false } : {}),
     ...(search ? { OR: [{ questionText: { contains: search, mode: 'insensitive' as const } }, { externalQid: { contains: search, mode: 'insensitive' as const } }] } : {}) }
   return where
 }
+router.get('/filters', asyncRoute(async (req, res) => {
+  const track = listFiltersSchema.shape.track.parse(req.query.track)
+  const [categories, tracks] = await Promise.all([
+    prisma.questionBankQuestion.groupBy({ by: ['category'], where: track ? { track } : {}, orderBy: { category: 'asc' } }),
+    prisma.questionBankQuestion.groupBy({ by: ['track'], orderBy: { track: 'asc' } }),
+  ])
+  res.json({ categories: categories.map(q => q.category).filter(Boolean), tracks: tracks.map(q => q.track).filter(Boolean) })
+}))
 router.get('/questions', asyncRoute(async (req, res) => {
   const page = pageSchema.parse(req.query.page)
   const where = listWhere(req.query)
   const [questions, total] = await Promise.all([
     prisma.questionBankQuestion.findMany({ where, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], skip: (page - 1) * 30, take: 30,
-      select: { id: true, revision: true, approved: true, active: true, questionText: true, track: true, difficulty: true, externalQid: true, namespace: true, origin: true } }),
+      select: { id: true, revision: true, approved: true, active: true, questionText: true, track: true, category: true, difficulty: true, externalQid: true, namespace: true, origin: true } }),
     prisma.questionBankQuestion.count({ where }),
   ])
   res.json({ questions, total, page })
 }))
 router.post('/questions/selection', asyncRoute(async (req, res) => {
-  const filters = z.object({ search: z.string().max(160).optional(), track: z.string().max(160).optional(), status: z.enum(['DRAFT','APPROVED','ACTIVE','INACTIVE']).optional() }).strict().parse(req.body)
+  const filters = listFiltersSchema.parse(req.body)
   const where = listWhere(filters)
   const questions = await prisma.questionBankQuestion.findMany({ where, orderBy: { id: 'asc' }, take: 2001, select: { id: true, revision: true } })
   if (questions.length > 2000) throw new BankError(400, 'Narrow your filters to at most 2,000 questions for one bulk action')

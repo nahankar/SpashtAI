@@ -72,6 +72,45 @@ describe.skipIf(!testDb.url)('single-copy question bank PostgreSQL workflow', ()
     const response = await request(app).post('/bank/questions/selection').auth(auth,{ type:'bearer' }).send({ search: (await detail(id)).question.externalQid })
     expect(response.body.questions).toContainEqual({ id, revision: 1 })
   })
+  it('combines track, complexity, category, status and search for listing and bulk selection across pages', async () => {
+    const auth = token(); const category = `Category ${namespace}`; const search = `Filter ${namespace}`; const track = `Track ${namespace}`
+    const ids: string[] = []
+    const matching: string[] = []
+    try {
+      for (let i = 0; i < 35; i++) {
+        const id = await createQuestion({ namespace, externalQid: `FILTER-${i}` }, {
+          ...readyDraft(), questionText: `${search} ${i}?`, category: i === 31 ? `Other ${namespace}` : category,
+          difficulty: i === 32 ? 'Very Complex' : 'Simple', track: i === 34 ? `Other track ${namespace}` : track,
+        }, actor)
+        ids.push(id)
+        if (i < 31) matching.push(id)
+      }
+      await bulkAction({ action: 'approve_activate', questions: await selection(ids.filter((_id, i) => i !== 33)) }, actor)
+      const filters = { search, category, difficulty: 'Simple', status: 'ACTIVE', track }
+      const first = await request(app).get('/bank/questions').query(filters).auth(auth, { type:'bearer' })
+      const second = await request(app).get('/bank/questions').query({ ...filters, page: 2 }).auth(auth, { type:'bearer' })
+      expect(first.status).toBe(200); expect(first.body.total).toBe(31); expect(first.body.questions).toHaveLength(30)
+      expect(second.body.total).toBe(31); expect(second.body.questions).toHaveLength(1)
+      expect([...first.body.questions, ...second.body.questions].map(q => q.id).sort()).toEqual([...matching].sort())
+      expect(first.body.questions.every(q => q.track === track && q.category === category && q.difficulty === 'Simple' && q.active)).toBe(true)
+      const selected = await request(app).post('/bank/questions/selection').auth(auth, { type:'bearer' }).send(filters)
+      expect(selected.status).toBe(200)
+      expect(selected.body.questions).toEqual(await selection([...matching].sort()))
+      const options = await request(app).get('/bank/filters').auth(auth, { type:'bearer' })
+      expect(options.status).toBe(200); expect(options.body.categories).toContain(category)
+      expect(new Set(options.body.categories).size).toBe(options.body.categories.length)
+      expect(options.body.tracks).toContain(track)
+      expect(options.body.tracks).toContain(`Other track ${namespace}`)
+      const scopedOptions = await request(app).get('/bank/filters').query({ track: `Other track ${namespace}` }).auth(auth, { type:'bearer' })
+      expect(scopedOptions.body.categories).toEqual([category])
+      expect(scopedOptions.body.tracks).toEqual(options.body.tracks)
+      expect((await request(app).get('/bank/filters')).status).toBe(401)
+      expect((await request(app).get('/bank/questions').query({ difficulty: 'Impossible' }).auth(auth, { type:'bearer' })).status).toBe(400)
+      expect((await request(app).post('/bank/questions/selection').auth(auth, { type:'bearer' }).send({ difficulty: 'Impossible' })).status).toBe(400)
+    } finally {
+      await prisma.questionBankQuestion.deleteMany({ where: { id: { in: ids } } })
+    }
+  })
   it('imports Copilot learning fields; updates preserve unmapped fields and reset approval', async () => {
     const scope = `${namespace}_csv`
     const options = importOptionsSchema.parse({ namespace: scope, mode: 'UPDATE_BY_QID', mapping: { externalQid: 'QID', questionText: 'Question', track: 'Track', goodAnswerPoints: 'Good Answer Points', exampleAnswer: 'Learner Example Answer' } })
