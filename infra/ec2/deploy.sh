@@ -268,7 +268,9 @@ if [[ "${PENDING_MIGRATIONS}" -eq 1 ]]; then
 fi
 
 echo "==> Sync web dist to /var/www/spashtai"
-sudo rsync -a --delete apps/web/dist/ /var/www/spashtai/
+# Build files can inherit a restrictive shell umask. Public assets must remain
+# readable by nginx regardless of the deploy user's file-creation permissions.
+sudo rsync -a --delete --chmod=D755,F644 apps/web/dist/ /var/www/spashtai/
 
 echo "==> PM2 reload"
 if [[ "${PROCESSES_STOPPED}" -eq 1 ]]; then
