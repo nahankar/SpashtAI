@@ -1,7 +1,16 @@
 import { describe, expect, it, vi } from 'vitest'
-import { confirmedInterviewDrain, type CaptureAction, type CaptureReceipt } from './interview-practice'
+import { confirmedInterviewDrain, interviewCompletionMessage, type CaptureAction, type CaptureReceipt } from './interview-practice'
+import { ApiError } from './api-client'
 
 describe('interview durable speech confirmation',()=> {
+  it.each(['QUESTION_BANK_EXHAUSTED', 'PRACTICE_DURATION_REACHED', 'PRACTICE_QUESTION_LIMIT'])('recognizes %s as normal completion', code => {
+    expect(interviewCompletionMessage(new ApiError('Your answers are saved.', 409, code))).toBe('Your answers are saved.')
+  })
+  it('does not classify failed capture, authorization or connectivity as normal completion', () => {
+    expect(interviewCompletionMessage(new ApiError('Not permitted', 403, 'QUESTION_BANK_EXHAUSTED'))).toBeNull()
+    expect(interviewCompletionMessage(new ApiError('Transcript pending', 409, 'TRANSCRIPT_PENDING'))).toBeNull()
+    expect(interviewCompletionMessage(new Error('Connection failed'))).toBeNull()
+  })
   function fixture(action:CaptureAction='FINISH') {
     const order:string[]=[]
     const receipt:CaptureReceipt={id:'request-1',attemptId:'attempt-1',segmentId:'segment-1',action}

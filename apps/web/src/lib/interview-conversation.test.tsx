@@ -39,4 +39,13 @@ describe('interview input to the existing Elevate conversation panel',()=> {
     expect(html.match(/bg-blue-600 text-white/g)).toHaveLength(1)
     expect(html).toContain('First part. Second part.')
   })
+  it('keeps separate complete answers when playback filters out the interviewer', () => {
+    const messages = [live('interview_answer_a1', 'First answer.'), live('interview_answer_a2', 'Second answer.', '2026-10-12T20:00:30Z')]
+    const html = renderToStaticMarkup(<ConversationPanel messages={messages} stitchAdjacentUserMessages={false} />)
+    expect(html.match(/bg-blue-600 text-white/g)).toHaveLength(2)
+    expect(html).toContain('First answer.'); expect(html).toContain('Second answer.')
+    // Elevate retains its existing stitching behavior for speech fragments.
+    const elevate = renderToStaticMarkup(<ConversationPanel messages={messages} />)
+    expect(elevate.match(/bg-blue-600 text-white/g)).toHaveLength(1)
+  })
 })

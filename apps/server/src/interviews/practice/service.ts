@@ -89,10 +89,10 @@ export async function prepareBankAttempt(runId: string, ownerId: string) {
     const segments = await tx.sessionSegment.findMany({ where: { sessionId: run.sessionId }, select: { startedAt: true, endedAt: true, activeDurationSec: true } })
     const activeSeconds = segments.reduce((sum, s) => sum + (s.activeDurationSec ?? Math.max(0, ((s.endedAt?.getTime() ?? Date.now())-s.startedAt.getTime())/1000)), 0)
     if (activeSeconds >= run.durationMinutes * 60) {
-      throw new BankError(409, 'Practice duration reached; finish the current answer or end the interview')
+      throw new BankError(409, 'Practice duration reached. Your saved answers are ready for review.', 'PRACTICE_DURATION_REACHED')
     }
     const count = await tx.interviewAttempt.count({ where: { runId } })
-    if (count >= run.maxQuestions) throw new BankError(409, 'Question limit reached')
+    if (count >= run.maxQuestions) throw new BankError(409, 'You have completed the questions for this practice.', 'PRACTICE_QUESTION_LIMIT')
     const where: Prisma.QuestionBankQuestionWhereInput = { ...learnerEligibleWhere, namespace: run.namespace,
       track: run.track, experienceBand: run.experienceBand, difficulty: run.startingDifficulty,
       interviewAttempts: { none: { runId } } }
@@ -103,7 +103,7 @@ export async function prepareBankAttempt(runId: string, ownerId: string) {
     for (const e of exposure) if (e.questionId && e.askedAt) seen.set(e.questionId, Math.max(seen.get(e.questionId) ?? 0, e.askedAt.getTime()))
     candidates.sort((a, b) => (seen.get(a.id) ?? 0) - (seen.get(b.id) ?? 0) || hash([run.id,a.id]).localeCompare(hash([run.id,b.id])))
     const candidate = candidates[0]
-    if (!candidate) throw new BankError(409, 'No more eligible questions match this setup')
+    if (!candidate) throw new BankError(409, 'You have answered all available questions for this track, experience and difficulty. End practice to review your answers, or start another practice with a different setup.', 'QUESTION_BANK_EXHAUSTED')
     await tx.$queryRaw`SELECT id FROM "QuestionBankQuestion" WHERE id=${candidate.id} FOR SHARE`
     const question = await tx.questionBankQuestion.findFirst({ where: { ...where, id: candidate.id } })
     if (!question) throw new BankError(409, 'Question eligibility changed; try again')

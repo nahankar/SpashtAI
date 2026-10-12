@@ -3,7 +3,7 @@ import { useRoomContext } from '@livekit/components-react'
 import { ParticipantEvent, RoomEvent, Track } from 'livekit-client'
 import { Button } from '@/components/ui/button'
 import { apiClient } from '@/lib/api-client'
-import { captureFailure, confirmedInterviewDrain, INTERVIEWS_API, interviewWrite, type CaptureAction, type CaptureReceipt } from '@/lib/interview-practice'
+import { captureFailure, confirmedInterviewDrain, interviewCompletionMessage, INTERVIEWS_API, interviewWrite, type CaptureAction, type CaptureReceipt } from '@/lib/interview-practice'
 import type { SessionRecorderHandle } from '@/components/session/SessionRecorder'
 
 export function InterviewControls({ runId, attemptId, segmentId, status, ready, blocked, recorder, changed, preparing,
@@ -18,6 +18,7 @@ export function InterviewControls({ runId, attemptId, segmentId, status, ready, 
   const [confirmIncomplete,setConfirmIncomplete]=useState(false); const [confirmDiscard,setConfirmDiscard]=useState(false)
   const [timeUp,setTimeUp]=useState(false)
   const [questionReady,setQuestionReady]=useState(false)
+  const [completionMessage,setCompletionMessage]=useState<string|null>(null)
   const canSpeak=ready && questionReady
   const pending=useRef<{ action: CaptureAction; requestId: string }|null>(null)
   const running=useRef(false)
@@ -108,14 +109,21 @@ export function InterviewControls({ runId, attemptId, segmentId, status, ready, 
   }
   async function next() {
     if (running.current) return
-    running.current=true; setBusy(true); setError(''); microphone(false); setQuestionReady(false); preparing()
+    running.current=true; setBusy(true); setError(''); microphone(false)
     try {
       await interviewWrite(`/runs/${encodeURIComponent(runId)}/next`)
+      // Only enter the waiting-for-speech state when another question exists.
+      // Exhaustion leaves the completed question ready to close normally.
+      setQuestionReady(false); preparing()
       await changed()
       const result=JSON.parse(await room.localParticipant.performRpc({ destinationIdentity:interviewer().identity,
         method:'interview.control',payload:JSON.stringify({action:'NEXT',requestId:crypto.randomUUID()}),responseTimeout:15_000 }))
       if (result.error) throw new Error(result.error==='VOICE_DISCONNECTED' ? captureFailure(result.error) : 'The next question could not be read. Retry the question or reconnect the interviewer.')
-    } catch (e) { setError(e instanceof Error ? e.message : 'Could not start the next question.') }
+    } catch (e) {
+      const completion=interviewCompletionMessage(e)
+      if (completion) setCompletionMessage(completion)
+      else setError(e instanceof Error ? e.message : 'Could not start the next question.')
+    }
     finally { running.current=false; setBusy(false) }
   }
   return <div className="space-y-3 py-3">
@@ -123,12 +131,13 @@ export function InterviewControls({ runId, attemptId, segmentId, status, ready, 
     <div className="flex flex-wrap gap-2">
       {status==='ASKED' && <><Button disabled={!canSpeak || busy || blocked || !!error} onClick={() => void action('FINISH')}>Finish answer</Button>
         <Button variant="outline" disabled={!canSpeak || busy || blocked || !!error} onClick={() => void action('SKIP')}>Skip question</Button></>}
-      {['ANSWERED','SKIPPED'].includes(status) && <Button disabled={busy || blocked || timeUp} onClick={() => void next()}>Next question</Button>}
+      {['ANSWERED','SKIPPED'].includes(status) && !completionMessage && <Button disabled={busy || blocked || timeUp} onClick={() => void next()}>Next question</Button>}
       <Button variant="outline" disabled={!canSpeak || status!=='ASKED' || busy || blocked || !!error || timeUp} onClick={() => microphone(muted)}>{muted ? 'Unmute' : 'Mute'}</Button>
       <Button variant="outline" disabled={!canSpeak || busy || blocked || !!error} onClick={() => void action('PAUSE')}>Pause</Button>
       <Button variant="secondary" disabled={!canSpeak || busy || blocked || !!error} onClick={() => void action('LEAVE')}>End practice</Button>
       <Button variant="ghost" disabled={busy || blocked} onClick={() => setConfirmDiscard(true)}>Discard</Button>
     </div>
+    {completionMessage && <p role="status" className="rounded-lg border p-3 text-sm">{completionMessage}</p>}
     {error && <div role="alert" className="rounded-lg border border-amber-400/40 p-3 space-y-3"><p>{error}</p>
       <div className="flex gap-2">{pending.current && <Button disabled={busy} onClick={() => void action(pending.current!.action)}>Retry saving speech</Button>}
         {!pending.current && ['PREPARED','ASKED'].includes(status) && <Button disabled={busy || blocked} onClick={() => void next()}>Retry question</Button>}

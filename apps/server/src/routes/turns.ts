@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express'
 import { prisma } from '../lib/prisma'
+import { readInterviewPlaybackConversation } from '../interviews/practice/projection'
 import { applyAlignedDelivery } from '../analytics/alignedDelivery'
 import {
   clockSignatureFromStatus,
@@ -100,6 +101,8 @@ export async function getSessionTurns(req: Request, res: Response) {
       select: {
         recordingStartedAt: true,
         module: true,
+        purpose: true,
+        interviewRun: { select: { id: true } },
         sessionName: true,
         focusArea: true,
         startedAt: true,
@@ -196,6 +199,13 @@ export async function getSessionTurns(req: Request, res: Response) {
       }
     }
 
+    // Interview answers are one presentation unit even though Transcribe
+    // persisted several chunks. Keep raw turns for the shared audio transport.
+    const interviewConversation = session?.purpose === 'INTERVIEW' && session.interviewRun
+      ? (await readInterviewPlaybackConversation(prisma, session.interviewRun.id))
+        .map(message => flags.hideTranscriptText ? { ...message, content: '' } : message)
+      : null
+
     // Respect per-user transcript-text restriction: blank the text + words but
     // keep the numeric metrics/scores so the analytics still render.
     const sanitized = turns.map(t => ({
@@ -249,6 +259,7 @@ export async function getSessionTurns(req: Request, res: Response) {
       session: session
         ? {
             module: session.module,
+            purpose: session.purpose,
             sessionName: session.sessionName,
             focusArea: session.focusArea,
             startedAt: session.startedAt,
@@ -257,6 +268,7 @@ export async function getSessionTurns(req: Request, res: Response) {
           }
         : null,
       turns: sanitized,
+      interviewConversation,
     })
   } catch (error) {
     console.error('Error getting session turns:', error)

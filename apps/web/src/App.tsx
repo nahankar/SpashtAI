@@ -548,7 +548,7 @@ function AppRoutes() {
             </main>
           } />
           <Route path="/interviews" element={<main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8"><Interviews /></main>} />
-          <Route path="/interviews/playback/:sessionId" element={<main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8"><SessionReplay sessionChatDisabled /></main>} />
+          <Route path="/interviews/playback/:sessionId" element={<main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8"><SessionReplay variant="interview" sessionChatDisabled /></main>} />
           <Route path="/prepare/new" element={
             <main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8">
               <AppBreadcrumbs />

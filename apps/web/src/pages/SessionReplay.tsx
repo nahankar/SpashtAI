@@ -25,6 +25,8 @@ import { Badge } from '@/components/ui/badge'
 import { SessionChat } from '@/components/session/SessionChat'
 import { getAuthHeaders, getAuthenticatedMediaUrl } from '@/lib/api-client'
 import { COACH_BUBBLE, USER_BUBBLE } from '@/lib/conversation'
+import { ConversationPanel } from '@/features/live-session/components/ConversationPanel'
+import type { ChatMessage } from '@/features/live-session/types'
 import { ElevateDeliveryClip, isElevateRecordingReady, watchElevateRecordingDuration } from '@/lib/elevateDeliveryClip'
 import { useIsPro } from '@/hooks/useIsPro'
 import { toast } from 'sonner'
@@ -78,6 +80,7 @@ interface ReplayTurn {
 
 interface SessionInfo {
   module?: string | null
+  purpose?: string | null
   sessionName?: string | null
   focusArea?: string | null
   startedAt?: string | null
@@ -367,6 +370,7 @@ export function SessionReplay({
   autoPlayNonce = null,
   clipRequest = null,
   sessionChatDisabled = false,
+  variant = 'communication',
 }: {
   /** Override the route param so this can render inside the Elevate results tab. */
   sessionId?: string
@@ -374,6 +378,7 @@ export function SessionReplay({
   embedded?: boolean
   /** Interview teaching uses a separate bank-grounded contract. */
   sessionChatDisabled?: boolean
+  variant?: 'communication' | 'interview'
   /** @deprecated Use autoPlayNonce — kept so older callers compile. */
   focusRequest?: { skill: string; nonce: number } | null
   /** Bump to auto-press Play once the transport is ready (Elevate "Hear it"). */
@@ -390,6 +395,11 @@ export function SessionReplay({
   const [degraded, setDegraded] = useState(false)
   const [segments, setSegments] = useState<ReplaySegment[]>([])
   const [sessionInfo, setSessionInfo] = useState<SessionInfo | null>(null)
+  const [interviewMessages, setInterviewMessages] = useState<ChatMessage[] | null>(null)
+  const isInterview = variant === 'interview' || sessionInfo?.purpose === 'INTERVIEW'
+  const backPath = isInterview ? '/interviews' : '/elevate'
+  const backLabel = isInterview ? 'Interviews' : 'Elevate'
+  const assistantLabel = isInterview ? 'Interviewer' : 'Coach'
   const [canonicalPaceAvailable, setCanonicalPaceAvailable] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -404,7 +414,7 @@ export function SessionReplay({
   const [currentTime, setCurrentTime] = useState(0)
   const [rate, setRate] = useState(1)
 
-  const [roleFilter, setRoleFilter] = useState<RoleFilter>('user')
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>(variant === 'interview' ? 'all' : 'user')
   const [chips, setChips] = useState<Set<QualityChip>>(new Set())
   const [skipGaps, setSkipGaps] = useState(true)
   const [deliveryMarkers, setDeliveryMarkers] = useState<VerifiedDeliveryMoment[]>([])
@@ -484,6 +494,7 @@ export function SessionReplay({
     let cancelled = false
     setLoading(true)
     setError(null)
+    setInterviewMessages(null)
     fetch(`${API_BASE_URL}/sessions/${sessionId}/turns`, { headers: getAuthHeaders() })
       .then(async (res) => {
         if (!res.ok) throw new Error(`Failed to load replay (${res.status})`)
@@ -496,6 +507,7 @@ export function SessionReplay({
         setDegraded(Boolean(data.degraded))
         setSegments(Array.isArray(data.segments) ? data.segments : [])
         setSessionInfo(data.session ?? null)
+        setInterviewMessages(Array.isArray(data.interviewConversation) ? data.interviewConversation : null)
         setSpeechRegions(
           Array.isArray(data.speechRegions)
             ? data.speechRegions.filter(
@@ -1220,9 +1232,9 @@ export function SessionReplay({
         <CardContent className="py-16 text-center">
           <AlertCircle className="mx-auto mb-3 h-10 w-10 text-destructive" />
           <p className="text-sm text-destructive">{error}</p>
-          <Link to="/elevate">
+          <Link to={backPath}>
             <Button variant="outline" size="sm" className="mt-4">
-              Back to Elevate
+              Back to {backLabel}
             </Button>
           </Link>
         </CardContent>
@@ -1240,9 +1252,9 @@ export function SessionReplay({
             This session was recorded before per-turn playback was enabled, or no
             turns were captured. New sessions will have full playback.
           </p>
-          <Link to="/elevate">
+          <Link to={backPath}>
             <Button variant="outline" size="sm" className="mt-4">
-              Back to Elevate
+              Back to {backLabel}
             </Button>
           </Link>
         </CardContent>
@@ -1257,10 +1269,10 @@ export function SessionReplay({
         {!embedded && (
           <>
             <Link
-              to="/elevate"
+              to={backPath}
               className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
             >
-              <ArrowLeft className="h-3.5 w-3.5" /> Elevate
+              <ArrowLeft className="h-3.5 w-3.5" /> {backLabel}
             </Link>
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Playback
@@ -1269,7 +1281,7 @@ export function SessionReplay({
               <h1 className="text-2xl font-bold">{sessionTitle(sessionInfo)}</h1>
               {sessionInfo?.module && (
                 <Badge variant="secondary" className="capitalize">
-                  {MODULE_LABELS[(sessionInfo.module || '').toLowerCase()] || sessionInfo.module}
+                  {isInterview ? 'Interviews' : MODULE_LABELS[(sessionInfo.module || '').toLowerCase()] || sessionInfo.module}
                 </Badge>
               )}
             </div>
@@ -1282,8 +1294,8 @@ export function SessionReplay({
           {sessionInfo?.focusArea && (
             <span className="capitalize">Focus: {sessionInfo.focusArea.replace(/_/g, ' ')}</span>
           )}
-          <span>{turns.length} turns</span>
-          <span>{userTurnCount} of yours</span>
+          <span>{interviewMessages?.length ?? turns.length} {interviewMessages ? 'messages' : 'turns'}</span>
+          <span>{interviewMessages ? interviewMessages.filter(m => m.role === 'user').length : userTurnCount} {interviewMessages ? 'answers' : 'of yours'}</span>
           {!audioAvailable && <span className="text-amber-600">Transcript-only (no audio)</span>}
           {audioAvailable && !hasTimings && (
             <span className="text-amber-600">Audio available · per-turn seek limited</span>
@@ -1317,7 +1329,7 @@ export function SessionReplay({
                 onClick={() => !disabled && setRoleFilter(r)}
                 disabled={disabled}
                 title={
-                  disabled ? 'Coach turns are hidden while a quality filter is active' : undefined
+                  disabled ? `${assistantLabel} turns are hidden while a quality filter is active` : undefined
                 }
                 className={`rounded px-3 py-1 text-xs font-medium capitalize transition-colors ${
                   roleFilter === r
@@ -1325,7 +1337,7 @@ export function SessionReplay({
                     : 'text-muted-foreground hover:text-foreground'
                 } ${disabled ? 'cursor-not-allowed opacity-40' : ''}`}
               >
-                {r === 'assistant' ? 'Coach' : r === 'user' ? 'You' : 'All'}
+                {r === 'assistant' ? assistantLabel : r === 'user' ? 'You' : 'All'}
               </button>
             )
           })}
@@ -1351,7 +1363,7 @@ export function SessionReplay({
         {/* Ask AI Coach — conversational Q&A over this session.
             Renders the inert "Pro" placeholder until an admin enables the
             `session_chat` flag, then becomes interactive (see SessionChat). */}
-        {sessionId && !sessionChatDisabled ? (
+        {sessionId && !sessionChatDisabled && !isInterview ? (
           <SessionChat module="elevate" sessionId={sessionId} />
         ) : null}
       </div>
@@ -1433,7 +1445,9 @@ export function SessionReplay({
       )}
 
       {/* Transcript */}
-      <div className="space-y-3">
+      {isInterview && interviewMessages && !transcriptHidden && effectiveChips.size === 0 ? (
+        <ConversationPanel stitchAdjacentUserMessages={false} messages={interviewMessages.filter(m => roleFilter === 'all' || m.role === roleFilter)} />
+      ) : <div className="space-y-3">
         {visibleTurns.length === 0 && (
           <Card>
             <CardContent className="py-10 text-center text-sm text-muted-foreground">
@@ -1450,6 +1464,7 @@ export function SessionReplay({
             currentTime={currentTime}
             audioAvailable={audioAvailable}
             transcriptHidden={transcriptHidden}
+            assistantLabel={assistantLabel}
             onPlayFrom={playFrom}
             suggestion={suggestions[turn.id]}
             registerRef={(el) => {
@@ -1457,7 +1472,7 @@ export function SessionReplay({
             }}
           />
         ))}
-      </div>
+      </div>}
 
       {/* Sticky transport */}
       {audioAvailable && (
@@ -1485,7 +1500,7 @@ export function SessionReplay({
               disabled={!audioUrl || roleFilter === 'assistant'}
               title={
                 roleFilter === 'assistant'
-                  ? "Coach turns have no audio on this track — switch to All or You to play"
+                  ? `${assistantLabel} turns have no audio on this track — switch to All or You to play`
                   : undefined
               }
               className="h-10 w-10 shrink-0 rounded-full"
@@ -1501,7 +1516,7 @@ export function SessionReplay({
 
             <button
               onClick={() => setSkipGaps((v) => !v)}
-              title="Skip the blank stretches where the coach is replying"
+              title={`Skip the blank stretches where the ${assistantLabel.toLowerCase()} is replying`}
               className={`inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium transition-colors ${
                 skipGaps
                   ? 'border-primary bg-primary/10 text-primary'
@@ -1848,6 +1863,7 @@ function TurnBubble({
   onPlayFrom,
   suggestion,
   registerRef,
+  assistantLabel = 'Coach',
 }: {
   turn: ReplayTurn
   presentation?: TurnPresentation
@@ -1858,6 +1874,7 @@ function TurnBubble({
   onPlayFrom: (t: number) => void
   suggestion?: TurnSuggestion
   registerRef: (el: HTMLDivElement | null) => void
+  assistantLabel?: string
 }) {
   const isUser = turn.role === 'user'
   const m = turn.metrics
@@ -1943,7 +1960,7 @@ function TurnBubble({
         </div>
 
         {!isUser && (
-          <span className="mt-1 px-1 text-[10px] text-muted-foreground">Coach</span>
+          <span className="mt-1 px-1 text-[10px] text-muted-foreground">{assistantLabel}</span>
         )}
 
         {isUser && suggestion ? (

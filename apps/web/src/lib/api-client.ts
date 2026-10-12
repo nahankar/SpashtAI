@@ -47,6 +47,16 @@ interface RequestOptions extends RequestInit {
   skipAuth?: boolean
 }
 
+export class ApiError extends Error {
+  status: number
+  code?: string
+  constructor(message: string, status: number, code?: string) {
+    super(message)
+    this.status = status
+    this.code = code
+  }
+}
+
 export async function apiClient<T = unknown>(
   path: string,
   options: RequestOptions = {}
@@ -83,8 +93,9 @@ export async function apiClient<T = unknown>(
     const body = (await response.json().catch(() => ({}))) as {
       message?: string
       error?: string
+      code?: string
     }
-    throw new Error(body.message || body.error || `Request failed: ${response.status}`)
+    throw new ApiError(body.message || body.error || `Request failed: ${response.status}`, response.status, body.code)
   }
 
   // 204 carries no body; calling .json() on it throws.

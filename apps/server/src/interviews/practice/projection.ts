@@ -1,6 +1,25 @@
 import type { Prisma } from '@prisma/client'
 import { questionSnapshotSchema } from '../evaluator/contracts'
 
+/** Read-only presentation for playback, including sessions ended before this
+ * view existed. Raw chunks/turns stay intact for recording alignment. */
+export async function readInterviewPlaybackConversation(tx: Pick<Prisma.TransactionClient, 'interviewAttempt'>, runId: string) {
+    const attempts = await tx.interviewAttempt.findMany({ where: { runId }, orderBy: { index: 'asc' },
+      include: { chunks: { include: { segment: { select: { segmentIndex: true } } } },
+        answerSnapshots: { orderBy: { textRevision: 'desc' }, take: 1, select: { answerText: true } } } })
+    return attempts.flatMap(attempt => {
+      if (!attempt.askedAt) return []
+      const chunks = attempt.chunks.sort((a,b) => a.segment.segmentIndex-b.segment.segmentIndex || a.localTurnIndex-b.localTurnIndex)
+      const answer = attempt.answerSnapshots[0]?.answerText ?? chunks.map(c => c.text).join(' ')
+      const questionTime = attempt.askedAt.toISOString()
+      return [
+        { id: `interview_question_${attempt.id}`, role: 'assistant', content: questionSnapshotSchema.parse(attempt.questionSnapshot).questionText, timestamp: questionTime },
+        ...(answer.trim() ? [{ id: `interview_answer_${attempt.id}`, role: 'user', content: answer.replace(/\s+/g, ' ').trim(),
+          timestamp: chunks[0]?.createdAt.toISOString() ?? questionTime }] : []),
+      ]
+    })
+}
+
 /** Derived replay data. Immutable answer chunks remain authoritative. Caller holds the Session lock. */
 export async function projectInterviewTranscript(tx: Prisma.TransactionClient, runId: string, sessionId: string) {
     const attempts = await tx.interviewAttempt.findMany({ where: { runId }, orderBy: { index: 'asc' },

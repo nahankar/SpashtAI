@@ -102,7 +102,7 @@ interface ChatGroup {
   count: number
 }
 
-function groupConsecutive(messages: ChatMessage[]): ChatGroup[] {
+function groupConsecutive(messages: ChatMessage[], stitchAdjacentUserMessages: boolean): ChatGroup[] {
   const groups: ChatGroup[] = []
 
   for (let i = 0; i < messages.length; i++) {
@@ -114,6 +114,7 @@ function groupConsecutive(messages: ChatMessage[]): ChatGroup[] {
     const last = groups[groups.length - 1]
     const sameStream = last && last.role === m.role && m.id && last.id === m.id
     const userTimeStitch =
+      stitchAdjacentUserMessages &&
       last &&
       last.role === 'user' &&
       m.role === 'user' &&
@@ -152,6 +153,7 @@ export function ConversationPanel({
   transcriptHidden = false,
   collapsible = false,
   defaultCollapsed = false,
+  stitchAdjacentUserMessages = true,
 }: {
   messages: ChatMessage[]
   turnMetricsByIndex?: Record<number, TurnMetrics>
@@ -164,6 +166,8 @@ export function ConversationPanel({
   transcriptHidden?: boolean
   collapsible?: boolean
   defaultCollapsed?: boolean
+  /** Disable when inputs already represent complete answers to separate questions. */
+  stitchAdjacentUserMessages?: boolean
 }) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [collapsed, setCollapsed] = useState(collapsible && defaultCollapsed)
@@ -200,8 +204,8 @@ export function ConversationPanel({
         return dt !== 0 ? dt : a.i - b.i
       })
       .map((x) => x.m)
-    return groupConsecutive(ordered)
-  }, [messages])
+    return groupConsecutive(ordered, stitchAdjacentUserMessages)
+  }, [messages, stitchAdjacentUserMessages])
   const userTurnCount = useMemo(() => groups.filter((g) => g.role === 'user').length, [groups])
 
   // Auto-scroll to bottom when new messages arrive

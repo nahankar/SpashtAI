@@ -182,7 +182,7 @@ export function Interviews() {
           changed={refreshDetail} preparing={()=>live.setAssistantState('unknown')} pause={()=>controller.pause(recorderRef.current)}
           leave={leave} incomplete={leave} reconnect={reconnect} discard={()=>controller.discard(recorderRef.current,adapter)} />} />}
       {!live.token && !detail.endedAt && <div className="rounded-xl border p-5 space-y-3"><p>Your interview is paused. Confirmed answers are saved.</p><div className="flex gap-2"><Button disabled={!options || live.isResuming || loading} onClick={()=>void resume()}>{live.isResuming?'Reconnecting…':'Resume practice'}</Button><Button variant="outline" disabled={live.isLeaving} onClick={()=>void leave()}>End practice</Button></div></div>}
-      {conversation.length>0 && <ConversationPanel messages={conversation} />}
+      {conversation.length>0 && <ConversationPanel messages={conversation} stitchAdjacentUserMessages={false} />}
       {!live.token && detail.attempts.some(a=>['SKIPPED','INCOMPLETE'].includes(a.status)) && <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">{detail.attempts.filter(a=>['SKIPPED','INCOMPLETE'].includes(a.status)).map(a=><span key={a.id} className="rounded-md border px-3 py-1">Question {a.index}: {a.status==='INCOMPLETE'?'Incomplete':'Skipped'}</span>)}</div>}
       {detail.endedAt && <Link className="text-sm underline" to={`/interviews/playback/${encodeURIComponent(detail.sessionId)}`}>Review answer recordings and communication feedback</Link>}
     </section>}

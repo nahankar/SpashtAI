@@ -1,4 +1,4 @@
-import { apiClient } from './api-client'
+import { ApiError, apiClient } from './api-client'
 export const INTERVIEWS_API = '/api/interviews'
 export type InterviewSetup = { track: string; experienceBand: string; startingDifficulty: string; durationMinutes: number; recordingConsent: true }
 export type InterviewAttempt = {
@@ -29,6 +29,11 @@ export function captureFailure(code?: string) {
   return code === 'TRANSCRIPT_PENDING'
     ? 'Your final speech is still being transcribed. Your microphone is muted; retry saving in a moment.'
     : 'Your speech could not be confirmed as saved. Your microphone is muted; retry before continuing.'
+}
+export function interviewCompletionMessage(error: unknown): string | null {
+  return error instanceof ApiError && error.status === 409 &&
+    ['QUESTION_BANK_EXHAUSTED', 'PRACTICE_DURATION_REACHED', 'PRACTICE_QUESTION_LIMIT'].includes(error.code ?? '')
+    ? error.message : null
 }
 export async function confirmedInterviewDrain(port: {
   seal(): Promise<void>; mute(): Promise<void>;

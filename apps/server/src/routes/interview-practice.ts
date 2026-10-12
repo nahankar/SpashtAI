@@ -14,7 +14,7 @@ const empty = z.object({}).strict()
 const finish = z.object({ skip: z.boolean().default(false), receiptId: z.string().uuid() }).strict()
 function errors(error: unknown, req: Request, res: Response, _next: NextFunction) {
   if (error instanceof BankError || error instanceof SessionDiscardedError || error instanceof SessionMissingError) {
-    res.status(error.status).json({ error: error.message }); return
+    res.status(error.status).json({ error: error.message, ...(error instanceof BankError && error.code ? { code: error.code } : {}) }); return
   }
   if (error instanceof z.ZodError) { res.status(400).json({ error: 'Invalid interview practice request' }); return }
   reqLog(req).error({ event: 'interviews.capture_request_failed', errorType: error instanceof Error ? error.name : 'unknown' }, 'Interview capture request failed')

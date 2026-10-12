@@ -2,7 +2,7 @@ import { createHash } from 'crypto'
 
 export const CSV_LIMITS = { bytes: 5 * 1024 * 1024, rows: 10000, columns: 40, cellChars: 20000 } as const
 export class BankError extends Error {
-  constructor(public status: number, message: string) { super(message) }
+  constructor(public status: number, message: string, public code?: string) { super(message) }
 }
 /** Bounded RFC 4180 reader. No spreadsheet/formula evaluation, external resources or uploads on disk. */
 export function parseCsv(buffer: Buffer) {

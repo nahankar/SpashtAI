@@ -26,11 +26,13 @@ import { resolveLivekitAccess } from '../src/lib/livekitAccess'
 import { invalidateFeatureFlagCache } from '../src/lib/featureFlags'
 import sessionChatRouter from '../src/routes/session-chat'
 import { retainSession } from '../src/routes/sessions'
+import { getSessionTurns } from '../src/routes/turns'
 
 const app = express(); app.use(express.json()); app.use('/practice', practiceRouter); app.use('/agent', practiceAgentRouter)
 app.use('/chat',requireAuth,sessionChatRouter)
 app.put('/retain/:id', requireAuth, retainSession)
 app.use(guardInterviewSession)
+app.get('/sessions/:sessionId/turns', requireAuth, getSessionTurns)
 app.get('/sessions/:id', requireAuth, requireSessionFeature(), (_req,res)=>res.json({ok:true}))
 app.post('/sessions/:sessionId/segments', requireAuth, (_req,res)=>res.json({ok:true}))
 const token = (id: string, role = 'USER') => signToken({ userId: id, role, email: `${fixture}@example.invalid` })
@@ -200,6 +202,24 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
     await expect(prisma.interviewAnswerSnapshot.update({ where: { id: snapshot.id }, data: { answerText: 'rewrite' } })).rejects.toThrow()
     await expect(captureCommittedTurn(a.id, turn(resumed.id, 'late', 1))).rejects.toMatchObject({ status: 409 })
     expect((await captureCommittedTurn(a.id, turn(s.id, 'First part.'))).reused).toBe(true)
+    await endPractice(r.id, owner)
+    const playback = await request(app).get(`/sessions/${r.sessionId}/turns`).auth(token(owner), { type: 'bearer' })
+    expect(playback.status).toBe(200)
+    expect(playback.body.session.purpose).toBe('INTERVIEW')
+    expect(playback.body.interviewConversation.map((m: { content: string }) => m.content))
+      .toEqual([a.question.text, 'First part. Second part. After reconnect.'])
+    // Grouping is a read-only presentation; every original chunk remains.
+    expect(playback.body.turns.filter((t: { role: string }) => t.role === 'user')).toHaveLength(3)
+    expect(JSON.stringify(playback.body.interviewConversation)).not.toMatch(/privateRubric|goodAnswerPoints|misconceptions/)
+    expect((await request(app).get(`/sessions/${r.sessionId}/turns`).auth(token(other, 'SUPER_ADMIN'), { type: 'bearer' })).status).toBe(404)
+    await prisma.user.update({ where: { id: owner }, data: { hideTranscriptText: true } })
+    try {
+      const hidden = await request(app).get(`/sessions/${r.sessionId}/turns`).auth(token(owner), { type: 'bearer' })
+      expect(hidden.status).toBe(200)
+      expect(hidden.body.interviewConversation.every((m: { content: string }) => m.content === '')).toBe(true)
+    } finally {
+      await prisma.user.update({ where: { id: owner }, data: { hideTranscriptText: false } })
+    }
   })
   it('rejects cross-user reads/finish and unrelated or closed segment speech', async () => {
     const { r, a, s } = await asked()
@@ -313,7 +333,24 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
     expect((await prepareBankAttempt(r.id, owner)).id).toBe(a.id)
     await captureCommittedTurn(a.id, turn(s.id, 'Finish this answer'))
     await finish(r.id, a.id)
-    await expect(prepareBankAttempt(r.id, owner)).rejects.toMatchObject({ status: 409 })
+    await expect(prepareBankAttempt(r.id, owner)).rejects.toMatchObject({ status: 409, code: 'PRACTICE_DURATION_REACHED' })
+  })
+  it('reports exhausted bank coverage as normal completion without losing completed answers', async () => {
+    const { r, a, s } = await asked()
+    await captureCommittedTurn(a.id, turn(s.id, 'First answer.'))
+    await finish(r.id, a.id)
+    const second = await prepareBankAttempt(r.id, owner)
+    await markQuestionAsked(second.id, { segmentId: s.id, questionText: second.question.text })
+    await captureCommittedTurn(second.id, turn(s.id, 'Second answer.', 1))
+    const ack = await receipt(second.id, s.id)
+    await finishAnswer(r.id, second.id, owner, false, ack.id)
+    const response = await request(app).post(`/practice/runs/${r.id}/next`).auth(token(owner), { type: 'bearer' }).send({})
+    expect(response.status).toBe(409)
+    expect(response.body.code).toBe('QUESTION_BANK_EXHAUSTED')
+    expect((await practiceDetail(r.id, owner)).attempts.map(attempt => attempt.status)).toEqual(['ANSWERED', 'ANSWERED'])
+    // End closes a completed interview, rather than marking an answer incomplete.
+    await endPractice(r.id, owner)
+    expect((await practiceDetail(r.id, owner)).attempts.map(attempt => attempt.status)).toEqual(['ANSWERED', 'ANSWERED'])
   })
   it('fences legacy session paths and token access; permits owned history after rollout withdrawal', async () => {
     const {r,s}=await asked()
