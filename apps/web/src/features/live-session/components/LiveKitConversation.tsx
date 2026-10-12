@@ -180,12 +180,14 @@ export function LiveKitConversation({
               else if (stateText.includes('recovering')) state = 'recovering'
               else if (stateText.includes('restart')) state = 'restarting'
 
-              if (lastControlStateRef.current !== state) {
-                lastControlStateRef.current = state
-                onStateChange(state)
-                if (state === 'restarting') {
-                  onRestart()
-                }
+              const changed = lastControlStateRef.current !== state
+              lastControlStateRef.current = state
+              // The owner can enter a waiting state between questions without
+              // an agent state transition. Every ready acknowledgment must
+              // restore that state, even when the last agent event was ready.
+              if (changed || state === 'ready') onStateChange(state)
+              if (changed && state === 'restarting') {
+                onRestart()
               }
             }
           } catch (error) {
