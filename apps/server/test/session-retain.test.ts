@@ -30,7 +30,7 @@ describe('retain an in-progress session', () => {
     vi.clearAllMocks()
     mocks.prisma.$transaction.mockImplementation(async (fn) => fn(mocks.tx))
     mocks.tx.$queryRaw.mockResolvedValue([{ discardedAt: null }])
-    mocks.tx.session.findUnique.mockResolvedValue({ userId: 'u1', endedAt: null })
+    mocks.tx.session.findUnique.mockResolvedValue({ userId: 'u1', endedAt: null, purpose: 'COMMUNICATION' })
     mocks.tx.session.findMany.mockResolvedValue([])
     mocks.tx.session.update.mockImplementation(async ({ data }) => ({ id: 's1', retainedAt: data.retainedAt }))
   })
@@ -47,17 +47,22 @@ describe('retain an in-progress session', () => {
     const res = response()
     await retainSession(request({ retain: true }), res)
     expect(mocks.tx.session.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { userId: 'u1', retainedAt: { not: null }, id: { not: 's1' }, preparationPractice: { is: null } },
+      where: { userId: 'u1', retainedAt: { not: null }, id: { not: 's1' }, purpose: 'COMMUNICATION', preparationPractice: { is: null } },
     }))
     expect(mocks.tx.session.updateMany).toHaveBeenCalledWith({ where: { id: { in: ['old'] } }, data: { retainedAt: null } })
     expect(mocks.tx.session.update.mock.calls[0][0].data.retainedAt).toBeInstanceOf(Date)
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 's1', releasedSessionIds: ['old'] }))
   })
 
-  it('keeps interview practice retain separate from Elevate retain', async () => {
+  it('keeps Prepare-linked practice retain separate from standalone retain', async () => {
     mocks.tx.session.findUnique.mockResolvedValue({ userId: 'u1', endedAt: null, preparationPractice: { id: 'p1' } })
     await retainSession(request({ retain: true }), response())
     expect(mocks.tx.session.findMany.mock.calls[0][0].where.preparationPractice).toEqual({ isNot: null })
+  })
+  it('keeps standalone Interviews retain separate from Elevate and Prepare', async () => {
+    mocks.tx.session.findUnique.mockResolvedValue({ userId: 'u1', endedAt: null, purpose: 'INTERVIEW', preparationPractice: null })
+    await retainSession(request({ retain: true }), response())
+    expect(mocks.tx.session.findMany.mock.calls[0][0].where).toMatchObject({ purpose: 'INTERVIEW', preparationPractice: { is: null } })
   })
 
   it('releases without touching other sessions', async () => {

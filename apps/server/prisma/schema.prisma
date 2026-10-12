@@ -434,8 +434,8 @@ model Session {
   viewCount    Int       @default(0)
   lastViewedAt DateTime?
 
-  // User opt-out from 24h inactivity auto-completion. At most one unfinished
-  // session per user; cleared when the session ends.
+  // User opt-out from 24h inactivity auto-completion. One retained unfinished
+  // session per user/activity bucket (communication, Interviews, Prepare).
   retainedAt   DateTime?
 
   progressPulseStatus String? // 'tracked' | 'skipped' | null (not yet decided)

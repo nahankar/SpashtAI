@@ -57,6 +57,34 @@ describe.skipIf(!testDb.url)('single-copy question bank PostgreSQL workflow', ()
     expect(edits.filter(e => e.status === 'fulfilled')).toHaveLength(1)
     await expect(createQuestion({ namespace, externalQid: (await detail(id)).question.externalQid }, readyDraft(), actor)).rejects.toMatchObject({ status: 409 })
   })
+  it('preserves confirmation and activation on private review-note edits; provenance notes still invalidate them', async () => {
+    const id = await createReady(); await questionAction(id, 1, 'approve_activate', actor)
+    const before = (await detail(id)).question
+    await editQuestion(id, before.revision, { ...readyDraft(), reviewNotes: 'Clarify an internal review task.' }, actor)
+    const saved = (await detail(id)).question
+    expect(saved).toMatchObject({ approved: true, active: true, provenanceNote: before.provenanceNote,
+      provenanceConfirmedAt: before.provenanceConfirmedAt, provenanceConfirmedById: actor, revision: before.revision + 1 })
+    await prisma.questionBankQuestion.update({ where: { id }, data: { reviewNotes: 'Internal follow-up edited directly.' } })
+    expect((await detail(id)).question.provenanceConfirmedAt).toEqual(before.provenanceConfirmedAt)
+    await editQuestion(id, saved.revision, { ...readyDraft(), reviewNotes: 'Internal follow-up edited directly.', generationNotes: 'Changed the stated source of the content.' }, actor)
+    expect((await detail(id)).question).toMatchObject({ approved: false, active: false, provenanceConfirmedAt: null })
+    await confirmProvenance({ confirmed: true, note: provenanceNote, questions: await selection([id]) }, actor)
+    await prisma.questionBankQuestion.update({ where: { id }, data: { generationNotes: 'Another source statement.' } })
+    expect((await detail(id)).question.provenanceConfirmedAt).toBeNull()
+  })
+  it('preserves confirmation and activation when a CSV changes only review notes', async () => {
+    const scope = `${namespace}_editorial_import`
+    const options = importOptionsSchema.parse({ namespace: scope, mode: 'UPDATE_BY_QID', mapping: { externalQid: 'QID', questionText: 'Question', track: 'Track', goodAnswerPoints: 'Points', reviewNotes: 'Notes' } })
+    const file = 'QID,Question,Track,Points,Notes\nNOTE-1,How should tests be isolated?,Automation Testing,Independent state,Initial private note'
+    await csv(file, options)
+    const q = await prisma.questionBankQuestion.findFirstOrThrow({ where: { namespace: scope } })
+    await confirmProvenance({ confirmed: true, note: provenanceNote, questions: [{ id: q.id, revision: 1 }] }, actor)
+    await questionAction(q.id, 1, 'approve_activate', actor)
+    const before = (await detail(q.id)).question
+    await csv(file.replace('Initial private note', 'Updated private note'), options)
+    expect((await detail(q.id)).question).toMatchObject({ approved: true, active: true, reviewNotes: 'Updated private note',
+      provenanceConfirmedAt: before.provenanceConfirmedAt, revision: before.revision + 1 })
+  })
   it('requires confirmation before activation and reads the current activation role rather than the JWT', async () => {
     const id = await createQuestion({ namespace, externalQid: 'PROVENANCE-GATE' }, readyDraft(), actor)
     await expect(questionAction(id, 1, 'approve_activate', actor)).rejects.toMatchObject({ status: 400 })

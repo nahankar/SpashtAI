@@ -135,6 +135,70 @@ checks; this checkpoint does not claim a usable learner voice interview yet.
 
 ## Checkpoint 3.2 — Simple learner launch using the existing voice engine
 
+### Review decisions before voice registration
+
+The independent Opus review identifies four relevant launch conditions. They
+are required before registering either practice router, not optional follow-up
+cleanup after learners have already created interviews.
+
+1. **Finish saving speech before closing its segment.** The voice producer must
+   send committed speech as it arrives, independently of shutdown-time metrics
+   uploads. Normal Pause/Leave/Finish must drain final transcription and the
+   persistence queue and receive an acknowledgement before closing the segment
+   or committing the answer. A fire-and-forget immediate upload alone still
+   has a close-versus-save race. Test pause immediately after speaking, delayed
+   final transcription, failed/retried writes, leave and abrupt disconnection.
+   Keep the current closed-segment rejection until this producer protocol is
+   implemented. Do not add a blanket grace window that permits rewriting a
+   finished answer; if abrupt disconnect requires grace, bind it to a server
+   finalization state and the same unfinished attempt, with a short deadline.
+2. **Separate retention and history.** The standalone Interviews Retain bucket
+   is now implemented using purpose plus absence of a Prepare link. Retaining
+   an interview cannot release a retained communication session; linked
+   Prepare practice remains its own bucket. An owned Interviews history and
+   resume entry must arrive with the first learner launch.
+3. **Audit all session operations by purpose.** Include token, dispatch,
+   segments, recording, metrics/transcripts, analysis, retain, end and discard.
+   Resolve ownership and saved purpose on the server; never accept a feature
+   name from the client. Execution uses the appropriate feature/grant rather
+   than Elevate for an interview. Owned history, ending and secure discard must
+   remain possible when pilot execution access is withdrawn. Preserve internal
+   agent authentication and existing communication/journey behavior.
+4. **Vary selection.** Replace alphabetical ordering with a stable per-run
+   seeded order among equally eligible questions. Prefer questions not asked
+   recently when coverage allows, without excluding the only suitable bank
+   item. This uses question exposure only, never previous answer text, grades
+   or inferred skill as context for a fresh practice. Test stability on retry,
+   variety across runs, sparse coverage and namespace/eligibility filtering.
+
+The same checkpoint must close open attempts as **incomplete**, with a recorded
+reason, when the interview ends or the inactivity worker completes it. Preserve
+committed speech; do not equate abandonment with an explicit skip or invent an
+incorrect/not-answered technical verdict. Add the corresponding state contract
+and migration, covering both PREPARED and ASKED attempts. Existing communication
+analysis may still run separately under the existing purpose policy, which
+excludes interview activity from Pulse and points.
+
+The database intentionally fixes `automation-pilot`, eight questions and the
+attempt-index bound for this pilot. Widening those limits requires an additive
+migration; they are not unrestricted Admin settings.
+
+The smaller review fixes are applied locally in an additive migration: the
+Session ownership trigger runs only for userId/purpose/contextScope/module
+updates, and review-note-only changes preserve content confirmation, approval
+and activation in the editor and importer. Generation/provenance notes remain
+significant because the editor explicitly uses them to record content origin.
+Content/source changes still invalidate confirmation. Previous applied
+migrations were not rewritten. This review does not authorize merge/deploy.
+
+Review-fix verification: 498 server tests and 210 web tests pass, server
+typecheck and the full production build pass. The targeted bank/capture/Retain
+subset passes 42 tests, including real database retention isolation, editorial
+note changes through the editor/importer/direct DB path, and policy-trigger
+scope with ownership rejection. The additive migration passes on the preview,
+isolated test and fresh-install databases. Learner/agent practice routes remain
+unregistered; production and feature flags are unchanged.
+
 - Add a hidden Interview Practice entry with track, experience, starting
   difficulty and duration. Reuse the extracted live-session engine rather
   than duplicating Elevate's room, microphone, reconnect and pause handling.

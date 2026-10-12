@@ -286,7 +286,8 @@ export class RetainConflictError extends Error {
 /**
  * PUT /sessions/:id/retain { retain: boolean }
  * Keeps one unfinished session open past the inactivity sweep. The limit is one
- * per list the user sees: standalone Elevate, and Prepare interview practice.
+ * per list the user sees: standalone Elevate, standalone Interviews, and
+ * Prepare-owned practice.
  * Retaining a session releases the user's other retained session of that kind.
  */
 export async function retainSession(req: Request, res: Response) {
@@ -303,7 +304,7 @@ export async function retainSession(req: Request, res: Response) {
       await lockWritableSession(tx, id)
       const session = await tx.session.findUnique({
         where: { id },
-        select: { userId: true, endedAt: true, preparationPractice: { select: { id: true } } },
+        select: { userId: true, endedAt: true, purpose: true, preparationPractice: { select: { id: true } } },
       })
       if (!session) throw new SessionMissingError()
       if (session.userId !== userId) throw new RetainConflictError('Only the session owner can retain it', 403)
@@ -315,7 +316,9 @@ export async function retainSession(req: Request, res: Response) {
             userId,
             retainedAt: { not: null },
             id: { not: id },
-            preparationPractice: session.preparationPractice ? { isNot: null } : { is: null },
+            ...(session.preparationPractice
+              ? { preparationPractice: { isNot: null } }
+              : { purpose: session.purpose, preparationPractice: { is: null } }),
           },
           select: { id: true },
         })

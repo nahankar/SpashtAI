@@ -5,6 +5,15 @@ import { BankError, parseCsv } from './csv'
 import { importFingerprint, normalizeRows, type ImportOptions } from './import'
 import { learnerActivationBlockers, provenanceSchema, bankActionSchema, bulkSchema, draftSchema, type BankDraft } from './schemas'
 type Tx = Prisma.TransactionClient
+function reviewNoteOnlyChange(question: QuestionBankQuestion, values: Record<string, unknown>): boolean {
+  const changed = Object.entries(values).filter(([key, value]) => JSON.stringify(question[key as keyof QuestionBankQuestion]) !== JSON.stringify(value))
+  // Generation notes describe provenance, unlike private editorial review notes.
+  return changed.length > 0 && changed.every(([key]) => key === 'reviewNotes')
+}
+const resetContentApproval = {
+  approved: false, active: false, approvedAt: null, approvedById: null,
+  provenanceNote: '', provenanceConfirmedAt: null, provenanceConfirmedById: null,
+} as const
 export function draftFromQuestion(question: QuestionBankQuestion): BankDraft {
   return draftSchema.parse(Object.fromEntries(Object.keys(draftSchema.shape).map(key => [key, question[key as keyof QuestionBankQuestion]])))
 }
@@ -34,11 +43,13 @@ export async function detail(id: string) {
   return { question, draft, blockers: learnerActivationBlockers(draft, question.provenanceConfirmedAt) }
 }
 export async function editQuestion(id: string, revision: number, draft: BankDraft, actorId: string) {
+  draft = draftSchema.parse(draft)
   await prisma.$transaction(async tx => {
     await lockQuestion(tx, id)
     const question = await tx.questionBankQuestion.findUniqueOrThrow({ where: { id } })
     if (question.revision !== revision) throw new BankError(409, 'This question changed. Reload before saving.')
-    await tx.questionBankQuestion.update({ where: { id }, data: { ...draft, approved: false, active: false, approvedAt: null, approvedById: null, importHash: null, provenanceNote: '', provenanceConfirmedAt: null, provenanceConfirmedById: null, revision: { increment: 1 } } })
+    const editorialOnly = reviewNoteOnlyChange(question, draft)
+    await tx.questionBankQuestion.update({ where: { id }, data: { ...draft, ...(!editorialOnly ? resetContentApproval : {}), importHash: null, revision: { increment: 1 } } })
     await bankAudit(tx, actorId, 'edit', { questionId: id })
   })
 }
@@ -142,8 +153,9 @@ export async function confirmImport(batchId: string, actorId: string) {
       if (question && Object.entries({ ...draft, ...input.sources }).every(([key,value]) => JSON.stringify(question![key as keyof QuestionBankQuestion]) === JSON.stringify(value))) {
         outcome = 'Unchanged content skipped'
       } else if (question) {
-        await tx.questionBankQuestion.update({ where: { id: question.id }, data: { ...content, approved: false, active: false, approvedAt: null, approvedById: null, provenanceNote: '', provenanceConfirmedAt: null, provenanceConfirmedById: null, revision: { increment: 1 } } })
-        resultQuestionId = question.id; outcome = 'Question updated'
+        const editorialOnly = reviewNoteOnlyChange(question, { ...draft, ...input.sources, sourceQuestionText: input.sourceQuestionText })
+        await tx.questionBankQuestion.update({ where: { id: question.id }, data: { ...content, ...(!editorialOnly ? resetContentApproval : {}), revision: { increment: 1 } } })
+        resultQuestionId = question.id; outcome = editorialOnly ? 'Review notes updated' : 'Question updated'
       } else {
         const created = await tx.questionBankQuestion.create({ data: { ...content, namespace: batch.namespace, externalQid: input.externalQid, createdById: actorId, origin: 'IMPORT' } })
         resultQuestionId = created.id; outcome = 'Question created'

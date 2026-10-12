@@ -20,8 +20,11 @@ import { assessmentDetail, claimAssessment } from '../src/interviews/evaluator/s
 import { isPulseEligible } from '../src/lib/activityPolicy'
 import { practiceAgentRouter, practiceRouter } from '../src/routes/interview-practice'
 import { signToken } from '../src/lib/jwt'
+import { requireAuth } from '../src/middleware/auth'
+import { retainSession } from '../src/routes/sessions'
 
 const app = express(); app.use(express.json()); app.use('/practice', practiceRouter); app.use('/agent', practiceAgentRouter)
+app.put('/retain/:id', requireAuth, retainSession)
 const token = (id: string, role = 'USER') => signToken({ userId: id, role, email: `${fixture}@example.invalid` })
 
 const fixture = `practice_${randomUUID().replaceAll('-', '')}`
@@ -84,6 +87,29 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
     await expect(startPractice({ ...body, track: 'changed' }, owner)).rejects.toMatchObject({ status: 409 })
     await expect(run()).rejects.toMatchObject({ status: 409 })
     await expect(startPractice(body, other)).rejects.toMatchObject({ status: 404 })
+  })
+  it('limits the Session ownership trigger to policy columns and still rejects ownership changes', async () => {
+    const columns = await prisma.$queryRaw<Array<{ name: string }>>`
+      SELECT a.attname AS name FROM pg_trigger t
+      JOIN pg_attribute a ON a.attrelid=t.tgrelid AND a.attnum=ANY(t.tgattr::smallint[])
+      WHERE t.tgname='Session_interview_run_policy' ORDER BY a.attname`
+    expect(columns.map(c => c.name)).toEqual(['contextScope', 'module', 'purpose', 'userId'])
+    const r = await run()
+    await prisma.session.update({ where: { id: r.sessionId }, data: { sessionName: 'Renamed practice', viewCount: 1 } })
+    await expect(prisma.session.update({ where: { id: r.sessionId }, data: { userId: other } })).rejects.toThrow()
+  })
+  it('retains Interviews without releasing the owner’s retained Elevate session', async () => {
+    const r = await run()
+    const communication = await prisma.session.create({ data: { userId: owner, module: 'elevate', purpose: 'COMMUNICATION', retainedAt: new Date() } })
+    const earlierInterview = await prisma.session.create({ data: { userId: owner, module: 'elevate', purpose: 'INTERVIEW', retainedAt: new Date() } })
+    const res = await request(app).put(`/retain/${r.sessionId}`).auth(token(owner), { type: 'bearer' }).send({ retain: true })
+    expect(res.status).toBe(200)
+    expect(res.body.releasedSessionIds).toEqual([earlierInterview.id])
+    expect((await prisma.session.findUniqueOrThrow({ where: { id: communication.id } })).retainedAt).not.toBeNull()
+    expect((await prisma.session.findUniqueOrThrow({ where: { id: r.sessionId } })).retainedAt).not.toBeNull()
+    const back = await request(app).put(`/retain/${communication.id}`).auth(token(owner), { type: 'bearer' }).send({ retain: true })
+    expect(back.status).toBe(200); expect(back.body.releasedSessionIds).toEqual([])
+    expect((await prisma.session.findUniqueOrThrow({ where: { id: r.sessionId } })).retainedAt).not.toBeNull()
   })
   it('separates authenticated learner actions from internal speech/assistance producers', async () => {
     expect((await request(app).post('/practice/runs').send(setup())).status).toBe(401)

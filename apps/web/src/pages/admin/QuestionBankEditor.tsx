@@ -58,7 +58,7 @@ export function QuestionBankEditor() {
   if (id && !data) return <div><Link to="/admin/interview-bank">Back to bank</Link><p role="alert" className="text-destructive mt-4">{error}</p></div>
   return <div className="max-w-4xl space-y-6">
     <Link className="text-sm underline" to="/admin/interview-bank">Back to question bank</Link>
-    <div><h1 className="text-2xl font-semibold">{data ? data.question.externalQid : 'Write an interview question'}</h1><p className="text-muted-foreground mt-2">{data ? bankStatus(data.question) : 'New draft'} · One editable question. Saving changes clears approval and deactivates it.</p></div>
+    <div><h1 className="text-2xl font-semibold">{data ? data.question.externalQid : 'Write an interview question'}</h1><p className="text-muted-foreground mt-2">{data ? bankStatus(data.question) : 'New draft'} · One editable question. Content changes clear approval and deactivate it. Review-note-only edits preserve its status.</p></div>
     {error && <p role="alert" className="text-destructive">{error}</p>}
     <fieldset disabled={busy} className="space-y-6">
       {!id && <div className="grid sm:grid-cols-2 gap-4"><TextField label="Namespace" value={identity.namespace} onChange={namespace => setIdentity(i => ({ ...i, namespace }))} /><TextField label="QID" value={identity.externalQid} onChange={externalQid => setIdentity(i => ({ ...i, externalQid }))} /></div>}
