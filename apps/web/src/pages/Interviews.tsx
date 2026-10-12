@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -11,6 +11,8 @@ import { liveSessionApi } from '@/features/live-session/browser'
 import { interviewsAdapter } from '@/features/live-session/adapters/interviews'
 import { LiveSessionRoom } from '@/features/live-session/components/LiveSessionRoom'
 import type { ChatMessage } from '@/features/live-session/types'
+import { ConversationPanel } from '@/features/live-session/components/ConversationPanel'
+import { interviewConversation } from '@/lib/interview-conversation'
 import { InterviewControls } from '@/features/interviews/InterviewControls'
 
 const difficulties=['Simple','Medium','Complex','Very Complex']
@@ -99,6 +101,9 @@ export function Interviews() {
     return ()=>clearInterval(timer)
   },[selected,live.token])
   const current=detail?.attempts.at(-1)
+  const conversationJson=JSON.stringify(detail ? interviewConversation(detail.attempts,messages,detail.startedAt) : [])
+  // Keep the shared panel stable when polling returns identical saved speech.
+  const conversation=useMemo(()=>JSON.parse(conversationJson) as ChatMessage[],[conversationJson])
   async function start() {
     if (!consent) return
     setError(''); setMessages([])
@@ -120,6 +125,16 @@ export function Interviews() {
     if (!detail) return
     setError('')
     try { await controller.resume(detail.sessionId,undefined,true) } catch (e) { setError(e instanceof Error ? e.message : 'Could not reconnect') }
+  }
+  async function reconnect() {
+    if (!detail) return
+    setError('')
+    try {
+      const binding=controller.getSnapshot()
+      if (binding.token) await controller.onDisconnected(recorderRef.current,{sessionId:binding.sessionId,segmentId:binding.segmentId})
+      await controller.resume(detail.sessionId,undefined,true)
+      await refreshDetail()
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not reconnect the interviewer') }
   }
   const coverage=options?.coverage ?? []
   const tracks=[...new Set(coverage.map(c=>c.track))].sort()
@@ -165,10 +180,10 @@ export function Interviews() {
         controls={<InterviewControls runId={detail.id} attemptId={current.id} segmentId={live.segmentId!} status={current.status}
           ready={live.assistantState==='ready'} blocked={live.isPausing || live.isLeaving || !!live.pauseAudioFailure} recorder={()=>recorderRef.current}
           changed={refreshDetail} preparing={()=>live.setAssistantState('unknown')} pause={()=>controller.pause(recorderRef.current)}
-          leave={leave} incomplete={leave} discard={()=>controller.discard(recorderRef.current,adapter)} />} />}
+          leave={leave} incomplete={leave} reconnect={reconnect} discard={()=>controller.discard(recorderRef.current,adapter)} />} />}
       {!live.token && !detail.endedAt && <div className="rounded-xl border p-5 space-y-3"><p>Your interview is paused. Confirmed answers are saved.</p><div className="flex gap-2"><Button disabled={!options || live.isResuming || loading} onClick={()=>void resume()}>{live.isResuming?'Reconnecting…':'Resume practice'}</Button><Button variant="outline" disabled={live.isLeaving} onClick={()=>void leave()}>End practice</Button></div></div>}
-      {live.token && messages.length>0 && <div className="max-h-72 overflow-auto rounded-xl border p-4 space-y-3" aria-label="Live interview transcript">{messages.map((m,i)=><div key={m.id ?? i}><p className="text-xs font-medium text-muted-foreground">{m.role==='user'?'You':'Interviewer'}</p><p className="whitespace-pre-wrap text-sm">{m.content}</p></div>)}</div>}
-      {!live.token && <div className="space-y-3">{detail.attempts.map(a=><article key={a.id} className="rounded-xl border p-4 space-y-2"><p className="text-xs text-muted-foreground">Question {a.index} · {a.status==='INCOMPLETE'?'Incomplete':a.status==='ANSWERED'?'Answer saved':a.status==='SKIPPED'?'Skipped':'In progress'}</p><h3 className="font-medium">{a.question.text}</h3><p className="whitespace-pre-wrap text-sm">{(a.answer?.answerText ?? a.capturedText) || 'No confirmed speech yet.'}</p></article>)}</div>}
+      {conversation.length>0 && <ConversationPanel messages={conversation} />}
+      {!live.token && detail.attempts.some(a=>['SKIPPED','INCOMPLETE'].includes(a.status)) && <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">{detail.attempts.filter(a=>['SKIPPED','INCOMPLETE'].includes(a.status)).map(a=><span key={a.id} className="rounded-md border px-3 py-1">Question {a.index}: {a.status==='INCOMPLETE'?'Incomplete':'Skipped'}</span>)}</div>}
       {detail.endedAt && <Link className="text-sm underline" to={`/interviews/playback/${encodeURIComponent(detail.sessionId)}`}>Review answer recordings and communication feedback</Link>}
     </section>}
     {!selected && <section className="space-y-3"><h2 className="text-xl font-semibold">Your interview history</h2><p className="text-sm text-muted-foreground">Unfinished practice closes after 24 hours without activity. Retain one interview to keep it open.</p>

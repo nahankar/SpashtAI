@@ -3,14 +3,15 @@ import { useRoomContext } from '@livekit/components-react'
 import { ParticipantEvent, RoomEvent, Track } from 'livekit-client'
 import { Button } from '@/components/ui/button'
 import { apiClient } from '@/lib/api-client'
-import { confirmedInterviewDrain, INTERVIEWS_API, interviewWrite, type CaptureAction, type CaptureReceipt } from '@/lib/interview-practice'
+import { captureFailure, confirmedInterviewDrain, INTERVIEWS_API, interviewWrite, type CaptureAction, type CaptureReceipt } from '@/lib/interview-practice'
 import type { SessionRecorderHandle } from '@/components/session/SessionRecorder'
 
 export function InterviewControls({ runId, attemptId, segmentId, status, ready, blocked, recorder, changed, preparing,
-  pause, leave, incomplete, discard }: {
+  pause, leave, incomplete, discard, reconnect }: {
   runId: string; attemptId: string; segmentId: string; status: string; ready: boolean; blocked: boolean;
   recorder: () => SessionRecorderHandle|null; changed: () => Promise<void>; preparing: () => void;
   pause: () => Promise<void>; leave: () => Promise<void>; incomplete: () => Promise<void>; discard: () => Promise<void>;
+  reconnect: () => Promise<void>;
 }) {
   const room = useRoomContext()
   const [busy,setBusy]=useState(false); const [error,setError]=useState(''); const [muted,setMuted]=useState(true)
@@ -53,6 +54,7 @@ export function InterviewControls({ runId, attemptId, segmentId, status, ready, 
         if (data.type==='session_state' && data.text==='ready') setQuestionReady(true)
         if (data.type==='interview_time_up') setTimeUp(true)
         if (data.type==='interview_error') setError('Interview speech capture is unavailable. Retry saving or end with an incomplete answer.')
+        if (data.type==='interview_voice_closed') { setQuestionReady(false); setError(captureFailure('VOICE_DISCONNECTED')) }
       } catch { /* unrelated control message */ }
     }
     room.on(RoomEvent.DataReceived,control)
@@ -112,12 +114,12 @@ export function InterviewControls({ runId, attemptId, segmentId, status, ready, 
       await changed()
       const result=JSON.parse(await room.localParticipant.performRpc({ destinationIdentity:interviewer().identity,
         method:'interview.control',payload:JSON.stringify({action:'NEXT',requestId:crypto.randomUUID()}),responseTimeout:15_000 }))
-      if (result.error) throw new Error('The next question could not be started. Reconnect to retry.')
+      if (result.error) throw new Error(result.error==='VOICE_DISCONNECTED' ? captureFailure(result.error) : 'The next question could not be read. Retry the question or reconnect the interviewer.')
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not start the next question.') }
     finally { running.current=false; setBusy(false) }
   }
   return <div className="space-y-3 py-3">
-    <p className="text-sm text-muted-foreground">{busy ? 'Saving and confirming your speech…' : timeUp ? 'Practice time is up. Finish your current answer or end practice.' : status==='ASKED' ? 'Take your time. Choose Finish answer when you are done; thinking pauses are welcome.' : 'Your answer is saved. Continue with another question or end practice.'}</p>
+    <p className="text-sm text-muted-foreground">{busy ? 'Saving and confirming your speech…' : timeUp ? 'Practice time is up. Finish your current answer or end practice.' : status==='ASKED' ? 'Take your time. Choose Finish answer when you are done; thinking pauses are welcome.' : status==='PREPARED' ? 'Waiting for the interviewer to read your next question.' : 'Your answer is saved. Continue with another question or end practice.'}</p>
     <div className="flex flex-wrap gap-2">
       {status==='ASKED' && <><Button disabled={!canSpeak || busy || blocked || !!error} onClick={() => void action('FINISH')}>Finish answer</Button>
         <Button variant="outline" disabled={!canSpeak || busy || blocked || !!error} onClick={() => void action('SKIP')}>Skip question</Button></>}
@@ -130,6 +132,7 @@ export function InterviewControls({ runId, attemptId, segmentId, status, ready, 
     {error && <div role="alert" className="rounded-lg border border-amber-400/40 p-3 space-y-3"><p>{error}</p>
       <div className="flex gap-2">{pending.current && <Button disabled={busy} onClick={() => void action(pending.current!.action)}>Retry saving speech</Button>}
         {!pending.current && ['PREPARED','ASKED'].includes(status) && <Button disabled={busy || blocked} onClick={() => void next()}>Retry question</Button>}
+        {!pending.current && <Button variant="outline" disabled={busy || blocked} onClick={() => void reconnect()}>Reconnect interviewer</Button>}
         {pending.current?.action==='FINISH' && <Button variant="outline" disabled={busy || blocked} onClick={() => void action('SKIP')}>Skip this question</Button>}
         <Button variant="outline" disabled={busy} onClick={() => setConfirmIncomplete(true)}>End with incomplete answer</Button></div></div>}
     {!canSpeak && !error && <Button variant="ghost" disabled={busy} onClick={() => setConfirmIncomplete(true)}>End without waiting</Button>}

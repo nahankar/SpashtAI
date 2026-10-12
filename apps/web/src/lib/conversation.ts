@@ -7,3 +7,7 @@
  */
 export const USER_BUBBLE = 'bg-blue-600 text-white'
 export const COACH_BUBBLE = 'border bg-muted text-foreground'
+
+export function normalizeTurnText(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().toLowerCase()
+}

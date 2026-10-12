@@ -263,7 +263,7 @@ function Navbar() {
     className,
     onClick,
   }: {
-    feature: 'elevate' | 'replay' | 'prepare'
+    feature: 'elevate' | 'replay' | 'prepare' | 'interviews'
     to: string
     label: string
     className?: string

@@ -63,7 +63,8 @@ class InterviewCapture:
             item = self.pending[0]
             try:
                 await self.send(f"/attempts/{item['attemptId']}/chunks", item["body"])
-                await self.publish("user", item["body"]["text"], item["body"]["sourceTurnId"])
+                await self.publish("user", item["body"]["text"],
+                    f"answer_{item['attemptId']}::{item['body']['segmentId']}::{item['body']['sourceTurnId']}")
             except Exception:
                 self.error = "SAVE_FAILED"
                 return

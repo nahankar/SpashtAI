@@ -5,6 +5,8 @@ export type InterviewAttempt = {
   id: string; index: number; status: 'PREPARED'|'ASKED'|'ANSWERED'|'SKIPPED'|'INCOMPLETE'; assistance: string;
   question: { text: string; track: string; topic: string; difficulty: string; expectedDepth: string };
   capturedText: string; completionReason: string|null;
+  askedAt?: string|null;
+  capturedParts?: Array<{ segmentId: string; sourceTurnId: string; text: string; createdAt: string }>;
   answer: { answerText: string; textSource: string; textRevision: number; assistance: string }|null;
 }
 export type InterviewRun = {
@@ -23,6 +25,7 @@ export function interviewWrite<T>(path: string, body: unknown = {}, method = 'PO
   return apiClient<T>(`${INTERVIEWS_API}${path}`, { method, body: JSON.stringify(body) })
 }
 export function captureFailure(code?: string) {
+  if (code === 'VOICE_DISCONNECTED') return 'The interviewer disconnected. Your saved answers are safe. Reconnect the interviewer to continue.'
   return code === 'TRANSCRIPT_PENDING'
     ? 'Your final speech is still being transcribed. Your microphone is muted; retry saving in a moment.'
     : 'Your speech could not be confirmed as saved. Your microphone is muted; retry before continuing.'

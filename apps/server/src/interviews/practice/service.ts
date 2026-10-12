@@ -42,9 +42,9 @@ async function activeSegment(tx: Tx, sessionId: string, segmentId: string, drain
     throw new BankError(409, 'The speech segment is no longer accepting this answer')
   }
 }
-function learnerAttempt(row: { id: string; index: number; status: string; assistance: string; questionSnapshot: Prisma.JsonValue }) {
+function learnerAttempt(row: { id: string; index: number; status: string; assistance: string; askedAt: Date | null; questionSnapshot: Prisma.JsonValue }) {
   const q = questionSnapshotSchema.parse(row.questionSnapshot)
-  return { id: row.id, index: row.index, status: row.status, assistance: row.assistance,
+  return { id: row.id, index: row.index, status: row.status, assistance: row.assistance, askedAt: row.askedAt,
     question: { text: q.questionText, track: q.track, topic: q.topic, difficulty: q.difficulty, expectedDepth: q.expectedDepth } }
 }
 
@@ -208,6 +208,7 @@ export async function practiceDetail(runId: string, ownerId: string) {
       recordingConsentAt: run.recordingConsentAt, recordingConsentVersion: run.recordingConsentVersion,
       attempts: attempts.map(a => ({ ...learnerAttempt(a), completionReason: a.completionReason,
         capturedText: a.chunks.sort((x,y) => x.segment.segmentIndex-y.segment.segmentIndex || x.localTurnIndex-y.localTurnIndex).map(c => c.text).join('\n'),
+        capturedParts: a.chunks.map(c => ({ segmentId: c.segmentId, sourceTurnId: c.sourceTurnId, text: c.text, createdAt: c.createdAt })),
         answer: a.answerSnapshots[0] ?? null })) }
   })
 }

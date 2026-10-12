@@ -294,6 +294,36 @@ and refuses learner interview requests until the bank-grounded teaching contract
 is implemented; privileged users cannot read another learner’s interview through
 that route.
 
+### Manual-pilot corrections after localhost testing
+
+The existing Elevate conversation panel has been moved, without changing its
+rendering/grouping/metrics behavior, into a shared live-session component. Elevate
+and Interviews now render that same panel. The interview adapter supplies one
+question and one answer per attempt, merging persisted/provider-final UI chunks
+by segment/turn identity. A resumed question or overlapping history notification
+cannot duplicate an answer. Saved answer snapshots remain authoritative.
+
+Manual completion detached STT input between questions. AWS Transcribe rejects
+15 seconds without new audio; the installed plugin could then close AgentSession
+while the browser still appeared connected. The interview-only STT node now
+feeds 16 kHz mono silence during those gaps, keeping real microphone frames in
+order. Silence never becomes an answer, VAD event or browser recording. Closed
+voice sessions signal failure explicitly, and the UI offers Reconnect interviewer
+while preserving the existing saved answer and finalizing the recording segment.
+
+Validation: 512 server tests, 226 web tests and 14 Python voice tests pass. Web
+project typechecking, server compilation, changed-file lint and production builds
+pass. The real isolated voice test passed Finish, a 20-second detached-audio gap,
+Next, Pause and resumed speech capture. A browser layout check used the actual
+shared panel with disposable sample text. No production or environment-file
+changes are part of these corrections.
+
+The current Finish/Next controls are a temporary capture-validation mode. The
+proposed product direction is natural conversation using Elevate's shared voice
+infrastructure and patient turn handling, with grounded interview decisions and
+optional completion/skip controls. This is brainstorming for checkpoint 3.3,
+not an implemented or implicitly approved change to automatic answer completion.
+
 ## Checkpoint 3.3 — Adaptive interview loop
 
 - Strong answer: deepen the demonstrated concept or move to a harder eligible

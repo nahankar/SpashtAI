@@ -10,6 +10,7 @@ import aiohttp
 from livekit.agents import Agent, stt, room_io
 from livekit import rtc
 from interview_capture import CaptureUnavailable, InterviewCapture, parse_control
+from interview_audio import keep_interview_audio_alive, INTERVIEW_SAMPLE_RATE
 from voice_backends import VoiceBackendConfig, build_interview_session
 
 logger = logging.getLogger("spashtai-agent.interview_voice")
@@ -49,6 +50,7 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
         build = await build_interview_session(cfg)
         session = build.session
         active_session = session
+        closed = asyncio.Event()
 
         async def publish(role, text, message_id):
             try:
@@ -72,7 +74,7 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
                 super().__init__(instructions="Read only saved interview questions. Wait for explicit user controls; never invent feedback.")
 
             async def stt_node(self, audio, model_settings):
-                async for event in Agent.default.stt_node(self, audio, model_settings):
+                async for event in Agent.default.stt_node(self, keep_interview_audio_alive(audio), model_settings):
                     if isinstance(event, stt.SpeechEvent) and event.alternatives:
                         if event.type == stt.SpeechEventType.FINAL_TRANSCRIPT:
                             capture.observe_provider_transcript(event.alternatives[0].text, True)
@@ -91,6 +93,8 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
                 raise rtc.RpcError(1500, "Interview access denied")
             try:
                 body = parse_control(data.payload)
+                if closed.is_set():
+                    return json.dumps({"error": "VOICE_DISCONNECTED"})
                 if body["action"] == "NEXT":
                     if question_task is not None and not question_task.done():
                         return json.dumps({"asking": True})
@@ -107,15 +111,15 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
                 return json.dumps(await capture.drain(session, body["action"], body["requestId"]))
             except CaptureUnavailable as error:
                 return json.dumps({"error": error.code})
-            except Exception:
-                logger.warning("Interview control failed without a save acknowledgement")
+            except Exception as error:
+                logger.warning("Interview control failed without a save acknowledgement (%s)", type(error).__name__)
                 return json.dumps({"error": "SAVE_FAILED"})
 
         await ctx.room.local_participant.set_name("SpashtAI Interviewer")
         await ctx.room.local_participant.set_metadata(json.dumps({"type": "assistant", "interviewRunId": state["runId"],
             "sessionId": session_id, "segmentId": segment_id, "model": "Interview voice"}))
-        closed = asyncio.Event()
-        room_options = room_io.RoomOptions(participant_identity=participant.identity, close_on_disconnect=False)
+        room_options = room_io.RoomOptions(participant_identity=participant.identity, close_on_disconnect=False,
+            audio_input=room_io.AudioInputOptions(sample_rate=INTERVIEW_SAMPLE_RATE, frame_size_ms=50))
         if profile.get("hushEnabled"):
             from hush_audio import prepare_hush_audio
             runtime = prepare_hush_audio(requested=True)
@@ -153,6 +157,12 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
         @session.on("close")
         def session_closed(_event):
             closed.set()
+            async def notify_closed():
+                try:
+                    await ctx.room.local_participant.publish_data(json.dumps({"type": "interview_voice_closed"}).encode(), topic="lk.control")
+                except Exception:
+                    pass
+            asyncio.create_task(notify_closed())
         await session.start(room=ctx.room, agent=InterviewAgent(), room_options=room_options)
         await closed.wait()
         duration_task.cancel()
