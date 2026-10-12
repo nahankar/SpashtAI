@@ -28,7 +28,7 @@ export interface LiveSessionState {
   assistantState: 'restarting' | 'ready' | 'recovering' | 'unknown'
 }
 export interface ActivityAdapter {
-  kind: 'elevate' | 'prepare'
+  kind: 'elevate' | 'prepare' | 'interviews'
   preparationId: string | null
   creationBody(id: string, startedAt: string): Record<string, unknown>
   createActivity(id: string, startedAt: string): Promise<void>

@@ -1,4 +1,4 @@
-import type { RefObject } from 'react'
+import type { RefObject, ReactNode } from 'react'
 import { LiveKitRoom, RoomAudioRenderer, StartAudio } from '@livekit/components-react'
 import '@livekit/components-styles'
 import { AUDIO_CAPTURE } from '@/lib/audioCapture'
@@ -14,6 +14,7 @@ import { ConnectionStatus } from './ConnectionStatus'
 import { LiveKitConversation } from './LiveKitConversation'
 import { InRoomControls } from './InRoomControls'
 export interface LiveSessionRoomProps {
+  controls?: ReactNode
   token: string; url: string; sessionId: string | null; segmentId: string | null; roomName: string
   recorderRef: RefObject<SessionRecorderHandle | null>
   isPausing: boolean; pauseAudioFailure: 'failed' | 'unavailable' | null; isSessionPaused: boolean; isLeaving: boolean
@@ -28,7 +29,7 @@ export interface LiveSessionRoomProps {
   retryPauseUpload: () => Promise<void>; pauseWithoutReplayAudio: () => Promise<void>
   continueInNewSegmentAfterPauseFailure: () => Promise<void>
 }
-export function LiveSessionRoom({ token, url, sessionId, segmentId, roomName, recorderRef, isPausing, pauseAudioFailure, isSessionPaused, isLeaving, assistantState, handleDisconnected, handleNewMessage, setAssistantState, handleConversationRestart, onTurnMetrics, updateMetrics, handleLeave, showMetrics, setShowMetrics, handlePause, exportFlags, canDiscardPreparePractice, isPrepare, handleDiscard, retryPauseUpload, pauseWithoutReplayAudio, continueInNewSegmentAfterPauseFailure }: LiveSessionRoomProps) {
+export function LiveSessionRoom({ controls, token, url, sessionId, segmentId, roomName, recorderRef, isPausing, pauseAudioFailure, isSessionPaused, isLeaving, assistantState, handleDisconnected, handleNewMessage, setAssistantState, handleConversationRestart, onTurnMetrics, updateMetrics, handleLeave, showMetrics, setShowMetrics, handlePause, exportFlags, canDiscardPreparePractice, isPrepare, handleDiscard, retryPauseUpload, pauseWithoutReplayAudio, continueInNewSegmentAfterPauseFailure }: LiveSessionRoomProps) {
   return (
                 <LiveKitRoom
                   token={token}
@@ -61,7 +62,7 @@ export function LiveSessionRoom({ token, url, sessionId, segmentId, roomName, re
                     onTurnMetrics={onTurnMetrics}
                     onMetricsUpdate={updateMetrics}
                   />
-                  <div className="flex flex-wrap items-center gap-2 py-2">
+                  {controls ?? <div className="flex flex-wrap items-center gap-2 py-2">
                     <Button onClick={handleLeave}>Leave</Button>
                     <Button
                       variant="outline"
@@ -82,7 +83,7 @@ export function LiveSessionRoom({ token, url, sessionId, segmentId, roomName, re
                         {isPrepare ? 'Discard interview practice' : 'Discard Session'}
                       </Button>
                     )}
-                  </div>
+                  </div>}
                   {pauseAudioFailure && (
                     <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
                       <p className="text-sm font-medium">Replay audio could not be saved</p>

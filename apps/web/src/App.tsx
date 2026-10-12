@@ -44,6 +44,7 @@ import { QuestionBank } from '@/pages/admin/QuestionBank'
 import { QuestionBankEditor } from '@/pages/admin/QuestionBankEditor'
 import { QuestionBankImports } from '@/pages/admin/QuestionBankImports'
 import { InterviewEvaluator } from '@/pages/admin/InterviewEvaluator'
+import { Interviews } from '@/pages/Interviews'
 import { FeatureFlagsProvider, useFeatureFlags } from '@/contexts/FeatureFlagsContext'
 import { FeatureGate } from '@/components/auth/FeatureGate'
 import { PublicFooter } from '@/components/layout/PublicFooter'
@@ -73,6 +74,7 @@ function AppBreadcrumbs() {
     '/': 'Home',
     '/replay': 'Replay',
     '/elevate': 'Elevate',
+    '/interviews': 'Interviews',
     '/prepare': 'Prepare',
     '/prepare/new': 'New Interview Journey',
     '/prepare/interviews': 'Your Interviews',
@@ -319,6 +321,7 @@ function Navbar() {
               <NavFeatureLink feature="replay" to="/replay" label="Replay" />
               <span className="text-muted-foreground/40 select-none" aria-hidden="true">·</span>
               <NavFeatureLink feature="elevate" to="/elevate" label="Elevate" />
+              <NavFeatureLink feature="interviews" to="/interviews" label="Interviews" />
               <span className="text-muted-foreground/40 select-none" aria-hidden="true">·</span>
               <NavFeatureLink feature="prepare" to="/prepare" label="Prepare" />
               <span className="text-muted-foreground/40 select-none" aria-hidden="true">·</span>
@@ -371,6 +374,7 @@ function Navbar() {
               <Link className={cn(navLinkClass, coachActive && 'font-medium text-foreground')} to="/coach" onClick={() => setMobileOpen(false)}>Coach</Link>
               <NavFeatureLink feature="replay" to="/replay" label="Replay" className={navLinkClass} onClick={() => setMobileOpen(false)} />
               <NavFeatureLink feature="elevate" to="/elevate" label="Elevate" className={navLinkClass} onClick={() => setMobileOpen(false)} />
+              <NavFeatureLink feature="interviews" to="/interviews" label="Interviews" className={navLinkClass} onClick={() => setMobileOpen(false)} />
               <NavFeatureLink feature="prepare" to="/prepare" label="Prepare" className={navLinkClass} onClick={() => setMobileOpen(false)} />
               <Link className={navLinkClass} to="/progress" onClick={() => setMobileOpen(false)}>Progress Pulse</Link>
               <Link className={navLinkClass} to="/feedback" onClick={() => setMobileOpen(false)}>Feedback</Link>
@@ -543,6 +547,8 @@ function AppRoutes() {
               </FeatureGate>
             </main>
           } />
+          <Route path="/interviews" element={<main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8"><Interviews /></main>} />
+          <Route path="/interviews/playback/:sessionId" element={<main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8"><SessionReplay sessionChatDisabled /></main>} />
           <Route path="/prepare/new" element={
             <main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8">
               <AppBreadcrumbs />

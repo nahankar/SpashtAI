@@ -1,7 +1,7 @@
 # Phase 3 — Hidden adaptive interview practice pilot
 
-Simplified Phase 2a and the Admin evaluator are deployed through `d283857`.
-Phase 3 implementation is local on `codex/interviews-phase3`; deployment is a
+Phase 3.0/3.1 foundations and review fixes are deployed through `c0bbdc6`.
+Phase 3.2 implementation is local on `codex/interviews-phase3.2`; deployment is a
 separate review step. Keep one editable bank copy; past attempts retain
 their captured question, answer and assessment. Technical feedback stays
 outside Progress Pulse. Start with Automation Testing unless the user chooses
@@ -135,6 +135,38 @@ checks; this checkpoint does not claim a usable learner voice interview yet.
 
 ## Checkpoint 3.2 — Simple learner launch using the existing voice engine
 
+### Implementation refinements checked against the deployed code
+
+- Production currently has Interviews and the Admin evaluator enabled for
+  selected users. Introduce a separate default-off `interview_voice` capability;
+  both module and capability grants are required. The public Interviews entry
+  remains hidden until the voice capability is visible for the current user.
+  Never assume the older module flag is still off when registering new routes.
+- Pilot voice uses the existing pipeline-bedrock Transcribe/Polly configuration
+  with manual turn completion and literal TTS of the saved question. Keep
+  Elevate's active voice settings unchanged. Fail explicitly on unsupported
+  configurations rather than silently fall back to a free-speaking interviewer.
+- Use the installed LiveKit 1.5.8 manual-commit future to drain transcription,
+  alongside a serial persistence queue and durable action receipt. Capture only
+  actual provider-final STT events. The SDK can promote an interim transcript
+  after timeout; such promotion must not establish an authoritative answer.
+  Pending transcription produces a retryable save state, never a fabricated
+  completion or grade. Finish/Pause/Leave mute input before requesting the drain
+  and require the matching server-owned receipt before finalizing.
+- Abrupt disconnect gets a bounded, server-established drain window tied to
+  the closed segment and its current unfinished attempt. Discard, session end,
+  expired drain windows and committed answers still reject writes. Normal
+  acknowledged Pause/Leave seals the segment, with no general late-write grace.
+- Require explicit recording/transcription consent before creating the run or
+  issuing a room token. Use the existing browser recorder for answer audio.
+  Implement owned history/resume, sparse-coverage handling, seeded question
+  exposure selection and incomplete closure in this checkpoint. Adaptive
+  evaluation, generated follow-ups and detailed teaching remain 3.3/3.4.
+- Reuse the extracted browser room/controller and established voice-provider
+  builders. A small interview voice adapter bypasses communication-profile
+  personalization and automatic qualitative coaching while the learner answers.
+  Keep existing Elevate/Prepare branches and token query parameters intact.
+
 ### Review decisions before voice registration
 
 The independent Opus review identifies four relevant launch conditions. They
@@ -212,6 +244,55 @@ unregistered; production and feature flags are unchanged.
 - Test pause/resume, refresh/reconnect, discard and recording consent. Capture
   thinking pauses and stitch answers spanning speech turns without ending an
   attempt on the first short silence. Ask one question at a time.
+
+### Local implementation and validation
+
+Implemented a peer Interviews launch page with setup coverage, recording and
+transcription consent, manual Finish/Skip, Pause/Resume, owned history, retention,
+secure discard and recorded-answer review. The shared session controller and
+recorder remain in use; Elevate's coaching behavior and communication profile
+are unchanged. Microphone controls wait for the interview agent's explicit
+question-ready signal, including transport recovery. Failed speech saves cannot
+silently advance an answer; finalization requires a matching persisted receipt.
+
+The interview voice backend reads exact saved question text through Polly and
+captures genuine Transcribe final events. It does not instantiate an LLM. SDK
+promoted interim text is never used as a final answer. Immutable capture is
+projected into replay data only when ending, including inactivity completion;
+interview chunks also count toward the inactivity deadline. Practice duration
+uses active segment time, excluding pauses. Question selection avoids repeats
+within a run and prefers questions not recently asked to that user; this exposure
+metadata does not carry earlier answers, scores or coaching context into a run.
+
+Two additive migrations add consent/profile snapshots, speech-save receipts,
+incomplete closure and bounded disconnect draining, then forbid reopening or
+rebinding closed interview segments. Both have passed upgrade checks on the
+isolated test database and localhost preview, and a clean install on a separate
+voice-test database. No production changes are included in this checkpoint.
+
+Validation: 507 server tests and 221 web tests pass, along with 11 Python capture
+and backend regression tests (including two existing backend tests). Typechecks
+and the production build pass. A separate local LiveKit server and disposable
+database passed a real Polly/Transcribe test covering literal question speech,
+explicit Finish, Pause, a new resumed segment and a stitched authoritative answer.
+A second real voice run passed abrupt disconnect draining and resumed capture.
+The localhost preview on 5174/4010 is connected to the isolated LiveKit
+server on 19880 and the new voice worker; other local servers remain unchanged.
+No environment files were modified. Browser inspection verifies the default-off
+access state and consent/setup/history page. Human microphone, browser audio
+upload/playback and mobile live controls still require a manual smoke test.
+
+To test the real bank on localhost: enable Interviews plus Interview voice for
+selected pilot users, grant both capabilities, retain the supported active
+Transcribe/Polly pipeline, and deliberately confirm provenance for a small
+reviewed set in `automation-pilot`. Existing imported approvals/activation are
+preserved; imported content has not been automatically attested. Technical
+assessment/adaptation remains checkpoint 3.3, and teaching/session Q&A remains
+3.4. The generated-followup materialization endpoint/worker stays unregistered.
+The existing communication-only session chat is hidden for interview playback
+and refuses learner interview requests until the bank-grounded teaching contract
+is implemented; privileged users cannot read another learner’s interview through
+that route.
 
 ## Checkpoint 3.3 — Adaptive interview loop
 

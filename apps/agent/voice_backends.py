@@ -331,10 +331,10 @@ def _build_pipeline_bedrock_tts(cfg: VoiceBackendConfig):
     )
 
 
-def _build_pipeline_bedrock(cfg: VoiceBackendConfig) -> AgentSession:
+def _build_pipeline_bedrock(cfg: VoiceBackendConfig, *, manual: bool = False) -> AgentSession:
     """Composable pipeline: STT + Nova Lite + TTS; patient Silero VAD for all STT providers."""
     stt = _build_pipeline_bedrock_stt(cfg)
-    llm = _build_pipeline_bedrock_llm(cfg)
+    llm = None if manual else _build_pipeline_bedrock_llm(cfg)
     tts = _build_pipeline_bedrock_tts(cfg)
 
     from livekit.plugins import silero
@@ -376,7 +376,7 @@ def _build_pipeline_bedrock(cfg: VoiceBackendConfig) -> AgentSession:
         "vad=silero vad_silence=%.2fs endpointing=%.2f-%.2fs (requested=%s)",
         cfg.stt_provider,
         cfg.tts_provider,
-        cfg.pipeline_llm or _default_pipeline_llm(),
+        "disabled/manual" if manual else (cfg.pipeline_llm or _default_pipeline_llm()),
         cfg.voice_name,
         vad_silence,
         endpoint_silence,
@@ -384,6 +384,9 @@ def _build_pipeline_bedrock(cfg: VoiceBackendConfig) -> AgentSession:
         cfg.turn_detection,
     )
 
+    if manual:
+        session_kwargs["turn_handling"]["turn_detection"] = "manual"
+        session_kwargs["user_away_timeout"] = None
     return AgentSession(**session_kwargs)
 
 
@@ -495,6 +498,16 @@ async def build_session(cfg: VoiceBackendConfig) -> SessionBuildResult:
 
     logger.warning("Unknown voice backend '%s' — falling back to nova-sonic", backend)
     return SessionBuildResult(_build_nova_sonic(cfg), "nova-sonic", "unknown_backend")
+
+
+async def build_interview_session(cfg: VoiceBackendConfig) -> SessionBuildResult:
+    """Literal bank questions and explicit completion; never a free-speaking fallback."""
+    if cfg.backend != "pipeline-bedrock" or cfg.stt_provider != "transcribe" or cfg.tts_provider != "polly":
+        raise ValueError("Interview voice requires the Transcribe/Polly pipeline")
+    ok, _ = await _pipeline_bedrock_health(cfg)
+    if not ok:
+        raise RuntimeError("Interview voice pipeline is unavailable")
+    return SessionBuildResult(_build_pipeline_bedrock(cfg, manual=True), "pipeline-bedrock")
 
 
 async def apply_turn_detection_update(

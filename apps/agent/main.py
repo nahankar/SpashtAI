@@ -1580,6 +1580,15 @@ async def entrypoint(ctx: JobContext):
     install_session_log_context()
     bind_log_context(session_id=session_id, room=ctx.room.name)
 
+    # The interview adapter has explicit question/answer boundaries and never
+    # loads communication-profile context or starts automatic coaching replies.
+    if room_meta.get("interviewRunId"):
+        if not persistence_enabled or not segment_id:
+            return
+        from interview_voice import run_interview_voice
+        await run_interview_voice(ctx, participant, session_id, segment_id)
+        return
+
     # Refuse jobs for finalized or discarded sessions. A delayed dispatch can
     # otherwise start a phantom agent after the browser has already left.
     initial_lifecycle = (

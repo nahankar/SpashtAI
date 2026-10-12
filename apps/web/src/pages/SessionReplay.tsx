@@ -366,11 +366,14 @@ export function SessionReplay({
   focusRequest = null,
   autoPlayNonce = null,
   clipRequest = null,
+  sessionChatDisabled = false,
 }: {
   /** Override the route param so this can render inside the Elevate results tab. */
   sessionId?: string
   /** Hide the page header (back link + title) when shown inside another view. */
   embedded?: boolean
+  /** Interview teaching uses a separate bank-grounded contract. */
+  sessionChatDisabled?: boolean
   /** @deprecated Use autoPlayNonce — kept so older callers compile. */
   focusRequest?: { skill: string; nonce: number } | null
   /** Bump to auto-press Play once the transport is ready (Elevate "Hear it"). */
@@ -1348,7 +1351,7 @@ export function SessionReplay({
         {/* Ask AI Coach — conversational Q&A over this session.
             Renders the inert "Pro" placeholder until an admin enables the
             `session_chat` flag, then becomes interactive (see SessionChat). */}
-        {sessionId ? (
+        {sessionId && !sessionChatDisabled ? (
           <SessionChat module="elevate" sessionId={sessionId} />
         ) : null}
       </div>
