@@ -277,6 +277,7 @@ function PilotGrants({ feature }: { feature: string }) {
       if (!cancelled) {
         setUsers(people.users); setGrantedIds(grants.grants.map(g => g.userId))
         setGrantEmails(Object.fromEntries(grants.grants.map(g => [g.userId, g.user.email])))
+        setError(null)
       }
     }).catch(() => { if (!cancelled) setError('Could not load pilot users') })
     }, 300)
