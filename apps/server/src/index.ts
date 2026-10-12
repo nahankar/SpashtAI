@@ -87,6 +87,8 @@ import adminPlatformRouter from './routes/admin/platform'
 import adminInterviewBankRouter from './routes/admin/interview-bank'
 import adminInterviewEvaluatorRouter from './routes/admin/interview-evaluator'
 import { startInterviewEvaluatorWorker } from './interviews/evaluator/service'
+import { practiceRouter, practiceAgentRouter } from './routes/interview-practice'
+import { guardInterviewSession, requireSessionFeature } from './middleware/interviewSessionAccess'
 import preparationsRouter from './routes/preparations'
 import legalRouter from './routes/legal'
 import { getPublicTickers } from './routes/tickers'
@@ -247,10 +249,13 @@ app.use('/api/session-chat', requireAuth, sessionChatRouter)
 
 // Protected: Prepare interview journeys
 app.use('/api/preparations', requireAuth, requireFeature('prepare'), preparationsRouter)
+app.use('/api/interviews', practiceRouter)
+app.use('/internal/interviews', practiceAgentRouter)
+app.use(guardInterviewSession)
 
 // Authenticated LiveKit access, bound to an owned active session segment.
-app.get('/livekit/token', requireAuth, requireFeature('elevate'), getLivekitToken)
-app.post('/livekit/dispatch', requireAuth, requireFeature('elevate'), dispatchAgent)
+app.get('/livekit/token', requireAuth, requireSessionFeature(true), getLivekitToken)
+app.post('/livekit/dispatch', requireAuth, requireSessionFeature(true), dispatchAgent)
 
 // Public: personas (read-only reference data)
 app.get('/personas', listPersonas)
@@ -258,15 +263,15 @@ app.get('/personas/:id', getPersona)
 
 // Protected: sessions (Elevate live coaching)
 app.get('/sessions', requireAuth, requireFeature('elevate'), listSessions)
-app.get('/sessions/:id', requireAuth, requireFeature('elevate'), getSession)
+app.get('/sessions/:id', requireAuth, requireSessionFeature(), getSession)
 app.post('/sessions', requireAuth, requireFeature('elevate'), trackFeatureUsage(
   'elevate', 'session_start', (req) => !req.body?.preparationId,
 ), createSession)
-app.post('/sessions/:id/end', requireAuthOrAgent, requireFeature('elevate'), trackFeatureUsage(
+app.post('/sessions/:id/end', requireAuthOrAgent, requireSessionFeature(), trackFeatureUsage(
   'elevate', 'session_end', (req) => !req.body?.preparationId,
 ), endSession)
-app.delete('/sessions/:id', requireAuth, requireFeature('elevate'), deleteSession)
-app.put('/sessions/:id/retain', requireAuth, requireFeature('elevate'), retainSession)
+app.delete('/sessions/:id', requireAuth, requireSessionFeature(), deleteSession)
+app.put('/sessions/:id/retain', requireAuth, requireSessionFeature(), retainSession)
 
 // Protected: settings
 app.get('/settings', requireAuth, getSettings)

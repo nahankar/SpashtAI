@@ -9,6 +9,7 @@ export const startSchema = z.object({
   experienceBand: z.enum(['0-2', '2-5', '5-8', '8+']),
   startingDifficulty: z.enum(['Simple', 'Medium', 'Complex', 'Very Complex']),
   durationMinutes: z.union([z.literal(5), z.literal(10), z.literal(15)]).default(10),
+  recordingConsent: z.literal(true),
 }).strict()
 export const askedSchema = z.object({ segmentId: id, questionText: z.string().min(1).max(8000) }).strict()
 export const chunkSchema = z.object({
@@ -16,3 +17,8 @@ export const chunkSchema = z.object({
   role: z.literal('user'), text: z.string().min(1).max(MAX_ANSWER_LENGTH).refine(v => Boolean(v.trim()), 'A committed speech turn must contain text'),
 }).strict()
 export const assistanceSchema = z.object({ assistance: z.enum(['HINT', 'EXAMPLE']) }).strict()
+export const receiptSchema = z.object({
+  id: z.string().uuid(), segmentId: id, action: z.enum(['FINISH', 'SKIP', 'PAUSE', 'LEAVE']),
+  lastTurnIndex: z.number().int().min(-1),
+}).strict()
+export const VOICE_CONSENT_VERSION = 'interview-recording-1'

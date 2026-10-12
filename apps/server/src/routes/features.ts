@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express'
 import { verifyToken } from '../lib/jwt'
-import { getFeatureFlagsMap, PLATFORM_FEATURES, isFeatureVisible } from '../lib/featureFlags'
+import { getFeatureFlagsMap, PLATFORM_FEATURES, isFeatureVisible, isFeatureAccessible } from '../lib/featureFlags'
 
 export async function getPublicFeatures(req: Request, res: Response) {
   try {
@@ -16,6 +16,8 @@ export async function getPublicFeatures(req: Request, res: Response) {
         resolved[feature] = { ...map[feature], hidden: true }
       }
     }
+    if (!await isFeatureVisible('interview_voice', userId)) resolved.interviews = { ...resolved.interviews, hidden: true }
+    else if (!await isFeatureAccessible('interview_voice', userId)) resolved.interviews = { ...resolved.interviews, disabled: true }
     res.json({
       features: PLATFORM_FEATURES.reduce(
         (acc, feature) => {

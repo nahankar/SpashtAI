@@ -1,24 +1,17 @@
+import { projectInterviewTranscript } from './projection'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { lockWritableSession } from '../../lib/sessionDiscard'
+import { activeSegmentDurationSec } from '../../analytics/sessionSegments'
 import { BankError } from '../bank/csv'
 import { learnerEligibleWhere } from '../bank/schemas'
 import { hash, questionSnapshotSchema } from '../evaluator/contracts'
-import { askedSchema, assistanceSchema, chunkSchema, MAX_ANSWER_LENGTH, MAX_QUESTIONS, PRACTICE_NAMESPACE, startSchema } from './contracts'
+import { askedSchema, assistanceSchema, chunkSchema, MAX_ANSWER_LENGTH, MAX_QUESTIONS, PRACTICE_NAMESPACE, receiptSchema, startSchema, VOICE_CONSENT_VERSION } from './contracts'
+import { currentInterviewVoiceProfile, practiceExecutionAccess, voiceProfileSchema } from './access'
 
 type Tx = Prisma.TransactionClient
 const json = (value: unknown) => value as Prisma.InputJsonValue
 
-async function executionAccess(tx: Tx, ownerId: string) {
-  // Read current rollout state, rather than the public flag map's normalized values.
-  await tx.$queryRaw`SELECT feature FROM "PlatformFeatureFlag" WHERE feature='interviews' FOR SHARE`
-  const flag = await tx.platformFeatureFlag.findUnique({ where: { feature: 'interviews' } })
-  await tx.$queryRaw`SELECT id FROM "UserFeatureGrant" WHERE "userId"=${ownerId} AND feature='interviews' FOR SHARE`
-  const grant = await tx.userFeatureGrant.findUnique({ where: { userId_feature: { userId: ownerId, feature: 'interviews' } } })
-  if (!flag || flag.hidden || flag.disabled || (flag.audience === 'SELECTED_USERS' && !grant)) {
-    throw new BankError(403, 'Interview practice is not available')
-  }
-}
 async function ownedRun(tx: Tx, runId: string, ownerId: string) {
   const run = await tx.interviewRun.findFirst({ where: { id: runId, ownerId } })
   if (!run) throw new BankError(404, 'Interview not found')
@@ -29,9 +22,10 @@ async function ownedRun(tx: Tx, runId: string, ownerId: string) {
 }
 async function writableRun(tx: Tx, runId: string, ownerId: string) {
   const run = await ownedRun(tx, runId, ownerId)
-  await executionAccess(tx, ownerId)
+  await practiceExecutionAccess(ownerId, tx)
   const session = await tx.session.findUniqueOrThrow({ where: { id: run.sessionId } })
   if (session.endedAt) throw new BankError(409, 'Interview has ended')
+  if (!run.recordingConsentAt || run.recordingConsentVersion !== VOICE_CONSENT_VERSION) throw new BankError(409, 'Recording consent is required')
   return run
 }
 async function agentAttempt(tx: Tx, attemptId: string) {
@@ -41,9 +35,12 @@ async function agentAttempt(tx: Tx, attemptId: string) {
   // Reload after the lock; another callback may have committed the answer.
   return { run, attempt: await tx.interviewAttempt.findUniqueOrThrow({ where: { id: attemptId } }) }
 }
-async function activeSegment(tx: Tx, sessionId: string, segmentId: string) {
-  const segment = await tx.sessionSegment.findFirst({ where: { id: segmentId, sessionId, endedAt: null } })
-  if (!segment) throw new BankError(409, 'The speech segment is not active for this interview')
+async function activeSegment(tx: Tx, sessionId: string, segmentId: string, drainingAttemptId?: string) {
+  const segment = await tx.sessionSegment.findFirst({ where: { id: segmentId, sessionId } })
+  if (!segment || segment.interviewDrainedAt || (segment.endedAt && (!drainingAttemptId || segment.interviewDrainAttemptId !== drainingAttemptId
+    || !segment.interviewDrainUntil || segment.interviewDrainUntil.getTime() <= Date.now()))) {
+    throw new BankError(409, 'The speech segment is no longer accepting this answer')
+  }
 }
 function learnerAttempt(row: { id: string; index: number; status: string; assistance: string; questionSnapshot: Prisma.JsonValue }) {
   const q = questionSnapshotSchema.parse(row.questionSnapshot)
@@ -54,7 +51,7 @@ function learnerAttempt(row: { id: string; index: number; status: string; assist
 export async function startPractice(input: unknown, ownerId: string) {
   const body = startSchema.parse(input)
   return prisma.$transaction(async tx => {
-    await executionAccess(tx, ownerId)
+    await practiceExecutionAccess(ownerId, tx)
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`interview-start:${ownerId}`},0))`
     const existing = await tx.session.findUnique({ where: { id: body.sessionId }, include: { interviewRun: true } })
     if (existing) {
@@ -72,12 +69,14 @@ export async function startPractice(input: unknown, ownerId: string) {
     const eligible = await tx.questionBankQuestion.count({ where: { ...learnerEligibleWhere, namespace: PRACTICE_NAMESPACE,
       track: body.track, experienceBand: body.experienceBand, difficulty: body.startingDifficulty } })
     if (!eligible) throw new BankError(409, 'No eligible questions match this track, experience and difficulty yet')
+    const voice = await currentInterviewVoiceProfile(tx)
     const session = await tx.session.create({ data: { id: body.sessionId, userId: ownerId, module: 'elevate',
       purpose: 'INTERVIEW', contextScope: 'SESSION_ONLY', sessionName: `${body.track} interview practice`,
       configurationSnapshot: { capturePolicy: 'committed-turns-1', answerCompletion: 'explicit', technicalFeedback: 'pending' } } })
     const run = await tx.interviewRun.create({ data: { sessionId: session.id, ownerId, namespace: PRACTICE_NAMESPACE,
       track: body.track, experienceBand: body.experienceBand, startingDifficulty: body.startingDifficulty,
-      durationMinutes: body.durationMinutes, maxQuestions: MAX_QUESTIONS } })
+      durationMinutes: body.durationMinutes, maxQuestions: MAX_QUESTIONS,
+      recordingConsentAt: new Date(), recordingConsentVersion: VOICE_CONSENT_VERSION, voiceConfigSnapshot: json(voice) } })
     return { id: run.id, sessionId: session.id, reused: false }
   })
 }
@@ -87,8 +86,9 @@ export async function prepareBankAttempt(runId: string, ownerId: string) {
     const run = await writableRun(tx, runId, ownerId)
     const open = await tx.interviewAttempt.findFirst({ where: { runId, status: { in: ['PREPARED', 'ASKED'] } } })
     if (open) return learnerAttempt(open)
-    const session = await tx.session.findUniqueOrThrow({ where: { id: run.sessionId } })
-    if (Date.now() >= session.startedAt.getTime() + run.durationMinutes * 60_000) {
+    const segments = await tx.sessionSegment.findMany({ where: { sessionId: run.sessionId }, select: { startedAt: true, endedAt: true, activeDurationSec: true } })
+    const activeSeconds = segments.reduce((sum, s) => sum + (s.activeDurationSec ?? Math.max(0, ((s.endedAt?.getTime() ?? Date.now())-s.startedAt.getTime())/1000)), 0)
+    if (activeSeconds >= run.durationMinutes * 60) {
       throw new BankError(409, 'Practice duration reached; finish the current answer or end the interview')
     }
     const count = await tx.interviewAttempt.count({ where: { runId } })
@@ -96,7 +96,13 @@ export async function prepareBankAttempt(runId: string, ownerId: string) {
     const where: Prisma.QuestionBankQuestionWhereInput = { ...learnerEligibleWhere, namespace: run.namespace,
       track: run.track, experienceBand: run.experienceBand, difficulty: run.startingDifficulty,
       interviewAttempts: { none: { runId } } }
-    const candidate = await tx.questionBankQuestion.findFirst({ where, orderBy: { externalQid: 'asc' } })
+    const candidates = await tx.questionBankQuestion.findMany({ where, take: 2000 })
+    const exposure = await tx.interviewAttempt.findMany({ where: { run: { ownerId }, runId: { not: runId },
+      askedAt: { gte: new Date(Date.now() - 14 * 86400000) }, questionId: { not: null } }, select: { questionId: true, askedAt: true } })
+    const seen = new Map<string, number>()
+    for (const e of exposure) if (e.questionId && e.askedAt) seen.set(e.questionId, Math.max(seen.get(e.questionId) ?? 0, e.askedAt.getTime()))
+    candidates.sort((a, b) => (seen.get(a.id) ?? 0) - (seen.get(b.id) ?? 0) || hash([run.id,a.id]).localeCompare(hash([run.id,b.id])))
+    const candidate = candidates[0]
     if (!candidate) throw new BankError(409, 'No more eligible questions match this setup')
     await tx.$queryRaw`SELECT id FROM "QuestionBankQuestion" WHERE id=${candidate.id} FOR SHARE`
     const question = await tx.questionBankQuestion.findFirst({ where: { ...where, id: candidate.id } })
@@ -135,8 +141,11 @@ export async function captureCommittedTurn(attemptId: string, input: unknown) {
       }
       return { id: previous.id, reused: true }
     }
-    await activeSegment(tx, run.sessionId, body.segmentId)
+    await activeSegment(tx, run.sessionId, body.segmentId, attemptId)
     if (attempt.status !== 'ASKED') throw new BankError(409, 'Answer is not accepting speech')
+    if (await tx.interviewCaptureReceipt.findFirst({ where: { attemptId, segmentId: body.segmentId, action: { in: ['FINISH','SKIP'] } } })) {
+      throw new BankError(409, 'This answer has already been drained for completion')
+    }
     if (await tx.interviewAnswerChunk.findUnique({ where: { segmentId_localTurnIndex: { segmentId: body.segmentId, localTurnIndex: body.localTurnIndex } } })) {
       throw new BankError(409, 'Speech turn order is already occupied')
     }
@@ -158,11 +167,15 @@ export async function recordAssistance(attemptId: string, input: unknown) {
     await tx.interviewAttempt.update({ where: { id: attemptId }, data: { assistance: body.assistance } })
   })
 }
-export async function finishAnswer(runId: string, attemptId: string, ownerId: string, skip = false) {
+export async function finishAnswer(runId: string, attemptId: string, ownerId: string, skip = false, receiptId?: string) {
   return prisma.$transaction(async tx => {
     await writableRun(tx, runId, ownerId)
     const attempt = await tx.interviewAttempt.findFirst({ where: { id: attemptId, runId } })
     if (!attempt) throw new BankError(404, 'Attempt not found')
+    const receipt = receiptId && await tx.interviewCaptureReceipt.findFirst({ where: { id: receiptId, attemptId, action: skip ? 'SKIP' : 'FINISH' } })
+    if (!receipt) throw new BankError(409, 'Wait for the interviewer to confirm that your speech has been saved')
+    if (!skip && await tx.sessionSegment.findFirst({ where: { sessionId: (await tx.interviewRun.findUniqueOrThrow({ where: { id: runId } })).sessionId,
+      interviewDrainAttemptId: attemptId, interviewDrainedAt: null } })) throw new BankError(409, 'A previous connection has not finished saving this answer. Retry or end it as incomplete.')
     if (attempt.status === 'ANSWERED' && !skip) {
       const saved = await tx.interviewAnswerSnapshot.findUniqueOrThrow({ where: { attemptId_textRevision: { attemptId, textRevision: 1 } } })
       return { id: saved.id, status: 'ANSWERED', answerText: saved.answerText, reused: true }
@@ -187,9 +200,15 @@ export async function practiceDetail(runId: string, ownerId: string) {
   return prisma.$transaction(async tx => {
     const run = await ownedRun(tx, runId, ownerId)
     const attempts = await tx.interviewAttempt.findMany({ where: { runId }, orderBy: { index: 'asc' },
-      include: { answerSnapshots: { select: { answerText: true, textSource: true, textRevision: true, assistance: true } } } })
+      include: { answerSnapshots: { select: { answerText: true, textSource: true, textRevision: true, assistance: true } },
+        chunks: { include: { segment: { select: { segmentIndex: true } } } } } })
+    const session = await tx.session.findUniqueOrThrow({ where: { id: run.sessionId }, select: { endedAt: true, startedAt: true, retainedAt: true } })
     return { id: run.id, sessionId: run.sessionId, track: run.track, experienceBand: run.experienceBand,
-      attempts: attempts.map(a => ({ ...learnerAttempt(a), answer: a.answerSnapshots[0] ?? null })) }
+      startingDifficulty: run.startingDifficulty, durationMinutes: run.durationMinutes, ...session,
+      recordingConsentAt: run.recordingConsentAt, recordingConsentVersion: run.recordingConsentVersion,
+      attempts: attempts.map(a => ({ ...learnerAttempt(a), completionReason: a.completionReason,
+        capturedText: a.chunks.sort((x,y) => x.segment.segmentIndex-y.segment.segmentIndex || x.localTurnIndex-y.localTurnIndex).map(c => c.text).join('\n'),
+        answer: a.answerSnapshots[0] ?? null })) }
   })
 }
 
@@ -201,8 +220,79 @@ export async function endPractice(runId: string, ownerId: string) {
     const session = await tx.session.findUniqueOrThrow({ where: { id: run.sessionId } })
     if (session.endedAt) return { endedAt: session.endedAt, reused: true }
     const endedAt = new Date()
+    const segments = await tx.sessionSegment.findMany({ where: { sessionId: session.id } })
+    for (const segment of segments.filter(s => !s.endedAt)) await tx.sessionSegment.update({ where: { id: segment.id },
+      data: { endedAt, activeDurationSec: activeSegmentDurationSec(segment.startedAt, endedAt) } })
+    await projectInterviewTranscript(tx, runId, session.id)
+    await tx.interviewAttempt.updateMany({ where: { runId, status: { in: ['PREPARED','ASKED'] } },
+      data: { status: 'INCOMPLETE', completedAt: endedAt, completionReason: 'USER_ENDED' } })
     await tx.session.update({ where: { id: session.id }, data: { endedAt, retainedAt: null,
-      durationSec: Math.max(0, Math.floor((endedAt.getTime() - session.startedAt.getTime()) / 1000)), progressPulseStatus: 'skipped' } })
+      durationSec: segments.reduce((sum,s) => sum+(s.activeDurationSec ?? activeSegmentDurationSec(s.startedAt, s.endedAt ?? endedAt)),0), progressPulseStatus: 'skipped' } })
     return { endedAt, reused: false }
+  })
+}
+
+export async function practiceOptions(ownerId: string) {
+  return prisma.$transaction(async tx => {
+    await practiceExecutionAccess(ownerId, tx)
+    await currentInterviewVoiceProfile(tx)
+    const coverage = await tx.questionBankQuestion.groupBy({ by: ['track','experienceBand','difficulty'],
+      where: { ...learnerEligibleWhere, namespace: PRACTICE_NAMESPACE }, _count: { _all: true } })
+    return { coverage: coverage.map(c => ({ track: c.track, experienceBand: c.experienceBand, difficulty: c.difficulty, count: c._count._all })),
+      consentVersion: VOICE_CONSENT_VERSION, maxQuestions: MAX_QUESTIONS }
+  })
+}
+export async function practiceHistory(ownerId: string) {
+  const rows = await prisma.interviewRun.findMany({ where: { ownerId, session: { discardedAt: null } }, orderBy: { createdAt: 'desc' }, take: 50,
+    select: { id: true, sessionId: true, track: true, experienceBand: true, startingDifficulty: true, createdAt: true,
+      session: { select: { endedAt: true, retainedAt: true } }, _count: { select: { attempts: true } } } })
+  return { runs: rows.map(r => ({ id: r.id, sessionId: r.sessionId, track: r.track, experienceBand: r.experienceBand,
+    startingDifficulty: r.startingDifficulty, startedAt: r.createdAt, ...r.session, questionCount: r._count.attempts })) }
+}
+export async function voiceState(sessionId: string, segmentId: string, room: string, identity: string) {
+  return prisma.$transaction(async tx => {
+    const row = await tx.interviewRun.findUnique({ where: { sessionId } })
+    if (!row || identity !== `user_${row.ownerId}`) throw new BankError(404, 'Interview not found')
+    const run = await writableRun(tx, row.id, row.ownerId)
+    await activeSegment(tx, sessionId, segmentId)
+    const segment = await tx.sessionSegment.findUniqueOrThrow({ where: { id: segmentId } })
+    if (segment.roomName !== room) throw new BankError(409, 'Room does not own this speech segment')
+    if (!run.recordingConsentAt || run.recordingConsentVersion !== VOICE_CONSENT_VERSION) throw new BankError(409, 'Recording consent is required for this interview')
+    const attempt = await tx.interviewAttempt.findFirst({ where: { runId: run.id }, orderBy: { index: 'desc' } })
+    if (!attempt) throw new BankError(409, 'Prepare the first question before joining')
+    const max = await tx.interviewAnswerChunk.aggregate({ where: { segmentId }, _max: { localTurnIndex: true } })
+    const segments = await tx.sessionSegment.findMany({ where: { sessionId }, select: { startedAt: true, endedAt: true, activeDurationSec: true } })
+    const activeSeconds=segments.reduce((sum,s) => sum+(s.activeDurationSec ?? Math.max(0,((s.endedAt?.getTime() ?? Date.now())-s.startedAt.getTime())/1000)),0)
+    return { runId: run.id, sessionId, segmentId, identity, attempt: learnerAttempt(attempt),
+      nextTurnIndex: (max._max.localTurnIndex ?? -1) + 1, secondsRemaining: Math.max(0,run.durationMinutes*60-activeSeconds),
+      voiceProfile: voiceProfileSchema.parse(run.voiceConfigSnapshot) }
+  })
+}
+export async function saveCaptureReceipt(attemptId: string, input: unknown) {
+  const body = receiptSchema.parse(input)
+  return prisma.$transaction(async tx => {
+    const { run, attempt } = await agentAttempt(tx, attemptId)
+    const existing = await tx.interviewCaptureReceipt.findUnique({ where: { id: body.id } })
+    if (existing) {
+      if (existing.attemptId !== attemptId || existing.segmentId !== body.segmentId || existing.action !== body.action || existing.lastTurnIndex !== body.lastTurnIndex) {
+        throw new BankError(409, 'Capture receipt ID already belongs to another action')
+      }
+      return { id: existing.id, reused: true }
+    }
+    await activeSegment(tx, run.sessionId, body.segmentId, attemptId)
+    if (['FINISH','SKIP'].includes(body.action) && attempt.status !== 'ASKED') throw new BankError(409, 'Question is not awaiting an answer')
+    const max = await tx.interviewAnswerChunk.aggregate({ where: { segmentId: body.segmentId }, _max: { localTurnIndex: true } })
+    if ((max._max.localTurnIndex ?? -1) !== body.lastTurnIndex) throw new BankError(409, 'Committed speech is still being saved')
+    await tx.interviewCaptureReceipt.create({ data: { ...body, attemptId } })
+    return { id: body.id, reused: false }
+  })
+}
+export async function ownedCaptureReceipt(runId: string, receiptId: string, ownerId: string) {
+  return prisma.$transaction(async tx => {
+    await ownedRun(tx, runId, ownerId)
+    const receipt = await tx.interviewCaptureReceipt.findFirst({ where: { id: receiptId, attempt: { runId } },
+      select: { id: true, action: true, segmentId: true, attemptId: true } })
+    if (!receipt) throw new BankError(404, 'Speech-save confirmation not found')
+    return receipt
   })
 }

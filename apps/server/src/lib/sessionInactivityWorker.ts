@@ -1,3 +1,4 @@
+import { projectInterviewTranscript } from '../interviews/practice/projection'
 import type { Prisma } from '@prisma/client'
 import { prisma } from './prisma'
 import { isStandaloneCommunication } from './activityPolicy'
@@ -70,13 +71,18 @@ export async function completeInactiveSession(
           module: true,
           purpose: true,
           preparationPractice: { select: { id: true } },
+          interviewRun: { select: { id: true } },
         },
       })
       if (!session) return { completed: false, reason: 'missing' } as const
       if (session.endedAt) return { completed: false, reason: 'already_ended' } as const
       if (session.retainedAt) return { completed: false, reason: 'retained' } as const
 
-      const lastActivity = await sessionLastActivityAt(tx, sessionId, session.startedAt)
+      let lastActivity = await sessionLastActivityAt(tx, sessionId, session.startedAt)
+      if (session.interviewRun) {
+        const chunk = await tx.interviewAnswerChunk.aggregate({ where: { attempt: { runId: session.interviewRun.id } }, _max: { createdAt: true } })
+        lastActivity = latestActivityAt(lastActivity, [chunk._max.createdAt])
+      }
       if (lastActivity.getTime() > cutoff) return { completed: false, reason: 'active' } as const
 
       const openSegments = await tx.sessionSegment.findMany({
@@ -110,6 +116,11 @@ export async function completeInactiveSession(
         durationSec = activeSegmentDurationSec(session.startedAt, lastActivity)
       }
 
+      if (session.interviewRun) await projectInterviewTranscript(tx, session.interviewRun.id, sessionId)
+      if (session.interviewRun) await tx.interviewAttempt.updateMany({
+        where: { runId: session.interviewRun.id, status: { in: ['PREPARED','ASKED'] } },
+        data: { status: 'INCOMPLETE', completionReason: 'INACTIVITY', completedAt: now },
+      })
       await tx.session.update({
         where: { id: sessionId },
         data: {

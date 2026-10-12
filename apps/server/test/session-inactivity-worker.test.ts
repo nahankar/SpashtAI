@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => {
     sessionTurn: { aggregate: vi.fn() },
     sessionTranscript: { findUnique: vi.fn() },
     sessionRecording: { aggregate: vi.fn() },
+    interviewAnswerChunk: { aggregate: vi.fn() },
+    interviewAttempt: { updateMany: vi.fn() },
   }
   return {
     tx,
@@ -52,12 +54,15 @@ function stubActivity({
   purpose = 'COMMUNICATION',
   module = 'elevate',
   retainedAt = null as Date | null,
+  interview = false,
+  chunk = null as Date | null,
 } = {}) {
   const { tx } = mocks
   tx.$queryRaw.mockResolvedValue([{ discardedAt: null }])
   tx.session.findUnique.mockResolvedValue({
     id: 's1', userId: 'u1', startedAt: started, endedAt, durationSec: null, purpose, module, retainedAt,
     preparationPractice: prepare ? { id: 'p1' } : null,
+    interviewRun: interview ? { id: 'run1' } : null,
   })
   tx.sessionSegment.aggregate.mockImplementation(async (args: { _sum?: unknown }) =>
     args._sum
@@ -66,6 +71,7 @@ function stubActivity({
   )
   tx.sessionTurn.aggregate.mockResolvedValue({ _max: { createdAt: turn } })
   tx.sessionTranscript.findUnique.mockResolvedValue(null)
+  tx.interviewAnswerChunk.aggregate.mockResolvedValue({_max:{createdAt:chunk}})
   tx.sessionRecording.aggregate.mockResolvedValue({ _max: { updatedAt: null } })
   tx.sessionSegment.findMany.mockResolvedValue(openSegments)
   tx.sessionSegment.count.mockResolvedValue(segmentCount)
@@ -89,6 +95,12 @@ describe('session inactivity worker', () => {
     expect(mocks.tx.session.update).not.toHaveBeenCalled()
   })
 
+  it('counts provider-final interview speech as activity without requiring replay projection',async()=> {
+    stubActivity({started:hoursAgo(48),interview:true,purpose:'INTERVIEW',chunk:hoursAgo(1)})
+    expect(await completeInactiveSession('s1',NOW)).toEqual({completed:false,reason:'active'})
+    expect(mocks.tx.session.update).not.toHaveBeenCalled()
+    expect(mocks.tx.interviewAnswerChunk.aggregate).toHaveBeenCalledWith({where:{attempt:{runId:'run1'}},_max:{createdAt:true}})
+  })
   it('leaves already-ended sessions untouched', async () => {
     stubActivity({ endedAt: hoursAgo(25) })
     expect(await completeInactiveSession('s1', NOW)).toEqual({ completed: false, reason: 'already_ended' })

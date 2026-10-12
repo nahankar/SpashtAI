@@ -534,6 +534,10 @@ model SessionTurn {
 
 model SessionSegment {
   interviewAnswerChunks InterviewAnswerChunk[]
+  interviewCaptureReceipts InterviewCaptureReceipt[]
+  interviewDrainedAt DateTime?
+  interviewDrainUntil DateTime?
+  interviewDrainAttemptId String?
   id                   String    @id
   session              Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   sessionId            String
@@ -1125,6 +1129,9 @@ model InterviewRun {
   startingDifficulty String
   durationMinutes Int @default(10)
   maxQuestions    Int @default(8)
+  recordingConsentAt DateTime?
+  recordingConsentVersion String?
+  voiceConfigSnapshot Json?
   attempts        InterviewAttempt[]
   createdAt       DateTime @default(now())
   @@index([ownerId, createdAt])
@@ -1145,14 +1152,29 @@ model InterviewAttempt {
   questionHash     String
   status           String @default("PREPARED")
   assistance       String @default("NONE")
+  completionReason String?
   askedAt          DateTime?
   completedAt      DateTime?
   createdAt        DateTime @default(now())
   chunks           InterviewAnswerChunk[]
   answerSnapshots  InterviewAnswerSnapshot[]
+  captureReceipts InterviewCaptureReceipt[]
   @@unique([runId, index])
   @@unique([runId, questionId])
   @@index([runId, status])
+}
+
+model InterviewCaptureReceipt {
+  id String @id
+  attemptId String
+  attempt InterviewAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  segmentId String
+  segment SessionSegment @relation(fields: [segmentId], references: [id], onDelete: Cascade)
+  action String
+  lastTurnIndex Int
+  createdAt DateTime @default(now())
+
+  @@index([attemptId, action])
 }
 
 model InterviewAnswerChunk {

@@ -3,6 +3,7 @@ import { AccessToken, RoomServiceClient, AgentDispatchClient } from 'livekit-ser
 import { prisma } from '../lib/prisma'
 import { resolveLivekitAccess } from '../lib/livekitAccess'
 import { logger, reqLog } from '../lib/logger'
+import { voiceProfileSchema } from '../interviews/practice/access'
 
 function getLivekitConfig() {
   const apiKey = process.env.LIVEKIT_API_KEY
@@ -95,13 +96,14 @@ export async function getLivekitToken(req: Request, res: Response) {
     console.log(`Generating token for identity: ${identity}, room: ${room}`)
 
     // Look up the active voice backend so the agent worker uses the right model.
-    const voiceCfg = await getActiveVoiceConfig()
+    const voiceCfg = session.interviewRun ? voiceProfileSchema.parse(session.interviewRun.voiceConfigSnapshot) : await getActiveVoiceConfig()
 
     // Create the room first to ensure agent can join
     const roomService = new RoomServiceClient(httpUrl, apiKey, apiSecret)
     const roomMeta: Record<string, string | boolean | undefined | null> = {
       sessionId,
       segmentId,
+      interviewRunId: session.interviewRun?.id,
       userName,
       focusArea,
       focusContext,

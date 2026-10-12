@@ -239,7 +239,7 @@ export async function endSession(req: Request, res: Response) {
     const pointsOn = await areRewardPointsEnabled()
     // Feature tracking middleware runs when the response is sent. Derive this
     // from the persisted association rather than trusting the caller's body.
-    req.body.preparationId = session.preparationPractice ? 'prepare-owned' : null
+    req.body.preparationId = session.preparationPractice ? 'prepare-owned' : session.purpose === 'INTERVIEW' ? 'interview-owned' : null
     let pointsAwarded = 0
     let totalPoints = session.user.rewardPoints
     if (!alreadyEnded && pointsOn && isStandaloneCommunication(session)) {

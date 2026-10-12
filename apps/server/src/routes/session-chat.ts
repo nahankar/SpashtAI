@@ -285,6 +285,16 @@ router.post('/', chatLimiter, async (req: Request, res: Response) => {
       res.status(404).json({ error: 'Session not found' })
       return
     }
+    if (mod === 'elevate' && await prisma.interviewRun.findUnique({ where: { sessionId }, select: { id: true } })) {
+      if (ownerId !== req.user!.userId) {
+        res.status(404).json({ error: 'Session not found' })
+        return
+      }
+      // Bank-grounded teaching and answer explanations are checkpoint 3.4.
+      // The communication-only chat must not invent technical feedback here.
+      res.status(409).json({ error: 'Interview session questions and explanations are not available yet', code: 'INTERVIEW_TEACHING_PENDING' })
+      return
+    }
     if (ownerId !== req.user!.userId && !isPrivilegedRole(req.user!.role)) {
       res.status(403).json({ error: 'Access denied' })
       return
