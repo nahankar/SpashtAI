@@ -3,7 +3,7 @@ import { Prisma, type QuestionBankQuestion } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { BankError, parseCsv } from './csv'
 import { importFingerprint, normalizeRows, type ImportOptions } from './import'
-import { activationBlockers, bankActionSchema, bulkSchema, draftSchema, type BankDraft } from './schemas'
+import { learnerActivationBlockers, provenanceSchema, bankActionSchema, bulkSchema, draftSchema, type BankDraft } from './schemas'
 type Tx = Prisma.TransactionClient
 export function draftFromQuestion(question: QuestionBankQuestion): BankDraft {
   return draftSchema.parse(Object.fromEntries(Object.keys(draftSchema.shape).map(key => [key, question[key as keyof QuestionBankQuestion]])))
@@ -19,6 +19,7 @@ async function lockQuestion(tx: Tx, id: string) {
   if (!rows.length) throw new BankError(404, 'Question not found')
 }
 export async function createQuestion(identity: { namespace: string; externalQid: string }, draft: BankDraft, actorId: string) {
+  draft = draftSchema.parse(draft)
   return prisma.$transaction(async tx => {
     await lockIdentity(tx, identity.namespace, identity.externalQid)
     if (await tx.questionBankQuestion.findUnique({ where: { namespace_externalQid: identity } })) throw new BankError(409, 'This namespace and QID already exist')
@@ -30,20 +31,24 @@ export async function detail(id: string) {
   const question = await prisma.questionBankQuestion.findUnique({ where: { id } })
   if (!question) throw new BankError(404, 'Question not found')
   const draft = draftFromQuestion(question)
-  return { question, draft, blockers: activationBlockers(draft) }
+  return { question, draft, blockers: learnerActivationBlockers(draft, question.provenanceConfirmedAt) }
 }
 export async function editQuestion(id: string, revision: number, draft: BankDraft, actorId: string) {
   await prisma.$transaction(async tx => {
     await lockQuestion(tx, id)
     const question = await tx.questionBankQuestion.findUniqueOrThrow({ where: { id } })
     if (question.revision !== revision) throw new BankError(409, 'This question changed. Reload before saving.')
-    await tx.questionBankQuestion.update({ where: { id }, data: { ...draft, approved: false, active: false, approvedAt: null, approvedById: null, importHash: null, revision: { increment: 1 } } })
+    await tx.questionBankQuestion.update({ where: { id }, data: { ...draft, approved: false, active: false, approvedAt: null, approvedById: null, importHash: null, provenanceNote: '', provenanceConfirmedAt: null, provenanceConfirmedById: null, revision: { increment: 1 } } })
     await bankAudit(tx, actorId, 'edit', { questionId: id })
   })
 }
 export async function bulkAction(input: unknown, actorId: string) {
   const body = bulkSchema.parse(input)
   return prisma.$transaction(async tx => {
+    if (['activate','approve_activate'].includes(body.action)) {
+      const roles = await tx.$queryRaw<Array<{ role: string }>>`SELECT role FROM "User" WHERE id=${actorId} FOR SHARE`
+      if (roles[0]?.role !== 'SUPER_ADMIN') throw new BankError(403, 'Current Super Admin access is required to activate questions')
+    }
     const questions: QuestionBankQuestion[] = []
     // Stable lock order prevents deadlocks for overlapping bulk selections.
     for (const selected of [...body.questions].sort((a,b) => a.id.localeCompare(b.id))) {
@@ -52,7 +57,7 @@ export async function bulkAction(input: unknown, actorId: string) {
       if (question.revision !== selected.revision) throw new BankError(409, `${question.externalQid} changed. Reload before proceeding.`)
       if (['activate','approve_activate'].includes(body.action)) {
         if (body.action === 'activate' && !question.approved) throw new BankError(400, `${question.externalQid}: approve before activating`)
-        const blockers = activationBlockers(draftFromQuestion(question))
+        const blockers = learnerActivationBlockers(draftFromQuestion(question), question.provenanceConfirmedAt)
         if (blockers.length) throw new BankError(400, `${question.externalQid}: ${blockers.join('; ')}`)
       }
       questions.push(question)
@@ -67,6 +72,22 @@ export async function bulkAction(input: unknown, actorId: string) {
     }
     await bankAudit(tx, actorId, body.action, { questionIds: questions.map(q => q.id) })
     return { changed: questions.length }
+  }, { timeout: 30000 })
+}
+export async function confirmProvenance(input: unknown, actorId: string) {
+  const body = provenanceSchema.parse(input)
+  return prisma.$transaction(async tx => {
+    const roles = await tx.$queryRaw<Array<{ role: string }>>`SELECT role FROM "User" WHERE id=${actorId} FOR SHARE`
+    if (!roles[0] || !['ADMIN','SUPER_ADMIN'].includes(roles[0].role)) throw new BankError(403, 'Current Admin access required')
+    for (const selected of [...body.questions].sort((a,b) => a.id.localeCompare(b.id))) {
+      await lockQuestion(tx, selected.id)
+      const question = await tx.questionBankQuestion.findUniqueOrThrow({ where: { id: selected.id } })
+      if (question.revision !== selected.revision) throw new BankError(409, `${question.externalQid} changed. Reload before confirming provenance.`)
+      // Attestation is metadata for the unchanged saved content, not a content edit.
+      await tx.questionBankQuestion.update({ where: { id: selected.id }, data: { provenanceNote: body.note, provenanceConfirmedAt: new Date(), provenanceConfirmedById: actorId } })
+    }
+    await bankAudit(tx, actorId, 'provenance_confirmed', { questionIds: body.questions.map(q => q.id), note: body.note })
+    return { changed: body.questions.length }
   }, { timeout: 30000 })
 }
 export async function questionAction(id: string, revision: number, action: unknown, actorId: string) {
@@ -121,7 +142,7 @@ export async function confirmImport(batchId: string, actorId: string) {
       if (question && Object.entries({ ...draft, ...input.sources }).every(([key,value]) => JSON.stringify(question![key as keyof QuestionBankQuestion]) === JSON.stringify(value))) {
         outcome = 'Unchanged content skipped'
       } else if (question) {
-        await tx.questionBankQuestion.update({ where: { id: question.id }, data: { ...content, approved: false, active: false, approvedAt: null, approvedById: null, revision: { increment: 1 } } })
+        await tx.questionBankQuestion.update({ where: { id: question.id }, data: { ...content, approved: false, active: false, approvedAt: null, approvedById: null, provenanceNote: '', provenanceConfirmedAt: null, provenanceConfirmedById: null, revision: { increment: 1 } } })
         resultQuestionId = question.id; outcome = 'Question updated'
       } else {
         const created = await tx.questionBankQuestion.create({ data: { ...content, namespace: batch.namespace, externalQid: input.externalQid, createdById: actorId, origin: 'IMPORT' } })

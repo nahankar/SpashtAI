@@ -4,7 +4,8 @@ import { apiClient } from '@/lib/api-client'
 import { BANK_API, bankWrite, bankStatus, type BankAction, type BankQuestion } from '@/lib/interview-bank'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-interface Listing { questions: BankQuestion[]; total: number }
+import { BankProvenanceConfirmation } from '@/components/admin/BankProvenanceConfirmation'
+interface Listing { questions: BankQuestion[]; total: number; canActivate: boolean }
 export function QuestionBank() {
   const [search, setSearch] = useState(''); const [status, setStatus] = useState(''); const [page, setPage] = useState(1)
   const [difficulty, setDifficulty] = useState(''); const [category, setCategory] = useState(''); const [categories, setCategories] = useState<string[]>([])
@@ -12,8 +13,9 @@ export function QuestionBank() {
   const [data, setData] = useState<Listing | null>(null); const [error, setError] = useState(''); const [message, setMessage] = useState('')
   const [selected, setSelected] = useState<Record<string,number>>({}); const [busy, setBusy] = useState(false); const [deleting, setDeleting] = useState(false); const [reload, setReload] = useState(0)
   const lifetime = useRef<AbortController | null>(null)
+  const [confirmingProvenance, setConfirmingProvenance] = useState(false)
   useEffect(() => { const controller = new AbortController(); lifetime.current = controller; return () => controller.abort() }, [])
-  useEffect(() => { setSelected({}); setDeleting(false); setMessage('') }, [search, status, difficulty, category, track])
+  useEffect(() => { setSelected({}); setDeleting(false); setConfirmingProvenance(false); setMessage('') }, [search, status, difficulty, category, track])
   useEffect(() => {
     const controller = new AbortController(); setLoadingFilters(true)
     const query = new URLSearchParams(); if (track) query.set('track', track)
@@ -29,6 +31,14 @@ export function QuestionBank() {
     return () => controller.abort()
   }, [search, status, difficulty, category, track, page, reload])
   const count = Object.keys(selected).length
+  async function confirmProvenance(note: string) {
+    const signal = lifetime.current!.signal; setBusy(true); setError('')
+    try {
+      const result = await bankWrite<{ changed: number }>('/questions/provenance', { confirmed: true, note, questions: Object.entries(selected).map(([id, revision]) => ({ id, revision })) }, 'POST', signal)
+      if (!signal.aborted) { setMessage(`Provenance confirmed for ${result.changed} questions. Approval and activation are preserved.`); setSelected({}); setConfirmingProvenance(false); setReload(v => v+1) }
+    } catch (e) { if (!signal.aborted) setError(e instanceof Error ? e.message : 'Confirmation failed') }
+    finally { if (!signal.aborted) setBusy(false) }
+  }
   async function action(action: BankAction) {
     const signal = lifetime.current!.signal; setBusy(true); setError(''); setMessage('')
     try {
@@ -61,11 +71,13 @@ export function QuestionBank() {
       {data.total > 30 && <Button variant="outline" disabled={busy} onClick={() => void selectAllMatching()}>Select all {data.total} matching questions</Button>}
       {count > 0 && <Button variant="outline" disabled={busy} onClick={() => { setSelected({}); setDeleting(false) }}>Clear selection</Button>}
     </div>
-    {count > 0 && <div className="flex flex-wrap gap-2">{(['approve','approve_activate','activate','deactivate'] as const).map(actionName => <Button key={actionName} variant="outline" disabled={busy} onClick={() => void action(actionName)}>{{ approve:'Approve', approve_activate:'Approve and activate', activate:'Activate', deactivate:'Deactivate' }[actionName]} selected</Button>)}<Button variant="destructive" disabled={busy} onClick={() => setDeleting(true)}>Delete selected</Button></div>}
+    {count > 0 && <div className="flex flex-wrap gap-2">{(['approve','approve_activate','activate','deactivate'] as const).map(actionName => <Button key={actionName} variant="outline" disabled={busy || (['activate','approve_activate'].includes(actionName) && !data.canActivate)} onClick={() => void action(actionName)}>{{ approve:'Approve', approve_activate:'Approve and activate', activate:'Activate', deactivate:'Deactivate' }[actionName]} selected</Button>)}<Button variant="outline" disabled={busy} onClick={() => setConfirmingProvenance(true)}>Confirm provenance for selected</Button><Button variant="destructive" disabled={busy} onClick={() => setDeleting(true)}>Delete selected</Button></div>}
+    {!data.canActivate && <p className="text-sm text-muted-foreground">Super Admin access is required to activate questions. You can edit, approve and confirm provenance.</p>}
+    {confirmingProvenance && count > 0 && <BankProvenanceConfirmation key={Object.keys(selected).sort().join(',')} count={count} disabled={busy} onConfirm={confirmProvenance} onCancel={() => setConfirmingProvenance(false)} />}
     {deleting && <div role="alertdialog" aria-label="Bulk deletion confirmation" className="rounded-xl border p-5 space-y-3"><p>Permanently delete {count} selected questions? Their current content will be removed.</p><div className="flex gap-3"><Button variant="destructive" disabled={busy || !count} onClick={() => void action('delete')}>Confirm delete {count} questions</Button><Button variant="outline" disabled={busy} onClick={() => setDeleting(false)}>Cancel</Button></div></div>}
     <div className="space-y-3">{data.questions.map(q => <div key={q.id} className="rounded-xl border p-4 flex items-start gap-3">
       <input className="mt-1" type="checkbox" aria-label={`Select ${q.externalQid}`} disabled={busy} checked={selected[q.id] !== undefined} onChange={e => { const checked=e.target.checked; setSelected(previous => { const next={ ...previous }; if (checked) next[q.id]=q.revision; else delete next[q.id]; return next }) }} />
-      <Link to={`/admin/interview-bank/questions/${q.id}`} className="flex-1 hover:underline focus-visible:ring-2"><div className="text-xs text-muted-foreground">{q.namespace} / {q.externalQid} · {bankStatus(q)}{q.origin === 'GENERATED_FOLLOW_UP' ? ' · Generated follow-up' : ''}</div><h2 className="font-medium mt-2">{q.questionText}</h2><p className="text-sm text-muted-foreground mt-1">{q.track} · {q.category} · {q.difficulty}</p></Link>
+      <Link to={`/admin/interview-bank/questions/${q.id}`} className="flex-1 hover:underline focus-visible:ring-2"><div className="text-xs text-muted-foreground">{q.namespace} / {q.externalQid} · {bankStatus(q)}{q.origin === 'GENERATED_FOLLOW_UP' ? ' · Generated follow-up' : ''}</div><h2 className="font-medium mt-2">{q.questionText}</h2><p className="text-sm text-muted-foreground mt-1">{q.track} · {q.category} · {q.difficulty} · {q.provenanceConfirmedAt ? 'Provenance confirmed' : 'Provenance needed for learner practice'}</p></Link>
     </div>)}{!data.total && <p>{search || status || difficulty || category || track ? 'No questions match these filters. Clear or change a filter to see more.' : 'No questions yet. Write one or import a CSV to begin.'}</p>}</div>
     <div className="flex items-center gap-3"><Button variant="outline" disabled={busy || page === 1} onClick={() => setPage(p => p - 1)}>Previous</Button><span>Page {page}</span><Button variant="outline" disabled={busy || page * 30 >= data.total} onClick={() => setPage(p => p + 1)}>Next</Button></div></>}
   </div>

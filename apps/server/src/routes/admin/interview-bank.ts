@@ -8,13 +8,14 @@ import { BankError, CSV_LIMITS, csvCell, parseCsv } from '../../interviews/bank/
 import { DEFAULT_COLUMNS, IMPORT_FIELDS, importOptionsSchema } from '../../interviews/bank/import'
 import { draftSchema, editSchema, identitySchema, revisionSchema } from '../../interviews/bank/schemas'
 import { learnerPreview } from '../../interviews/bank/views'
-import { confirmImport, createQuestion, detail, editQuestion, previewImport, bulkAction, questionAction } from '../../interviews/bank/service'
+import { confirmImport, confirmProvenance, createQuestion, detail, editQuestion, previewImport, bulkAction, questionAction } from '../../interviews/bank/service'
 
 const router = Router()
 router.use(requireAdmin)
 router.use((req, res, next) => {
   void prisma.user.findUnique({ where: { id: req.user!.userId }, select: { role: true } }).then(user => {
     if (user?.role !== 'ADMIN' && user?.role !== 'SUPER_ADMIN') { res.status(403).json({ error: 'Current Admin access required' }); return }
+    res.locals.bankRole = user.role
     next()
   }).catch(next)
 })
@@ -24,6 +25,7 @@ function asyncRoute(fn: (req: Request, res: Response) => Promise<unknown>) {
   return (req: Request, res: Response, next: NextFunction) => { void fn(req, res).catch(next) }
 }
 function csvUpload(req: Request) { if (!req.file) throw new BankError(400, 'Choose a UTF-8 .csv file'); return req.file.buffer }
+async function editorDetail(id: string, res: Response) { return { ...await detail(id), canActivate: res.locals.bankRole === 'SUPER_ADMIN' } }
 const pageSchema = z.coerce.number().int().min(1).max(10000).default(1)
 const listFiltersSchema = z.object({
   search: z.string().max(160).optional(), track: z.string().max(160).optional(),
@@ -52,10 +54,10 @@ router.get('/questions', asyncRoute(async (req, res) => {
   const where = listWhere(req.query)
   const [questions, total] = await Promise.all([
     prisma.questionBankQuestion.findMany({ where, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], skip: (page - 1) * 30, take: 30,
-      select: { id: true, revision: true, approved: true, active: true, questionText: true, track: true, category: true, difficulty: true, externalQid: true, namespace: true, origin: true } }),
+      select: { id: true, revision: true, approved: true, active: true, questionText: true, track: true, category: true, difficulty: true, externalQid: true, namespace: true, origin: true, provenanceConfirmedAt: true } }),
     prisma.questionBankQuestion.count({ where }),
   ])
-  res.json({ questions, total, page })
+  res.json({ questions, total, page, canActivate: res.locals.bankRole === 'SUPER_ADMIN' })
 }))
 router.post('/questions/selection', asyncRoute(async (req, res) => {
   const filters = listFiltersSchema.parse(req.body)
@@ -65,12 +67,13 @@ router.post('/questions/selection', asyncRoute(async (req, res) => {
   res.json({ questions })
 }))
 router.post('/questions/bulk', asyncRoute(async (req, res) => { res.json(await bulkAction(req.body, req.user!.userId)) }))
+router.post('/questions/provenance', asyncRoute(async (req, res) => { res.json(await confirmProvenance(req.body, req.user!.userId)) }))
 router.post('/questions', asyncRoute(async (req, res) => {
   const body = z.object({ identity: identitySchema, draft: draftSchema }).strict().parse(req.body)
   const id = await createQuestion(body.identity, body.draft, req.user!.userId)
-  res.status(201).json(await detail(id))
+  res.status(201).json(await editorDetail(id, res))
 }))
-router.get('/questions/:id', asyncRoute(async (req, res) => { res.json(await detail(req.params.id)) }))
+router.get('/questions/:id', asyncRoute(async (req, res) => { res.json(await editorDetail(req.params.id, res)) }))
 router.get('/questions/:id/learner-preview', asyncRoute(async (req, res) => {
   const data = await detail(req.params.id)
   res.json({ status: data.question.active ? 'ACTIVE' : data.question.approved ? 'APPROVED' : 'DRAFT', preview: learnerPreview(data.draft) })
@@ -78,7 +81,7 @@ router.get('/questions/:id/learner-preview', asyncRoute(async (req, res) => {
 router.put('/questions/:id', asyncRoute(async (req, res) => {
   const body = editSchema.parse(req.body)
   await editQuestion(req.params.id, body.revision, body.draft, req.user!.userId)
-  res.json(await detail(req.params.id))
+  res.json(await editorDetail(req.params.id, res))
 }))
 router.delete('/questions/:id', asyncRoute(async (req, res) => {
   const body = revisionSchema.parse(req.body)
@@ -88,10 +91,10 @@ router.post('/questions/:id/:action', asyncRoute(async (req, res) => {
   const { revision } = revisionSchema.parse(req.body)
   const action = z.enum(['approve', 'activate', 'deactivate', 'approve_activate']).parse(req.params.action)
   await questionAction(req.params.id, revision, action, req.user!.userId)
-  res.json(await detail(req.params.id))
+  res.json(await editorDetail(req.params.id, res))
 }))
 // The retained copy's old editor links remain usable after migration.
-router.get('/versions/:id', asyncRoute(async (req, res) => { res.json(await detail(req.params.id)) }))
+router.get('/versions/:id', asyncRoute(async (req, res) => { res.json(await editorDetail(req.params.id, res)) }))
 router.post('/imports/inspect', upload.single('file'), asyncRoute(async (req, res) => {
   const data = parseCsv(csvUpload(req))
   res.json({ headers: data.headers, rowCount: data.rows.length, defaultColumns: DEFAULT_COLUMNS, fields: IMPORT_FIELDS })

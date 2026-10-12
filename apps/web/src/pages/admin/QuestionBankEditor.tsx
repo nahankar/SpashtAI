@@ -4,6 +4,7 @@ import { apiClient } from '@/lib/api-client'
 import { BANK_API, bankWrite, bankStatus, emptyDraft, type BankDraft, type BankDetail, type BankPreview, type BankAction } from '@/lib/interview-bank'
 import { Button } from '@/components/ui/button'
 import { QuestionBankPreview } from '@/components/admin/QuestionBankPreview'
+import { BankProvenanceConfirmation } from '@/components/admin/BankProvenanceConfirmation'
 const control = 'w-full rounded-md border bg-background px-3 py-2 text-sm'
 const lines = (value: string) => value.split('\n')
 function TextField({ label, value, onChange, multiline = false }: { label: string; value: string; onChange: (v: string) => void; multiline?: boolean }) {
@@ -23,6 +24,15 @@ export function QuestionBankEditor() {
     return () => controller.abort()
   }, [id])
   const dirty = !data || JSON.stringify(draft) !== JSON.stringify(data.draft)
+  async function confirmProvenance(note: string) {
+    const signal = lifetime.current!.signal; setBusy(true); setError('')
+    try {
+      await bankWrite('/questions/provenance', { confirmed: true, note, questions: [{ id, revision: data!.question.revision }] }, 'POST', signal)
+      const result = await apiClient<BankDetail>(`${BANK_API}/questions/${id}`, { signal })
+      if (!signal.aborted) { setData(result); setDraft(result.draft) }
+    } catch (e) { if (!signal.aborted) setError(e instanceof Error ? e.message : 'Confirmation failed') }
+    finally { if (!signal.aborted) setBusy(false) }
+  }
   function change<K extends keyof BankDraft>(key: K, value: BankDraft[K]) { setDraft(d => ({ ...d, [key]: value })); setPreview(null) }
   async function act(action: 'save' | 'preview' | BankAction) {
     const signal = lifetime.current!.signal; setBusy(true); setError('')
@@ -73,13 +83,15 @@ export function QuestionBankEditor() {
       </div></details>
     </fieldset>
     {data?.question.sourceAnswer && <details className="border rounded-xl p-4"><summary className="cursor-pointer font-medium">Imported reference answer · Admin only</summary><p className="mt-3 whitespace-pre-wrap text-sm">{data.question.sourceAnswer}</p></details>}
+    {data && (data.question.provenanceConfirmedAt ? <div className="rounded-xl border p-4 space-y-2"><p className="font-medium">Learning content provenance confirmed</p><p className="text-sm whitespace-pre-wrap">{data.question.provenanceNote}</p><p className="text-xs text-muted-foreground">Content changes require confirmation again.</p></div> : <BankProvenanceConfirmation key={`${id}:${data.question.revision}`} count={1} disabled={busy || dirty} onConfirm={confirmProvenance} />)}
+    {data && !data.canActivate && <p className="text-sm text-muted-foreground">Super Admin access is required to activate this question.</p>}
     {data && data.blockers.length > 0 && <p className="text-sm text-muted-foreground">Before activating{dirty ? ' (last saved content)' : ''}: {data.blockers.join(' · ')}</p>}
     <div className="flex flex-wrap gap-3">
       <Button disabled={busy || !dirty} onClick={() => void act('save')}>Save question</Button>
       {data && <><Button variant="outline" disabled={busy || dirty} onClick={() => void act('preview')}>Learner preview</Button>
         <Button variant="outline" disabled={busy || dirty} onClick={() => navigate(`/admin/interview-bank/questions/${id}/test`)}>Test answer</Button>
         {!data.question.approved && <Button variant="outline" disabled={busy || dirty} onClick={() => void act('approve')}>Approve</Button>}
-        {!data.question.active && <Button disabled={busy || dirty || !!data.blockers.length} onClick={() => void act(data.question.approved ? 'activate' : 'approve_activate')}>{data.question.approved ? 'Activate' : 'Approve and activate'}</Button>}
+        {!data.question.active && <Button disabled={busy || dirty || !!data.blockers.length || !data.canActivate} onClick={() => void act(data.question.approved ? 'activate' : 'approve_activate')}>{data.question.approved ? 'Activate' : 'Approve and activate'}</Button>}
         {data.question.active && <Button variant="outline" disabled={busy || dirty} onClick={() => void act('deactivate')}>Deactivate</Button>}
         <Button variant="destructive" disabled={busy} onClick={() => setDeleting(true)}>Delete question</Button></>}
     </div>

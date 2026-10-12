@@ -15,10 +15,11 @@ export function emptyDraft(): BankDraft {
 export interface BankQuestion {
   id: string; revision: number; approved: boolean; active: boolean; namespace: string; externalQid: string
   questionText: string; track: string; category: string; difficulty: string; origin: string
+  provenanceConfirmedAt?: string | null
 }
 export interface BankDetail {
-  draft: BankDraft; blockers: string[]
-  question: BankQuestion & { sourceAnswer: string | null; sourceQuestionText: string | null }
+  draft: BankDraft; blockers: string[]; canActivate?: boolean
+  question: BankQuestion & { sourceAnswer: string | null; sourceQuestionText: string | null; provenanceNote?: string }
 }
 export interface BankPreview { status: string; preview: { questionText: string; explanation: string; exampleAnswer: string; expectedDepth: string } }
 export type BankAction = 'approve' | 'activate' | 'deactivate' | 'approve_activate' | 'delete'

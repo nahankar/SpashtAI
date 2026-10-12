@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activationBlockers, bulkSchema, draftSchema } from '../src/interviews/bank/schemas'
+import { activationBlockers, learnerActivationBlockers, provenanceSchema, bulkSchema, draftSchema } from '../src/interviews/bank/schemas'
 import { learnerPreview } from '../src/interviews/bank/views'
 import { followUpSchema, followUpIdentity } from '../src/interviews/bank/followUps'
 import { readyDraft } from './fixtures/bank-draft'
@@ -18,6 +18,15 @@ describe('simple bank content boundaries', () => {
     const result = learnerPreview(readyDraft())
     expect(result).toEqual(wirePreview)
     expect(JSON.stringify(result)).not.toMatch(/goodAnswerPoints|followUpGuidance|generationNotes|reviewNotes|Private editorial/)
+  })
+  it('requires a deliberate provenance confirmation without importing it as draft content', () => {
+    expect(learnerActivationBlockers(readyDraft(), null)).toEqual(['Confirm learning content provenance'])
+    expect(learnerActivationBlockers(readyDraft(), new Date())).toEqual([])
+    const body = { confirmed: true, note: 'Authored specifically for this disposable test fixture.', questions: [{ id: 'a', revision: 1 }] }
+    expect(provenanceSchema.safeParse(body).success).toBe(true)
+    expect(provenanceSchema.safeParse({ ...body, confirmed: false }).success).toBe(false)
+    expect(provenanceSchema.safeParse({ ...body, note: 'Copilot' }).success).toBe(false)
+    expect(draftSchema.safeParse({ ...readyDraft(), provenanceNote: body.note }).success).toBe(false)
   })
   it('rejects stale versioning fields and duplicate bulk selections', () => {
     expect(draftSchema.safeParse({ ...readyDraft(), rubric: {} }).success).toBe(false)

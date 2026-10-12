@@ -1,11 +1,64 @@
 # Phase 3 — Hidden adaptive interview practice pilot
 
-This is the next proposed implementation scope after simplified Phase 2a and
-the Admin evaluator are merged. It is a plan, not an implemented feature or
-authorization to deploy. Keep one editable bank copy; past attempts retain
+Simplified Phase 2a and the Admin evaluator are deployed through `d283857`.
+Phase 3 implementation is local on `codex/interviews-phase3`; deployment is a
+separate review step. Keep one editable bank copy; past attempts retain
 their captured question, answer and assessment. Technical feedback stays
 outside Progress Pulse. Start with Automation Testing unless the user chooses
 another pilot track.
+
+## Changes from the reviewed plan
+
+- Production now has all 1,649 `automation-pilot` questions approved and active.
+  Preserve those states. Add provenance confirmation as a separate single/bulk
+  action; missing confirmation excludes a question from learner selection.
+  CSV import cannot confirm provenance. One confirmation note can cover a
+  reviewed selection, avoiding another workbook-enrichment cycle.
+- Proceed with the recommended initial activation policy: current SUPER_ADMIN
+  activates; ADMIN edits, approves and confirms provenance.
+- Existing LiveKit token/dispatch and session lifecycle routes are gated on
+  Elevate. Add purpose-aware authorization before wiring the interview adapter;
+  learner Interviews access must not depend on the Elevate navigation flag.
+  Keep token parameters exactly room/sessionId/segmentId.
+- Live assessment access and budgets must be separate from the Admin evaluator
+  flag/caps. The worker must select enabled sources, rather than an off Admin
+  flag blocking learner jobs or an on learner flag permitting Admin tests.
+- The authoritative answer will be the server-assembled committed answer chunks
+  captured for the attempt, with source/revision/hash recorded. Silence does
+  not finalize an answer. Later transcript/recording alignment cannot silently
+  change an already graded snapshot; correction uses explicit supersession.
+- Persist generated question wording and matching evaluation guidance before
+  asking it. The current bank-guided follow-up proposal alone does not establish
+  a complete rubric for a newly generated or harder question.
+- Start with standalone practice and namespace `automation-pilot`, excluding
+  old workbook copies and QA/generated namespaces. Journey launch/context is a
+  later adapter integration; quick runs do not carry cross-session context.
+
+## Checkpoint 3.0 implementation
+
+Added an additive local migration for explicit provenance note/time/actor. It
+does not change existing approvals or active states. Single and bulk Admin UI
+confirmation require a deliberate checkbox and authorship/permission note.
+Edits and changed CSV imports invalidate confirmation; a database trigger also
+clears it on content changes outside those handlers. Identical imports and
+approval/activation changes preserve confirmation. Deleting the confirmer
+clears the actor link while retaining the recorded note/time.
+
+Activation reads the current Super Admin role under a database lock, independent
+of JWT role claims. Learner eligibility requires approval, activation, spoken
+suitability and confirmed provenance. Existing Admin evaluator tests remain
+usable for unconfirmed bank drafts. No production migration or flag change is
+part of this local checkpoint.
+
+Verification: 476 server tests pass in the serialized shared-DB run, 210 web
+tests pass, typechecks/builds pass, and the changed UI files have no lint errors
+or warnings. The default parallel run exposed the existing intermittent Replay
+workflow assertion; evaluator fixture flags now keep legacy enabled in sync.
+Clean installation and preview/test upgrades pass. Browser QA uses only two
+newly authored disposable questions in `phase3-ui-qa`: activation requires
+confirmation, and bulk confirmation preserves active/draft states. Imported
+content was not automatically attested. Bank integration tests now refuse the
+preview database and use only the disposable `simple_bank` database.
 
 ## Checkpoint 3.0 — Learning-content and access gates
 

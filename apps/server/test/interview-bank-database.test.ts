@@ -5,7 +5,7 @@ import { randomUUID } from 'crypto'
 import { readyDraft } from './fixtures/bank-draft'
 const testDb = vi.hoisted(() => {
   const url = process.env.BANK_TEST_DATABASE_URL
-  if (url && !/^postgresql:\/\/postgres@127\.0\.0\.1:55441\/(postgres|upgrade_bank|review_bank|review_upgrade|simple_bank|simple_upgrade)$/.test(url)) throw new Error('Bank tests require the isolated test database on port 55441')
+  if (url && url !== 'postgresql://postgres@127.0.0.1:55441/simple_bank') throw new Error('Bank tests use only the isolated simple_bank database; never the preview bank')
   return { url }
 })
 vi.mock('../src/lib/prisma', async () => {
@@ -13,29 +13,35 @@ vi.mock('../src/lib/prisma', async () => {
   return { prisma: new PrismaClient({ datasourceUrl: testDb.url || 'postgresql://postgres@127.0.0.1:55441/simple_bank' }) }
 })
 import { prisma } from '../src/lib/prisma'
-import { createQuestion, detail, editQuestion, previewImport, confirmImport, bulkAction, questionAction } from '../src/interviews/bank/service'
+import { createQuestion, detail, editQuestion, previewImport, confirmImport, confirmProvenance, bulkAction, questionAction } from '../src/interviews/bank/service'
 import { enqueueFollowUps, sweepFollowUps, followUpIdentity } from '../src/interviews/bank/followUps'
 import { importOptionsSchema } from '../src/interviews/bank/import'
 import router from '../src/routes/admin/interview-bank'
 import followUpRouter from '../src/routes/internal/interview-followups'
 import { requireAuth } from '../src/middleware/auth'
 import { signToken } from '../src/lib/jwt'
+import { learnerEligibleWhere } from '../src/interviews/bank/schemas'
 const namespace = `test_${randomUUID().replaceAll('-', '')}`
 let actor: string; let qid = 0
 const app = express(); app.use(express.json({ limit: '1mb' })); app.use('/bank', requireAuth, router); app.use('/internal/sessions', followUpRouter)
 const token = (role = 'ADMIN') => signToken({ userId: actor, email: 'bank-test@example.invalid', role })
-async function createReady() { return createQuestion({ namespace, externalQid: `AUTO-${++qid}` }, readyDraft(), actor) }
+const provenanceNote = 'Authored specifically for this disposable test fixture; no imported source content.'
+async function createReady() {
+  const id = await createQuestion({ namespace, externalQid: `AUTO-${++qid}` }, readyDraft(), actor)
+  await confirmProvenance({ confirmed: true, note: provenanceNote, questions: [{ id, revision: 1 }] }, actor)
+  return id
+}
 async function selection(ids: string[]) { return Promise.all(ids.map(async id => ({ id, revision: (await detail(id)).question.revision }))) }
 async function csv(text: string, options: ReturnType<typeof importOptionsSchema.parse>) { const id = await previewImport(Buffer.from(text), options, actor); await confirmImport(id, actor); return id }
 describe.skipIf(!testDb.url)('single-copy question bank PostgreSQL workflow', () => {
-  beforeAll(async () => { actor = (await prisma.user.create({ data: { email: `${namespace}@example.invalid`, role: 'ADMIN' } })).id })
+  beforeAll(async () => { actor = (await prisma.user.create({ data: { email: `${namespace}@example.invalid`, role: 'SUPER_ADMIN' } })).id })
   afterAll(async () => { await prisma.user.deleteMany({ where: { id: actor } }); await prisma.$disconnect() })
   it('requires login and current Admin role for reads and writes', async () => {
     expect((await request(app).get('/bank/questions')).status).toBe(401)
     expect((await request(app).get('/bank/questions').auth(token('USER'), { type: 'bearer' })).status).toBe(403)
     const stale = token(); await prisma.user.update({ where: { id: actor }, data: { role: 'USER' } })
     expect((await request(app).get('/bank/questions').auth(stale, { type: 'bearer' })).status).toBe(403)
-    await prisma.user.update({ where: { id: actor }, data: { role: 'ADMIN' } })
+    await prisma.user.update({ where: { id: actor }, data: { role: 'SUPER_ADMIN' } })
     expect((await request(app).get('/bank/questions').auth(stale, { type: 'bearer' })).status).toBe(200)
   })
   it('edits an active question in place and resets approval, without creating a second copy', async () => {
@@ -50,6 +56,49 @@ describe.skipIf(!testDb.url)('single-copy question bank PostgreSQL workflow', ()
     const edits = await Promise.allSettled([editQuestion(id, 1, readyDraft(), actor), editQuestion(id, 1, readyDraft(), actor)])
     expect(edits.filter(e => e.status === 'fulfilled')).toHaveLength(1)
     await expect(createQuestion({ namespace, externalQid: (await detail(id)).question.externalQid }, readyDraft(), actor)).rejects.toMatchObject({ status: 409 })
+  })
+  it('requires confirmation before activation and reads the current activation role rather than the JWT', async () => {
+    const id = await createQuestion({ namespace, externalQid: 'PROVENANCE-GATE' }, readyDraft(), actor)
+    await expect(questionAction(id, 1, 'approve_activate', actor)).rejects.toMatchObject({ status: 400 })
+    const staleToken = token('SUPER_ADMIN')
+    await prisma.user.update({ where: { id: actor }, data: { role: 'ADMIN' } })
+    try {
+      expect((await request(app).get(`/bank/questions/${id}`).auth(staleToken, { type: 'bearer' })).body.canActivate).toBe(false)
+      expect((await request(app).post('/bank/questions/provenance').auth(staleToken, { type: 'bearer' }).send({ confirmed: false, note: provenanceNote, questions: [{ id, revision: 1 }] })).status).toBe(400)
+      expect((await request(app).post('/bank/questions/provenance').auth(staleToken, { type: 'bearer' }).send({ confirmed: true, note: provenanceNote, questions: [{ id, revision: 1 }] })).status).toBe(200)
+      expect((await request(app).post(`/bank/questions/${id}/approve`).auth(staleToken, { type: 'bearer' }).send({ revision: 1 })).status).toBe(200)
+      expect((await request(app).post(`/bank/questions/${id}/activate`).auth(staleToken, { type: 'bearer' }).send({ revision: 2 })).status).toBe(403)
+    } finally { await prisma.user.update({ where: { id: actor }, data: { role: 'SUPER_ADMIN' } }) }
+    await questionAction(id, 2, 'activate', actor)
+    expect(await prisma.questionBankQuestion.count({ where: { id, ...learnerEligibleWhere } })).toBe(1)
+  })
+  it('confirms provenance without resetting activation and invalidates it after content changes', async () => {
+    const id = await createReady(); await questionAction(id, 1, 'approve_activate', actor)
+    const old = (await detail(id)).question
+    await confirmProvenance({ confirmed: true, note: 'Reviewed authorship again for this disposable test fixture.', questions: [{ id, revision: 2 }] }, actor)
+    expect((await detail(id)).question).toMatchObject({ active: true, approved: true, revision: old.revision, provenanceConfirmedById: actor })
+    await prisma.questionBankQuestion.update({ where: { id }, data: { explanation: 'Changed directly outside the editor for trigger regression.' } })
+    expect((await detail(id)).question).toMatchObject({ active: true, approved: true, provenanceConfirmedAt: null, provenanceConfirmedById: null, provenanceNote: '' })
+    expect(await prisma.questionBankQuestion.count({ where: { id, ...learnerEligibleWhere } })).toBe(0)
+    await confirmProvenance({ confirmed: true, note: provenanceNote, questions: [{ id, revision: 2 }] }, actor)
+    const options = importOptionsSchema.parse({ namespace, mode: 'UPDATE_BY_QID', mapping: { externalQid: 'QID', questionText: 'Question' } })
+    await csv(`QID,Question\n${old.externalQid},Changed by CSV?`, options)
+    expect((await detail(id)).question).toMatchObject({ active: false, approved: false, provenanceConfirmedAt: null })
+  })
+  it('rolls back an entire stale bulk confirmation and preserves confirmation on identical CSV content', async () => {
+    const ids = await Promise.all(['PROV-BULK-A','PROV-BULK-B'].map(externalQid => createQuestion({ namespace, externalQid }, readyDraft(), actor)))
+    const old = await selection(ids)
+    await editQuestion(ids[1], 1, readyDraft(), actor)
+    await expect(confirmProvenance({ confirmed: true, note: provenanceNote, questions: old }, actor)).rejects.toMatchObject({ status: 409 })
+    expect(await prisma.questionBankQuestion.count({ where: { id: { in: ids }, provenanceConfirmedAt: { not: null } } })).toBe(0)
+    const options = importOptionsSchema.parse({ namespace: `${namespace}_prov_import`, mode: 'UPDATE_BY_QID', mapping: { externalQid: 'QID', questionText: 'Question' } })
+    const file = 'QID,Question\nPROV-IMPORT,How should fixtures work?'
+    await csv(file, options)
+    const q = await prisma.questionBankQuestion.findFirstOrThrow({ where: { namespace: options.namespace } })
+    await confirmProvenance({ confirmed: true, note: provenanceNote, questions: [{ id: q.id, revision: 1 }] }, actor)
+    await csv(file, options)
+    expect((await detail(q.id)).question.provenanceConfirmedAt).not.toBeNull()
+    await expect(createQuestion({ namespace, externalQid: 'PROV-FAKE' }, { ...readyDraft(), provenanceNote, provenanceConfirmedAt: new Date() } as any, actor)).rejects.toThrow()
   })
   it('applies bulk approval/activation/deactivation atomically and rejects stale selections', async () => {
     const ids = await Promise.all([createReady(),createReady()])
@@ -85,6 +134,7 @@ describe.skipIf(!testDb.url)('single-copy question bank PostgreSQL workflow', ()
         ids.push(id)
         if (i < 31) matching.push(id)
       }
+      await confirmProvenance({ confirmed: true, note: provenanceNote, questions: await selection(ids) }, actor)
       await bulkAction({ action: 'approve_activate', questions: await selection(ids.filter((_id, i) => i !== 33)) }, actor)
       const filters = { search, category, difficulty: 'Simple', status: 'ACTIVE', track }
       const first = await request(app).get('/bank/questions').query(filters).auth(auth, { type:'bearer' })
@@ -119,6 +169,7 @@ describe.skipIf(!testDb.url)('single-copy question bank PostgreSQL workflow', ()
     expect(batchIds[0]).toBe(batchIds[1]); await Promise.all([confirmImport(batchIds[0],actor),confirmImport(batchIds[0],actor)])
     const q = await prisma.questionBankQuestion.findFirstOrThrow({ where: { namespace: scope } })
     expect(q).toMatchObject({ active:false, approved:false, exampleAnswer:'Use fresh fixtures', goodAnswerPoints:'Independent state' })
+    await confirmProvenance({ confirmed: true, note: provenanceNote, questions: [{ id: q.id, revision: 1 }] }, actor)
     await questionAction(q.id,1,'approve_activate',actor)
     const sparse = { ...options, mapping: { externalQid:'QID',questionText:'Question' } }
     await csv('QID,Question\nQ-1,How should fixtures work?', sparse)
@@ -141,7 +192,9 @@ describe.skipIf(!testDb.url)('single-copy question bank PostgreSQL workflow', ()
     const options=importOptionsSchema.parse({namespace:`${namespace}_delete`,mode:'ADD_ONLY',mapping:{externalQid:'QID',questionText:'Question'}})
     const batch=await csv('QID,Question\nDEL-1,What is isolation?',options)
     const row=await prisma.questionImportRow.findFirstOrThrow({where:{batchId:batch}});const id=row.resultQuestionId!
-    await editQuestion(id,1,readyDraft(),actor);await questionAction(id,2,'approve_activate',actor)
+    await editQuestion(id,1,readyDraft(),actor)
+    await confirmProvenance({ confirmed: true, note: provenanceNote, questions: [{ id, revision: 2 }] }, actor)
+    await questionAction(id,2,'approve_activate',actor)
     expect((await request(app).post(`/bank/questions/${id}/delete`).auth(token(),{type:'bearer'}).send({revision:3})).status).toBe(400)
     const response=await request(app).delete(`/bank/questions/${id}`).auth(token(),{type:'bearer'}).send({revision:3})
     expect(response.status).toBe(200); await expect(detail(id)).rejects.toMatchObject({status:404})
@@ -211,8 +264,9 @@ describe.skipIf(!testDb.url)('single-copy question bank PostgreSQL workflow', ()
     await prisma.session.delete({where:{id:session.id}})
   })
   it('retains shared questions when their creator account is removed', async () => {
-    const user=await prisma.user.create({data:{email:`${namespace}_author@example.invalid`,role:'ADMIN'}})
+    const user=await prisma.user.create({data:{email:`${namespace}_author@example.invalid`,role:'SUPER_ADMIN'}})
     const id=await createQuestion({namespace,externalQid:'AUTHOR'},readyDraft(),user.id)
+    await confirmProvenance({confirmed:true,note:provenanceNote,questions:[{id,revision:1}]},user.id)
     await questionAction(id,1,'approve_activate',user.id);await prisma.user.delete({where:{id:user.id}})
     expect((await detail(id)).question).toMatchObject({active:true,createdById:null,approvedById:null})
   })

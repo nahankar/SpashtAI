@@ -14,7 +14,7 @@ import { assessmentDetail, claimAssessment, deleteAssessment, enqueueAssessment,
 import { EvaluationFailure } from '../src/interviews/evaluator/model'
 import { readyDraft } from './fixtures/bank-draft'
 import { correctEvaluation, testAnswer } from './fixtures/interview-evaluation'
-import { createQuestion, editQuestion, questionAction } from '../src/interviews/bank/service'
+import { createQuestion, editQuestion, confirmProvenance, questionAction } from '../src/interviews/bank/service'
 import router from '../src/routes/admin/interview-evaluator'
 import featureRouter from '../src/routes/admin/feature-flags'
 import { requireAuth } from '../src/middleware/auth'
@@ -35,7 +35,7 @@ describe.skipIf(!testDb.url)('durable Admin evaluator PostgreSQL contracts', () 
     originalFlag = await prisma.platformFeatureFlag.findUnique({ where: { feature: 'interview_evaluator' } })
     originalGlobalBudget = await prisma.interviewEvaluatorBudget.findUnique({ where: { scope_day: { scope: 'global', day: new Date().toISOString().slice(0,10) } } })
     await prisma.interviewEvaluatorBudget.upsert({ where: { scope_day: { scope: 'global', day: new Date().toISOString().slice(0,10) } }, create: { scope: 'global', day: new Date().toISOString().slice(0,10) }, update: { used: 0 } })
-    await prisma.platformFeatureFlag.upsert({ where: { feature: 'interview_evaluator' }, create: { feature: 'interview_evaluator', label: 'Test', hidden: false, disabled: false, audience: 'SELECTED_USERS' }, update: { hidden: false, disabled: false, audience: 'SELECTED_USERS' } })
+    await prisma.platformFeatureFlag.upsert({ where: { feature: 'interview_evaluator' }, create: { feature: 'interview_evaluator', label: 'Test', hidden: false, disabled: false, enabled: true, audience: 'SELECTED_USERS' }, update: { hidden: false, disabled: false, enabled: true, audience: 'SELECTED_USERS' } })
     for (const [name, role] of [['owner','ADMIN'], ['other','ADMIN'], ['super','SUPER_ADMIN']] as const) {
       const user = await prisma.user.create({ data: { email: `${namespace}-${name}@example.invalid`, role } }); ids.push(user.id)
       await prisma.userFeatureGrant.create({ data: { userId: user.id, feature: 'interview_evaluator' } })
@@ -47,14 +47,14 @@ describe.skipIf(!testDb.url)('durable Admin evaluator PostgreSQL contracts', () 
     await prisma.interviewAnswerSnapshot.deleteMany({ where: { ownerId: { in: ids } } })
     await prisma.interviewEvaluatorBudget.deleteMany({ where: { scope: { in: ids.map(hash) } } })
     await prisma.user.update({ where: { id: actor }, data: { role: 'ADMIN' } })
-    await prisma.platformFeatureFlag.update({ where: { feature: 'interview_evaluator' }, data: { hidden: false, disabled: false } })
+    await prisma.platformFeatureFlag.update({ where: { feature: 'interview_evaluator' }, data: { hidden: false, disabled: false, enabled: true } })
     await prisma.userFeatureGrant.upsert({ where: { userId_feature: { userId: actor, feature: 'interview_evaluator' } }, create: { userId: actor, feature: 'interview_evaluator' }, update: {} })
   })
   afterAll(async () => {
     await prisma.questionBankQuestion.deleteMany({ where: { namespace } })
     await prisma.user.deleteMany({ where: { id: { in: ids } } })
     await prisma.interviewEvaluatorUsage.deleteMany({ where: { invocationKey: { in: usageKeys } } })
-    if (originalFlag) await prisma.platformFeatureFlag.update({ where: { feature: 'interview_evaluator' }, data: { hidden: originalFlag.hidden, disabled: originalFlag.disabled, audience: originalFlag.audience } })
+    if (originalFlag) await prisma.platformFeatureFlag.update({ where: { feature: 'interview_evaluator' }, data: { hidden: originalFlag.hidden, disabled: originalFlag.disabled, enabled: originalFlag.enabled, audience: originalFlag.audience } })
     const globalKey = { scope: 'global', day: new Date().toISOString().slice(0,10) }
     if (originalGlobalBudget) await prisma.interviewEvaluatorBudget.update({ where: { scope_day: globalKey }, data: { used: originalGlobalBudget.used } })
     else await prisma.interviewEvaluatorBudget.deleteMany({ where: globalKey })
@@ -127,7 +127,7 @@ describe.skipIf(!testDb.url)('durable Admin evaluator PostgreSQL contracts', () 
     await finish(job)
     expect(await assessmentDetail(saved.id, actor)).toMatchObject({ status: 'CANCELLED', result: null })
     await expect(retryAssessment(saved.id, actor)).rejects.toMatchObject({ status: 403 })
-    await prisma.platformFeatureFlag.update({ where: { feature: 'interview_evaluator' }, data: { disabled: true } })
+    await prisma.platformFeatureFlag.update({ where: { feature: 'interview_evaluator' }, data: { disabled: true, enabled: false } })
     expect(await claimAssessment()).toBeNull()
   })
   it('caps concurrent leases, fences expired leases, and bounds timeout retries', async () => {
@@ -150,7 +150,8 @@ describe.skipIf(!testDb.url)('durable Admin evaluator PostgreSQL contracts', () 
   })
   it('switches to an active different topic for abstentions and never invents a fallback', async () => {
     const nextId = await createQuestion({ namespace, externalQid: 'Q-2' }, { ...readyDraft(), topic: 'Selectors', difficulty: 'Simple' }, actor)
-    await questionAction(nextId, 1, 'approve_activate', actor)
+    await confirmProvenance({ confirmed: true, note: 'This disposable fixture was authored specifically for this evaluator test.', questions: [{ id: nextId, revision: 1 }] }, actor)
+    await questionAction(nextId, 1, 'approve_activate', superAdmin)
     const saved = await submit("I don't know."); const job = await claim(); await finish(job, "I don't know.")
     const result = (await assessmentDetail(saved.id, actor)).result as any
     expect(result.classification).toBe('NOT_ANSWERED'); expect(result.next).toMatchObject({ action: 'SWITCH_TOPIC', source: 'BANK', questionId: nextId, topic: 'Selectors' })

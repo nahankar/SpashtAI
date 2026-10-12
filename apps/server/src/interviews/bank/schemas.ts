@@ -25,6 +25,14 @@ export const bulkSchema = z.object({
   action: bankActionSchema,
   questions: z.array(z.object({ id: z.string().min(1).max(100), revision: revisionSchema.shape.revision }).strict()).min(1).max(2000),
 }).strict().refine(v => new Set(v.questions.map(q => q.id)).size === v.questions.length, 'Select each question once')
+export const provenanceSchema = z.object({
+  confirmed: z.literal(true), note: z.string().trim().min(20).max(2000),
+  questions: z.array(z.object({ id: z.string().min(1).max(100), revision: revisionSchema.shape.revision }).strict()).min(1).max(2000),
+}).strict().refine(v => new Set(v.questions.map(q => q.id)).size === v.questions.length, 'Select each question once')
+export function learnerActivationBlockers(draft: BankDraft, confirmedAt: Date | null): string[] {
+  return [...activationBlockers(draft), ...(!confirmedAt ? ['Confirm learning content provenance'] : [])]
+}
+export const learnerEligibleWhere = { approved: true, active: true, verbalSuitable: true, provenanceConfirmedAt: { not: null } } as const
 export function activationBlockers(draft: BankDraft): string[] {
   const issues: string[] = []
   if (draft.track === 'General' || !draft.track) issues.push('Confirm the track')

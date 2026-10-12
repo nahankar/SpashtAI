@@ -167,6 +167,7 @@ model User {
   featureGrants           UserFeatureGrant[]
   bankQuestionsCreated    QuestionBankQuestion[] @relation("BankQuestionCreator")
   bankQuestionsApproved   QuestionBankQuestion[] @relation("BankQuestionApprover")
+  bankProvenanceConfirmed QuestionBankQuestion[] @relation("BankProvenanceConfirmer")
   bankImports             QuestionImportBatch[]
   interviewAnswerSnapshots InterviewAnswerSnapshot[]
 
@@ -1087,6 +1088,10 @@ model QuestionBankQuestion {
   approvedById      String?
   approvedBy        User? @relation("BankQuestionApprover", fields: [approvedById], references: [id], onDelete: SetNull)
   approvedAt        DateTime?
+  provenanceNote    String @default("") @db.Text
+  provenanceConfirmedAt DateTime?
+  provenanceConfirmedById String?
+  provenanceConfirmedBy User? @relation("BankProvenanceConfirmer", fields: [provenanceConfirmedById], references: [id], onDelete: SetNull)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
   importRows        QuestionImportRow[]
