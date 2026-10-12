@@ -170,6 +170,7 @@ model User {
   bankProvenanceConfirmed QuestionBankQuestion[] @relation("BankProvenanceConfirmer")
   bankImports             QuestionImportBatch[]
   interviewAnswerSnapshots InterviewAnswerSnapshot[]
+  interviewRuns            InterviewRun[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -412,6 +413,7 @@ model ReplayDeletion {
 }
 
 model Session {
+  interviewRun         InterviewRun?
   bankFollowUpJobs      BankFollowUpJob[]
   id                   String    @id @default(cuid())
   user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -531,6 +533,7 @@ model SessionTurn {
 }
 
 model SessionSegment {
+  interviewAnswerChunks InterviewAnswerChunk[]
   id                   String    @id
   session              Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   sessionId            String
@@ -1096,6 +1099,7 @@ model QuestionBankQuestion {
   updatedAt         DateTime @updatedAt
   importRows        QuestionImportRow[]
   answerSnapshots   InterviewAnswerSnapshot[]
+  interviewAttempts InterviewAttempt[]
 
   @@unique([namespace, externalQid])
   @@index([active, approved, track, difficulty])
@@ -1107,6 +1111,65 @@ enum InterviewAnswerSource {
   RECORDING
 }
 
+// Session remains the voice/retention owner. A run owns logical questions;
+// several speech turns can belong to a single answer.
+model InterviewRun {
+  id              String @id @default(cuid())
+  sessionId       String @unique
+  session         Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  ownerId         String
+  owner           User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  namespace       String @default("automation-pilot")
+  track           String
+  experienceBand  String
+  startingDifficulty String
+  durationMinutes Int @default(10)
+  maxQuestions    Int @default(8)
+  attempts        InterviewAttempt[]
+  createdAt       DateTime @default(now())
+  @@index([ownerId, createdAt])
+}
+
+model InterviewAttempt {
+  id               String @id @default(cuid())
+  runId            String
+  run              InterviewRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  index            Int
+  origin           String @default("BANK")
+  questionId       String?
+  question         QuestionBankQuestion? @relation(fields: [questionId], references: [id], onDelete: SetNull)
+  parentAttemptId  String?
+  parentAttempt    InterviewAttempt? @relation("InterviewAttemptParent", fields: [parentAttemptId], references: [id], onDelete: NoAction)
+  followUps        InterviewAttempt[] @relation("InterviewAttemptParent")
+  questionSnapshot Json
+  questionHash     String
+  status           String @default("PREPARED")
+  assistance       String @default("NONE")
+  askedAt          DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime @default(now())
+  chunks           InterviewAnswerChunk[]
+  answerSnapshots  InterviewAnswerSnapshot[]
+  @@unique([runId, index])
+  @@unique([runId, questionId])
+  @@index([runId, status])
+}
+
+model InterviewAnswerChunk {
+  id             String @id @default(cuid())
+  attemptId      String
+  attempt        InterviewAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  segmentId      String
+  segment        SessionSegment @relation(fields: [segmentId], references: [id], onDelete: Cascade)
+  sourceTurnId   String
+  localTurnIndex Int
+  text           String @db.Text
+  createdAt      DateTime @default(now())
+  @@unique([segmentId, sourceTurnId])
+  @@unique([segmentId, localTurnIndex])
+  @@index([attemptId])
+}
+
 // Authoritative graded input, independent of edits/deletion of the bank question.
 model InterviewAnswerSnapshot {
   id               String @id @default(cuid())
@@ -1114,6 +1177,7 @@ model InterviewAnswerSnapshot {
   owner            User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   source           InterviewAnswerSource @default(ADMIN_TEST)
   attemptId        String?
+  attempt          InterviewAttempt? @relation(fields: [attemptId], references: [id], onDelete: Cascade)
   recordingId      String?
   questionId       String?
   question         QuestionBankQuestion? @relation(fields: [questionId], references: [id], onDelete: SetNull)
@@ -1129,6 +1193,7 @@ model InterviewAnswerSnapshot {
   assessment       InterviewAssessment?
 
   @@index([ownerId, createdAt])
+  @@unique([attemptId, textRevision])
 }
 
 // One assessment is also one durable job. A lease fences concurrent workers.

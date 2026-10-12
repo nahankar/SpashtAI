@@ -61,7 +61,7 @@ export async function enqueueAssessment(input: unknown, ownerId: string) {
 async function ownedAssessment(id: string, actorId: string, tx: Tx = prisma) {
   const role = await tx.user.findUnique({ where: { id: actorId }, select: { role: true } })
   if (!role || !['ADMIN','SUPER_ADMIN'].includes(role.role)) throw new BankError(403, 'Current Admin access required')
-  const row = await tx.interviewAssessment.findFirst({ where: { id, ...(role.role === 'SUPER_ADMIN' ? {} : { snapshot: { ownerId: actorId } }) }, include: { snapshot: true, usage: { orderBy: { createdAt: 'asc' } } } })
+  const row = await tx.interviewAssessment.findFirst({ where: { id, snapshot: { source: 'ADMIN_TEST', ...(role.role === 'SUPER_ADMIN' ? {} : { ownerId: actorId }) } }, include: { snapshot: true, usage: { orderBy: { createdAt: 'asc' } } } })
   if (!row) throw new BankError(404, 'Test not found')
   return row
 }
@@ -108,9 +108,12 @@ export async function claimAssessment() {
     const flag = await tx.platformFeatureFlag.findUnique({ where: { feature: FEATURE } })
     if (!flag || flag.hidden || flag.disabled) return null
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('interview-evaluator-claim',0))`
-    await tx.interviewAssessment.updateMany({ where: { status: 'RUNNING', leaseUntil: { lt: new Date() } }, data: { status: 'FAILED', errorCode: 'LEASE_EXPIRED', leaseToken: null, leaseUntil: null } })
-    if (await tx.interviewAssessment.count({ where: { status: 'RUNNING' } }) >= LIMITS.concurrent) return null
-    const rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "InterviewAssessment" WHERE status='PENDING' AND "nextAt" <= NOW() ORDER BY "createdAt" LIMIT 1 FOR UPDATE SKIP LOCKED`
+    await tx.interviewAssessment.updateMany({ where: { snapshot: { source: 'ADMIN_TEST' }, status: 'RUNNING', leaseUntil: { lt: new Date() } }, data: { status: 'FAILED', errorCode: 'LEASE_EXPIRED', leaseToken: null, leaseUntil: null } })
+    if (await tx.interviewAssessment.count({ where: { status: 'RUNNING', snapshot: { source: 'ADMIN_TEST' } } }) >= LIMITS.concurrent) return null
+    const rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT a.id FROM "InterviewAssessment" a
+      JOIN "InterviewAnswerSnapshot" s ON s.id=a."snapshotId"
+      WHERE a.status='PENDING' AND a."nextAt" <= NOW() AND s.source='ADMIN_TEST'
+      ORDER BY a."createdAt" LIMIT 1 FOR UPDATE OF a SKIP LOCKED`
     if (!rows.length) return null
     const row = await tx.interviewAssessment.findUniqueOrThrow({ where: { id: rows[0].id }, include: { snapshot: true } })
     if (row.attempts >= LIMITS.attempts || !await evaluatorAccess(row.snapshot.ownerId, tx)) {
@@ -124,6 +127,7 @@ export async function claimAssessment() {
 }
 type Claim = NonNullable<Awaited<ReturnType<typeof claimAssessment>>>
 export async function finishAssessment(job: Claim, invocation: Invocation | EvaluationFailure) {
+  if (job.snapshot.source !== 'ADMIN_TEST') throw new BankError(409, 'Admin worker cannot evaluate learner answers')
   const failure = invocation instanceof EvaluationFailure
   await prisma.$transaction(async tx => {
     await tx.$queryRaw`SELECT id FROM "InterviewAssessment" WHERE id=${job.id} FOR UPDATE`

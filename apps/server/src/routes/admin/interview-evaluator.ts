@@ -18,7 +18,7 @@ router.use((req, res, next) => { void (async () => {
 router.get('/config', route(async (req, res) => { res.json(await evaluatorConfig(req.user!.userId)) }))
 router.get('/tests', route(async (req, res) => {
   const query = z.object({ questionId: z.string().max(160).optional() }).strict().parse(req.query)
-  const tests = await prisma.interviewAssessment.findMany({ where: { snapshot: { ownerId: req.user!.userId, ...(query.questionId ? { questionId: query.questionId } : {}) } },
+  const tests = await prisma.interviewAssessment.findMany({ where: { snapshot: { source: 'ADMIN_TEST', ownerId: req.user!.userId, ...(query.questionId ? { questionId: query.questionId } : {}) } },
     orderBy: { createdAt: 'desc' }, take: 20, select: { id: true, status: true, attempts: true, errorCode: true, createdAt: true,
       snapshot: { select: { questionSnapshot: true, assistance: true } } } })
   res.json({ tests })

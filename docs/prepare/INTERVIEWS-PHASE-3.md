@@ -82,6 +82,42 @@ preview database and use only the disposable `simple_bank` database.
 
 ## Checkpoint 3.1 — Persist attempts and authoritative answers
 
+Local implementation now adds owned `InterviewRun`, immutable question attempts
+and committed answer chunks. The service accepts the existing shared engine's
+session IDs and creates INTERVIEW/SESSION_ONLY activities itself. It selects
+only the confirmed, approved, active, spoken-suitable `automation-pilot` bank,
+uses exact track/experience/difficulty matching and avoids repeat questions.
+Question capture is locked against bank edits, limited to eight questions and
+the configured duration, with one open question at a time.
+
+The producer must acknowledge the exact saved wording before speech is accepted.
+Speech identity is segment plus source turn, so resumed rooms can restart their
+turn counters. An explicit finish action stitches chunks by segment/turn order
+into one immutable LIVE_ATTEMPT snapshot. Identical callbacks and finish retries
+are idempotent; conflicting retries, unrelated/closed segments and oversized
+answers are rejected without silently rewriting or truncating speech. Assistance
+can only increase, and an explicit skip creates no invented answer or grade.
+
+Database constraints enforce live source/attempt ownership, exact committed
+text, fixed session purpose and immutable snapshots. Session/account deletion
+cascades capture; bank deletion clears the mutable link but retains captured
+guidance. Discard fences even reads/retries. Owned history and ending remain
+available after rollout access is withdrawn. No assessments are enqueued here;
+the existing Admin report/worker is explicitly limited to ADMIN_TEST sources.
+Generated origins and recording sources remain reserved until their contracts
+are implemented. The learner/agent routers are implemented and tested, but
+remain unregistered until the voice adapter is ready; enabling a flag alone
+cannot expose them. Learner JWTs cannot call the internal speech/assistance
+producer, and even Super Admin cannot use learner routes to read another
+person's interview.
+
+Verification: 17 capture boundary/integration tests pass, including namespace
+isolation and duration limits. The final serialized full server run passes 493
+tests and all 210 web tests pass. Local preview/test upgrades
+and the independent clean-install migration pass, the fresh database matches
+the Prisma schema, and the production build passes. Voice/UI end-to-end and live assessment latency remain checkpoint 3.2/3.3
+checks; this checkpoint does not claim a usable learner voice interview yet.
+
 - Add owned interview run/attempt records linked to existing Session/segments,
   the actual asked question, its bank or generated origin, parent attempt,
   topic/difficulty and assistance. Store generated questions before asking
