@@ -81,6 +81,10 @@ describe('durable automatic delivery alignment', () => {
       deliveryAlignmentStatus: 'completed', deliveryAlignmentResult: expect.objectContaining({ inputSignature: 'audio-v1' }),
     }) }))
   })
+  it('can run a specifically selected recording without claiming a different pending session',async()=> {
+    await sweepDeliveryAlignment('session')
+    expect(mocks.findJob.mock.calls[0][0].where.id).toBe('session')
+  })
 
   it('reuses accepted recording-bound alignment instead of spawning another alignment job', async () => {
     const timeline = [{ segmentId: 'seg', segmentIndex: 0, durationSec: 25, replayOffsetSec: 0 }]

@@ -1,4 +1,5 @@
 import { projectInterviewTranscript } from './projection'
+import { requestDeliveryAlignment } from '../../lib/deliveryAlignmentWorker'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { lockWritableSession } from '../../lib/sessionDiscard'
@@ -229,6 +230,7 @@ export async function endPractice(runId: string, ownerId: string) {
       data: { status: 'INCOMPLETE', completedAt: endedAt, completionReason: 'USER_ENDED' } })
     await tx.session.update({ where: { id: session.id }, data: { endedAt, retainedAt: null,
       durationSec: segments.reduce((sum,s) => sum+(s.activeDurationSec ?? activeSegmentDurationSec(s.startedAt, s.endedAt ?? endedAt)),0), progressPulseStatus: 'skipped' } })
+    await requestDeliveryAlignment(tx, session.id)
     return { endedAt, reused: false }
   })
 }

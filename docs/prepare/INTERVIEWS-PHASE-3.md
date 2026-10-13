@@ -326,6 +326,12 @@ not an implemented or implicitly approved change to automatic answer completion.
 
 ## Checkpoint 3.3 — Adaptive interview loop
 
+Playback readiness comes first: bind recorded interview answers to the existing
+validated word-alignment pipeline and reuse Elevate's karaoke renderer. Show a
+distinct current word with three words before/after, and make following speech
+an explicit option that does not override manual scrolling. This is a Phase 3.2
+playback completion task, independent of technical evaluation and Pulse.
+
 - Strong answer: deepen the demonstrated concept or move to a harder eligible
   question. Partial answer: probe one actual gap. Incorrect answer: simplify
   a prerequisite. Explicit lack of knowledge: move to another topic. Use bounded
@@ -346,8 +352,7 @@ not an implemented or implicitly approved change to automatic answer completion.
 
 ## Checkpoint 3.4 — Post-session report and Ask this session
 
-- Reuse the existing communication playback/alignment pipeline for mapped
-  answer timings, per-answer seeking and measured communication trends. These
+- Extend Phase 3.2's recording-bound answer playback with measured communication trends. These
   require recording-clock mapping and real measurements; capture chunks alone
   are not timed speaking turns. Missing audio must continue to block claims
   about whole-session delivery. Playback can skip measured silence within its

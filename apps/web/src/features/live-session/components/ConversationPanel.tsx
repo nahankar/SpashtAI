@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { stripThinkingBlocks } from '@/lib/stripThinking'
 import { COACH_BUBBLE, USER_BUBBLE, normalizeTurnText } from '@/lib/conversation'
@@ -154,6 +154,9 @@ export function ConversationPanel({
   collapsible = false,
   defaultCollapsed = false,
   stitchAdjacentUserMessages = true,
+  autoScroll = true,
+  scrollable = true,
+  renderMessage,
 }: {
   messages: ChatMessage[]
   turnMetricsByIndex?: Record<number, TurnMetrics>
@@ -168,6 +171,11 @@ export function ConversationPanel({
   defaultCollapsed?: boolean
   /** Disable when inputs already represent complete answers to separate questions. */
   stitchAdjacentUserMessages?: boolean
+  /** Live practice follows new speech. Recorded playback preserves manual scrolling. */
+  autoScroll?: boolean
+  /** Playback uses the page scrollbar instead of a second transcript scrollbar. */
+  scrollable?: boolean
+  renderMessage?: (message: ChatMessage) => ReactNode
 }) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [collapsed, setCollapsed] = useState(collapsible && defaultCollapsed)
@@ -210,8 +218,8 @@ export function ConversationPanel({
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+    if (autoScroll) messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, autoScroll])
 
   // Format timestamp for display
   const formatTime = (timestamp: string) => {
@@ -269,7 +277,7 @@ export function ConversationPanel({
       
       {/* Messages Container */}
       <div
-        className={`p-4 space-y-3 max-h-[32rem] min-h-[12rem] overflow-y-auto overflow-x-hidden bg-gradient-to-b from-background to-muted/10 ${
+        className={`p-4 space-y-3 min-h-[12rem] overflow-x-hidden ${scrollable ? 'max-h-[32rem] overflow-y-auto' : ''} bg-gradient-to-b from-background to-muted/10 ${
           collapsed ? 'hidden' : ''
         }`}
       >
@@ -329,7 +337,7 @@ export function ConversationPanel({
                         : `${COACH_BUBBLE} rounded-tl-sm`
                     }`}
                   >
-                    {g.role === 'user' ? (
+                    {renderMessage?.(g) ?? (g.role === 'user' ? (
                       turnMetrics ? (
                         <UserTurnBubble content={g.content} metrics={turnMetrics} />
                       ) : (
@@ -341,7 +349,7 @@ export function ConversationPanel({
                       <p className="text-[13px] leading-relaxed whitespace-pre-wrap break-words">
                         {g.content}
                       </p>
-                    )}
+                    ))}
                   </div>
                   
                   <div className="text-[10px] mt-1 px-1 text-muted-foreground">

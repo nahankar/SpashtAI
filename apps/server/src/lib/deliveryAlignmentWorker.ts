@@ -268,7 +268,7 @@ async function processSession(sessionId: string, owner: string): Promise<void> {
   })
 }
 
-export async function sweepDeliveryAlignment(): Promise<void> {
+export async function sweepDeliveryAlignment(sessionId?: string): Promise<void> {
   if (running || process.env.AUTO_DELIVERY_ALIGNMENT_ENABLED === 'false') return
   running = true
   const owner = randomUUID()
@@ -283,6 +283,7 @@ export async function sweepDeliveryAlignment(): Promise<void> {
     // One job per tick keeps startup and resource use bounded. Expired processing
     // jobs resume after the global lease expires, including after API restarts.
     const job = await prisma.session.findFirst({ where: {
+      ...(sessionId ? { id: sessionId } : {}),
       module: 'elevate', endedAt: { not: null }, discardedAt: null,
       deliveryAlignmentStatus: { in: ['pending', 'retry', 'processing'] },
       OR: [{ deliveryAlignmentNextAt: null }, { deliveryAlignmentNextAt: { lte: now } }],

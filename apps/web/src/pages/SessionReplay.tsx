@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -25,6 +25,8 @@ import { Badge } from '@/components/ui/badge'
 import { SessionChat } from '@/components/session/SessionChat'
 import { getAuthHeaders, getAuthenticatedMediaUrl } from '@/lib/api-client'
 import { COACH_BUBBLE, USER_BUBBLE } from '@/lib/conversation'
+import { KaraokeText, type PlaybackWord as TurnWord } from '@/components/session/KaraokeText'
+import { interviewPlaybackWords } from '@/lib/interview-playback-words'
 import { ConversationPanel } from '@/features/live-session/components/ConversationPanel'
 import type { ChatMessage } from '@/features/live-session/types'
 import { ElevateDeliveryClip, isElevateRecordingReady, watchElevateRecordingDuration } from '@/lib/elevateDeliveryClip'
@@ -44,11 +46,6 @@ import {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
 
-interface TurnWord {
-  w: string
-  start: number
-  end: number
-}
 interface TurnMetrics {
   word_count?: number
   filler_count?: number
@@ -171,7 +168,8 @@ const QUALITY_FILL: Record<QualityTone, string> = {
 function turnQuality(t: ReplayTurn): { score: number; tone: QualityTone } | null {
   if (t.role !== 'user') return null
   const m = t.metrics
-  const hasSignal = !!m || t.score?.stars != null || t.score?.confidence != null
+  const hasSignal = t.score?.stars != null || t.score?.confidence != null ||
+    m?.filler_rate != null || (!!m?.qualitative_pace && isSubstantivePaceTurn(m as unknown as Record<string, unknown>))
   if (!hasSignal) return null
 
   let base = 0.7
@@ -416,6 +414,8 @@ export function SessionReplay({
   const [rate, setRate] = useState(1)
 
   const [roleFilter, setRoleFilter] = useState<RoleFilter>(variant === 'interview' ? 'all' : 'user')
+  const visibleInterviewMessages = useMemo(() => interviewMessages?.filter(message => roleFilter === 'all' || message.role === roleFilter) ?? [], [interviewMessages, roleFilter])
+  const interviewWords = useMemo(() => interviewPlaybackWords(interviewMessages ?? [], turns), [interviewMessages, turns])
   const [chips, setChips] = useState<Set<QualityChip>>(new Set())
   const [skipGaps, setSkipGaps] = useState(true)
   const [deliveryMarkers, setDeliveryMarkers] = useState<VerifiedDeliveryMoment[]>([])
@@ -898,10 +898,10 @@ export function SessionReplay({
 
   // Auto-scroll the active turn into view while playing.
   useEffect(() => {
-    if (activeTurnIndex < 0 || !isPlaying) return
+    if (isInterview || activeTurnIndex < 0 || !isPlaying) return
     const el = turnRefs.current[activeTurnIndex]
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  }, [activeTurnIndex, isPlaying])
+  }, [activeTurnIndex, isPlaying, isInterview])
 
   // ── Filters ──────────────────────────────────────────────────────────
   const toggleChip = (c: QualityChip) =>
@@ -1448,7 +1448,13 @@ export function SessionReplay({
 
       {/* Transcript */}
       {isInterview && interviewMessages && !transcriptHidden && effectiveChips.size === 0 ? (
-        <ConversationPanel stitchAdjacentUserMessages={false} messages={interviewMessages.filter(m => roleFilter === 'all' || m.role === roleFilter)} />
+        <ConversationPanel autoScroll={false} scrollable={false} stitchAdjacentUserMessages={false} messages={visibleInterviewMessages}
+          renderMessage={message => {
+            const words = message.id ? interviewWords.get(message.id) : undefined
+            return words?.length ? <KaraokeText text={message.content} words={words} currentTime={currentTime}
+              active={currentTime >= words[0].start && currentTime <= words.at(-1)!.end}
+              onSeek={playFrom} lightOnDark /> : undefined
+          }} />
       ) : <div className="space-y-3">
         {visibleTurns.length === 0 && (
           <Card>
@@ -1997,113 +2003,5 @@ function TurnBubble({
   )
 }
 
-// ── Karaoke highlighting on conversation text ──────────────────────────
-const KARAOKE_BEHIND = 3
-const KARAOKE_AHEAD = 3
-
-function normalizeToken(s: string): string {
-  return s.toLowerCase().replace(/[^\w]/g, '')
-}
-
-function KaraokeText({
-  text,
-  words,
-  currentTime,
-  active,
-  onSeek,
-  lightOnDark = false,
-}: {
-  text: string
-  words: TurnWord[]
-  currentTime: number
-  active: boolean
-  onSeek: (t: number) => void
-  lightOnDark?: boolean
-}) {
-  let cur = -1
-  if (active) {
-    for (let i = 0; i < words.length; i++) {
-      if (currentTime >= words[i].start) cur = i
-      else break
-    }
-  }
-
-  const bandStart = cur - KARAOKE_BEHIND
-  const bandEnd = cur + KARAOKE_AHEAD
-
-  // Walk turn.text and align timed words in order so trailing words (e.g.
-  // "schedule?") stay on the correct turn even when STT attached them elsewhere.
-  const parts: ReactNode[] = []
-  let textIdx = 0
-  let matched = 0
-
-  for (let i = 0; i < words.length; i++) {
-    const token = normalizeToken(words[i].w)
-    if (!token) continue
-
-    let pos = -1
-    for (let scan = textIdx; scan < text.length; scan++) {
-      const chunk = text.slice(scan)
-      const m = chunk.match(/^[\s,;:.!?'"()-]*/)
-      const afterPunct = scan + (m?.[0]?.length ?? 0)
-      const candidate = text.slice(afterPunct, afterPunct + words[i].w.length + 4)
-      if (normalizeToken(candidate.split(/\s/)[0] ?? '') === token) {
-        pos = afterPunct
-        break
-      }
-    }
-    if (pos < 0) continue
-
-    if (pos > textIdx) {
-      parts.push(
-        <span key={`gap-${i}`} className={lightOnDark ? 'text-white/90' : undefined}>
-          {text.slice(textIdx, pos)}
-        </span>,
-      )
-    }
-
-    const surface = text.slice(pos).match(/^[^\s]+/)?.[0] ?? words[i].w
-    const inBand = active && cur >= 0 && i >= bandStart && i <= bandEnd
-    const isPast = active && cur >= 0 && i < bandStart
-
-    parts.push(
-      <span
-        key={`w-${i}-${matched}`}
-        onClick={() => onSeek(words[i].start)}
-        className={`cursor-pointer rounded px-0.5 transition-colors ${
-          inBand
-            ? lightOnDark
-              ? 'bg-white/30 text-white'
-              : 'bg-primary/20 text-foreground'
-            : isPast
-              ? lightOnDark
-                ? 'text-white'
-                : 'text-foreground'
-              : lightOnDark
-                ? 'text-white/75'
-                : 'text-muted-foreground'
-        }`}
-      >
-        {surface}
-      </span>,
-    )
-    textIdx = pos + surface.length
-    matched++
-  }
-
-  if (textIdx < text.length) {
-    parts.push(
-      <span key="tail" className={lightOnDark ? 'text-white/90' : undefined}>
-        {text.slice(textIdx)}
-      </span>,
-    )
-  }
-
-  if (matched === 0) {
-    return <p className="whitespace-pre-wrap break-words">{text}</p>
-  }
-
-  return <p className="whitespace-pre-wrap break-words">{parts}</p>
-}
 
 export default SessionReplay
