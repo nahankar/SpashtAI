@@ -13,7 +13,7 @@ export function interviewsAdapter(api: LiveSessionApi, setup: InterviewSetup, cu
   const creationBody = (id: string) => ({ sessionId: id, ...setup })
   const discard = async () => { const id=currentRun(); if (id) await request(`/runs/${encodeURIComponent(id)}`, 'DELETE') }
   return {
-    kind: 'interviews', preparationId: null, trackPulse: false, skipPulseCall: true, creationBody,
+    kind: 'interviews', preparationId: null, trackPulse: false, skipPulseCall: false, creationBody,
     async createActivity(id) {
       const run = await request('/runs', 'POST', creationBody(id)); created(run)
       await request(`/runs/${encodeURIComponent(run.id)}/next`)
@@ -26,7 +26,7 @@ export function interviewsAdapter(api: LiveSessionApi, setup: InterviewSetup, cu
       // Existing communication analysis stays separate and purpose policy
       // prevents any interview Pulse or points contribution.
       if (capture === 'uploaded') void api.request(`/sessions/${encodeURIComponent(sessionId)}/analyze`, {
-        method: 'POST', body: JSON.stringify({ source: 'elevate' }),
+        method: 'POST', body: JSON.stringify({ source: 'elevate', autoTrackPulse: false }),
       }).catch(() => undefined)
     },
   }

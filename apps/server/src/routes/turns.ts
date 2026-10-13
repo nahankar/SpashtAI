@@ -133,10 +133,14 @@ export async function getSessionTurns(req: Request, res: Response) {
         resolvedAudio.inputSignature, resolvedAudio.segments,
         clockSignatureFromStatus(timingMetrics?.processingStatus))
     }
+    // Replay may play the readable subset of a disconnected session. Its gap
+    // hints and offsets must use that same subset, while session-wide delivery
+    // evidence above still requires a complete recording.
+    const playbackAudio = resolvedAudio ?? await resolveElevateSessionAudio(sessionId).catch(() => null)
     // This is the one canonical segment list for both the merged stream and
     // replay offsets. Unreadable files are absent, so later words cannot drift.
     const segmentOffsets = new Map(
-      (resolvedAudio?.segments ?? []).map((segment) => [
+      (playbackAudio?.segments ?? []).map((segment) => [
         segment.segmentId,
         segment.replayOffsetSec,
       ]),
@@ -220,8 +224,8 @@ export async function getSessionTurns(req: Request, res: Response) {
     let speechRegions: { start: number; end: number }[] = []
     let skipPlaybackRegions: { start: number; end: number }[] = wordSkipRegions
     try {
-      if (resolvedAudio?.audioPath) {
-        speechRegions = await detectSpeechRegions(resolvedAudio.audioPath)
+      if (playbackAudio?.audioPath) {
+        speechRegions = await detectSpeechRegions(playbackAudio.audioPath)
         if (skipPlaybackRegions.length === 0) {
           const userTurnCount = turns.filter((t) => t.role === 'user').length
           const firstUserStart = turns.find(

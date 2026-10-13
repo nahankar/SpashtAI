@@ -40,6 +40,7 @@ describe('interviews shared-session adapter',()=> {
     // Shared engine invokes the effect, so this page supplies a deliberate no-op.
     expect(f.effects.left).toHaveBeenCalledWith(expect.any(String),false)
     expect(f.calls.some(c=>c.path.endsWith('/sessions'))).toBe(false)
-    expect(f.adapter.trackPulse).toBe(false);expect(f.adapter.skipPulseCall).toBe(true)
+    expect(f.adapter.trackPulse).toBe(false);expect(f.adapter.skipPulseCall).toBe(false)
+    expect(f.calls.find(c=>c.path.endsWith('/analyze'))?.body).toMatchObject({autoTrackPulse:false})
   })
 })

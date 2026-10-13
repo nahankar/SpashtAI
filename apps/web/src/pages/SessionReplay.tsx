@@ -394,6 +394,7 @@ export function SessionReplay({
   const [transcriptHidden, setTranscriptHidden] = useState(false)
   const [degraded, setDegraded] = useState(false)
   const [segments, setSegments] = useState<ReplaySegment[]>([])
+  const missingAudioCount = segments.filter(segment => segment.audioStatus === 'failed' || segment.audioStatus === 'unavailable').length
   const [sessionInfo, setSessionInfo] = useState<SessionInfo | null>(null)
   const [interviewMessages, setInterviewMessages] = useState<ChatMessage[] | null>(null)
   const isInterview = variant === 'interview' || sessionInfo?.purpose === 'INTERVIEW'
@@ -1298,7 +1299,7 @@ export function SessionReplay({
           <span>{interviewMessages ? interviewMessages.filter(m => m.role === 'user').length : userTurnCount} {interviewMessages ? 'answers' : 'of yours'}</span>
           {!audioAvailable && <span className="text-amber-600">Transcript-only (no audio)</span>}
           {audioAvailable && !hasTimings && (
-            <span className="text-amber-600">Audio available · per-turn seek limited</span>
+            <span className="text-amber-600">Recording available · jumping to individual answers is unavailable</span>
           )}
         </div>
       </div>
@@ -1309,16 +1310,17 @@ export function SessionReplay({
           session — new sessions will include synced highlighting and per-turn analytics.
         </div>
       )}
-      {segments.some(
-        (segment) => segment.audioStatus === 'failed' || segment.audioStatus === 'unavailable',
-      ) && (
+      {missingAudioCount > 0 && (
         <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          Some parts of this paused session have no replay audio. Their transcript is still
-          included.
+          {missingAudioCount === 1 ? 'One recording segment has no audio.' : `${missingAudioCount} recording segments have no audio.`}{' '}
+          Available recordings and saved answers are included.
         </div>
       )}
 
       {/* Filters */}
+      {isInterview && audioAvailable && !trendsAvailable && <p className="mb-3 text-xs text-muted-foreground">
+        Communication trends are unavailable for this recording.
+      </p>}
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="inline-flex rounded-md border p-0.5">
           {(['all', 'user', 'assistant'] as RoleFilter[]).map((r) => {
@@ -1516,9 +1518,11 @@ export function SessionReplay({
 
             <button
               onClick={() => setSkipGaps((v) => !v)}
-              title={`Skip the blank stretches where the ${assistantLabel.toLowerCase()} is replying`}
+              disabled={skipIntervals.length === 0}
+              aria-pressed={skipGaps && skipIntervals.length > 0}
+              title={skipIntervals.length > 0 ? 'Skip silent stretches in the available recording' : 'Skip gaps is unavailable because this recording has no speech timings.'}
               className={`inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium transition-colors ${
-                skipGaps
+                skipGaps && skipIntervals.length > 0
                   ? 'border-primary bg-primary/10 text-primary'
                   : 'border-muted text-muted-foreground hover:text-foreground'
               }`}

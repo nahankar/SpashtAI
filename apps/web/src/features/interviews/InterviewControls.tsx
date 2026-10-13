@@ -3,18 +3,21 @@ import { useRoomContext } from '@livekit/components-react'
 import { ParticipantEvent, RoomEvent, Track } from 'livekit-client'
 import { Button } from '@/components/ui/button'
 import { apiClient } from '@/lib/api-client'
-import { captureFailure, confirmedInterviewDrain, interviewCompletionMessage, INTERVIEWS_API, interviewWrite, type CaptureAction, type CaptureReceipt } from '@/lib/interview-practice'
+import { captureFailure, confirmedInterviewDrain, interviewCompletionMessage, INTERVIEWS_API, interviewWrite, type CaptureAction, type CaptureReceipt, type InterviewOperation } from '@/lib/interview-practice'
 import type { SessionRecorderHandle } from '@/components/session/SessionRecorder'
 
 export function InterviewControls({ runId, attemptId, segmentId, status, ready, blocked, recorder, changed, preparing,
-  pause, leave, incomplete, discard, reconnect }: {
+  pause, leave, incomplete, discard, reconnect, operationChanged }: {
   runId: string; attemptId: string; segmentId: string; status: string; ready: boolean; blocked: boolean;
   recorder: () => SessionRecorderHandle|null; changed: () => Promise<void>; preparing: () => void;
   pause: () => Promise<void>; leave: () => Promise<void>; incomplete: () => Promise<void>; discard: () => Promise<void>;
   reconnect: () => Promise<void>;
+  operationChanged: (operation: InterviewOperation) => void;
 }) {
   const room = useRoomContext()
-  const [busy,setBusy]=useState(false); const [error,setError]=useState(''); const [muted,setMuted]=useState(true)
+  const [operation,setOperation]=useState<InterviewOperation>(null); const busy=operation!==null
+  const [error,setError]=useState(''); const [muted,setMuted]=useState(true)
+  useEffect(()=> { operationChanged(operation); return ()=>operationChanged(null) },[operation,operationChanged])
   const [confirmIncomplete,setConfirmIncomplete]=useState(false); const [confirmDiscard,setConfirmDiscard]=useState(false)
   const [timeUp,setTimeUp]=useState(false)
   const [questionReady,setQuestionReady]=useState(false)
@@ -89,7 +92,7 @@ export function InterviewControls({ runId, attemptId, segmentId, status, ready, 
   },[room,runId,interviewer])
   async function action(action: CaptureAction) {
     if (running.current) return
-    running.current=true; setBusy(true); setError('')
+    running.current=true; setOperation('saving'); setError('')
     if (!pending.current || pending.current.action!==action) pending.current={ action,requestId:crypto.randomUUID() }
     try {
       const receipt=await confirmedInterviewDrain({
@@ -105,11 +108,11 @@ export function InterviewControls({ runId, attemptId, segmentId, status, ready, 
       else await leave()
       pending.current=null
     } catch (e) { setError(e instanceof Error ? e.message : 'Speech could not be saved. Retry before continuing.') }
-    finally { running.current=false; setBusy(false) }
+    finally { running.current=false; setOperation(null) }
   }
   async function next() {
     if (running.current) return
-    running.current=true; setBusy(true); setError(''); microphone(false)
+    running.current=true; setOperation('preparing'); setError(''); microphone(false)
     try {
       await interviewWrite(`/runs/${encodeURIComponent(runId)}/next`)
       // Only enter the waiting-for-speech state when another question exists.
@@ -124,10 +127,10 @@ export function InterviewControls({ runId, attemptId, segmentId, status, ready, 
       if (completion) setCompletionMessage(completion)
       else setError(e instanceof Error ? e.message : 'Could not start the next question.')
     }
-    finally { running.current=false; setBusy(false) }
+    finally { running.current=false; setOperation(null) }
   }
   return <div className="space-y-3 py-3">
-    <p className="text-sm text-muted-foreground">{busy ? 'Saving and confirming your speech…' : timeUp ? 'Practice time is up. Finish your current answer or end practice.' : status==='ASKED' ? 'Take your time. Choose Finish answer when you are done; thinking pauses are welcome.' : status==='PREPARED' ? 'Waiting for the interviewer to read your next question.' : 'Your answer is saved. Continue with another question or end practice.'}</p>
+    <p className="text-sm text-muted-foreground">{operation==='preparing' ? 'Starting your next question…' : busy ? 'Saving and confirming your speech…' : timeUp ? 'Practice time is up. Finish your current answer or end practice.' : status==='ASKED' ? 'Take your time. Choose Finish answer when you are done; thinking pauses are welcome.' : status==='PREPARED' ? 'Waiting for the interviewer to read your next question.' : 'Your answer is saved. Continue with another question or end practice.'}</p>
     <div className="flex flex-wrap gap-2">
       {status==='ASKED' && <><Button disabled={!canSpeak || busy || blocked || !!error} onClick={() => void action('FINISH')}>Finish answer</Button>
         <Button variant="outline" disabled={!canSpeak || busy || blocked || !!error} onClick={() => void action('SKIP')}>Skip question</Button></>}

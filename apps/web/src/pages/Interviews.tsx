@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { RetainCheckbox } from '@/components/session/SessionRetain'
 import type { SessionRecorderHandle } from '@/components/session/SessionRecorder'
 import { apiClient } from '@/lib/api-client'
-import { getInterview, interviewWrite, INTERVIEWS_API, type InterviewHistory, type InterviewOptions, type InterviewRun, type InterviewSetup } from '@/lib/interview-practice'
+import { getInterview, interviewWrite, INTERVIEWS_API, type InterviewHistory, type InterviewOptions, type InterviewRun, type InterviewSetup, type InterviewOperation } from '@/lib/interview-practice'
 import { useLiveSession } from '@/features/live-session/useLiveSession'
 import { liveSessionApi } from '@/features/live-session/browser'
 import { interviewsAdapter } from '@/features/live-session/adapters/interviews'
@@ -26,6 +26,7 @@ export function Interviews() {
   const [consent,setConsent]=useState(false); const [error,setError]=useState(''); const [accessError,setAccessError]=useState('')
   const [loading,setLoading]=useState(false); const [messages,setMessages]=useState<ChatMessage[]>([])
   const [observedId,setObservedId]=useState<string|null>(null)
+  const [operation,setOperation]=useState<InterviewOperation>(null)
   const recorderRef=useRef<SessionRecorderHandle|null>(null); const activeRun=useRef<string|null>(selected)
   const justStarted=useRef<string|null>(null); const messageRef=useRef(messages); messageRef.current=messages
   async function refreshHistory() {
@@ -172,6 +173,8 @@ export function Interviews() {
       {live.token && live.url && current && <LiveSessionRoom {...live} token={live.token} url={live.url} recorderRef={recorderRef}
         handleDisconnected={()=>controller.onDisconnected(recorderRef.current,{sessionId:live.sessionId,segmentId:live.segmentId})}
         handleNewMessage={m=>controller.handleMessage(m)} setAssistantState={live.setAssistantState} handleConversationRestart={()=>live.setAssistantState('recovering')}
+        statusOverride={operation ? {label:operation==='saving' ? 'Saving answer…' : 'Starting next question…',hint:'Your microphone is muted.'}
+          : ['ANSWERED','SKIPPED'].includes(current.status) ? {label:current.status==='ANSWERED' ? 'Answer saved' : 'Question skipped',hint:'Your microphone is muted. Continue or end practice.'} : undefined}
         onTurnMetrics={()=>undefined} updateMetrics={()=>undefined} handleLeave={leave} showMetrics={false} setShowMetrics={()=>undefined}
         handlePause={()=>controller.pause(recorderRef.current)} exportFlags={{enableAudioExport:false}}
         canDiscardPreparePractice={false} isPrepare={false} handleDiscard={()=>controller.discard(recorderRef.current,adapter)}
@@ -179,7 +182,7 @@ export function Interviews() {
         continueInNewSegmentAfterPauseFailure={()=>controller.continueInNewSegment()}
         controls={<InterviewControls runId={detail.id} attemptId={current.id} segmentId={live.segmentId!} status={current.status}
           ready={live.assistantState==='ready'} blocked={live.isPausing || live.isLeaving || !!live.pauseAudioFailure} recorder={()=>recorderRef.current}
-          changed={refreshDetail} preparing={()=>live.setAssistantState('unknown')} pause={()=>controller.pause(recorderRef.current)}
+          operationChanged={setOperation} changed={refreshDetail} preparing={()=>live.setAssistantState('unknown')} pause={()=>controller.pause(recorderRef.current)}
           leave={leave} incomplete={leave} reconnect={reconnect} discard={()=>controller.discard(recorderRef.current,adapter)} />} />}
       {!live.token && !detail.endedAt && <div className="rounded-xl border p-5 space-y-3"><p>Your interview is paused. Confirmed answers are saved.</p><div className="flex gap-2"><Button disabled={!options || live.isResuming || loading} onClick={()=>void resume()}>{live.isResuming?'Reconnecting…':'Resume practice'}</Button><Button variant="outline" disabled={live.isLeaving} onClick={()=>void leave()}>End practice</Button></div></div>}
       {conversation.length>0 && <ConversationPanel messages={conversation} stitchAdjacentUserMessages={false} />}

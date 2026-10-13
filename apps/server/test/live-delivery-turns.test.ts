@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   session: vi.fn(), turns: vi.fn(), latest: vi.fn(), upsert: vi.fn(),
   segments: vi.fn(), segment: vi.fn(), metrics: vi.fn(),
-  resolve: vi.fn(), flags: vi.fn(), align: vi.fn(),
+  resolve: vi.fn(), flags: vi.fn(), align: vi.fn(), detect: vi.fn(),
 }))
 vi.mock('../src/lib/prisma', () => {
   const db = {
@@ -36,8 +36,8 @@ vi.mock('../src/analytics/insightProviders/resolveSessionAudio', () => ({
 vi.mock('../src/lib/audioAlignment', () => ({
   alignTurnsToAudio: mocks.align,
   buildSkipIntervalsFromTurnWords: () => [],
-  buildSkipPlaybackRegions: () => [],
-  detectSpeechRegions: async () => [],
+  buildSkipPlaybackRegions: (regions: unknown[]) => regions,
+  detectSpeechRegions: mocks.detect,
 }))
 
 import { getSessionTurns, saveSessionTurnsForAgent } from '../src/routes/turns'
@@ -68,6 +68,7 @@ describe('live evidence turn API boundary', () => {
     mocks.metrics.mockResolvedValue(null)
     mocks.resolve.mockResolvedValue({ audioPath: '/synthetic.wav', inputSignature: 'audio', segments: [] })
     mocks.align.mockResolvedValue({ aligned: false, turns: [], regionCount: 0, userTurnCount: 1 })
+    mocks.detect.mockResolvedValue([])
   })
 
   it('retains source metadata internally but only approximate positions in turn words', async () => {
@@ -102,5 +103,22 @@ describe('live evidence turn API boundary', () => {
     mocks.flags.mockResolvedValue({ flags: {}, accessDenied: true })
     expect((await request(app).get('/sessions/s/turns')).status).toBe(403)
     expect(mocks.turns).not.toHaveBeenCalled()
+  })
+  it('uses the playable audio subset for gap skipping when a connection segment has no recording', async () => {
+    mocks.resolve.mockResolvedValueOnce(null).mockResolvedValue({ audioPath: '/readable-segment.wav', inputSignature: 'audio',
+      segments: [{ segmentId: 'saved', replayOffsetSec: 0, durationSec: 40 }] })
+    mocks.segments.mockResolvedValue([{ id: 'lost', segmentIndex: 0, audioStatus: 'unavailable' },
+      { id: 'saved', segmentIndex: 1, audioStatus: 'available' }])
+    mocks.turns.mockResolvedValue([{ ...structuredClone(turn), segmentId: 'saved' },
+      { ...structuredClone(turn), id: 'lost-turn', turnIndex: 1, segmentId: 'lost' }])
+    mocks.detect.mockResolvedValue([{ start: 5, end: 10 }, { start: 20, end: 30 }])
+    const response = await request(app).get('/sessions/s/turns')
+    expect(response.status).toBe(200)
+    expect(mocks.resolve.mock.calls[0]).toEqual(['s', { requireCompleteSegments: true }])
+    expect(mocks.resolve.mock.calls[1]).toEqual(['s'])
+    expect(mocks.detect).toHaveBeenCalledWith('/readable-segment.wav')
+    expect(response.body.skipPlaybackRegions).toEqual([{ start: 5, end: 10 }, { start: 20, end: 30 }])
+    expect(response.body.turns[1]).toMatchObject({ audioStart: null, audioEnd: null, words: null })
+    expect(response.body.segments[0].audioStatus).toBe('unavailable')
   })
 })

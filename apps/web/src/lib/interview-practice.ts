@@ -18,6 +18,7 @@ export type InterviewHistory = { id: string; sessionId: string; track: string; e
   startedAt: string; endedAt: string|null; retainedAt: string|null; questionCount: number }
 export type InterviewOptions = { coverage: Array<{ track: string; experienceBand: string; difficulty: string; count: number }>; maxQuestions: number; consentVersion: string }
 export type CaptureAction = 'FINISH'|'SKIP'|'PAUSE'|'LEAVE'
+export type InterviewOperation = 'saving'|'preparing'|null
 export type CaptureReceipt = { id: string; attemptId: string; segmentId: string; action: CaptureAction }
 export const interviewPath = (id: string) => `${INTERVIEWS_API}/runs/${encodeURIComponent(id)}`
 export function getInterview(id: string, signal?: AbortSignal) { return apiClient<InterviewRun>(interviewPath(id), { signal }) }

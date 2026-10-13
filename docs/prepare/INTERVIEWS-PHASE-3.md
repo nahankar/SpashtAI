@@ -346,6 +346,13 @@ not an implemented or implicitly approved change to automatic answer completion.
 
 ## Checkpoint 3.4 — Post-session report and Ask this session
 
+- Reuse the existing communication playback/alignment pipeline for mapped
+  answer timings, per-answer seeking and measured communication trends. These
+  require recording-clock mapping and real measurements; capture chunks alone
+  are not timed speaking turns. Missing audio must continue to block claims
+  about whole-session delivery. Playback can skip measured silence within its
+  readable recording subset without certifying that subset as complete.
+
 - Show each actual question and answer, evidence-based subject findings,
   improvement guidance, assistance and pending/failed status. Show communication
   feedback separately. No numeric subject score or Pulse write is required.

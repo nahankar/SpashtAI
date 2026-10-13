@@ -4,17 +4,17 @@ import '@livekit/components-styles'
 import { AUDIO_CAPTURE } from '@/lib/audioCapture'
 import { CoachAudioBootstrap } from '@/components/session/CoachAudioBootstrap'
 import { SessionRecorder, type SessionRecorderHandle } from '@/components/session/SessionRecorder'
-import { AgentVisualizer } from '@/components/layout/AgentVisualizer'
 import { Button } from '@/components/ui/button'
 import { Loader2 } from 'lucide-react'
 import type { LiveMetricsUpdate } from '@/hooks/useSessionMetrics'
 import type { TurnMetrics } from '@/components/session/UserTurnMetrics'
 import type { ChatMessage } from '../types'
-import { ConnectionStatus } from './ConnectionStatus'
+import { LiveRoomStatus, type RoomStatusOverride } from './LiveRoomStatus'
 import { LiveKitConversation } from './LiveKitConversation'
 import { InRoomControls } from './InRoomControls'
 export interface LiveSessionRoomProps {
   controls?: ReactNode
+  statusOverride?: RoomStatusOverride
   token: string; url: string; sessionId: string | null; segmentId: string | null; roomName: string
   recorderRef: RefObject<SessionRecorderHandle | null>
   isPausing: boolean; pauseAudioFailure: 'failed' | 'unavailable' | null; isSessionPaused: boolean; isLeaving: boolean
@@ -29,7 +29,7 @@ export interface LiveSessionRoomProps {
   retryPauseUpload: () => Promise<void>; pauseWithoutReplayAudio: () => Promise<void>
   continueInNewSegmentAfterPauseFailure: () => Promise<void>
 }
-export function LiveSessionRoom({ controls, token, url, sessionId, segmentId, roomName, recorderRef, isPausing, pauseAudioFailure, isSessionPaused, isLeaving, assistantState, handleDisconnected, handleNewMessage, setAssistantState, handleConversationRestart, onTurnMetrics, updateMetrics, handleLeave, showMetrics, setShowMetrics, handlePause, exportFlags, canDiscardPreparePractice, isPrepare, handleDiscard, retryPauseUpload, pauseWithoutReplayAudio, continueInNewSegmentAfterPauseFailure }: LiveSessionRoomProps) {
+export function LiveSessionRoom({ controls, statusOverride, token, url, sessionId, segmentId, roomName, recorderRef, isPausing, pauseAudioFailure, isSessionPaused, isLeaving, assistantState, handleDisconnected, handleNewMessage, setAssistantState, handleConversationRestart, onTurnMetrics, updateMetrics, handleLeave, showMetrics, setShowMetrics, handlePause, exportFlags, canDiscardPreparePractice, isPrepare, handleDiscard, retryPauseUpload, pauseWithoutReplayAudio, continueInNewSegmentAfterPauseFailure }: LiveSessionRoomProps) {
   return (
                 <LiveKitRoom
                   token={token}
@@ -48,10 +48,7 @@ export function LiveSessionRoom({ controls, token, url, sessionId, segmentId, ro
                     segmentId={segmentId}
                   />
                   <StartAudio label="Click to enable coach audio" />
-                  <div className="flex justify-center w-full mb-2">
-                    <AgentVisualizer className="bg-muted/20 rounded-lg w-full" isPaused={isSessionPaused} compact />
-                  </div>
-                  <ConnectionStatus assistantState={assistantState} />
+                  <LiveRoomStatus override={statusOverride} isPaused={isSessionPaused} assistantState={assistantState} />
                   <LiveKitConversation
                     key={roomName}
                     sessionId={sessionId}
