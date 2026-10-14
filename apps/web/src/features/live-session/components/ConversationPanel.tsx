@@ -100,6 +100,7 @@ interface ChatGroup {
   content: string
   timestamp: string
   count: number
+  attemptStatus?: ChatMessage['attemptStatus']
 }
 
 function groupConsecutive(messages: ChatMessage[], stitchAdjacentUserMessages: boolean): ChatGroup[] {
@@ -125,6 +126,7 @@ function groupConsecutive(messages: ChatMessage[], stitchAdjacentUserMessages: b
     if (sameStream) {
       last.content = content
       last.timestamp = m.timestamp || last.timestamp
+      last.attemptStatus = m.attemptStatus
     } else if (userTimeStitch) {
       last.content = `${last.content} ${content}`.replace(/\s+/g, ' ').trim()
       last.timestamp = m.timestamp || last.timestamp
@@ -136,6 +138,7 @@ function groupConsecutive(messages: ChatMessage[], stitchAdjacentUserMessages: b
         content,
         timestamp: m.timestamp,
         count: 1,
+        attemptStatus: m.attemptStatus,
       })
     }
   }
@@ -337,6 +340,9 @@ export function ConversationPanel({
                         : `${COACH_BUBBLE} rounded-tl-sm`
                     }`}
                   >
+                    {g.role === 'assistant' && g.attemptStatus && <span className="mb-2 inline-flex rounded-md border border-orange-200 bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-800 dark:border-orange-800 dark:bg-orange-950/50 dark:text-orange-200">
+                      {g.attemptStatus === 'SKIPPED' ? 'Skipped' : 'Incomplete'}
+                    </span>}
                     {renderMessage?.(g) ?? (g.role === 'user' ? (
                       turnMetrics ? (
                         <UserTurnBubble content={g.content} metrics={turnMetrics} />

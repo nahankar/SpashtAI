@@ -21,6 +21,9 @@ export type CaptureAction = 'FINISH'|'SKIP'|'PAUSE'|'LEAVE'
 export type InterviewOperation = 'saving'|'preparing'|null
 export type CaptureReceipt = { id: string; attemptId: string; segmentId: string; action: CaptureAction }
 export const interviewPath = (id: string) => `${INTERVIEWS_API}/runs/${encodeURIComponent(id)}`
+export const interviewPlaybackPath = (sessionId: string) => `/interviews/playback/${encodeURIComponent(sessionId)}`
+export const interviewHistoryPath = (run: Pick<InterviewHistory, 'id' | 'sessionId' | 'endedAt'>) =>
+  run.endedAt ? interviewPlaybackPath(run.sessionId) : `/interviews?run=${encodeURIComponent(run.id)}`
 export function getInterview(id: string, signal?: AbortSignal) { return apiClient<InterviewRun>(interviewPath(id), { signal }) }
 export function interviewWrite<T>(path: string, body: unknown = {}, method = 'POST') {
   return apiClient<T>(`${INTERVIEWS_API}${path}`, { method, body: JSON.stringify(body) })

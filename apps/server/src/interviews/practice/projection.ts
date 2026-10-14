@@ -13,7 +13,8 @@ export async function readInterviewPlaybackConversation(tx: Pick<Prisma.Transact
       const answer = attempt.answerSnapshots[0]?.answerText ?? chunks.map(c => c.text).join(' ')
       const questionTime = attempt.askedAt.toISOString()
       return [
-        { id: `interview_question_${attempt.id}`, role: 'assistant', content: questionSnapshotSchema.parse(attempt.questionSnapshot).questionText, timestamp: questionTime },
+        { id: `interview_question_${attempt.id}`, role: 'assistant', content: questionSnapshotSchema.parse(attempt.questionSnapshot).questionText, timestamp: questionTime,
+          ...(['SKIPPED', 'INCOMPLETE'].includes(attempt.status) ? { attemptStatus: attempt.status } : {}) },
         ...(answer.trim() ? [{ id: `interview_answer_${attempt.id}`, role: 'user', content: answer.replace(/\s+/g, ' ').trim(),
           timestamp: chunks[0]?.createdAt.toISOString() ?? questionTime }] : []),
       ]

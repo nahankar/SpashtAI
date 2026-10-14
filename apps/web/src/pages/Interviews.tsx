@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { RetainCheckbox } from '@/components/session/SessionRetain'
 import type { SessionRecorderHandle } from '@/components/session/SessionRecorder'
 import { apiClient } from '@/lib/api-client'
-import { getInterview, interviewWrite, INTERVIEWS_API, type InterviewHistory, type InterviewOptions, type InterviewRun, type InterviewSetup, type InterviewOperation } from '@/lib/interview-practice'
+import { getInterview, interviewWrite, interviewHistoryPath, interviewPlaybackPath, INTERVIEWS_API, type InterviewHistory, type InterviewOptions, type InterviewRun, type InterviewSetup, type InterviewOperation } from '@/lib/interview-practice'
 import { useLiveSession } from '@/features/live-session/useLiveSession'
 import { liveSessionApi } from '@/features/live-session/browser'
 import { interviewsAdapter } from '@/features/live-session/adapters/interviews'
@@ -186,12 +186,11 @@ export function Interviews() {
           leave={leave} incomplete={leave} reconnect={reconnect} discard={()=>controller.discard(recorderRef.current,adapter)} />} />}
       {!live.token && !detail.endedAt && <div className="rounded-xl border p-5 space-y-3"><p>Your interview is paused. Confirmed answers are saved.</p><div className="flex gap-2"><Button disabled={!options || live.isResuming || loading} onClick={()=>void resume()}>{live.isResuming?'Reconnecting…':'Resume practice'}</Button><Button variant="outline" disabled={live.isLeaving} onClick={()=>void leave()}>End practice</Button></div></div>}
       {conversation.length>0 && <ConversationPanel messages={conversation} stitchAdjacentUserMessages={false} />}
-      {!live.token && detail.attempts.some(a=>['SKIPPED','INCOMPLETE'].includes(a.status)) && <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">{detail.attempts.filter(a=>['SKIPPED','INCOMPLETE'].includes(a.status)).map(a=><span key={a.id} className="rounded-md border px-3 py-1">Question {a.index}: {a.status==='INCOMPLETE'?'Incomplete':'Skipped'}</span>)}</div>}
-      {detail.endedAt && <Link className="text-sm underline" to={`/interviews/playback/${encodeURIComponent(detail.sessionId)}`}>Review answer recordings and communication feedback</Link>}
+      {detail.endedAt && <Link className="text-sm underline" to={interviewPlaybackPath(detail.sessionId)}>Review answer recordings and communication feedback</Link>}
     </section>}
     {!selected && <section className="space-y-3"><h2 className="text-xl font-semibold">Your interview history</h2><p className="text-sm text-muted-foreground">Unfinished practice closes after 24 hours without activity. Retain one interview to keep it open.</p>
       {!history.length && <p className="text-sm text-muted-foreground">Your interviews will appear here.</p>}
-      {history.map(h=><article key={h.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4"><div><h3 className="font-medium">{h.track}</h3><p className="text-sm text-muted-foreground">{h.startingDifficulty} · {h.experienceBand} years · {new Date(h.startedAt).toLocaleString()} · {h.endedAt?'Ended':'In progress'}</p></div><div className="flex items-center gap-3">{!h.endedAt && <RetainCheckbox sessionId={h.sessionId} retained={!!h.retainedAt} onChange={result=>setHistory(rows=>rows.map(r=>({...r,retainedAt:r.sessionId===h.sessionId?result.retainedAt:result.releasedSessionIds.includes(r.sessionId)?null:r.retainedAt})))} />}<Link className="text-sm underline" to={`/interviews?run=${encodeURIComponent(h.id)}`}>{h.endedAt?'Review':'Resume'}</Link></div></article>)}
+      {history.map(h=><article key={h.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4"><div><h3 className="font-medium">{h.track}</h3><p className="text-sm text-muted-foreground">{h.startingDifficulty} · {h.experienceBand} years · {new Date(h.startedAt).toLocaleString()} · {h.endedAt?'Ended':'In progress'}</p></div><div className="flex items-center gap-3">{!h.endedAt && <RetainCheckbox sessionId={h.sessionId} retained={!!h.retainedAt} onChange={result=>setHistory(rows=>rows.map(r=>({...r,retainedAt:r.sessionId===h.sessionId?result.retainedAt:result.releasedSessionIds.includes(r.sessionId)?null:r.retainedAt})))} />}<Link className="text-sm underline" to={interviewHistoryPath(h)}>{h.endedAt?'Review':'Resume'}</Link></div></article>)}
     </section>}
   </div>
 }

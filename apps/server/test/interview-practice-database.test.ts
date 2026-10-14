@@ -244,6 +244,15 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
     expect(await prisma.interviewAnswerSnapshot.count({ where: { attemptId: a.id } })).toBe(0)
     const next = await prepareBankAttempt(r.id, owner); expect(next.id).not.toBe(a.id)
     expect(next.index).toBe(2)
+    await markQuestionAsked(next.id, { segmentId: s.id, questionText: next.question.text })
+    await endPractice(r.id, owner)
+    const playback = await request(app).get(`/sessions/${r.sessionId}/turns`).auth(token(owner), { type: 'bearer' })
+    expect(playback.status).toBe(200)
+    expect(playback.body.interviewConversation).toEqual([
+      expect.objectContaining({ content: a.question.text, role: 'assistant', attemptStatus: 'SKIPPED' }),
+      expect.objectContaining({ content: next.question.text, role: 'assistant', attemptStatus: 'INCOMPLETE' }),
+    ])
+    expect(await prisma.interviewAssessment.count({ where: { snapshot: { attemptId: { in: [a.id, next.id] } } } })).toBe(0)
   })
   it('rejects conflicting retries, non-user turns, silent truncation and overwritten chunks', async () => {
     const { a, s } = await asked(); await captureCommittedTurn(a.id, turn(s.id, 'x'.repeat(7999)))

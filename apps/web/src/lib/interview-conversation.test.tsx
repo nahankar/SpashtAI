@@ -12,6 +12,23 @@ const part=(segmentId:string,sourceTurnId:string,text:string,createdAt=start)=>(
 const live=(id:string,content:string,timestamp=start):ChatMessage=>({id,role:'user',content,timestamp})
 
 describe('interview input to the existing Elevate conversation panel',()=> {
+  it('labels the skipped question itself in light orange without inventing an answer', () => {
+    const skipped = { ...attempt(), status: 'SKIPPED' as const }
+    const result = interviewConversation([skipped, { ...attempt('a2', 2), askedAt: '2026-10-12T20:01:00Z' }], [], start)
+    expect(result[0]).toMatchObject({ role: 'assistant', content: 'Question 1?', attemptStatus: 'SKIPPED' })
+    expect(result).toHaveLength(2)
+    const html = renderToStaticMarkup(<ConversationPanel messages={result} stitchAdjacentUserMessages={false} />)
+    expect(html).toContain('bg-orange-50')
+    expect(html.match(/>Skipped</g)).toHaveLength(1)
+    expect(result[1]).not.toHaveProperty('attemptStatus')
+  })
+  it('keeps partially spoken skipped answers and distinguishes incomplete closure', () => {
+    const result = interviewConversation([{ ...attempt(), status: 'SKIPPED', capturedParts: [part('s1', 'user_turn_0', 'Partial thought.')] },
+      { ...attempt('a2', 2), status: 'INCOMPLETE', askedAt: '2026-10-12T20:01:00Z' }], [], start)
+    expect(result.map(m => m.content)).toEqual(['Question 1?', 'Partial thought.', 'Question 2?'])
+    expect(result[1]).not.toHaveProperty('attemptStatus')
+    expect(result[2].attemptStatus).toBe('INCOMPLETE')
+  })
   it('joins thinking-pause fragments into one answer and deduplicates saved/live overlap',()=> {
     const a={...attempt(),capturedParts:[part('s1','user_turn_0','Streaming in an LLM.'),part('s1','user_turn_1','Sends data in real time.')]}
     const result=interviewConversation([a],[live('room::answer_a1::s1::user_turn_1','Sends data in real time.'),live('room::answer_a1::s1::user_turn_2','The screen updates gradually.')],start)

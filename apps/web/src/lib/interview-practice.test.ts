@@ -1,8 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
-import { confirmedInterviewDrain, interviewCompletionMessage, type CaptureAction, type CaptureReceipt } from './interview-practice'
+import { confirmedInterviewDrain, interviewCompletionMessage, interviewHistoryPath, type CaptureAction, type CaptureReceipt } from './interview-practice'
 import { ApiError } from './api-client'
 
 describe('interview durable speech confirmation',()=> {
+  it('opens ended history directly in playback and keeps unfinished runs resumable', () => {
+    const run = { id: 'run-1', sessionId: 'session_1', endedAt: null }
+    expect(interviewHistoryPath(run)).toBe('/interviews?run=run-1')
+    expect(interviewHistoryPath({ ...run, endedAt: '2026-10-14T00:00:00Z' })).toBe('/interviews/playback/session_1')
+  })
   it.each(['QUESTION_BANK_EXHAUSTED', 'PRACTICE_DURATION_REACHED', 'PRACTICE_QUESTION_LIMIT'])('recognizes %s as normal completion', code => {
     expect(interviewCompletionMessage(new ApiError('Your answers are saved.', 409, code))).toBe('Your answers are saved.')
   })

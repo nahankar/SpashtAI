@@ -3,6 +3,8 @@ export interface ChatMessage {
   role: string
   content: string
   timestamp: string
+  /** Interview question outcome; never a technical grade. */
+  attemptStatus?: 'SKIPPED' | 'INCOMPLETE'
 }
 
 export type AudioStatus = 'available' | 'pending' | 'failed' | 'unavailable'
