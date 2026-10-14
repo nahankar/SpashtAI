@@ -1,8 +1,9 @@
 # Phase 3 — Hidden adaptive interview practice pilot
 
 Phase 3.0/3.1 foundations and review fixes are deployed through `c0bbdc6`.
-Phase 3.2 implementation is local on `codex/interviews-phase3.2`; deployment is a
-separate review step. Keep one editable bank copy; past attempts retain
+Phase 3.2 voice/playback is deployed through `933f3e1`; the skipped-question and
+direct-playback review fix is `a45839c`, on top of Cursor's `3913037` analytics
+deployment. Keep one editable bank copy; past attempts retain
 their captured question, answer and assessment. Technical feedback stays
 outside Progress Pulse. Start with Automation Testing unless the user chooses
 another pilot track.
@@ -326,11 +327,16 @@ not an implemented or implicitly approved change to automatic answer completion.
 
 ## Checkpoint 3.3 — Adaptive interview loop
 
-Playback readiness comes first: bind recorded interview answers to the existing
-validated word-alignment pipeline and reuse Elevate's karaoke renderer. Show a
-distinct current word with three words before/after, and make following speech
-an explicit option that does not override manual scrolling. This is a Phase 3.2
-playback completion task, independent of technical evaluation and Pulse.
+The detailed implementation plan, reviewed against the latest deployed code,
+is in [INTERVIEWS-PHASE-3.3.md](./INTERVIEWS-PHASE-3.3.md). It splits implementation
+into learner evaluation/decisions, natural turn coordination, grounded adaptation
+and the minimum learner review UI, with separate rollout acceptance gates.
+
+Phase 3.2 now binds recorded interview answers to the validated word-alignment
+pipeline and reuses Elevate's karaoke renderer. The current word and three
+context words before/after are highlighted where timings are accepted. Playback
+preserves manual scrolling. This capability is deployed independently of
+technical evaluation and Pulse.
 
 - Strong answer: deepen the demonstrated concept or move to a harder eligible
   question. Partial answer: probe one actual gap. Incorrect answer: simplify
