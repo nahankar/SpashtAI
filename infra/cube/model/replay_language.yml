@@ -1,0 +1,179 @@
+# Replay NLP samples. Medians use percentile_cont(0.5).
+# Row eligibility matches loadLanguageAnalytics() for source replay.
+# Filler rate, hedging rate, and vocabulary diversity are already percents
+# on ReplayResult. Readability and coherence come from communicationSignals.
+# Phrases, entities, transcripts, and coaching text are not members.
+
+cubes:
+  - name: replay_language
+    description: >
+      One row per ReplayResult whose ReplaySession has purpose COMMUNICATION
+      and is not a PreparationRecording. Query this fact separately from
+      elevate_language.
+    sql: |
+      SELECT
+        id,
+        user_id,
+        result_created_at,
+        CASE WHEN words_per_minute > 0 THEN words_per_minute END AS wpm_sample,
+        CASE
+          WHEN has_signals OR filler_word_count > 0 THEN filler_word_rate
+        END AS filler_rate_sample,
+        CASE
+          WHEN has_signals OR hedging_count > 0 THEN hedging_rate
+        END AS hedging_rate_sample,
+        CASE
+          WHEN avg_sentence_length > 0 THEN avg_sentence_length
+        END AS sentence_length_sample,
+        CASE
+          WHEN vocabulary_diversity > 0 THEN vocabulary_diversity
+        END AS vocab_diversity_sample,
+        CASE
+          WHEN readability_text ~ '^[0-9]+(\.[0-9]+)?$' THEN readability_text::double precision
+        END AS readability_sample,
+        CASE
+          WHEN coherence_text ~ '^[0-9]+(\.[0-9]+)?$' THEN coherence_text::double precision
+        END AS coherence_sample
+      FROM (
+        SELECT
+          res.id AS id,
+          r."userId" AS user_id,
+          res."createdAt" AS result_created_at,
+          res."wordsPerMinute" AS words_per_minute,
+          res."fillerWordRate" AS filler_word_rate,
+          res."fillerWordCount" AS filler_word_count,
+          res."hedgingRate" AS hedging_rate,
+          res."hedgingCount" AS hedging_count,
+          res."avgSentenceLength" AS avg_sentence_length,
+          res."vocabularyDiversity" AS vocabulary_diversity,
+          (res."communicationSignals" IS NOT NULL) AS has_signals,
+          res."communicationSignals"#>> ARRAY['sentenceComplexity','readability'] AS readability_text,
+          res."communicationSignals"#>> ARRAY['topicCoherence','avgSimilarity'] AS coherence_text
+        FROM "ReplayResult" res
+        JOIN "ReplaySession" r ON r.id = res."replaySessionId"
+        WHERE r.purpose::text = 'COMMUNICATION'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM "PreparationRecording" pr
+            WHERE pr."replaySessionId" = r.id
+          )
+      ) replay_samples
+    public: true
+
+    refresh_key:
+      every: 5 minutes
+
+    dimensions:
+      - name: id
+        sql: id
+        type: string
+        primary_key: true
+        description: ReplayResult id. Admin group only.
+
+      - name: user_id
+        sql: user_id
+        type: string
+        description: Learner id. Join key to learners.id. Admin group only on this cube; page with learners.id.
+
+      - name: result_created_at
+        sql: result_created_at
+        type: time
+        description: ReplayResult.createdAt. This is the Replay language date window.
+
+      - name: wpm_sample
+        sql: wpm_sample
+        type: number
+        public: false
+
+      - name: filler_rate_sample
+        sql: filler_rate_sample
+        type: number
+        public: false
+
+      - name: hedging_rate_sample
+        sql: hedging_rate_sample
+        type: number
+        public: false
+
+      - name: sentence_length_sample
+        sql: sentence_length_sample
+        type: number
+        public: false
+
+      - name: vocab_diversity_sample
+        sql: vocab_diversity_sample
+        type: number
+        public: false
+
+      - name: readability_sample
+        sql: readability_sample
+        type: number
+        public: false
+
+      - name: coherence_sample
+        sql: coherence_sample
+        type: number
+        public: false
+
+    measures:
+      - name: sessions
+        type: count
+        description: Canonical Replay results. Prepare recordings are excluded.
+
+      - name: learner_count
+        sql: user_id
+        type: count_distinct
+        description: Distinct learners contributing Replay language rows. AI demographic suppression uses this count.
+
+      - name: median_wpm
+        sql: "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {wpm_sample})"
+        type: number
+        description: Median words per minute. Zero is excluded. percentile_cont(0.5).
+
+      - name: median_filler_rate
+        sql: "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {filler_rate_sample})"
+        type: number
+        description: Median fillerWordRate in percent, as stored on ReplayResult.
+
+      - name: median_hedging_rate
+        sql: "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {hedging_rate_sample})"
+        type: number
+        description: Median hedgingRate in percent, as stored on ReplayResult.
+
+      - name: median_sentence_length
+        sql: "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {sentence_length_sample})"
+        type: number
+        description: Median avgSentenceLength. Zero is excluded.
+
+      - name: median_vocab_diversity
+        sql: "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {vocab_diversity_sample})"
+        type: number
+        description: Median vocabularyDiversity in percent, as stored on ReplayResult.
+
+      - name: median_readability
+        sql: "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {readability_sample})"
+        type: number
+        description: Median Flesch readability from communicationSignals.sentenceComplexity.readability.
+
+      - name: median_coherence
+        sql: "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {coherence_sample})"
+        type: number
+        description: Median topic coherence from communicationSignals.topicCoherence.avgSimilarity.
+
+    access_policy:
+      - group: ai
+        member_level:
+          includes:
+            - result_created_at
+            - sessions
+            - learner_count
+            - median_wpm
+            - median_filler_rate
+            - median_hedging_rate
+            - median_sentence_length
+            - median_vocab_diversity
+            - median_readability
+            - median_coherence
+      - group: admin
+        member_level:
+          includes: "*"

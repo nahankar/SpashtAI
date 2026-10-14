@@ -42,7 +42,8 @@ What we collect
 • Account details: name, email, phone, date of birth, gender, pincode
 • Location derived from pincode (city, state, country) — used internally, not shown to other users
 • Session data: audio, transcripts, metrics, and coaching insights
-• Usage logs: sign-in activity, feature usage, device/browser type
+• Usage logs: sign-in activity, feature usage, active time, and device/browser type
+• Optional Microsoft Clarity diagnostics, only after you allow them in Settings. These are masked, excluded from admin pages, and are not the source of admin dashboard numbers
 
 How we use it
 • Provide and improve the Service

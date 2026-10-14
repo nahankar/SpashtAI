@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { useFeatureMilestone } from '@/hooks/useFeatureMilestone'
 import {
   ArrowLeft,
   Play,
@@ -386,6 +387,7 @@ export function SessionReplay({
 } = {}) {
   const params = useParams<{ sessionId: string }>()
   const sessionId = sessionIdProp ?? params.sessionId
+  useFeatureMilestone(variant === 'interview' ? 'interviews' : 'elevate', 'results_viewed', sessionId, !embedded)
   const isPro = useIsPro()
 
   const [turns, setTurns] = useState<ReplayTurn[]>([])

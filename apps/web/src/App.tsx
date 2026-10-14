@@ -25,7 +25,9 @@ import { AdminLayout } from '@/components/admin/AdminLayout'
 import { Dashboard as AdminDashboard } from '@/pages/admin/Dashboard'
 import { Users as AdminUsers } from '@/pages/admin/Users'
 import { UserDetail as AdminUserDetail } from '@/pages/admin/UserDetail'
+import { AnalyticsExplorer } from '@/pages/admin/AnalyticsExplorer'
 import { FeatureAnalytics } from '@/pages/admin/FeatureAnalytics'
+import { ProgressPulseAnalytics } from '@/pages/admin/ProgressPulseAnalytics'
 import { SystemHealth } from '@/pages/admin/SystemHealth'
 import { VoiceBackend as AdminVoiceBackend } from '@/pages/admin/VoiceBackend'
 import { FeatureFlagsAdmin } from '@/pages/admin/FeatureFlags'
@@ -50,6 +52,7 @@ import { FeatureGate } from '@/components/auth/FeatureGate'
 import { PublicFooter } from '@/components/layout/PublicFooter'
 import { LogoWithBeta } from '@/components/brand/LogoWithBeta'
 import { usePageTracking } from '@/hooks/usePageTracking'
+import { AnalyticsConsent, AnalyticsPrivacySettings } from '@/components/analytics/AnalyticsConsent'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { safeAppPath } from '@/lib/safe-next-path'
@@ -602,7 +605,7 @@ function AppRoutes() {
           <Route path="/settings" element={
             <main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8">
               <AppBreadcrumbs />
-              <div>Settings</div>
+              <AnalyticsPrivacySettings />
             </main>
           } />
         </Route>
@@ -615,7 +618,9 @@ function AppRoutes() {
             <Route path="users/:id" element={<AdminUserDetail />} />
             <Route path="feedback" element={<AdminFeedback />} />
             <Route path="feedback/:id" element={<AdminFeedbackDetail />} />
+            <Route path="analytics/explorer" element={<AnalyticsExplorer />} />
             <Route path="analytics" element={<FeatureAnalytics />} />
+            <Route path="progress-pulse" element={<ProgressPulseAnalytics />} />
             <Route path="system" element={<SystemHealth />} />
             <Route path="voice-backend" element={<AdminVoiceBackend />} />
             <Route path="features" element={<FeatureFlagsAdmin />} />
@@ -635,6 +640,7 @@ function AppRoutes() {
         </div>
         {!loading && !user && <PublicFooter />}
       </div>
+      <AnalyticsConsent />
     </>
   )
 }

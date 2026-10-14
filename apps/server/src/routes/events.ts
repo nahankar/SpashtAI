@@ -1,61 +1,41 @@
 import { Router, Request, Response } from 'express'
-import { Prisma } from '@prisma/client'
-import { prisma } from '../lib/prisma'
-import { isPrivilegedRole } from '../lib/userExportFlags'
+import { recordProductEvent } from '../analytics/recordProductEvent'
 
 const router = Router()
 
-const ALLOWED_FEATURES = new Set(['app', 'elevate', 'replay', 'prepare'])
-const MAX_ACTION_LEN = 64
-
-// POST /api/events/track — lightweight product analytics (auth required)
+// POST /api/events/track — authenticated product analytics. Admins are acknowledged and not stored.
 router.post('/track', async (req: Request, res: Response) => {
-  try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Authentication required' })
-      return
-    }
-
-    const { feature, action, metadata, sessionId, duration } = req.body as {
-      feature?: string
-      action?: string
-      metadata?: Record<string, unknown>
-      sessionId?: string
-      duration?: number
-    }
-
-    if (!feature || !action || !ALLOWED_FEATURES.has(feature)) {
-      res.status(400).json({ error: 'Invalid feature or action' })
-      return
-    }
-
-    const safeAction = String(action).slice(0, MAX_ACTION_LEN)
-
-    // Admin views/actions must not pollute product analytics — count users only.
-    if (isPrivilegedRole(req.user.role)) {
-      res.json({ ok: true })
-      return
-    }
-
-    await prisma.featureUsage.create({
-      data: {
-        userId: req.user.userId,
-        feature,
-        action: safeAction,
-        sessionId: sessionId || null,
-        duration: typeof duration === 'number' ? Math.round(duration) : null,
-        metadata:
-          metadata != null
-            ? (metadata as Prisma.InputJsonValue)
-            : undefined,
-      },
-    })
-
-    res.json({ ok: true })
-  } catch (err) {
-    console.error('Event track error:', err)
-    res.status(500).json({ error: 'Failed to track event' })
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication required' })
+    return
   }
+
+  const body = req.body ?? {}
+  const result = await recordProductEvent({
+    userId: req.user.userId,
+    role: req.user.role,
+    source: 'client',
+    feature: body.feature,
+    action: body.action,
+    metadata: body.metadata,
+    sessionId: body.sessionId,
+    duration: body.duration,
+    engagementMs: body.engagementMs,
+    outcome: body.outcome,
+    path: body.path,
+    visitId: body.visitId,
+    eventId: body.eventId,
+  })
+
+  if (!result.ok && result.error === 'Invalid feature or action') {
+    res.status(400).json({ error: result.error })
+    return
+  }
+  if (!result.ok) {
+    res.status(500).json({ error: 'Failed to track event' })
+    return
+  }
+  res.json({ ok: true, stored: result.stored, duplicate: result.duplicate === true })
 })
 
 export default router

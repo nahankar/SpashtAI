@@ -1,11 +1,22 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useConnectionState, useRoomContext } from '@livekit/components-react'
 import { RoomEvent } from 'livekit-client'
+import { trackProductEvent } from '@/lib/productTelemetry'
 export function ConnectionStatus({ assistantState }: { assistantState: 'restarting' | 'ready' | 'recovering' | 'unknown' }) {
   const state = useConnectionState()
   const room = useRoomContext()
   const isConnected = state === 'connected'
   const isConnecting = state === 'connecting'
+  const connectedSent = useRef(false)
+
+  useEffect(() => {
+    if (!isConnected || connectedSent.current) return
+    connectedSent.current = true
+    const path = window.location.pathname
+    const feature = path.startsWith('/interviews') ? 'interviews' : 'elevate'
+    const sessionId = localStorage.getItem('spashtai_active_session')
+    trackProductEvent({ feature, action: 'rtc_connected', sessionId, outcome: 'completed' })
+  }, [isConnected])
 
   const [agentPresent, setAgentPresent] = useState(false)
 

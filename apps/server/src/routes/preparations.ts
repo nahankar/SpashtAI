@@ -44,7 +44,7 @@ import {
   preparationInclude,
 } from '../services/preparations/createInterviewJourney'
 import { logInterview, LogInterviewError } from '../services/preparations/logInterview'
-import { trackFeatureUsage } from '../middleware/tracking'
+import { recordFeatureUsage, trackFeatureUsage } from '../middleware/tracking'
 import { currentListRole, ownerListWhere } from '../lib/listAccess'
 import { isPrivilegedRole } from '../lib/userExportFlags'
 
@@ -630,6 +630,7 @@ router.post('/:id/questions', async (req, res) => {
       { event: 'prepare.question_added', preparationId: preparation.id, count: 1 },
       'Interview question added',
     )
+    recordFeatureUsage(req, 'prepare', 'question_added', null, { outcome: 'completed', metadata: { count: 1 } })
     res.status(201).json({ question })
   } catch (error) {
     reqLog(req).error({ err: error }, 'Failed to add interview question')
@@ -704,6 +705,7 @@ router.patch('/:id/stages/:stageId/reflection', async (req, res) => {
       },
       update: parsed.data,
     })
+    recordFeatureUsage(req, 'prepare', 'reflection_saved', null, { outcome: 'completed' })
     res.json({ reflection })
   } catch (error) {
     reqLog(req).error({ err: error }, 'Failed to save stage reflection')
@@ -731,7 +733,10 @@ router.post('/:id/log-interview', async (req, res) => {
       { event: 'prepare.stage_completed', preparationId: preparation.id },
       'Preparation stage completed',
     )
+    recordFeatureUsage(req, 'prepare', 'interview_logged', null, { outcome: 'completed' })
+    recordFeatureUsage(req, 'prepare', 'stage_completed', null, { outcome: 'completed' })
     if (questionCount > 0) {
+      recordFeatureUsage(req, 'prepare', 'question_added', null, { outcome: 'completed', metadata: { count: questionCount } })
       reqLog(req).info(
         {
           event: 'prepare.question_added',

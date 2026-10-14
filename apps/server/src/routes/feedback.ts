@@ -5,6 +5,7 @@ import fs from 'fs'
 import { prisma } from '../lib/prisma'
 import { generateFeedbackNumber, isFeedbackEditable } from '../lib/feedback'
 import { resolveFeedbackSessionLink } from '../lib/feedbackSession'
+import { recordFeatureUsage } from '../middleware/tracking'
 
 const router = Router()
 
@@ -83,6 +84,10 @@ router.post('/', upload.array('attachments', 5), async (req: Request, res: Respo
       include: { attachments: true, notes: { orderBy: { createdAt: 'asc' } } },
     })
 
+    recordFeatureUsage(req, 'feedback', 'submitted', sessionLink.sessionId, {
+      outcome: 'completed',
+      metadata: { type: feedbackType, hasAttachment: files.length > 0 },
+    })
     res.status(201).json({ feedback: full })
   } catch (err) {
     console.error('Create feedback error:', err)

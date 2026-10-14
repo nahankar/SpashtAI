@@ -1,21 +1,28 @@
 import { Request, Response, NextFunction } from 'express'
-import { prisma } from '../lib/prisma'
+import { recordProductEvent, type RecordProductEventInput } from '../analytics/recordProductEvent'
 import { isPrivilegedRole } from '../lib/userExportFlags'
+
+type EventExtra = Partial<Pick<RecordProductEventInput, 'outcome' | 'metadata' | 'path' | 'engagementMs'>>
 
 function writeFeatureUsage(data: {
   userId: string
+  role?: string | null
   feature: string
   action: string
   duration?: number
   sessionId: string | null
+  extra?: EventExtra
 }) {
-  try {
-    Promise.resolve(prisma.featureUsage.create({ data }))
-      .catch((err: unknown) => console.error('Tracking error:', err))
-  } catch (err) {
-    // Analytics must never turn a successful user action into a failed one.
-    console.error('Tracking error:', err)
-  }
+  void recordProductEvent({
+    userId: data.userId,
+    role: data.role,
+    feature: data.feature,
+    action: data.action,
+    duration: data.duration,
+    sessionId: data.sessionId,
+    source: 'server',
+    ...data.extra,
+  })
 }
 
 export function trackFeatureUsage(
@@ -30,14 +37,15 @@ export function trackFeatureUsage(
     res.send = function (data: any) {
       const duration = Date.now() - startTime
 
-      // Only count real end-user activity in analytics — never admin views/actions.
+      // duration here is request latency. Active time is recorded separately.
       if (res.statusCode < 400 && req.user && !isPrivilegedRole(req.user.role) && shouldTrack(req)) {
         writeFeatureUsage({
           userId: req.user.userId,
+          role: req.user.role,
           feature,
           action,
           duration,
-          sessionId: req.params.sessionId || req.body?.sessionId || null,
+          sessionId: req.params.sessionId || req.params.id || req.body?.sessionId || null,
         })
       }
 
@@ -57,8 +65,9 @@ export function recordFeatureUsage(
   feature: string,
   action: string,
   sessionId: string | null = null,
+  extra?: EventExtra,
 ) {
   if (!req.user || isPrivilegedRole(req.user.role)) return
 
-  writeFeatureUsage({ userId: req.user.userId, feature, action, sessionId })
+  writeFeatureUsage({ userId: req.user.userId, role: req.user.role, feature, action, sessionId, extra })
 }

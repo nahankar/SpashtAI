@@ -1,0 +1,190 @@
+# Elevate NLP samples. Medians use percentile_cont(0.5).
+# Row eligibility matches loadLanguageAnalytics() for source elevate.
+# Filler rate is stored as a percent. Hedging (0-1) and vocabulary diversity
+# (0-1) are scaled by 100 so medians match the admin analytics presentation.
+# Phrases, entities, transcripts, and coaching text are not members.
+
+cubes:
+  - name: elevate_language
+    description: >
+      One row per eligible Elevate SessionMetrics row. Excludes discarded
+      sessions, non-communication sessions, Prepare practice, and Interview runs.
+      Query this fact separately from replay_language.
+    sql: |
+      SELECT
+        id,
+        user_id,
+        started_at,
+        CASE WHEN user_wpm > 0 THEN user_wpm END AS wpm_sample,
+        CASE
+          WHEN has_signals OR user_filler_count > 0 THEN user_filler_rate
+        END AS filler_rate_sample,
+        CASE
+          WHEN hedging_text ~ '^[0-9]+(\.[0-9]+)?$' THEN hedging_text::double precision * 100
+        END AS hedging_rate_sample,
+        CASE
+          WHEN user_avg_sentence_length > 0 THEN user_avg_sentence_length
+        END AS sentence_length_sample,
+        CASE
+          WHEN user_vocab_diversity > 0 THEN user_vocab_diversity * 100
+        END AS vocab_diversity_sample,
+        CASE
+          WHEN readability_text ~ '^[0-9]+(\.[0-9]+)?$' THEN readability_text::double precision
+        END AS readability_sample,
+        CASE
+          WHEN coherence_text ~ '^[0-9]+(\.[0-9]+)?$' THEN coherence_text::double precision
+        END AS coherence_sample
+      FROM (
+        SELECT
+          m.id AS id,
+          s."userId" AS user_id,
+          s."startedAt" AS started_at,
+          m."userWpm" AS user_wpm,
+          m."userFillerRate" AS user_filler_rate,
+          m."userFillerCount" AS user_filler_count,
+          m."userAvgSentenceLength" AS user_avg_sentence_length,
+          m."userVocabDiversity" AS user_vocab_diversity,
+          (m."communicationSignals" IS NOT NULL) AS has_signals,
+          m."communicationSignals"#>> ARRAY['hedging','rate'] AS hedging_text,
+          m."communicationSignals"#>> ARRAY['sentenceComplexity','readability'] AS readability_text,
+          m."communicationSignals"#>> ARRAY['topicCoherence','avgSimilarity'] AS coherence_text
+        FROM "SessionMetrics" m
+        JOIN "Session" s ON s.id = m."sessionId"
+        WHERE s."discardedAt" IS NULL
+          AND s.purpose::text = 'COMMUNICATION'
+          AND s.module = 'elevate'
+          AND NOT EXISTS (
+            SELECT 1 FROM "PreparationPractice" pp WHERE pp."sessionId" = s.id
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM "InterviewRun" ir WHERE ir."sessionId" = s.id
+          )
+          AND (
+            m."communicationSignals" IS NOT NULL
+            OR m."userWpm" > 0
+            OR m."userFillerCount" > 0
+          )
+      ) elevate_samples
+    public: true
+
+    refresh_key:
+      every: 5 minutes
+
+    dimensions:
+      - name: id
+        sql: id
+        type: string
+        primary_key: true
+        description: SessionMetrics id. Admin group only.
+
+      - name: user_id
+        sql: user_id
+        type: string
+        description: Learner id. Join key to learners.id. Admin group only on this cube; page with learners.id.
+
+      - name: started_at
+        sql: started_at
+        type: time
+        description: Session.startedAt. This is the Elevate language date window.
+
+      - name: wpm_sample
+        sql: wpm_sample
+        type: number
+        public: false
+
+      - name: filler_rate_sample
+        sql: filler_rate_sample
+        type: number
+        public: false
+
+      - name: hedging_rate_sample
+        sql: hedging_rate_sample
+        type: number
+        public: false
+
+      - name: sentence_length_sample
+        sql: sentence_length_sample
+        type: number
+        public: false
+
+      - name: vocab_diversity_sample
+        sql: vocab_diversity_sample
+        type: number
+        public: false
+
+      - name: readability_sample
+        sql: readability_sample
+        type: number
+        public: false
+
+      - name: coherence_sample
+        sql: coherence_sample
+        type: number
+        public: false
+
+    measures:
+      - name: sessions
+        type: count
+        description: Eligible Elevate sessions that have language metrics.
+
+      - name: learner_count
+        sql: user_id
+        type: count_distinct
+        description: Distinct learners contributing Elevate language rows. AI demographic suppression uses this count.
+
+      - name: median_wpm
+        sql: "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {wpm_sample})"
+        type: number
+        description: Median words per minute. Zero words per minute is excluded. percentile_cont(0.5).
+
+      - name: median_filler_rate
+        sql: "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {filler_rate_sample})"
+        type: number
+        description: Median filler rate in percent, as stored on SessionMetrics.userFillerRate.
+
+      - name: median_hedging_rate
+        sql: "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {hedging_rate_sample})"
+        type: number
+        description: >
+          Median hedging rate in percent. SessionMetrics stores hedging.rate as
+          a 0-1 ratio; this median is that ratio times 100.
+
+      - name: median_sentence_length
+        sql: "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {sentence_length_sample})"
+        type: number
+        description: Median userAvgSentenceLength. Zero is excluded.
+
+      - name: median_vocab_diversity
+        sql: "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {vocab_diversity_sample})"
+        type: number
+        description: >
+          Median vocabulary diversity in percent. SessionMetrics stores a 0-1
+          ratio; this median is that ratio times 100.
+
+      - name: median_readability
+        sql: "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {readability_sample})"
+        type: number
+        description: Median Flesch readability from communicationSignals.sentenceComplexity.readability.
+
+      - name: median_coherence
+        sql: "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {coherence_sample})"
+        type: number
+        description: Median topic coherence from communicationSignals.topicCoherence.avgSimilarity.
+
+    access_policy:
+      - group: ai
+        member_level:
+          includes:
+            - started_at
+            - sessions
+            - learner_count
+            - median_wpm
+            - median_filler_rate
+            - median_hedging_rate
+            - median_sentence_length
+            - median_vocab_diversity
+            - median_readability
+            - median_coherence
+      - group: admin
+        member_level:
+          includes: "*"

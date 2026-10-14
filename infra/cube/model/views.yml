@@ -1,0 +1,182 @@
+# Query surfaces for the explorer. Member-level policies on a view are the
+# policies that apply to that view; cube policies do not replace them.
+# Do not join elevate_nlp and replay_nlp in one query. The two language facts
+# would fan out and the medians would be wrong.
+
+views:
+  - name: learner_explorer
+    description: >
+      Learner directory: paging id, demographics, canonical feature-use
+      booleans, and learner count. Identity members are admin-only.
+    public: true
+    cubes:
+      - join_path: learners
+        includes:
+          - id
+          - first_name
+          - last_name
+          - email
+          - gender
+          - age
+          - age_band
+          - city
+          - state
+          - created_at
+          - used_replay
+          - used_elevate
+          - used_interviews
+          - used_progress_pulse
+          - used_prepare
+          - used_feedback
+          - count
+    access_policy:
+      - group: ai
+        member_level:
+          includes:
+            - id
+            - gender
+            - age
+            - age_band
+            - city
+            - state
+            - created_at
+            - used_replay
+            - used_elevate
+            - used_interviews
+            - used_progress_pulse
+            - used_prepare
+            - used_feedback
+            - count
+      - group: admin
+        member_level:
+          includes: "*"
+
+  - name: elevate_nlp
+    description: >
+      Learner attributes plus Elevate percentile_cont medians. Date window is
+      started_at (Session.startedAt). AI demographic groups under 5 learners
+      are omitted.
+    public: true
+    cubes:
+      - join_path: learners
+        includes:
+          - id
+          - gender
+          - age
+          - age_band
+          - city
+          - state
+          - used_replay
+          - used_elevate
+          - used_interviews
+          - used_progress_pulse
+          - used_prepare
+          - used_feedback
+          - count
+      - join_path: learners.elevate_language
+        includes:
+          - learner_count
+          - sessions
+          - started_at
+          - median_wpm
+          - median_filler_rate
+          - median_hedging_rate
+          - median_sentence_length
+          - median_vocab_diversity
+          - median_readability
+          - median_coherence
+    access_policy:
+      - group: ai
+        member_level:
+          includes:
+            - id
+            - gender
+            - age
+            - age_band
+            - city
+            - state
+            - used_replay
+            - used_elevate
+            - used_interviews
+            - used_progress_pulse
+            - used_prepare
+            - used_feedback
+            - count
+            - learner_count
+            - sessions
+            - started_at
+            - median_wpm
+            - median_filler_rate
+            - median_hedging_rate
+            - median_sentence_length
+            - median_vocab_diversity
+            - median_readability
+            - median_coherence
+      - group: admin
+        member_level:
+          includes: "*"
+
+  - name: replay_nlp
+    description: >
+      Learner attributes plus Replay percentile_cont medians. Date window is
+      result_created_at (ReplayResult.createdAt). AI demographic groups under
+      5 learners are omitted.
+    public: true
+    cubes:
+      - join_path: learners
+        includes:
+          - id
+          - gender
+          - age
+          - age_band
+          - city
+          - state
+          - used_replay
+          - used_elevate
+          - used_interviews
+          - used_progress_pulse
+          - used_prepare
+          - used_feedback
+          - count
+      - join_path: learners.replay_language
+        includes:
+          - learner_count
+          - sessions
+          - result_created_at
+          - median_wpm
+          - median_filler_rate
+          - median_hedging_rate
+          - median_sentence_length
+          - median_vocab_diversity
+          - median_readability
+          - median_coherence
+    access_policy:
+      - group: ai
+        member_level:
+          includes:
+            - id
+            - gender
+            - age
+            - age_band
+            - city
+            - state
+            - used_replay
+            - used_elevate
+            - used_interviews
+            - used_progress_pulse
+            - used_prepare
+            - used_feedback
+            - count
+            - learner_count
+            - sessions
+            - result_created_at
+            - median_wpm
+            - median_filler_rate
+            - median_hedging_rate
+            - median_sentence_length
+            - median_vocab_diversity
+            - median_readability
+            - median_coherence
+      - group: admin
+        member_level:
+          includes: "*"

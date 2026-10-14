@@ -1,0 +1,258 @@
+# Learner directory for the AI Analytics Explorer.
+#
+# Keep this file aligned with the Prisma schema and the canonical product
+# predicates in:
+#   apps/server/src/analytics/adminProductAnalytics.ts
+#   apps/server/src/analytics/pulseEligibility.ts
+#   apps/server/src/analytics/productEvents.ts
+# When those change, update the SQL in this directory in the same change.
+# Admin and super-admin User rows are not learners.
+
+cubes:
+  - name: learners
+    description: >
+      One row per learner (User.role = USER). Feature booleans are canonical
+      product-table facts. Elevate excludes Prepare practice sessions and
+      Interview runs. Replay excludes Prepare recordings. Progress Pulse
+      excludes legacy Replay rows that lack replay-server-assessment-v1
+      evidence. first_name, last_name, and email are admin-group members.
+    sql: |
+      SELECT
+        u.id,
+        u.email,
+        u."firstName" AS first_name,
+        u."lastName" AS last_name,
+        u.gender::text AS gender,
+        u.city,
+        u.state,
+        u."createdAt" AS created_at,
+        CASE
+          WHEN u."dateOfBirth" IS NULL THEN NULL
+          ELSE EXTRACT(YEAR FROM AGE(CURRENT_TIMESTAMP, u."dateOfBirth"))::int
+        END AS age_years,
+        EXISTS (
+          SELECT 1
+          FROM "ReplaySession" r
+          WHERE r."userId" = u.id
+            AND r.purpose::text = 'COMMUNICATION'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM "PreparationRecording" pr
+              WHERE pr."replaySessionId" = r.id
+            )
+        ) OR EXISTS (
+          SELECT 1 FROM "FeatureUsage" fu
+          WHERE fu."userId" = u.id AND fu.feature = 'replay'
+            AND fu.action IN ('session_create', 'analyze', 'process_completed', 'process_failed')
+        ) AS used_replay,
+        EXISTS (
+          SELECT 1
+          FROM "Session" s
+          WHERE s."userId" = u.id
+            AND s."discardedAt" IS NULL
+            AND s.purpose::text = 'COMMUNICATION'
+            AND s.module = 'elevate'
+            AND NOT EXISTS (
+              SELECT 1 FROM "PreparationPractice" pp WHERE pp."sessionId" = s.id
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM "InterviewRun" ir WHERE ir."sessionId" = s.id
+            )
+        ) OR EXISTS (
+          SELECT 1 FROM "FeatureUsage" fu
+          WHERE fu."userId" = u.id AND fu.feature = 'elevate'
+            AND fu.action IN ('session_start', 'session_end', 'auto_completed', 'rtc_connected')
+        ) AS used_elevate,
+        EXISTS (
+          SELECT 1
+          FROM "InterviewRun" ir
+          JOIN "Session" s ON s.id = ir."sessionId"
+          WHERE ir."ownerId" = u.id
+            AND s."discardedAt" IS NULL
+        ) OR EXISTS (
+          SELECT 1 FROM "FeatureUsage" fu
+          WHERE fu."userId" = u.id AND fu.feature = 'interviews'
+            AND fu.action IN ('practice_start', 'answer_completed', 'answer_skipped', 'run_completed', 'run_abandoned', 'rtc_connected')
+        ) AS used_interviews,
+        EXISTS (
+          SELECT 1
+          FROM "ProgressPulse" p
+          WHERE p."userId" = u.id
+            AND (
+              p.source <> 'replay'
+              OR p.metadata->>'evidenceOrigin' = 'replay-server-assessment-v1'
+            )
+        ) OR EXISTS (
+          SELECT 1 FROM "FeatureUsage" fu
+          WHERE fu."userId" = u.id AND fu.feature = 'progress_pulse'
+            AND fu.action IN ('tracked')
+        ) AS used_progress_pulse,
+        EXISTS (
+          SELECT 1
+          FROM "Preparation" prep
+          WHERE prep."userId" = u.id
+        ) OR EXISTS (
+          SELECT 1 FROM "FeatureUsage" fu
+          WHERE fu."userId" = u.id AND fu.feature = 'prepare'
+            AND fu.action IN (
+              'journey_created', 'event_practice_started', 'event_practice_completed',
+              'event_recording_created', 'event_recording_analyzed', 'question_added',
+              'interview_logged', 'stage_completed', 'reflection_saved'
+            )
+        ) AS used_prepare,
+        EXISTS (
+          SELECT 1
+          FROM "UserFeedback" f
+          WHERE f."userId" = u.id
+        ) OR EXISTS (
+          SELECT 1 FROM "FeatureUsage" fu
+          WHERE fu."userId" = u.id AND fu.feature = 'feedback'
+            AND fu.action IN ('submitted')
+        ) AS used_feedback
+      FROM "User" u
+      WHERE u.role::text = 'USER'
+    public: true
+
+    refresh_key:
+      every: 5 minutes
+
+    joins:
+      - name: elevate_language
+        relationship: one_to_many
+        sql: "{CUBE}.id = {elevate_language.user_id}"
+      - name: replay_language
+        relationship: one_to_many
+        sql: "{CUBE}.id = {replay_language.user_id}"
+
+    dimensions:
+      - name: id
+        sql: id
+        type: string
+        primary_key: true
+        description: Learner id. Stable key for limit/offset paging. Visible to ai and admin.
+
+      - name: first_name
+        sql: first_name
+        type: string
+        description: Learner first name. Admin group only.
+
+      - name: last_name
+        sql: last_name
+        type: string
+        description: Learner last name. Admin group only.
+
+      - name: email
+        sql: email
+        type: string
+        description: Learner email. Admin group only.
+
+      - name: gender
+        sql: gender
+        type: string
+        description: >
+          Gender enum text: MALE, FEMALE, OTHER, PREFER_NOT_TO_SAY, or null.
+          Demographic aggregate. AI results with fewer than 5 learners are omitted.
+
+      - name: age
+        sql: age_years
+        type: number
+        description: >
+          Completed years from dateOfBirth at read time, using
+          EXTRACT(YEAR FROM AGE(CURRENT_TIMESTAMP, dateOfBirth)). Null when
+          date of birth is missing. Raw date of birth is not a member.
+
+      - name: age_band
+        sql: >
+          CASE
+            WHEN {age} IS NULL THEN 'unknown'
+            WHEN {age} < 18 THEN 'under_18'
+            WHEN {age} < 25 THEN '18_24'
+            WHEN {age} < 35 THEN '25_34'
+            WHEN {age} < 45 THEN '35_44'
+            WHEN {age} < 55 THEN '45_54'
+            ELSE '55_plus'
+          END
+        type: string
+        description: >
+          under_18, 18_24, 25_34, 35_44, 45_54, 55_plus, or unknown.
+          Same bands as admin analytics.
+
+      - name: city
+        sql: city
+        type: string
+        description: City resolved from pincode. Demographic aggregate.
+
+      - name: state
+        sql: state
+        type: string
+        description: State resolved from pincode. Demographic aggregate.
+
+      - name: created_at
+        sql: created_at
+        type: time
+        description: Learner account createdAt.
+
+      - name: used_replay
+        sql: used_replay
+        type: boolean
+        description: >
+          True when the learner has a ReplaySession with purpose COMMUNICATION
+          that is not a PreparationRecording.
+
+      - name: used_elevate
+        sql: used_elevate
+        type: boolean
+        description: >
+          True when the learner has a non-discarded Session with purpose
+          COMMUNICATION and module elevate that is neither a PreparationPractice
+          nor an InterviewRun.
+
+      - name: used_interviews
+        sql: used_interviews
+        type: boolean
+        description: >
+          True when the learner owns an InterviewRun whose Session is not discarded.
+
+      - name: used_progress_pulse
+        sql: used_progress_pulse
+        type: boolean
+        description: >
+          True when the learner has an eligible ProgressPulse row. Replay-sourced
+          rows count only when metadata.evidenceOrigin is replay-server-assessment-v1.
+
+      - name: used_prepare
+        sql: used_prepare
+        type: boolean
+        description: True when the learner has a Preparation journey.
+
+      - name: used_feedback
+        sql: used_feedback
+        type: boolean
+        description: True when the learner has a UserFeedback row.
+
+    measures:
+      - name: count
+        type: count
+        description: Distinct learners. Primary keys keep joins from inflating this count.
+
+    access_policy:
+      - group: ai
+        member_level:
+          includes:
+            - id
+            - gender
+            - age
+            - age_band
+            - city
+            - state
+            - created_at
+            - used_replay
+            - used_elevate
+            - used_interviews
+            - used_progress_pulse
+            - used_prepare
+            - used_feedback
+            - count
+      - group: admin
+        member_level:
+          includes: "*"

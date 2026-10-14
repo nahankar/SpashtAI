@@ -1,29 +1,40 @@
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
-import { apiClient } from '@/lib/api-client'
+import { EngagementClock } from '@/lib/engagementClock'
+import { trackProductEvent } from '@/lib/productTelemetry'
 
-/** Records authenticated page views to server-side FeatureUsage (for admin analytics). */
+/** Records authenticated page views and visible, non-idle time. Background tabs are excluded. */
 export function usePageTracking() {
   const location = useLocation()
   const { user } = useAuth()
-  const lastPath = useRef<string | null>(null)
+  const userId = user?.id
 
   useEffect(() => {
-    if (!user) return
+    if (!userId) return
     const path = location.pathname
-    if (path === lastPath.current) return
-    lastPath.current = path
+    const clock = new EngagementClock()
+    trackProductEvent({ feature: 'app', action: 'page_view', path, outcome: 'viewed', metadata: { path } })
 
-    apiClient('/api/events/track', {
-      method: 'POST',
-      body: JSON.stringify({
+    const onVisibility = () => clock.setHidden(document.visibilityState === 'hidden')
+    const onActivity = () => clock.markActivity()
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pointerdown', onActivity, { passive: true })
+    window.addEventListener('keydown', onActivity)
+    onVisibility()
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pointerdown', onActivity)
+      window.removeEventListener('keydown', onActivity)
+      trackProductEvent({
         feature: 'app',
-        action: 'page_view',
+        action: 'page_exit',
+        path,
+        engagementMs: clock.flush(),
+        outcome: 'completed',
         metadata: { path },
-      }),
-    }).catch(() => {
-      // Non-blocking — analytics must not break navigation
-    })
-  }, [location.pathname, user])
+      })
+    }
+  }, [location.pathname, userId])
 }

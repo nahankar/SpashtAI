@@ -10,6 +10,7 @@ import type { SkillScores } from '../analytics/skillScores'
 import { replayResultView } from '../lib/replay-result-view'
 import type { ReplaySelection } from '../lib/replay-evidence'
 import { guardPaceClaims, isPersistedPaceAvailable } from '../analytics/paceClaims'
+import { recordFeatureUsage } from '../middleware/tracking'
 
 function enabledSources(): Promise<PlatformFeature[]> {
   return getEnabledFeatures()
@@ -287,6 +288,7 @@ export async function trackElevateProgressPulse(req: Request, res: Response) {
       stored.scores,
       stored.components,
     )
+    recordFeatureUsage(req, 'progress_pulse', 'tracked', sessionId, { outcome: 'tracked', metadata: { source: 'elevate' } })
     res.json({ success: true, pulseEntriesCreated })
   } catch (error) {
     console.error('Error tracking elevate progress pulse:', error)
@@ -334,6 +336,7 @@ export async function skipProgressPulse(req: Request, res: Response) {
       })
     }
 
+    recordFeatureUsage(req, 'progress_pulse', 'skipped', sessionId, { outcome: 'skipped', metadata: { source } })
     res.json({ success: true })
   } catch (error) {
     console.error('Error skipping progress pulse:', error)

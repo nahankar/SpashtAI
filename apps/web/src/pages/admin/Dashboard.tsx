@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { apiClient } from '@/lib/api-client'
 import { MetricCard } from '@/components/admin/MetricCard'
 import { BrandName } from '@/components/brand/BrandName'
 
 interface Overview {
   users: { total: number; newToday: number; newThisWeek: number; activeThisWeek: number }
+  headlines?: { pulseParticipants: number; interviewRuns: number }
   sessions: {
     enabledFeatures?: string[]
     elevate?: { total: number; thisMonth: number }
@@ -86,7 +88,7 @@ export function Dashboard() {
         )}
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-3">
         <div className="rounded-md border p-4">
           <h3 className="mb-2 font-semibold">Quick Stats</h3>
           <ul className="space-y-2 text-sm text-muted-foreground">
@@ -103,6 +105,14 @@ export function Dashboard() {
                 <li>Prepare event recordings: <strong className="text-foreground">{data.sessions.prepare.eventRecordings.total}</strong></li>
               </>
             )}
+          </ul>
+        </div>
+        <div className="rounded-md border p-4">
+          <h3 className="mb-2 font-semibold">Analytics</h3>
+          <ul className="space-y-2 text-sm text-muted-foreground">
+            <li><Link className="text-primary underline-offset-4 hover:underline" to="/admin/progress-pulse">{data.headlines?.pulseParticipants ?? 0} learners have eligible Progress Pulse scores</Link></li>
+            <li><Link className="text-primary underline-offset-4 hover:underline" to="/admin/analytics?feature=interviews">{data.headlines?.interviewRuns ?? 0} interview practice runs</Link></li>
+            <li><Link className="text-primary underline-offset-4 hover:underline" to="/admin/analytics">Feature usage, active time, and milestones</Link></li>
           </ul>
         </div>
         <div className="rounded-md border p-4">

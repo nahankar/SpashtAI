@@ -8,6 +8,7 @@ import { activeSegmentDurationSec } from '../analytics/sessionSegments'
 import { queuePaceReconciliation, requeuePaceReconciliationData } from './paceReconciliationWorker'
 import { awardSessionActivePoints } from './points'
 import { runSessionAnalysis } from '../routes/analytics'
+import { recordProductEvent } from '../analytics/recordProductEvent'
 
 export const SESSION_INACTIVITY_TIMEOUT_MS = 24 * 60 * 60 * 1000
 const SWEEP_INTERVAL_MS = 15 * 60 * 1000
@@ -44,7 +45,7 @@ async function sessionLastActivityAt(db: ActivityClient, sessionId: string, star
 }
 
 export type InactiveCompletionResult =
-  | { completed: true; endedAt: Date; userId: string; prepareOwned: boolean; module: string; rewardEligible: boolean }
+  | { completed: true; endedAt: Date; userId: string; prepareOwned: boolean; interviewOwned: boolean; module: string; rewardEligible: boolean }
   | { completed: false; reason: 'already_ended' | 'active' | 'retained' | 'discarded' | 'missing' }
 
 /**
@@ -136,6 +137,7 @@ export async function completeInactiveSession(
         endedAt: lastActivity,
         userId: session.userId,
         prepareOwned: Boolean(session.preparationPractice),
+        interviewOwned: Boolean(session.interviewRun),
         module: session.module,
         rewardEligible: isStandaloneCommunication(session),
       } as const
@@ -193,6 +195,15 @@ export async function sweepInactiveSessions(now = new Date()): Promise<number> {
             { event: 'elevate.session_auto_completed', sessionId: id, endedAt: result.endedAt },
             'inactive session completed',
           )
+          if (!result.prepareOwned) {
+            void recordProductEvent({
+              userId: result.userId,
+              feature: result.interviewOwned ? 'interviews' : 'elevate',
+              action: result.interviewOwned ? 'run_abandoned' : 'auto_completed',
+              sessionId: id,
+              outcome: 'inactivity',
+            })
+          }
           queuePaceReconciliation(id)
           if (result.rewardEligible) {
             try {

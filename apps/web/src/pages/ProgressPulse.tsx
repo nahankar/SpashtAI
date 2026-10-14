@@ -1,8 +1,10 @@
 import { ProgressPulseCard } from '@/components/analytics/ProgressPulseCard'
 import { useFeatureFlags } from '@/contexts/FeatureFlagsContext'
+import { useFeatureMilestone } from '@/hooks/useFeatureMilestone'
 
 export function ProgressPulse() {
   const { isEnabled } = useFeatureFlags()
+  useFeatureMilestone('progress_pulse', 'dashboard_viewed')
   const sources = [
     isEnabled('replay') ? 'Replay analyses' : null,
     isEnabled('elevate') ? 'Elevate practice sessions' : null,

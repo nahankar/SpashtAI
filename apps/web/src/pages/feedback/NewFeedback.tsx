@@ -1,4 +1,5 @@
 import { useState, useRef, useMemo } from 'react'
+import { useFeatureMilestone } from '@/hooks/useFeatureMilestone'
 import { useNavigate, Link, useSearchParams } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -23,6 +24,7 @@ function parseModuleParam(value: string | null): FeedbackSessionModule | null {
 }
 
 export function NewFeedback() {
+  useFeatureMilestone('feedback', 'form_started')
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const initialModule = parseModuleParam(searchParams.get('module'))

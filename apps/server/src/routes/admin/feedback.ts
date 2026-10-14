@@ -3,6 +3,7 @@ import { Router, type Request, type Response } from 'express'
 import { prisma } from '../../lib/prisma'
 import { FEEDBACK_PRIORITIES, FEEDBACK_STATUSES } from '../../lib/feedback'
 import { awardFeedbackConsideredPoints } from '../../lib/points'
+import { recordProductEvent } from '../../analytics/recordProductEvent'
 
 const router = Router()
 
@@ -148,6 +149,15 @@ router.put('/:id', async (req: Request, res: Response) => {
           })
         : updated
 
+    if (status && status !== existing.status) {
+      void recordProductEvent({
+        userId: existing.userId,
+        feature: 'feedback',
+        action: status === 'ACKNOWLEDGED' && existing.status === 'OPEN' ? 'first_response' : status === 'IMPLEMENTED' || status === 'PARKED' ? 'resolved' : 'status_changed',
+        outcome: status === 'IMPLEMENTED' || status === 'PARKED' ? 'resolved' : status === 'ACKNOWLEDGED' ? 'acknowledged' : 'completed',
+        metadata: { status },
+      })
+    }
     res.json({ feedback: feedback ?? updated, pointsAwarded, totalPoints })
   } catch (err) {
     console.error('Admin feedback update error:', err)

@@ -19,6 +19,7 @@ import {
   resolveRequestExportFlags,
 } from '../lib/userExportFlags'
 import { recordFeatureUsage, trackFeatureUsage } from '../middleware/tracking'
+import { recordProductEvent } from '../analytics/recordProductEvent'
 import {
   enqueueReplayDeletion,
   processReplayDeletion,
@@ -301,6 +302,9 @@ router.post('/sessions/:id/track-progress', async (req: Request, res: Response) 
       await tx.replaySession.update({ where: { id: session.id }, data: { progressPulseStatus: 'tracked' } })
       return { code: 200, tracked: entries.length }
     })
+    if (outcome.code === 200) {
+      recordFeatureUsage(req, 'progress_pulse', 'tracked', req.params.id, { outcome: 'tracked', metadata: { source: 'replay' } })
+    }
     res.status(outcome.code).json(outcome)
   } catch { res.status(500).json({ error: 'Unable to track Replay scores' }) }
 })
@@ -579,6 +583,7 @@ router.post('/sessions/:id/process', trackFeatureUsage(
           data: { status: 'failed', errorMessage: err.message },
         })
         .catch((updErr) => logger.error({ err: updErr, sessionId: id }, 'replay failure-status update failed'))
+      recordFeatureUsage(req, 'replay', 'process_failed', id, { outcome: 'failed' })
     })
   } catch (error) {
     logger.error({ err: error }, 'Error starting processing:')
@@ -782,6 +787,7 @@ async function processReplaySession(sessionId: string): Promise<void> {
       { event: 'replay.process_completed', sessionId, phase: resolvedParticipantSpeaker ? 'insufficient_speech' : 'confirmation_required', processingTimeMs },
       'replay processing completed',
     )
+    void recordProductEvent({ userId: session.userId, feature: 'replay', action: 'process_completed', sessionId, outcome: 'completed', metadata: { phase: 'confirmation' } })
     return
   }
 
@@ -904,6 +910,7 @@ async function processReplaySession(sessionId: string): Promise<void> {
     { event: 'replay.process_completed', sessionId, phase: 'personalized', processingTimeMs },
     'replay processing completed',
   )
+  void recordProductEvent({ userId: session.userId, feature: 'replay', action: 'process_completed', sessionId, outcome: 'completed', metadata: { phase: 'personalized' } })
 }
 
 // ── PATCH /api/replay/sessions/:id ──

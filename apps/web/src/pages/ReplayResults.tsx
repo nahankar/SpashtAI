@@ -2,6 +2,8 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { getAuthHeaders } from '@/lib/api-client'
+import { trackProductEvent } from '@/lib/productTelemetry'
+import { useFeatureMilestone } from '@/hooks/useFeatureMilestone'
 import { useUserExportFlags } from '@/hooks/useUserExportFlags'
 import { SessionChat } from '@/components/session/SessionChat'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -997,6 +999,7 @@ function ReanalyzeOverlay({ status, error, hasPriorAssessment, onDismiss, onRetr
 
 export function ReplayResults() {
   const { id } = useParams<{ id: string }>()
+  useFeatureMilestone('replay', 'results_viewed', id)
   const navigate = useNavigate()
   const { user, updateUser } = useAuth()
   const exportFlags = useUserExportFlags()
@@ -1226,6 +1229,7 @@ export function ReplayResults() {
     : null
 
   const handleDownload = () => {
+    trackProductEvent({ feature: 'replay', action: 'exported', sessionId: id, outcome: 'completed', metadata: { type: 'json' } })
     const report = {
       session,
       skillScores: data.skillScores ?? null,
@@ -1291,6 +1295,7 @@ export function ReplayResults() {
 
   const handleExportPdf = async () => {
     if (!data) return
+    trackProductEvent({ feature: 'replay', action: 'exported', sessionId: id, outcome: 'completed', metadata: { type: 'pdf' } })
     setPdfLoading(true)
     try {
       const pdfReport = replayEvidenceReport(data)

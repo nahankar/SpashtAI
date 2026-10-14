@@ -105,8 +105,10 @@ Depending on your location, you may have rights to access, correct, delete, rest
 10. Children
 SpashtAI is not directed at children under 18. We do not knowingly collect data from minors.
 
-11. Cookies and local storage
-We use essential cookies and local storage (e.g., authentication tokens, session preferences) to operate the Service. Analytics cookies, if any, will be disclosed separately.
+11. Cookies, local storage, and diagnostics
+We use essential local storage for authentication and preferences. First-party product analytics record signed-in feature use, such as page views, active time, and milestone completion, so administrators can understand aggregate usage. These records are tied to your account and are not a third-party advertising profile.
+
+Microsoft Clarity is optional, production-only, and starts only after you allow diagnostics in the app. It provides masked interaction diagnostics for usability. It is not loaded on admin pages and is not given your name, email, transcript, interview answers, feedback text, or recordings. You can decline or withdraw that choice in Settings. Dashboard metrics do not come from Clarity.
 
 12. Changes
 We may update this Policy. The "Last updated" date will reflect revisions. Material changes will be communicated where required by law.

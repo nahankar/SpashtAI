@@ -177,6 +177,9 @@ model User {
 
   @@index([email])
   @@index([role])
+  @@index([role, pincode])
+  @@index([role, gender])
+  @@index([role, state])
 }
 
 model FeatureUsage {
@@ -189,11 +192,23 @@ model FeatureUsage {
 
   sessionId String?
   metadata  Json?
+  // Request latency in milliseconds for middleware-generated events.
+  // Active foreground time is engagementMs, never this field.
   duration  Int?
+
+  eventId        String? @unique
+  visitId        String?
+  path           String?
+  engagementMs   Int?
+  outcome        String?
+  schemaVersion  Int     @default(1)
 
   timestamp DateTime @default(now())
 
   @@index([userId, feature, timestamp])
+  @@index([userId, timestamp])
+  @@index([feature, timestamp])
+  @@index([feature, action, timestamp])
 }
 
 model UserActivity {
@@ -228,6 +243,23 @@ model AdminAction {
   timestamp DateTime @default(now())
 
   @@index([adminId, timestamp])
+}
+
+model AdminAnalyticsQuery {
+  id                 String   @id @default(cuid())
+  adminId            String
+  question           String   @db.Text
+  title              String
+  plan               Json
+  planHash           String
+  pinned             Boolean  @default(false)
+  refreshIntervalSec Int      @default(60)
+  lastRunAt          DateTime @default(now())
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([adminId, planHash])
+  @@index([adminId, pinned, lastRunAt])
 }
 
 model SystemMetrics {
@@ -780,6 +812,8 @@ model ProgressPulse {
 
   @@index([userId, skill, recordedAt])
   @@index([userId, recordedAt])
+  @@index([recordedAt])
+  @@index([source, recordedAt])
 }
 
 // ── Platform feature flags (global until multi-tenant) ──

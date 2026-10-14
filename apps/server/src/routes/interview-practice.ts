@@ -28,20 +28,32 @@ practiceRouter.get('/options', route(async (req, res) => { res.json(await practi
 practiceRouter.get('/runs', route(async (req, res) => { res.json(await practiceHistory(req.user!.userId)) }))
 practiceRouter.post('/runs', route(async (req, res) => {
   const run = await startPractice(req.body, req.user!.userId)
-  if (!run.reused) recordFeatureUsage(req, 'interviews', 'practice_start', run.sessionId)
+  if (!run.reused) recordFeatureUsage(req, 'interviews', 'practice_start', run.sessionId, { outcome: 'started' })
   res.status(201).json(run)
 }))
 practiceRouter.get('/runs/:runId', route(async (req, res) => { res.json(await practiceDetail(req.params.runId, req.user!.userId)) }))
 practiceRouter.post('/runs/:runId/next', route(async (req, res) => { empty.parse(req.body); res.json(await prepareBankAttempt(req.params.runId, req.user!.userId)) }))
 practiceRouter.post('/runs/:runId/attempts/:attemptId/finish', route(async (req, res) => {
   const body = finish.parse(req.body)
-  res.json(await finishAnswer(req.params.runId, req.params.attemptId, req.user!.userId, body.skip, body.receiptId))
+  const result = await finishAnswer(req.params.runId, req.params.attemptId, req.user!.userId, body.skip, body.receiptId)
+  if (!result.reused) {
+    recordFeatureUsage(req, 'interviews', result.status === 'SKIPPED' ? 'answer_skipped' : 'answer_completed', null, {
+      outcome: result.status === 'SKIPPED' ? 'skipped' : 'completed',
+    })
+  }
+  res.json(result)
 }))
-practiceRouter.post('/runs/:runId/end', route(async (req, res) => { empty.parse(req.body); res.json(await endPractice(req.params.runId, req.user!.userId)) }))
+practiceRouter.post('/runs/:runId/end', route(async (req, res) => {
+  empty.parse(req.body)
+  const result = await endPractice(req.params.runId, req.user!.userId)
+  if (!result.reused) recordFeatureUsage(req, 'interviews', 'run_completed', null, { outcome: 'completed' })
+  res.json(result)
+}))
 practiceRouter.get('/runs/:runId/receipts/:receiptId', route(async (req, res) => { res.json(await ownedCaptureReceipt(req.params.runId, req.params.receiptId, req.user!.userId)) }))
 practiceRouter.delete('/runs/:runId', route(async (req, res) => {
   const run = await prisma.interviewRun.findFirst({ where: { id: req.params.runId, ownerId: req.user!.userId }, select: { sessionId: true } })
   if (!run) throw new BankError(404, 'Interview not found')
+  recordFeatureUsage(req, 'interviews', 'run_discarded', run.sessionId, { outcome: 'discarded' })
   req.params.id=run.sessionId
   await deleteSession(req, res)
 }))

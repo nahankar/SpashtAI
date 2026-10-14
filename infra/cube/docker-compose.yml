@@ -1,0 +1,42 @@
+# SpashtAI AI Analytics Explorer — Cube Core 1.8.5
+#
+# Single API process with the in-memory cache and queue. Do not scale this
+# service past one replica until Cube Store replaces that driver.
+# This file is a complete compose project and can be pulled into a larger
+# stack with `include`.
+
+services:
+  cube:
+    image: cubejs/cube:v1.8.5
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4002:4000"
+    environment:
+      CUBEJS_DEV_MODE: "false"
+      CUBEJS_CACHE_AND_QUEUE_DRIVER: memory
+      CUBEJS_DB_TYPE: postgres
+      CUBEJS_TELEMETRY: "false"
+      CUBEJS_DB_MAX_POOL: "4"
+      CUBEJS_DB_QUERY_TIMEOUT: "60"
+      CUBEJS_LOG_LEVEL: info
+      CUBE_IN_DOCKER: "true"
+      DATABASE_URL: ${DATABASE_URL:-}
+      CUBEJS_API_SECRET: ${CUBEJS_API_SECRET:-}
+    volumes:
+      - ./cube.js:/cube/conf/cube.js:ro
+      - ./lib/security.js:/cube/conf/lib/security.js:ro
+      - ./lib/database.js:/cube/conf/lib/database.js:ro
+      - ./model:/cube/conf/model:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    mem_limit: 2g
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/livez').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
