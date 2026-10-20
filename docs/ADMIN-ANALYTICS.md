@@ -54,3 +54,11 @@ Cube Core 1.8.5 was tested read-only against local PostgreSQL 16. The semantic m
 Cube is deployed with development mode and the SQL API disabled. Server-to-server JWT groups separate aggregate AI members from admin identity members. Every AI-visible demographic measure must implement the five-learner threshold; the Express gateway still owns identity authorization and auditing. The Cube model duplicates canonical feature definitions, so any Prisma change to those definitions must update and test the Cube model in the same release.
 
 Timescale `pgai` is not used. It was archived and became unsupported in February 2026, and its vector/RAG workflow does not solve governed cohort analytics.
+
+## UX Analytics and Microsoft Clarity
+
+`/admin/ux-analytics` shows authenticated first-party page views, distinct learners, daily trends, top routes, and visible non-idle active time from `FeatureUsage`. Admin and super-admin traffic is excluded. Demographic filters use the same five-learner suppression threshold as the other analytics pages.
+
+Microsoft Clarity is complementary UX diagnostics, not the source of these numbers. The web app loads Clarity only in production, after the learner grants analytics consent, when `VITE_CLARITY_PROJECT_ID` is present. It never loads on `/admin`. Microsoft does not support embedding the general Clarity dashboard in a custom iframe, so the admin page links to the Clarity project for recordings and heatmaps.
+
+On EC2, set `VITE_CLARITY_PROJECT_ID` and optionally `VITE_CLARITY_DASHBOARD_URL` in `apps/server/.env`. `infra/ec2/deploy.sh` reads them and bakes them into the frontend build. Changing either value requires another web deployment.

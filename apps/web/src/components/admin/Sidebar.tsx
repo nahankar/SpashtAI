@@ -1,46 +1,98 @@
 import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
-import { Menu, X } from 'lucide-react'
+import {
+  Activity,
+  BarChart3,
+  Bot,
+  BrainCircuit,
+  Building2,
+  ClipboardList,
+  DollarSign,
+  Flag,
+  Gauge,
+  HeartPulse,
+  LayoutDashboard,
+  MessageSquareText,
+  Mic2,
+  Scale,
+  Users,
+  X,
+  Menu,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
-const links = [
-  { to: '/admin', label: 'Dashboard', end: true },
-  { to: '/admin/users', label: 'Users', end: false },
-  { to: '/admin/feedback', label: 'Feedback', end: false },
-  { to: '/admin/analytics', label: 'Feature usage', end: true },
-  { to: '/admin/analytics/explorer', label: 'AI Analytics', end: true },
-  { to: '/admin/progress-pulse', label: 'Progress Pulse', end: false },
-  { to: '/admin/system', label: 'System', end: false },
-  { to: '/admin/voice-backend', label: 'Voice Backend', end: false },
-  { to: '/admin/features', label: 'Feature Flags', end: false },
-  { to: '/admin/agent-prompts', label: 'Coach Prompts', end: false },
-  { to: '/admin/interview-bank', label: 'Interview Question Bank', end: false },
-  { to: '/admin/tickers', label: 'Tickers', end: false },
-  { to: '/admin/pricing', label: 'Pricing', end: false },
-  { to: '/admin/legal', label: 'Legal', end: false },
+const groups = [
+  {
+    label: 'Overview',
+    links: [
+      { to: '/admin', label: 'Dashboard', end: true, icon: LayoutDashboard },
+      { to: '/admin/users', label: 'Users', end: false, icon: Users },
+      { to: '/admin/feedback', label: 'Feedback', end: false, icon: MessageSquareText },
+    ],
+  },
+  {
+    label: 'Analytics',
+    links: [
+      { to: '/admin/analytics', label: 'Feature Usage', end: true, icon: BarChart3 },
+      { to: '/admin/progress-pulse', label: 'Progress Pulse', end: false, icon: Activity },
+      { to: '/admin/analytics/explorer', label: 'AI Analytics', end: true, icon: BrainCircuit },
+      { to: '/admin/ux-analytics', label: 'UX Analytics', end: false, icon: Gauge },
+    ],
+  },
+  {
+    label: 'System',
+    links: [
+      { to: '/admin/system', label: 'Health', end: false, icon: HeartPulse },
+      { to: '/admin/voice-backend', label: 'Voice Backend', end: false, icon: Mic2 },
+      { to: '/admin/features', label: 'Feature Flags', end: false, icon: Flag },
+      { to: '/admin/agent-prompts', label: 'Coach Prompts', end: false, icon: Bot },
+      { to: '/admin/interview-bank', label: 'Interview Question Bank', end: false, icon: ClipboardList },
+      { to: '/admin/tickers', label: 'Tickers', end: false, icon: Building2 },
+    ],
+  },
+  {
+    label: 'Administration',
+    links: [
+      { to: '/admin/pricing', label: 'Pricing', end: false, icon: DollarSign },
+      { to: '/admin/legal', label: 'Legal', end: false, icon: Scale },
+    ],
+  },
 ]
 
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <>
-      {links.map((link) => (
-        <NavLink
-          key={link.to}
-          to={link.to}
-          end={link.end}
-          onClick={onNavigate}
-          className={({ isActive }) =>
-            cn(
-              'rounded-md px-3 py-2 text-sm font-medium transition-colors',
-              isActive
-                ? 'bg-primary/10 text-primary'
-                : 'text-muted-foreground hover:bg-accent hover:text-foreground',
-            )
-          }
-        >
-          {link.label}
-        </NavLink>
+      {groups.map((group) => (
+        <div key={group.label} className="mb-4 last:mb-0">
+          <p className="mb-1.5 px-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+            {group.label}
+          </p>
+          <div className="flex flex-col gap-1">
+            {group.links.map((link) => {
+              const Icon = link.icon
+              return (
+                <NavLink
+                  key={link.to}
+                  to={link.to}
+                  end={link.end}
+                  onClick={onNavigate}
+                  className={({ isActive }) =>
+                    cn(
+                      'flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                      isActive
+                        ? 'bg-primary/10 text-primary'
+                        : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                    )
+                  }
+                >
+                  <Icon className="h-4 w-4 shrink-0" />
+                  <span>{link.label}</span>
+                </NavLink>
+              )
+            })}
+          </div>
+        </div>
       ))}
     </>
   )
@@ -80,9 +132,9 @@ export function Sidebar() {
         </div>
       )}
 
-      <aside className="hidden md:block w-56 shrink-0 border-r bg-card/50 min-h-[calc(100vh-65px)]">
+      <aside className="hidden md:block w-64 shrink-0 border-r bg-card/50 min-h-[calc(100vh-65px)]">
         <nav className="flex flex-col gap-1 p-4">
-          <div className="mb-3 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          <div className="mb-4 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             Admin Panel
           </div>
           <NavLinks />

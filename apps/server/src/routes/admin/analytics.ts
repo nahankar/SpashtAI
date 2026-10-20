@@ -4,7 +4,13 @@ import { z } from 'zod'
 import { prisma } from '../../lib/prisma'
 import { getEnabledFeatures } from '../../lib/featureFlags'
 import { parseAnalyticsFilters } from '../../analytics/adminAnalyticsFilters'
-import { loadFeatureReport, loadFeatureUsers, loadOverviewHeadlines, loadProgressPulseReport } from '../../analytics/adminProductAnalytics'
+import {
+  loadFeatureReport,
+  loadFeatureUsers,
+  loadOverviewHeadlines,
+  loadPageViewReport,
+  loadProgressPulseReport,
+} from '../../analytics/adminProductAnalytics'
 import { interpretAdminAnalyticsQuestion, isAnalyticsPlanRejection } from '../../analytics/adminAnalyticsInterpreter'
 import { adminAnalyticsPlanSchema } from '../../analytics/adminAnalyticsQuerySchema'
 import { executeAdminAnalyticsPlan, loadAdminAnalyticsUsers } from '../../analytics/adminAnalyticsQueryEngine'
@@ -220,6 +226,17 @@ router.get('/progress-pulse', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Progress pulse analytics error:', err)
     res.status(500).json({ error: 'Failed to load progress pulse analytics' })
+  }
+})
+
+router.get('/page-views', async (req: Request, res: Response) => {
+  try {
+    const filters = filtersFrom(req, res)
+    if (!filters) return
+    res.json(await loadPageViewReport(filters))
+  } catch (err) {
+    console.error('Page-view analytics error:', err)
+    res.status(500).json({ error: 'Failed to load page-view analytics' })
   }
 })
 

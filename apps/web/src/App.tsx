@@ -28,6 +28,7 @@ import { UserDetail as AdminUserDetail } from '@/pages/admin/UserDetail'
 import { AnalyticsExplorer } from '@/pages/admin/AnalyticsExplorer'
 import { FeatureAnalytics } from '@/pages/admin/FeatureAnalytics'
 import { ProgressPulseAnalytics } from '@/pages/admin/ProgressPulseAnalytics'
+import { UxAnalytics } from '@/pages/admin/UxAnalytics'
 import { SystemHealth } from '@/pages/admin/SystemHealth'
 import { VoiceBackend as AdminVoiceBackend } from '@/pages/admin/VoiceBackend'
 import { FeatureFlagsAdmin } from '@/pages/admin/FeatureFlags'
@@ -621,6 +622,7 @@ function AppRoutes() {
             <Route path="analytics/explorer" element={<AnalyticsExplorer />} />
             <Route path="analytics" element={<FeatureAnalytics />} />
             <Route path="progress-pulse" element={<ProgressPulseAnalytics />} />
+            <Route path="ux-analytics" element={<UxAnalytics />} />
             <Route path="system" element={<SystemHealth />} />
             <Route path="voice-backend" element={<AdminVoiceBackend />} />
             <Route path="features" element={<FeatureFlagsAdmin />} />

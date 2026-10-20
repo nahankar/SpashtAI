@@ -306,6 +306,16 @@ type MetricRow = Record<string, number | string | null>
 type ActionRow = { feature: string; action: string; users: number; events: number; median_ms: number | null; p75_ms: number | null }
 type DayRow = { day: string; feature: string; users: number; events: number }
 type SampleRow = { feature: string; action: string; n: number }
+type PageViewSummaryRow = { views: number; users: number; routes: number }
+type PageViewRouteRow = {
+  path: string
+  views: number
+  users: number
+  exits: number
+  median_active_ms: number | null
+  p75_active_ms: number | null
+}
+type PageViewTrendRow = { day: string; views: number; users: number }
 
 const FUNNELS: Record<string, Array<{ action: string; label: string; canonical?: string }>> = {
   replay: [
@@ -356,6 +366,90 @@ function featureFromPath(column: Prisma.Sql) {
     WHEN ${column} LIKE '/feedback%' THEN 'feedback'
     ELSE 'app'
   END`
+}
+
+export async function loadPageViewReport(filters: AnalyticsFilters) {
+  const [summary, routes, trends] = await Promise.all([
+    prisma.$queryRaw<PageViewSummaryRow[]>`
+      SELECT COUNT(*)::int AS views,
+        COUNT(DISTINCT f."userId")::int AS users,
+        COUNT(DISTINCT COALESCE(f.path, f.metadata->>'path'))::int AS routes
+      FROM "FeatureUsage" f
+      JOIN (${learners(filters)}) l ON l.id = f."userId"
+      WHERE f.feature = 'app' AND f.action = 'page_view'
+        AND f.timestamp >= ${filters.since} AND f.timestamp < ${filters.until}`,
+    prisma.$queryRaw<PageViewRouteRow[]>`
+      WITH page_views AS (
+        SELECT COALESCE(f.path, f.metadata->>'path', 'unknown') AS path,
+          COUNT(*)::int AS views,
+          COUNT(DISTINCT f."userId")::int AS users
+        FROM "FeatureUsage" f
+        JOIN (${learners(filters)}) l ON l.id = f."userId"
+        WHERE f.feature = 'app' AND f.action = 'page_view'
+          AND f.timestamp >= ${filters.since} AND f.timestamp < ${filters.until}
+        GROUP BY 1
+      ),
+      page_exits AS (
+        SELECT COALESCE(f.path, f.metadata->>'path', 'unknown') AS path,
+          COUNT(*)::int AS exits,
+          PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY f."engagementMs")
+            FILTER (WHERE f."engagementMs" IS NOT NULL) AS median_active_ms,
+          PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY f."engagementMs")
+            FILTER (WHERE f."engagementMs" IS NOT NULL) AS p75_active_ms
+        FROM "FeatureUsage" f
+        JOIN (${learners(filters)}) l ON l.id = f."userId"
+        WHERE f.feature = 'app' AND f.action = 'page_exit'
+          AND f.timestamp >= ${filters.since} AND f.timestamp < ${filters.until}
+        GROUP BY 1
+      )
+      SELECT v.path, v.views, v.users, COALESCE(e.exits, 0)::int AS exits,
+        e.median_active_ms, e.p75_active_ms
+      FROM page_views v
+      LEFT JOIN page_exits e ON e.path = v.path
+      ORDER BY v.views DESC, v.path
+      LIMIT 20`,
+    prisma.$queryRaw<PageViewTrendRow[]>`
+      SELECT to_char(date_trunc('day', f.timestamp), 'YYYY-MM-DD') AS day,
+        COUNT(*)::int AS views,
+        COUNT(DISTINCT f."userId")::int AS users
+      FROM "FeatureUsage" f
+      JOIN (${learners(filters)}) l ON l.id = f."userId"
+      WHERE f.feature = 'app' AND f.action = 'page_view'
+        AND f.timestamp >= ${filters.since} AND f.timestamp < ${filters.until}
+      GROUP BY 1 ORDER BY 1`,
+  ])
+  const headline = summary[0] ?? { views: 0, users: 0, routes: 0 }
+  const suppressed = demographicFilterActive(filters) && headline.users < MIN_COHORT
+  return {
+    range: { days: filters.days, since: filters.since.toISOString(), until: filters.until.toISOString() },
+    coverage: {
+      firstParty: 'Page views come from authenticated SpashtAI product events. Admin and super-admin traffic is excluded.',
+      clarity: 'Microsoft Clarity provides consented recordings, heatmaps, and UX diagnostics in its own project dashboard.',
+    },
+    summary: suppressed ? {
+      views: null,
+      users: null,
+      routes: null,
+      viewsPerUser: null,
+      suppressed: true,
+    } : {
+      views: headline.views,
+      users: headline.users,
+      routes: headline.routes,
+      viewsPerUser: headline.users > 0 ? round1(headline.views / headline.users) : null,
+      suppressed: false,
+    },
+    routes: suppressed ? [] : routes.map((row) => ({
+      path: row.path,
+      views: row.views,
+      users: row.users,
+      exits: row.exits,
+      medianActiveMs: numberOrNull(row.median_active_ms),
+      p75ActiveMs: numberOrNull(row.p75_active_ms),
+    })),
+    trends: suppressed ? [] : trends,
+    privacyThreshold: MIN_COHORT,
+  }
 }
 
 export async function loadFeatureReport(filters: AnalyticsFilters) {

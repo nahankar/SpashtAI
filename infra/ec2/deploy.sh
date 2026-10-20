@@ -192,9 +192,20 @@ if [[ -z "${VITE_GOOGLE_CLIENT_ID:-}" ]]; then
   VITE_GOOGLE_CLIENT_ID="$(load_env_val "${ROOT}/apps/server/.env" GOOGLE_CLIENT_ID)"
   export VITE_GOOGLE_CLIENT_ID
 fi
+if [[ -z "${VITE_CLARITY_PROJECT_ID:-}" ]]; then
+  VITE_CLARITY_PROJECT_ID="$(load_env_val "${ROOT}/apps/server/.env" VITE_CLARITY_PROJECT_ID)"
+  export VITE_CLARITY_PROJECT_ID
+fi
+if [[ -z "${VITE_CLARITY_DASHBOARD_URL:-}" ]]; then
+  VITE_CLARITY_DASHBOARD_URL="$(load_env_val "${ROOT}/apps/server/.env" VITE_CLARITY_DASHBOARD_URL)"
+  export VITE_CLARITY_DASHBOARD_URL
+fi
 echo "    VITE_API_BASE_URL=${VITE_API_BASE_URL}"
 if [[ -z "${VITE_GOOGLE_CLIENT_ID:-}" ]]; then
   echo "Warning: VITE_GOOGLE_CLIENT_ID not set — Google Sign-In will fail until set." >&2
+fi
+if [[ -z "${VITE_CLARITY_PROJECT_ID:-}" ]]; then
+  echo "Warning: VITE_CLARITY_PROJECT_ID not set — first-party page views remain available, but Clarity tracking is off." >&2
 fi
 npm run build
 

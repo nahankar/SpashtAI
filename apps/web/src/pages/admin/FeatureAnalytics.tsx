@@ -1,6 +1,18 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  ComposedChart,
+  Legend,
+  Line,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
 import { apiClient } from '@/lib/api-client'
 import { analyticsQueryFromSearch, analyticsQueryToSearch, formatDuration, viewState, type AnalyticsQuery } from '@/lib/adminAnalytics'
 import { AnalyticsFilters } from '@/components/admin/AnalyticsFilters'
@@ -43,20 +55,35 @@ type Report = {
 }
 
 function readable(value: string) {
-  return value.replaceAll('_', ' ')
+  return value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
-function CanonicalList({ data }: { data: Record<string, number | string | null> | undefined }) {
+const CHART_COLORS = [
+  'hsl(var(--chart-1))',
+  'hsl(var(--chart-2))',
+  'hsl(var(--chart-3))',
+  'hsl(var(--chart-4))',
+  'hsl(var(--chart-5))',
+]
+
+function CanonicalChart({ data }: { data: Record<string, number | string | null> | undefined }) {
   const entries = Object.entries(data ?? {})
+    .filter(([, value]) => typeof value === 'number')
+    .map(([key, value]) => ({ metric: readable(key), value: value as number }))
   if (!entries.length) return <p className="text-sm text-muted-foreground">No retained records in this range.</p>
   return (
-    <div className="grid gap-2 sm:grid-cols-2">
-      {entries.map(([key, value]) => (
-        <div key={key} className="flex justify-between gap-3 border-b py-2 text-sm">
-          <span className="text-muted-foreground">{readable(key)}</span>
-          <span>{value == null ? 'Not recorded yet' : String(value)}</span>
-        </div>
-      ))}
+    <div className="h-72">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={entries} layout="vertical" margin={{ left: 24, right: 24 }}>
+          <CartesianGrid strokeDasharray="3 3" horizontal={false} className="stroke-muted" />
+          <XAxis type="number" allowDecimals={false} />
+          <YAxis type="category" dataKey="metric" width={136} tick={{ fontSize: 12 }} />
+          <Tooltip />
+          <Bar dataKey="value" name="Value" radius={[0, 5, 5, 0]}>
+            {entries.map((entry, index) => <Cell key={entry.metric} fill={CHART_COLORS[index % CHART_COLORS.length]} />)}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
     </div>
   )
 }
@@ -110,49 +137,84 @@ export function FeatureAnalytics() {
             <MetricCard label="Median active time" value={summary.activeTimeStatus === 'recorded' ? formatDuration(summary.medianActiveMs) : 'Not recorded yet'} sublabel={summary.p75ActiveMs != null ? `75th percentile ${formatDuration(summary.p75ActiveMs)}` : 'Page-exit timing starts with this release'} />
             <MetricCard label="Daily users / stickiness" value={summary.averageDailyUsers ?? '—'} sublabel={summary.stickiness == null ? 'Needs activity in the range' : `${Math.round(summary.stickiness * 100)}% of period users on an average day`} />
           </div>
-          <Card>
-            <CardHeader><CardTitle className="text-base">Milestone reach</CardTitle></CardHeader>
-            <CardContent className="space-y-2">
-              {(report.funnels[feature] ?? []).map((step) => (
-                <div key={step.action} className="flex items-center justify-between gap-3 border-b py-2 text-sm last:border-0">
-                  <span>{step.label}</span>
-                  <span className="text-muted-foreground">{step.status === 'not_yet_recorded' ? 'Not recorded yet' : `${step.users} learners · ${step.events} events`}</span>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader><CardTitle className="text-base">Retained product detail</CardTitle></CardHeader>
-            <CardContent>
-              <CanonicalList data={feature === 'progress_pulse' ? undefined : report.canonical[feature]} />
-              {feature === 'progress_pulse' && <p className="mt-3 text-sm text-muted-foreground">Score movement stays on the Progress Pulse dashboard. This tab measures who opened, tracked, or skipped it.</p>}
-            </CardContent>
-          </Card>
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Milestone reach</CardTitle>
+                <p className="text-xs text-muted-foreground">Learners and event volume at each recorded step.</p>
+              </CardHeader>
+              <CardContent className="h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={(report.funnels[feature] ?? []).map((step) => ({
+                      milestone: step.label,
+                      learners: step.status === 'recorded' ? step.users : null,
+                      events: step.status === 'recorded' ? step.events : null,
+                    }))}
+                    layout="vertical"
+                    margin={{ left: 28, right: 16 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} className="stroke-muted" />
+                    <XAxis type="number" allowDecimals={false} />
+                    <YAxis type="category" dataKey="milestone" width={116} tick={{ fontSize: 12 }} />
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="learners" fill="hsl(var(--chart-2))" radius={[0, 4, 4, 0]} />
+                    <Bar dataKey="events" fill="hsl(var(--chart-1))" radius={[0, 4, 4, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Retained product detail</CardTitle>
+                <p className="text-xs text-muted-foreground">Canonical product records—not page views.</p>
+              </CardHeader>
+              <CardContent>
+                <CanonicalChart data={feature === 'progress_pulse' ? undefined : report.canonical[feature]} />
+                {feature === 'progress_pulse' && <p className="text-sm text-muted-foreground">Score movement stays on the Progress Pulse dashboard. This tab measures who opened, tracked, or skipped it.</p>}
+              </CardContent>
+            </Card>
+          </div>
           {(feature === 'elevate' || feature === 'replay' || feature === 'progress_pulse') && (
             <LanguageAnalytics rows={(report.language ?? []).filter((row) => feature === 'progress_pulse' || row.source === feature)} />
           )}
           <Card>
-            <CardHeader><CardTitle className="text-base">Daily events</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle className="text-base">Daily activity</CardTitle>
+              <p className="text-xs text-muted-foreground">Event volume with distinct learners over time.</p>
+            </CardHeader>
             <CardContent className="h-64">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={report.trends.filter((row) => row.feature === feature)}>
+                <ComposedChart data={report.trends.filter((row) => row.feature === feature)}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                   <XAxis dataKey="day" className="text-xs" />
-                  <YAxis className="text-xs" />
+                  <YAxis yAxisId="events" className="text-xs" allowDecimals={false} />
+                  <YAxis yAxisId="users" orientation="right" className="text-xs" allowDecimals={false} />
                   <Tooltip />
-                  <Bar dataKey="events" fill="hsl(var(--primary))" />
-                </BarChart>
+                  <Legend />
+                  <Bar yAxisId="events" dataKey="events" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} />
+                  <Line yAxisId="users" dataKey="users" stroke="hsl(var(--chart-2))" strokeWidth={2} dot={false} />
+                </ComposedChart>
               </ResponsiveContainer>
             </CardContent>
           </Card>
           <Card>
             <CardHeader><CardTitle className="text-base">Week-one return</CardTitle></CardHeader>
-            <CardContent className="text-sm text-muted-foreground">
+            <CardContent className="space-y-3 text-sm text-muted-foreground">
               {(() => {
                 const row = report.retention.find((item) => item.feature === feature)
                 if (!row || row.status === 'insufficient_range') return 'Choose 90 days to compare the first week with the following week.'
                 if (row.status === 'suppressed') return 'Hidden because the first-week cohort is smaller than 5 learners.'
-                return `${row.returned} of ${row.cohort} first-week learners came back during the next week.`
+                const percent = row.cohort ? Math.round(((row.returned ?? 0) / row.cohort) * 100) : 0
+                return (
+                  <>
+                    <div className="h-3 overflow-hidden rounded-full bg-muted">
+                      <div className="h-full rounded-full bg-primary" style={{ width: `${percent}%` }} />
+                    </div>
+                    <p><span className="font-semibold text-foreground">{percent}% returned</span> · {row.returned} of {row.cohort} first-week learners</p>
+                  </>
+                )
               })()}
             </CardContent>
           </Card>

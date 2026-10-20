@@ -27,6 +27,13 @@ export function clarityProjectId() {
   return import.meta.env.VITE_CLARITY_PROJECT_ID || ''
 }
 
+export function clarityDashboardUrl() {
+  const configured = import.meta.env.VITE_CLARITY_DASHBOARD_URL || ''
+  if (configured) return configured
+  const projectId = clarityProjectId()
+  return projectId ? `https://clarity.microsoft.com/projects/view/${encodeURIComponent(projectId)}/dashboard` : ''
+}
+
 export function canUseClarity(pathname: string) {
   return import.meta.env.PROD && Boolean(clarityProjectId()) && !pathname.startsWith('/admin') && readClarityConsent() === 'granted'
 }

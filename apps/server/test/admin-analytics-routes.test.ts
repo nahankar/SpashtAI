@@ -7,6 +7,7 @@ const reports = vi.hoisted(() => ({
   loadProgressPulseReport: vi.fn(),
   loadFeatureReport: vi.fn(),
   loadFeatureUsers: vi.fn(),
+  loadPageViewReport: vi.fn(),
 }))
 const explorer = vi.hoisted(() => ({
   interpret: vi.fn(),
@@ -62,6 +63,7 @@ describe('admin analytics routes', () => {
     reports.loadProgressPulseReport.mockResolvedValue({ summary: { users: null, suppressed: true } })
     reports.loadFeatureReport.mockResolvedValue({ summary: { replay: { events: 0, activeTimeStatus: 'not_yet_recorded' } } })
     reports.loadFeatureUsers.mockResolvedValue({ users: [], suppressed: true, page: 1, pageSize: 20 })
+    reports.loadPageViewReport.mockResolvedValue({ summary: { views: 14, users: 6, suppressed: false }, routes: [], trends: [] })
     explorer.execute.mockResolvedValue({ planHash: 'hash', cohorts: [], executedAt: 'now', privacyThreshold: 5 })
     explorer.save.mockResolvedValue({ id: 'query-1', planHash: 'hash' })
     explorer.list.mockResolvedValue({ pinned: [], recent: [] })
@@ -101,6 +103,17 @@ describe('admin analytics routes', () => {
     expect(features.body.summary.replay.activeTimeStatus).toBe('not_yet_recorded')
     expect(users.status).toBe(200)
     expect(users.body.suppressed).toBe(true)
+  })
+
+  it('loads first-party page views with the shared demographic filters', async () => {
+    const response = await request(app).get('/api/admin/analytics/page-views?days=7&state=Karnataka')
+    expect(response.status).toBe(200)
+    expect(response.body.summary.views).toBe(14)
+    expect(reports.loadPageViewReport).toHaveBeenCalledWith(expect.objectContaining({
+      days: 7,
+      states: ['Karnataka'],
+      pincodes: [],
+    }))
   })
 
   it('returns a plan for review without executing or saving it', async () => {
