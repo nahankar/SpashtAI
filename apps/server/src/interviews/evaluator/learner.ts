@@ -137,7 +137,7 @@ export async function learnerFindings(runId: string, ownerId: string, tx: Tx = p
     const result = assessment?.status === 'COMPLETED' ? persistedResult.safeParse(assessment.result) : null
     return { attemptId: a.id, index: a.index, question: run.owner.hideTranscriptText ? '' : questionSnapshotSchema.parse(a.questionSnapshot).questionText,
       status: assessment?.status ?? (a.status === 'SKIPPED' || a.status === 'INCOMPLETE' ? a.status : 'NOT_ENABLED'),
-      errorCode: assessment?.errorCode ?? null, afterExample: snapshot?.assistance === 'EXAMPLE',
+      errorCode: assessment?.errorCode ?? null, assistance: snapshot?.assistance ?? a.assistance, afterExample: snapshot?.assistance === 'EXAMPLE',
       result: result?.success && !run.owner.hideTranscriptText ? { classification: result.data.classification, criteria: result.data.criteria, strengths: result.data.strengths,
         gaps: result.data.gaps, misconceptions: result.data.misconceptions, guidance: result.data.guidance, uncertainty: result.data.uncertainty,
         ...(result.data.validationNotes ? { validationNotes: result.data.validationNotes } : {}) } : null }

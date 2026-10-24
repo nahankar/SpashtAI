@@ -163,6 +163,7 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
   it('atomically queues one learner assessment and returns owned sanitized findings even after End', async () => {
     await enableLearner()
     const { r, a, s } = await asked()
+    await recordAssistance(a.id, { assistance: 'HINT' })
     await captureCommittedTurn(a.id, turn(s.id, testAnswer))
     const receiptId = (await receipt(a.id, s.id)).id
     const replies = await Promise.all([finishAnswer(r.id, a.id, owner, false, receiptId), finishAnswer(r.id, a.id, owner, false, receiptId)])
@@ -173,7 +174,7 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
     await finishLearnerAssessment(job, { result: { ...correctEvaluation(), validationNotes: ['Answer depth was left unassessed because no evidence was supplied.'] }, inputTokens: 100, outputTokens: 50, latencyMs: 120 })
     const response = await request(app).get(`/practice/playback/${r.sessionId}/assessments`).auth(token(owner), { type: 'bearer' })
     expect(response.status).toBe(200)
-    expect(response.body.assessments[0]).toMatchObject({ status: 'COMPLETED', result: { classification: 'CORRECT' } })
+    expect(response.body.assessments[0]).toMatchObject({ status: 'COMPLETED', assistance: 'HINT', result: { classification: 'CORRECT' } })
     expect(response.body.assessments[0].result.validationNotes).toHaveLength(1)
     expect(JSON.stringify(response.body)).not.toMatch(/questionSnapshot|questionHash|answerHash|inputKey|followUpQuestion|goodAnswerPoints/)
     expect((await request(app).get(`/practice/runs/${r.id}/assessments`).auth(token(other, 'SUPER_ADMIN'), { type: 'bearer' })).status).toBe(404)

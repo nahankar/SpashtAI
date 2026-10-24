@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { apiClient } from '@/lib/api-client'
 import { labels, type Assessment } from '@/lib/interview-evaluator'
 
-export type LearnerFinding = { attemptId: string; index: number; question: string; status: string; errorCode: string | null; afterExample: boolean;
+export type LearnerFinding = { attemptId: string; index: number; question: string; status: string; errorCode: string | null; assistance: string; afterExample: boolean;
   result: Omit<NonNullable<Assessment['result']>, 'next'> | null }
 
 export function InterviewFindings({ runId, sessionId, refreshKey = '' }: { runId?: string; sessionId?: string; refreshKey?: string }) {
@@ -35,6 +35,7 @@ export function InterviewFindings({ runId, sessionId, refreshKey = '' }: { runId
       <div className="mt-3 space-y-3 text-sm">
         <p>{row.question}</p>
         {row.afterExample && <p className="text-orange-700 dark:text-orange-300">After seeing an example · this response does not establish independent recall.</p>}
+        {row.assistance === 'HINT' && <p className="text-orange-700 dark:text-orange-300">Hint-assisted answer</p>}
         {['PENDING', 'RUNNING'].includes(row.status) && <p role="status">Evaluation is pending. You can continue practicing.</p>}
         {['FAILED', 'CANCELLED'].includes(row.status) && <p>Technical evaluation is unavailable for this answer. No grade was invented.</p>}
         {row.result && <>
