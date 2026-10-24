@@ -5,7 +5,9 @@ const mocks = vi.hoisted(() => ({
   platformFeatureFlag: { findUnique: vi.fn(), update: vi.fn() },
   user: { findUnique: vi.fn() },
   userFeatureGrant: { findMany: vi.fn(), upsert: vi.fn(), deleteMany: vi.fn() },
-  interviewAssessment: { updateMany: vi.fn() },
+  interviewAssessment: { updateMany: vi.fn(), findMany: vi.fn() },
+  interviewEvaluatorUsage: { updateMany: vi.fn() },
+  $transaction: vi.fn(),
 }))
 vi.mock('../src/lib/prisma', () => ({ prisma: mocks }))
 vi.mock('../src/lib/featureFlags', () => ({
@@ -23,7 +25,11 @@ function response() {
   return res
 }
 describe('Phase 0 review boundaries', () => {
-  beforeEach(() => vi.resetAllMocks())
+  beforeEach(() => {
+    vi.resetAllMocks()
+    mocks.$transaction.mockImplementation(async (fn: (tx: typeof mocks) => unknown) => fn(mocks))
+    mocks.interviewAssessment.findMany.mockResolvedValue([{ leaseToken: 'running-lease' }])
+  })
   it('denies cross-user metrics before querying any session data', async () => {
     const res = response()
     await getUserSessionsMetrics({ params: { userId: 'victim' }, user: { userId: 'caller', role: 'USER' }, query: {} } as any, res)
@@ -79,6 +85,7 @@ describe('Phase 0 review boundaries', () => {
       where: expect.objectContaining({ snapshot: { source: 'LIVE_ATTEMPT', ownerId: 'pilot' } }),
       data: expect.objectContaining({ status: 'CANCELLED', leaseToken: null, leaseUntil: null }),
     }))
+    if (feature !== 'interview_evaluator') expect(mocks.interviewEvaluatorUsage.updateMany).toHaveBeenCalledWith({ where: { invocationKey: { in: ['running-lease'] }, outcome: 'STARTED' }, data: { outcome: 'CANCELLED' } })
     else expect(mocks.interviewAssessment.updateMany).not.toHaveBeenCalled()
   })
   it('still rejects unsupported pilot features and malformed grant requests',async()=> {

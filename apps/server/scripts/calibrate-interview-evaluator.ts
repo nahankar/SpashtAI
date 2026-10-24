@@ -1,10 +1,12 @@
 // Opt-in local/internal benchmark. Uses the same gate, quota and saved-job path as Admin.
-// Example: tsx scripts/calibrate-interview-evaluator.ts <admin-id> <report.json> [--fixture reviewed-1] [--model nova2_lite|nova_pro|all] [--only R1-01,R1-02]
-// The default fixture is the original synthetic set. Each case costs one Admin test from the daily
-// quota; quotas are never raised or bypassed here, so a larger set runs across several UTC days.
+// Example: tsx scripts/calibrate-interview-evaluator.ts <admin-id> <report.json> [--fixture reviewed-1] [--model nova2_lite|nova_pro|learner-evaluation-2|all] [--only R1-01,R1-02]
+// A learner-evaluation-N model previews that learner grading policy through the Admin test path.
+// The default fixture is the original synthetic set. Each model-evaluated case costs one Admin test
+// from the daily quota (a learner-policy preview of an explicit "I don't know" is deterministic and
+// free). Quotas are never raised or bypassed here, so a larger set runs across several UTC days.
 import { readFile, writeFile } from 'node:fs/promises'
 import { prisma } from '../src/lib/prisma'
-import { CONFIGS, configFor } from '../src/interviews/evaluator/contracts'
+import { ADMIN_MODELS, CONFIGS, PREVIEW_POLICIES, adminConfig } from '../src/interviews/evaluator/contracts'
 import { assessmentDetail, enqueueAssessment, sweepAssessments } from '../src/interviews/evaluator/service'
 
 type Case = { id?: string; name?: string; qid: string; category?: string; expected: string; acceptable?: string[]; mustNotBe?: string[]
@@ -23,8 +25,8 @@ const fixture: Fixture = Array.isArray(raw) ? { fixtureVersion: 'synthetic-1', c
 const only = flag('only')?.split(',')
 const cases = fixture.cases.filter(c => !only || only.includes(c.id ?? c.name ?? ''))
 const modelFlag = flag('model') ?? 'nova2_lite'
-const models = (modelFlag === 'all' ? Object.keys(CONFIGS) : [modelFlag]) as (keyof typeof CONFIGS)[]
-if (!models.every(m => m in CONFIGS)) throw new Error(`Unknown model ${modelFlag}`)
+const models = modelFlag === 'all' ? Object.keys(CONFIGS) : [modelFlag]
+if (!models.every(m => ADMIN_MODELS.includes(m))) throw new Error(`Unknown model ${modelFlag}`)
 
 const percentile = (values: number[], p: number) => {
   if (!values.length) return null
@@ -69,7 +71,7 @@ const write = () => {
     quotesExact: graded.every(r => (r.review as { quotesExact: boolean }).quotesExact),
   }
   return writeFile(output, JSON.stringify({ fixtureVersion: fixture.fixtureVersion, reviewer: fixture.reviewer ?? null, source: 'ADMIN_TEST',
-    configs: models.map(m => configFor(m)), questions: fixture.questions ?? null, calibrated: false,
+    configs: models.map(m => adminConfig(m)), questions: fixture.questions ?? null, calibrated: false,
     limitation: 'Small development set reviewed against bank guidance. Agreement on this sample is not a calibration claim.', summary, results }, null, 2))
 }
 try {
@@ -97,7 +99,8 @@ try {
         assessmentId: assessment.id, reused: submitted.reused, status: assessment.status, errorCode: assessment.errorCode,
         endToEndMs: Date.now() - start, usage: assessment.usage.map(u => ({ latencyMs: u.latencyMs, inputTokens: u.inputTokens, outputTokens: u.outputTokens, outcome: u.outcome })),
         answer: test.answer, notes: test.notes ?? null, result,
-        topicSwitchPassed: test.expected === 'NOT_ANSWERED' ? Boolean(result?.next?.source === 'BANK' && result.next.topic?.toLowerCase() !== question.topic.toLowerCase()) : null }
+        // Learner-policy previews propose no next step, so the Admin topic switch does not apply.
+        topicSwitchPassed: test.expected === 'NOT_ANSWERED' && !PREVIEW_POLICIES.includes(model) ? Boolean(result?.next?.source === 'BANK' && result.next.topic?.toLowerCase() !== question.topic.toLowerCase()) : null }
       results.push(record)
       console.log(JSON.stringify({ id: record.id ?? record.name, model, expected: record.expected, actual: record.actual, acceptable: record.review?.acceptable ?? null, status: record.status, errorCode: record.errorCode }))
       await write()

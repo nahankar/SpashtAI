@@ -11,9 +11,16 @@ const router = Router()
 const PILOT_FEATURES = ['interviews', 'interview_evaluator', 'interview_voice', 'interview_adaptive']
 const LEARNER_FEATURES = ['interviews', 'interview_voice', 'interview_adaptive']
 async function cancelLearnerJobs(ownerId?: string) {
-  await prisma.interviewAssessment.updateMany({ where: { status: { in: ['PENDING', 'RUNNING'] },
-    snapshot: { source: 'LIVE_ATTEMPT', ...(ownerId ? { ownerId } : {}) } },
-    data: { status: 'CANCELLED', errorCode: 'PILOT_ACCESS_UNAVAILABLE', leaseToken: null, leaseUntil: null } })
+  const where = { snapshot: { source: 'LIVE_ATTEMPT' as const, ...(ownerId ? { ownerId } : {}) } }
+  await prisma.$transaction(async tx => {
+    const running = await tx.interviewAssessment.findMany({ where: { ...where, status: 'RUNNING' }, select: { leaseToken: true } })
+    await tx.interviewAssessment.updateMany({ where: { ...where, status: { in: ['PENDING', 'RUNNING'] } },
+      data: { status: 'CANCELLED', errorCode: 'PILOT_ACCESS_UNAVAILABLE', leaseToken: null, leaseUntil: null } })
+    // A cancelled in-flight call may still be billed: close its claim ledger row with unknown usage.
+    // A finish that arrives later still records the actual usage under the same key.
+    await tx.interviewEvaluatorUsage.updateMany({ where: { invocationKey: { in: running.flatMap(r => r.leaseToken ? [r.leaseToken] : []) }, outcome: 'STARTED' },
+      data: { outcome: 'CANCELLED' } })
+  })
 }
 router.use((req, res, next) => {
   if (!req.user?.userId) { res.status(403).json({ error: 'Admin access required' }); return }

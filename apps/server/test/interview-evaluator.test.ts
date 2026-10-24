@@ -1,12 +1,13 @@
+import { createHash } from 'crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { CONFIGS, configFor, explicitDontKnow, hash, parseResult, submitSchema } from '../src/interviews/evaluator/contracts'
+import { CONFIGS, CURRENT_LEARNER_POLICY, LEARNER_POLICIES, PREVIEW_POLICIES, abstentionResult, adminConfig, configFor, previewPolicy, explicitAbstention, explicitDontKnow, hash, invalidOutputReason, parseResult, resultSchema, structuredRubric, submitSchema, supportedConfig } from '../src/interviews/evaluator/contracts'
 import { correctEvaluation, testAnswer } from './fixtures/interview-evaluation'
 const sdk = vi.hoisted(() => ({ send: vi.fn(), destroy: vi.fn() }))
 vi.mock('@aws-sdk/client-bedrock-runtime', () => ({
   BedrockRuntimeClient: class { send = sdk.send; destroy = sdk.destroy },
   ConverseCommand: class { constructor(public input: unknown) {} },
 }))
-import { evaluateAnswer, EvaluationFailure, SYSTEM_PROMPT } from '../src/interviews/evaluator/model'
+import { evaluateAnswer, EvaluationFailure, LEARNER_PROMPT_5, PROMPTS, SYSTEM_PROMPT } from '../src/interviews/evaluator/model'
 const question = { id: 'q', namespace: 'pilot', externalQid: 'Q-1', revision: 1, questionText: 'How do tests remain independent?',
   track: 'Automation Testing', category: 'Testing', topic: 'Isolation', difficulty: 'Simple', experienceBand: '0-2', goodAnswerPoints: 'Fresh independent state', exampleAnswer: '', expectedDepth: 'Short answer', followUpGuidance: '' }
 describe('interview evaluator contracts and model boundary', () => {
@@ -81,7 +82,7 @@ describe('interview evaluator contracts and model boundary', () => {
   })
   it('records token usage when validation fails rather than returning a fabricated grade', async () => {
     sdk.send.mockResolvedValue({ stopReason: 'end_turn', output: { message: { content: [{ text: '{}' }] } }, usage: { inputTokens: 600, outputTokens: 10 } })
-    await expect(evaluateAnswer(question, testAnswer, configFor('nova2_lite'), 'NONE')).rejects.toMatchObject({ code: 'INVALID_OUTPUT', retryable: false, usage: { inputTokens: 600, outputTokens: 10 } })
+    await expect(evaluateAnswer(question, testAnswer, configFor('nova2_lite'), 'NONE')).rejects.toMatchObject({ code: 'INVALID_OUTPUT_SCHEMA_classification_invalid_type', retryable: false, usage: { inputTokens: 600, outputTokens: 10 } })
   })
   it('reports a content-free validation reason without additional model calls', async () => {
     sdk.send.mockResolvedValue({ stopReason: 'end_turn', output: { message: { content: [{ text: JSON.stringify(correctEvaluation('Invented private quote')) }] } }, usage: { inputTokens: 600, outputTokens: 200 } })
@@ -97,5 +98,101 @@ describe('interview evaluator contracts and model boundary', () => {
   it('refuses unversioned config changes', async () => {
     await expect(evaluateAnswer(question, testAnswer, { ...configFor('nova2_lite'), temperature: 1 }, 'NONE')).rejects.toBeInstanceOf(EvaluationFailure)
     expect(sdk.send).not.toHaveBeenCalled()
+  })
+})
+
+const learner2 = LEARNER_POLICIES['learner-evaluation-2'].config
+const bankQuestion = { ...question, goodAnswerPoints: 'Core: Each test creates its own data.\nRemove shared state.\nAcceptable alternatives: Transaction rollback per test.\nOptional depth: How would you isolate parallel workers?\nMisconceptions: Incorrect belief: Test order guarantees isolation.',
+  exampleAnswer: 'Create fresh data per test.', expectedDepth: 'Identify why the stated misconception is false.', followUpGuidance: 'Correct: Ask about parallel workers.' }
+const learnerOutput = (overrides: Partial<ReturnType<typeof correctEvaluation>> = {}) => JSON.stringify({ ...correctEvaluation(), followUpQuestion: '', ...overrides })
+describe('learner policy registry and learner-evaluation-2 contract', () => {
+  beforeEach(() => vi.clearAllMocks())
+  it('freezes every pinnable learner policy and prompt text', () => {
+    // learner-evaluation-1 must stay byte-identical to the config new runs pinned before the registry existed.
+    expect(hash(LEARNER_POLICIES['learner-evaluation-1'].config)).toBe('a0c031d33359bc45e379b757878cf073360353e5a0b23a06aed246c792916478')
+    expect(hash(learner2)).toBe('de2333a2f15fb6f23c594d8cc07994a96c19122662d8653ee77bb1292b71bc4f')
+    const sha = (text: string) => createHash('sha256').update(text).digest('hex')
+    expect(Object.fromEntries(Object.entries(PROMPTS).map(([id, text]) => [id, sha(text)]))).toEqual({
+      'interview-answer-4': '6529a9f6cf7ebbc99016081a3dea4da01ee82207681cbbf630f513136798602a',
+      'interview-answer-5': 'd8f5c0c28076d15e9fae5e06d57e25dff3250d2a5ab0eb7147762ff96779c7cd',
+    })
+    for (const policy of Object.values(LEARNER_POLICIES)) expect(PROMPTS[policy.config.prompt]).toBeTruthy()
+    expect(LEARNER_POLICIES[CURRENT_LEARNER_POLICY]).toBeTruthy()
+    expect(supportedConfig({ ...learner2 })).toEqual(learner2)
+    expect(supportedConfig({ ...learner2, maxTokens: 4000 })).toBeNull()
+  })
+  it('sends the pinned prompt, a structured rubric and the pinned timeout without follow-up guidance', async () => {
+    sdk.send.mockResolvedValue({ stopReason: 'end_turn', output: { message: { content: [{ text: learnerOutput() }] } }, usage: { inputTokens: 900, outputTokens: 300 } })
+    await evaluateAnswer(bankQuestion, testAnswer, learner2, 'NONE')
+    const [command] = sdk.send.mock.calls[0]
+    expect(command.input.system[0].text).toBe(LEARNER_PROMPT_5)
+    const message = JSON.parse(command.input.messages[0].content[0].text)
+    expect(message.rubric).toMatchObject({ requiredPoints: 'Each test creates its own data.\nRemove shared state.', acceptedAlternatives: 'Transaction rollback per test.',
+      optionalDepth: 'How would you isolate parallel workers?', commonMisconceptions: 'Incorrect belief: Test order guarantees isolation.' })
+    expect(message).toMatchObject({ candidateAnswer: testAnswer, answerSource: 'SPEECH_TRANSCRIPT', assistance: 'NONE' })
+    expect(JSON.stringify(message)).not.toContain('Ask about parallel workers'); expect(message.question.externalQid).toBeUndefined()
+    expect(sdk.send.mock.calls[0][1].abortSignal).toBeInstanceOf(AbortSignal)
+  })
+  it('treats unlabelled guidance as required points', () => {
+    expect(structuredRubric({ ...bankQuestion, goodAnswerPoints: 'Fresh independent state' })).toMatchObject({ requiredPoints: 'Fresh independent state', optionalDepth: '' })
+  })
+  it('ignores follow-ups for learner grades but keeps the Admin requirement', () => {
+    expect(parseResult(learnerOutput({ followUpQuestion: 'Not a question' }), testAnswer, learner2.schema).followUpQuestion).toBe('')
+    const { followUpQuestion: _omitted, ...withoutFollowUp } = correctEvaluation()
+    expect(parseResult(JSON.stringify(withoutFollowUp), testAnswer, learner2.schema).classification).toBe('CORRECT')
+    expect(() => parseResult(learnerOutput({ followUpQuestion: 'Not a question' }), testAnswer)).toThrow('INVALID_FOLLOW_UP')
+  })
+  it('rejects learner grades whose classification contradicts their criteria', () => {
+    const notMet = correctEvaluation(); notMet.criteria[0].finding = 'NOT_MET'
+    expect(() => parseResult(JSON.stringify(notMet), testAnswer, learner2.schema)).toThrow('INCONSISTENT')
+    expect(() => parseResult(learnerOutput({ classification: 'INCORRECT', criteria: notMet.criteria, misconceptions: [] }), testAnswer, learner2.schema)).toThrow('INCONSISTENT')
+    expect(parseResult(learnerOutput({ classification: 'INCORRECT', criteria: notMet.criteria, misconceptions: ['False claim'] }), testAnswer, learner2.schema).classification).toBe('INCORRECT')
+    // A false secondary claim keeps the answer at most PARTIAL.
+    expect(() => parseResult(learnerOutput({ misconceptions: ['False side claim'] }), testAnswer, learner2.schema)).toThrow('INCONSISTENT')
+    const mixed = correctEvaluation(); mixed.criteria[0].finding = 'PARTIAL'
+    expect(parseResult(learnerOutput({ classification: 'PARTIAL', criteria: mixed.criteria, misconceptions: ['False side claim'] }), testAnswer, learner2.schema).classification).toBe('PARTIAL')
+    const partial = correctEvaluation(); partial.criteria[0].finding = 'NOT_ASSESSED'; partial.criteria[0].evidence = []
+    expect(() => parseResult(learnerOutput({ classification: 'PARTIAL', criteria: partial.criteria }), testAnswer, learner2.schema)).toThrow('INCONSISTENT')
+    expect(() => parseResult(learnerOutput({ classification: 'NOT_ANSWERED', criteria: partial.criteria }), testAnswer, learner2.schema)).toThrow('INCONSISTENT')
+    // The Admin schema is unchanged: it still publishes without the learner consistency rules.
+    expect(parseResult(JSON.stringify(notMet), testAnswer).classification).toBe('CORRECT')
+  })
+  it('removes an unquoted NOT_MET from a learner abstention without inventing evidence', () => {
+    const abstain = correctEvaluation(); abstain.criteria[0] = { criterion: 'ACCURACY', finding: 'NOT_MET', evidence: [], explanation: 'Nothing was said.' }
+    const parsed = parseResult(learnerOutput({ classification: 'NOT_ANSWERED', criteria: abstain.criteria, strengths: [] }), testAnswer, learner2.schema)
+    expect(parsed.criteria.every(c => c.finding === 'NOT_ASSESSED' && !c.evidence.length)).toBe(true)
+    expect(() => parseResult(JSON.stringify({ ...correctEvaluation(), classification: 'NOT_ANSWERED', criteria: abstain.criteria, strengths: [] }), testAnswer)).toThrow('MISSING_EVIDENCE')
+  })
+  it('reports content-free validation and stop reasons', async () => {
+    expect(invalidOutputReason(new SyntaxError('Unexpected token'))).toBe('INVALID_OUTPUT_JSON')
+    let error: unknown; try { parseResult(JSON.stringify({ ...correctEvaluation(), 'leaked candidate words': 1 }), testAnswer) } catch (e) { error = e }
+    expect(invalidOutputReason(error)).toBe('INVALID_OUTPUT_SCHEMA_unrecognized_keys')
+    try { parseResult(JSON.stringify({ ...correctEvaluation(), strengths: Array(7).fill('x') }), testAnswer) } catch (e) { error = e }
+    expect(invalidOutputReason(error)).toBe('INVALID_OUTPUT_SCHEMA_strengths_too_big')
+    sdk.send.mockResolvedValue({ stopReason: 'max_tokens', output: { message: { content: [{ text: '{"classification"' }] } }, usage: { inputTokens: 900, outputTokens: 2000 } })
+    await expect(evaluateAnswer(bankQuestion, testAnswer, learner2, 'NONE')).rejects.toMatchObject({ code: 'INCOMPLETE_OUTPUT_MAX_TOKENS', usage: { outputTokens: 2000 } })
+  })
+  it.each(["I don't know.", 'Sorry, I dont know this one.', 'Um, not sure.', 'I have no idea at all.', "I'm not sure about this", 'No clue', 'Honestly, I can’t answer that.', 'Pass'])(
+    'recognises a whole-answer abstention: %s', answer => expect(explicitAbstention(answer)).toBe(true))
+  it.each(["I don't know every tool, but isolated state prevents interference.", 'Not sure, but I think each test creates its own data.', "Honestly I'm not sure about this one, I haven't done API testing.", 'Skip lists are a probabilistic data structure.'])(
+    'leaves an answer with content to the model: %s', answer => expect(explicitAbstention(answer)).toBe(false))
+  it('bounds abstention matching on adversarial repeated filler', () => {
+    const start = performance.now()
+    for (const answer of ["I don't know" + ', sorry'.repeat(20) + ' but', 'um, '.repeat(39) + 'x', "I don't know" + ', sorry'.repeat(1000) + ' but']) expect(explicitAbstention(answer)).toBe(false)
+    expect(performance.now() - start).toBeLessThan(200)
+    expect(explicitAbstention(`Sorry, ${'um, '.repeat(10)}I don't know.`)).toBe(true)
+  })
+  it('offers only learner policies with their own configuration as Admin previews', () => {
+    expect(PREVIEW_POLICIES).toEqual(['learner-evaluation-2'])
+    expect(adminConfig('learner-evaluation-2')).toEqual(learner2); expect(previewPolicy(learner2)?.key).toBe('learner-evaluation-2')
+    expect(previewPolicy(configFor('nova2_lite'))).toBeNull()
+    expect(() => submitSchema.parse({ questionId: 'q', revision: 1, answer: testAnswer, model: 'learner-evaluation-1' })).toThrow()
+  })
+  it('authors a schema-valid abstention outcome without model text', () => {
+    const result = abstentionResult()
+    const { validationNotes, ...modelShape } = result
+    expect(resultSchema.parse(modelShape)).toBeTruthy(); expect(validationNotes).toHaveLength(1)
+    expect(result).toMatchObject({ classification: 'NOT_ANSWERED', strengths: [], misconceptions: [] })
+    expect(result.criteria.every(c => c.finding === 'NOT_ASSESSED')).toBe(true)
   })
 })

@@ -2,20 +2,22 @@ export const EVALUATOR_API = '/api/admin/interview-evaluator'
 export interface EvaluatorConfig {
   accessible: boolean; calibrated: boolean; usedToday: number; costUsd: number | null
   unreportedUsage: number
-  models: { key: string; label: string; modelId: string; region: string }[]
+  // id is the configuration identity; learner-policy previews share a modelId with nova2_lite.
+  models: { key: string; id: string; label: string; modelId: string; region: string }[]
   limits: { dailyPerAdmin: number; attempts: number }
   usage: { _count: number; _sum: { inputTokens: number | null; outputTokens: number | null } }
 }
 export interface Assessment {
   id: string; status: string; attempts: number; errorCode: string | null; bankChanged: boolean; afterExample: boolean; configCurrent: boolean; createdAt: string
-  config: { label: string; modelId: string; region: string; prompt: string; schema: string; rubric: string; policy: string }
+  config: { id: string; label: string; modelId: string; region: string; prompt: string; schema: string; rubric: string; policy: string }
   snapshot: { answerText: string; assistance: string; source: string; textSource: string; textRevision: number;
     questionSnapshot: { externalQid: string; questionText: string; revision: number; track: string; topic: string; difficulty: string } }
   usage: { id: string; latencyMs: number; inputTokens: number | null; outputTokens: number | null; outcome: string }[]
   result: null | {
     classification: string; strengths: string[]; gaps: string[]; misconceptions: string[]; guidance: string; uncertainty: string[]; validationNotes?: string[]
     criteria: { criterion: string; finding: string; explanation: string; evidence: string[] }[]
-    next: { action: string; source: string; questionText: string | null; topic: string | null; needsReview: boolean }
+    // Null for learner-policy previews, which grade the answer without proposing a next step.
+    next: { action: string; source: string; questionText: string | null; topic: string | null; needsReview: boolean } | null
   }
 }
 export interface TestList { tests: { id: string; status: string; createdAt: string; snapshot: { assistance: string } }[] }

@@ -91,7 +91,7 @@ export function InterviewEvaluator() {
       {['FAILED','CANCELLED'].includes(test.status) && <>
         {test.configCurrent && test.attempts < (config?.limits.attempts ?? 3) && <Button variant="outline" disabled={busy || !config?.accessible} onClick={() => void action('retry')}>Retry evaluation</Button>}
         {!test.configCurrent && <p className="text-sm text-muted-foreground">The evaluator has been updated. Create a new test with your saved answer; this original test will be preserved.</p>}
-        <Button variant="outline" disabled={busy || !config?.accessible} onClick={() => { setAnswer(test.snapshot.answerText); setAssistance(test.snapshot.assistance); setModel(config!.models.find(m => m.modelId === test.config.modelId)?.key ?? 'nova2_lite') }}>Use saved answer in a new test</Button>
+        <Button variant="outline" disabled={busy || !config?.accessible} onClick={() => { setAnswer(test.snapshot.answerText); setAssistance(test.snapshot.assistance); setModel(config!.models.find(m => m.id === test.config.id)?.key ?? 'nova2_lite') }}>Use saved answer in a new test</Button>
       </>}
       {test.bankChanged && <p className="text-sm text-muted-foreground">The bank question has changed or was deleted. This result uses its saved question and guidance.</p>}
       {test.afterExample && <p className="font-medium text-sm">After example · This answer does not demonstrate independent recall.</p>}

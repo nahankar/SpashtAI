@@ -3,7 +3,7 @@ import type { Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
 import { BankError } from '../bank/csv'
-import { ACTIONS, CONFIGS, LIMITS, configFor, explicitDontKnow, hash, questionSnapshotSchema, submitSchema, type EvaluationResult, type QuestionSnapshot } from './contracts'
+import { ACTIONS, CONFIGS, LEARNER_POLICIES, LIMITS, PREVIEW_POLICIES, abstentionResult, adminConfig, configFor, explicitAbstention, explicitDontKnow, hash, previewPolicy, questionSnapshotSchema, submitSchema, supportedConfig, type EvaluationResult, type EvaluatorConfig, type QuestionSnapshot } from './contracts'
 import { evaluateAnswer, EvaluationFailure, type Invocation } from './model'
 type Tx = Prisma.TransactionClient
 const FEATURE = 'interview_evaluator'
@@ -32,7 +32,10 @@ async function consumeBudget(userId: string, tx: Tx) {
   await tx.interviewEvaluatorBudget.updateMany({ where: { day: day(), scope: { in: ['global', hash(userId)] } }, data: { used: { increment: 1 } } })
 }
 export async function enqueueAssessment(input: unknown, ownerId: string) {
-  const body = submitSchema.parse(input); const config = configFor(body.model)
+  const body = submitSchema.parse(input); const config = adminConfig(body.model)
+  // A learner-policy preview follows that policy, including its free deterministic abstention.
+  const preview = previewPolicy(config)
+  const abstained = Boolean(preview?.deterministicAbstention && explicitAbstention(body.answer))
   return prisma.$transaction(async tx => {
     await assertAccess(ownerId, tx)
     // Serialize capture with edits/deletion so the supplied revision identifies exactly this text.
@@ -49,11 +52,12 @@ export async function enqueueAssessment(input: unknown, ownerId: string) {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('interview-evaluator-budget',0))`
     const existing = await tx.interviewAssessment.findUnique({ where: { inputKey } })
     if (existing) return { id: existing.id, reused: true }
-    await consumeBudget(ownerId, tx)
+    if (!abstained) await consumeBudget(ownerId, tx)
     const saved = await tx.interviewAnswerSnapshot.create({ data: {
       ownerId, questionId: question.id, questionSnapshot: json(snapshot), questionHash, answerText: body.answer, answerHash,
       assistance: body.assistance, language: body.language,
-      assessment: { create: { inputKey, config: json(config) } },
+      assessment: { create: { inputKey, config: json(config), ...(abstained ? { status: 'COMPLETED', completedAt: new Date(),
+        result: json({ ...abstentionResult(), next: null, assistance: body.assistance, afterExample: body.assistance === 'EXAMPLE', calibrated: false }) } : {}) } },
     }, include: { assessment: true } })
     return { id: saved.assessment!.id, reused: false }
   })
@@ -70,7 +74,7 @@ export async function assessmentDetail(id: string, actorId: string) {
   const current = row.snapshot.questionId ? await prisma.questionBankQuestion.findUnique({ where: { id: row.snapshot.questionId }, select: { revision: true } }) : null
   const question = questionSnapshotSchema.parse(row.snapshot.questionSnapshot)
   return { ...row, bankChanged: !current || current.revision !== question.revision, afterExample: row.snapshot.assistance === 'EXAMPLE',
-    configCurrent: Object.keys(CONFIGS).some(key => hash(configFor(key as keyof typeof CONFIGS)) === hash(row.config)) }
+    configCurrent: supportedConfig(row.config) !== null }
 }
 export async function deleteAssessment(id: string, actorId: string) {
   await prisma.$transaction(async tx => {
@@ -85,7 +89,7 @@ export async function retryAssessment(id: string, actorId: string) {
     const row = await ownedAssessment(id, actorId, tx)
     // A Super Admin can inspect/delete another owner's test, but cannot bill retries to them.
     if (row.snapshot.ownerId !== actorId) throw new BankError(403, 'Only the submitting admin can retry this test')
-    if (!Object.keys(CONFIGS).some(key => hash(configFor(key as keyof typeof CONFIGS)) === hash(row.config))) throw new BankError(409, 'Evaluator configuration changed. Submit a new test using the current configuration.')
+    if (!supportedConfig(row.config)) throw new BankError(409, 'Evaluator configuration changed. Submit a new test using the current configuration.')
     if (!['FAILED','CANCELLED'].includes(row.status) || row.attempts >= LIMITS.attempts) throw new BankError(409, 'This test cannot be retried. At most three invocations are allowed.')
     await consumeBudget(actorId, tx)
     return tx.interviewAssessment.update({ where: { id }, data: { status: 'PENDING', nextAt: new Date(), errorCode: null, completedAt: null } })
@@ -135,7 +139,7 @@ export async function finishAssessment(job: Claim, invocation: Invocation | Eval
     const usage = failure ? invocation.usage : invocation
     await tx.interviewEvaluatorUsage.upsert({ where: { invocationKey: job.leaseToken }, update: {}, create: {
       invocationKey: job.leaseToken, assessmentId: current?.id ?? null,
-      modelId: (job.config as ReturnType<typeof configFor>).modelId, region: (job.config as ReturnType<typeof configFor>).region,
+      modelId: (job.config as EvaluatorConfig).modelId, region: (job.config as EvaluatorConfig).region,
       inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, latencyMs: usage.latencyMs, outcome: failure ? invocation.code : 'SUCCESS',
     } })
     if (!current || current.status !== 'RUNNING' || current.leaseToken !== job.leaseToken) return
@@ -152,10 +156,14 @@ export async function finishAssessment(job: Claim, invocation: Invocation | Eval
     }
     const question = questionSnapshotSchema.parse(current.snapshot.questionSnapshot)
     let result = invocation.result
+    const config = job.config as EvaluatorConfig
+    const preview = previewPolicy(config)
     // Exact explicit abstentions cannot acquire an invented grade or generated same-topic follow-up.
-    if (explicitDontKnow(current.snapshot.answerText)) result = { ...result, classification: 'NOT_ANSWERED', strengths: [], misconceptions: [],
+    // Previewed learner policies abstain deterministically at submission instead.
+    if (!preview && explicitDontKnow(current.snapshot.answerText)) result = { ...result, classification: 'NOT_ANSWERED', strengths: [], misconceptions: [],
       criteria: result.criteria.map(c => ({ ...c, finding: 'NOT_ASSESSED', evidence: [], explanation: 'No subject understanding was demonstrated in this answer.' })) }
-    const next = await adaptiveDecision(question, result, tx)
+    // Learner previews grade the answer only; the Admin adaptive policy also proposes a next step.
+    const next = preview ? null : await adaptiveDecision(question, result, tx)
     await tx.interviewAssessment.update({ where: { id: job.id }, data: { ...release, status: 'COMPLETED', errorCode: null, completedAt: new Date(),
       result: json({ ...result, next, assistance: current.snapshot.assistance, afterExample: current.snapshot.assistance === 'EXAMPLE', calibrated: false }) } })
   })
@@ -167,7 +175,7 @@ export async function sweepAssessments() {
   if (!flag || flag.hidden || flag.disabled) return false
   const job = await claimAssessment(); if (!job) return false
   let invocation: Invocation | EvaluationFailure
-  try { invocation = await evaluateAnswer(questionSnapshotSchema.parse(job.snapshot.questionSnapshot), job.snapshot.answerText, job.config as ReturnType<typeof configFor>, job.snapshot.assistance) }
+  try { invocation = await evaluateAnswer(questionSnapshotSchema.parse(job.snapshot.questionSnapshot), job.snapshot.answerText, job.config as EvaluatorConfig, job.snapshot.assistance) }
   catch (error) { invocation = error instanceof EvaluationFailure ? error : new EvaluationFailure('EVALUATION_FAILED', false, { inputTokens: null, outputTokens: null, latencyMs: 0 }) }
   await finishAssessment(job, invocation)
   return true
@@ -202,6 +210,8 @@ export async function evaluatorConfig(actorId: string) {
   const usage = await prisma.interviewEvaluatorUsage.aggregate({ where: { assessment: { snapshot: { ownerId: actorId } } }, _sum: { inputTokens: true, outputTokens: true, latencyMs: true }, _count: true })
   const budget = await prisma.interviewEvaluatorBudget.findUnique({ where: { scope_day: { scope: hash(actorId), day: day() } } })
   const unreportedUsage = await prisma.interviewEvaluatorUsage.count({ where: { assessment: { snapshot: { ownerId: actorId } }, OR: [{ inputTokens: null }, { outputTokens: null }] } })
-  return { accessible: await evaluatorAccess(actorId), models: Object.entries(CONFIGS).map(([key, value]) => ({ key, ...value })), versions: configFor('nova2_lite'),
+  return { accessible: await evaluatorAccess(actorId), versions: configFor('nova2_lite'),
+    models: [...Object.entries(CONFIGS).map(([key, value]) => ({ key, ...value })),
+      ...PREVIEW_POLICIES.map(key => { const c = LEARNER_POLICIES[key].config; return { key, id: c.id, label: `${c.label} · learner policy preview (${key})`, modelId: c.modelId, region: c.region } })],
     limits: LIMITS, usedToday: budget?.used ?? 0, usage, unreportedUsage, calibrated: false, costUsd: null }
 }

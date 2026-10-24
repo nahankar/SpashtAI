@@ -9,7 +9,7 @@ const testDb = vi.hoisted(() => {
 })
 vi.mock('../src/lib/prisma', async () => { const { PrismaClient } = await import('@prisma/client'); return { prisma: new PrismaClient({ datasourceUrl: testDb.url || 'postgresql://postgres@127.0.0.1:55441/simple_bank' }) } })
 import { prisma } from '../src/lib/prisma'
-import { hash, parseResult } from '../src/interviews/evaluator/contracts'
+import { LEARNER_POLICIES, hash, parseResult } from '../src/interviews/evaluator/contracts'
 import { assessmentDetail, claimAssessment, deleteAssessment, enqueueAssessment, finishAssessment, retryAssessment } from '../src/interviews/evaluator/service'
 import { EvaluationFailure } from '../src/interviews/evaluator/model'
 import { readyDraft } from './fixtures/bank-draft'
@@ -159,6 +159,21 @@ describe.skipIf(!testDb.url)('durable Admin evaluator PostgreSQL contracts', () 
     await questionAction(nextId, 2, 'deactivate', actor)
     const missing = await submit('No idea'); await finish(await claim(), 'No idea')
     expect(((await assessmentDetail(missing.id, actor)).result as any).next).toMatchObject({ source: 'NONE_AVAILABLE', questionText: null })
+  })
+  it('previews a learner policy through the accounted Admin path without an adaptive next step', async () => {
+    const budget = async () => (await prisma.interviewEvaluatorBudget.findUnique({ where: { scope_day: { scope: hash(actor), day: new Date().toISOString().slice(0,10) } } }))?.used ?? 0
+    const abstained = await submit("I don't know.", { model: 'learner-evaluation-2' })
+    const free = await assessmentDetail(abstained.id, actor)
+    expect(free).toMatchObject({ status: 'COMPLETED', attempts: 0, configCurrent: true, config: LEARNER_POLICIES['learner-evaluation-2'].config })
+    expect(free.usage).toHaveLength(0); expect((free.result as any)).toMatchObject({ classification: 'NOT_ANSWERED', next: null })
+    expect(await budget()).toBe(0)
+    const graded = await submit(testAnswer, { model: 'learner-evaluation-2' })
+    expect(graded.id).not.toBe((await submit()).id) // a preview never reuses the Admin test of the same answer
+    expect(await budget()).toBe(2)
+    for (let i = 0; i < 2; i++) { const job = await claim(); await finish(job) }
+    expect(((await assessmentDetail(graded.id, actor)).result as any).next).toBeNull()
+    const config = await request(app).get('/eval/config').auth(token(), { type: 'bearer' })
+    expect(config.body.models.map((m: { key: string; id: string }) => `${m.key}:${m.id}`)).toEqual(['nova2_lite:nova2-lite-pilot-1', 'nova_pro:nova-pro-comparison-1', 'learner-evaluation-2:nova2-lite-learner-2'])
   })
   it('does not reset daily limits when tests are deleted', async () => {
     await prisma.interviewEvaluatorBudget.create({ data: { scope: hash(actor), day: new Date().toISOString().slice(0,10), used: 19 } })

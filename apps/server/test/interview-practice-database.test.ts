@@ -15,7 +15,7 @@ import { prisma } from '../src/lib/prisma'
 import { createQuestion, confirmProvenance, editQuestion, questionAction } from '../src/interviews/bank/service'
 import { readyDraft } from './fixtures/bank-draft'
 import { captureCommittedTurn, endPractice, finishAnswer, markQuestionAsked, practiceDetail, prepareBankAttempt, recordAssistance, startPractice, saveCaptureReceipt, voiceState, practiceHistory } from '../src/interviews/practice/service'
-import { hash } from '../src/interviews/evaluator/contracts'
+import { LEARNER_POLICIES, hash } from '../src/interviews/evaluator/contracts'
 import { assessmentDetail, claimAssessment } from '../src/interviews/evaluator/service'
 import { isPulseEligible } from '../src/lib/activityPolicy'
 import { practiceAgentRouter, practiceRouter } from '../src/routes/interview-practice'
@@ -147,7 +147,7 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
     expect(await claimLearnerAssessment()).toBeNull()
   })
   it.skipIf(!process.env.INTERVIEW_EVALUATOR_TEST_ENDPOINT).each([
-    [testAnswer, 'COMPLETED', null], ['[INVALID_OUTPUT]', 'FAILED', 'INVALID_OUTPUT'],
+    [testAnswer, 'COMPLETED', null], ['[INVALID_OUTPUT]', 'FAILED', 'INVALID_OUTPUT_JSON'],
     ['[THROTTLE]', 'PENDING', 'MODEL_UNAVAILABLE'], ['[TIMEOUT]', 'PENDING', 'TIMEOUT'],
   ])('runs the actual learner worker and Bedrock SDK over local HTTP: %s', async (answer, status, code) => {
     await enableLearner()
@@ -241,6 +241,127 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
     await finishLearnerAssessment(late, { result: correctEvaluation(), inputTokens: 100, outputTokens: 30, latencyMs: 5 })
     expect(await prisma.interviewAssessment.findUnique({ where: { id: late.id } })).toMatchObject({ status: 'CANCELLED', result: null })
     expect((await request(app).get(`/practice/runs/${r.id}/assessments`).auth(token(owner), { type: 'bearer' })).status).toBe(410)
+  })
+  // Simulates a run pinned by another code release: run configuration is otherwise immutable in SQL.
+  const pin = (runId: string, version: string, ...config: unknown[]) => prisma.$transaction(async tx => {
+    await tx.$executeRaw`SET LOCAL session_replication_role = replica`
+    const policy = config.length ? (config[0] === undefined ? { version } : { version, config: config[0] }) : { version, config: LEARNER_POLICIES[version].config }
+    await tx.interviewRun.update({ where: { id: runId }, data: { evaluationPolicySnapshot: policy as never } })
+  })
+  const ownerBudget = () => prisma.interviewEvaluatorBudget.findUnique({ where: { scope_day: { scope: `learner-${hash(owner)}`, day: learnerDay() } } })
+  it('keeps saving answers when the pinned learner policy is unknown to this code or altered', async () => {
+    await enableLearner()
+    for (const [version, config] of [['learner-evaluation-99', { modelId: 'unregistered' }], ['learner-evaluation-1', { ...LEARNER_POLICIES['learner-evaluation-1'].config, maxTokens: 4000 }], ['learner-evaluation-1', undefined]] as const) {
+      const { r, a, s } = await asked(); await pin(r.id, version, config)
+      await captureCommittedTurn(a.id, turn(s.id, testAnswer))
+      const saved = await finish(r.id, a.id)
+      expect(saved.status).toBe('ANSWERED')
+      expect((await prisma.interviewAnswerSnapshot.findUniqueOrThrow({ where: { id: saved.id! } })).answerText).toBe(testAnswer)
+      expect(await prisma.interviewAssessment.findUnique({ where: { snapshotId: saved.id! } })).toMatchObject({ status: 'CANCELLED', errorCode: 'EVALUATOR_POLICY_UNAVAILABLE', result: null })
+      await endPractice(r.id, owner)
+    }
+    expect(await ownerBudget()).toBeNull()
+    expect(await claimLearnerAssessment()).toBeNull()
+  })
+  it('evaluates each run with the exact registered policy it pinned', async () => {
+    await enableLearner()
+    const jobs: Record<string, string> = {}
+    for (const version of ['learner-evaluation-1', 'learner-evaluation-2']) {
+      const { r, a, s } = await asked(); await pin(r.id, version)
+      await captureCommittedTurn(a.id, turn(s.id, testAnswer)); const saved = await finish(r.id, a.id)
+      jobs[version] = (await prisma.interviewAssessment.findUniqueOrThrow({ where: { snapshotId: saved.id! } })).id
+      await endPractice(r.id, owner)
+    }
+    for (let i = 0; i < 2; i++) {
+      const job = await learnerClaim()
+      const version = Object.entries(jobs).find(([, id]) => id === job.id)![0]
+      expect(job.policy.config).toEqual(LEARNER_POLICIES[version].config)
+      expect(hash(job.config)).toBe(hash(LEARNER_POLICIES[version].config))
+    }
+  })
+  it('cancels a job whose stored config no longer matches its run policy with a distinct code', async () => {
+    await enableLearner()
+    const { r, a, s } = await asked(); await captureCommittedTurn(a.id, turn(s.id, testAnswer)); const saved = await finish(r.id, a.id)
+    await prisma.interviewAssessment.update({ where: { snapshotId: saved.id! }, data: { config: { ...LEARNER_POLICIES['learner-evaluation-2'].config } } })
+    expect(await claimLearnerAssessment()).toBeNull()
+    expect(await prisma.interviewAssessment.findUnique({ where: { snapshotId: saved.id! } })).toMatchObject({ status: 'CANCELLED', errorCode: 'CONFIG_MISMATCH' })
+    await endPractice(r.id, owner)
+    const second = await asked(); await captureCommittedTurn(second.a.id, turn(second.s.id, testAnswer)); const other = await finish(second.r.id, second.a.id)
+    await prisma.session.update({ where: { id: second.r.sessionId }, data: { discardedAt: new Date() } })
+    expect(await claimLearnerAssessment()).toBeNull()
+    expect(await prisma.interviewAssessment.findUnique({ where: { snapshotId: other.id! } })).toMatchObject({ status: 'CANCELLED', errorCode: 'SESSION_DISCARDED' })
+  })
+  it('completes an explicit abstention under learner-evaluation-2 without a model call or budget', async () => {
+    await enableLearner()
+    const { r, a, s } = await asked(); await pin(r.id, 'learner-evaluation-2')
+    await captureCommittedTurn(a.id, turn(s.id, "Sorry, I don't know this one.")); const saved = await finish(r.id, a.id)
+    const row = await prisma.interviewAssessment.findUniqueOrThrow({ where: { snapshotId: saved.id! }, include: { usage: true } })
+    expect(row).toMatchObject({ status: 'COMPLETED', attempts: 0, errorCode: null }); expect(row.usage).toHaveLength(0)
+    expect((row.result as { classification: string }).classification).toBe('NOT_ANSWERED')
+    expect(await ownerBudget()).toBeNull()
+    expect(await claimLearnerAssessment()).toBeNull()
+    const findings = await request(app).get(`/practice/runs/${r.id}/assessments`).auth(token(owner), { type: 'bearer' })
+    expect(findings.body.assessments[0]).toMatchObject({ status: 'COMPLETED', result: { classification: 'NOT_ANSWERED', strengths: [], misconceptions: [] } })
+  })
+  it('records a ledger row at claim that survives lease expiry and takes the late actual usage', async () => {
+    await enableLearner()
+    const { r, a, s } = await asked(); await captureCommittedTurn(a.id, turn(s.id, testAnswer)); await finish(r.id, a.id)
+    const job = await learnerClaim()
+    expect(await prisma.interviewEvaluatorUsage.findUnique({ where: { invocationKey: job.leaseToken } })).toMatchObject({ outcome: 'STARTED', inputTokens: null, outputTokens: null, assessmentId: job.id })
+    await prisma.interviewAssessment.update({ where: { id: job.id }, data: { leaseUntil: new Date(Date.now() - 1000) } })
+    expect(await claimLearnerAssessment()).toBeNull()
+    expect(await prisma.interviewAssessment.findUnique({ where: { id: job.id } })).toMatchObject({ status: 'FAILED', errorCode: 'LEASE_EXPIRED', leaseToken: null })
+    expect(await prisma.interviewEvaluatorUsage.findUnique({ where: { invocationKey: job.leaseToken } })).toMatchObject({ outcome: 'LEASE_EXPIRED', inputTokens: null })
+    await finishLearnerAssessment(job, { result: correctEvaluation(), inputTokens: 1400, outputTokens: 400, latencyMs: 61_000 })
+    expect(await prisma.interviewEvaluatorUsage.findUnique({ where: { invocationKey: job.leaseToken } })).toMatchObject({ outcome: 'SUCCESS', inputTokens: 1400, outputTokens: 400 })
+    expect(await prisma.interviewAssessment.findUnique({ where: { id: job.id } })).toMatchObject({ status: 'FAILED', result: null })
+  })
+  it('caps concurrent learner claims at two, independently of running Admin tests', async () => {
+    await enableLearner()
+    for (let i = 0; i < 2; i++) {
+      const { r, a, s } = await asked(); await captureCommittedTurn(a.id, turn(s.id, testAnswer)); await finish(r.id, a.id)
+      if (i === 0) {
+        const next = await prepareBankAttempt(r.id, owner); await markQuestionAsked(next.id, { segmentId: s.id, questionText: next.question.text })
+        await captureCommittedTurn(next.id, turn(s.id, testAnswer, 1)); await finish(r.id, next.id)
+      }
+      await endPractice(r.id, owner)
+    }
+    // Two running Admin tests occupy the Admin ceiling only.
+    const adminRows: string[] = []
+    for (let i = 0; i < 2; i++) {
+      const q = await prisma.questionBankQuestion.findUniqueOrThrow({ where: { id: questionId } })
+      const snap = await prisma.interviewAnswerSnapshot.create({ data: { ownerId: admin, questionId, questionSnapshot: { id: q.id } as never, questionHash: randomUUID(), answerText: testAnswer, answerHash: randomUUID(),
+        assessment: { create: { inputKey: randomUUID(), config: {}, status: 'RUNNING', attempts: 1, leaseToken: randomUUID(), leaseUntil: new Date(Date.now() + 60_000) } } } })
+      adminRows.push(snap.id)
+    }
+    try {
+      const claims = (await Promise.all([0, 1, 2].map(() => claimLearnerAssessment()))).filter(Boolean)
+      learnerUsage.push(...claims.map(c => c!.leaseToken))
+      expect(claims).toHaveLength(2)
+      expect(await prisma.interviewAssessment.count({ where: { status: 'PENDING', snapshot: { ownerId: owner } } })).toBe(1)
+    } finally { await prisma.interviewAnswerSnapshot.deleteMany({ where: { id: { in: adminRows } } }) }
+  })
+  it('cancels queued and running learner work when the capability is disabled through the Admin endpoint', async () => {
+    await enableLearner()
+    const { r, a, s } = await asked(); await captureCommittedTurn(a.id, turn(s.id, testAnswer)); const saved = await finish(r.id, a.id)
+    const next = await prepareBankAttempt(r.id, owner); await markQuestionAsked(next.id, { segmentId: s.id, questionText: next.question.text })
+    await captureCommittedTurn(next.id, turn(s.id, testAnswer, 1)); const queued = await finish(r.id, next.id)
+    const running = await learnerClaim(); expect(running.snapshotId).toBe(saved.id)
+    const reply = await request(app).put('/flags/interview_adaptive').auth(token(admin, 'SUPER_ADMIN'), { type: 'bearer' }).send({ disabled: true })
+    expect(reply.status).toBe(200)
+    for (const id of [saved.id!, queued.id!]) expect(await prisma.interviewAssessment.findUnique({ where: { snapshotId: id } })).toMatchObject({ status: 'CANCELLED', result: null, leaseToken: null })
+    expect(await prisma.interviewEvaluatorUsage.findUnique({ where: { invocationKey: running.leaseToken } })).toMatchObject({ outcome: 'CANCELLED', inputTokens: null })
+    await finishLearnerAssessment(running, { result: correctEvaluation(), inputTokens: 100, outputTokens: 30, latencyMs: 5 })
+    expect(await prisma.interviewAssessment.findUnique({ where: { id: running.id } })).toMatchObject({ status: 'CANCELLED', result: null })
+    expect(await prisma.interviewEvaluatorUsage.findUnique({ where: { invocationKey: running.leaseToken } })).toMatchObject({ outcome: 'SUCCESS', inputTokens: 100 })
+  })
+  it('distinguishes open answers in an evaluated run from a capture-only run', async () => {
+    const legacy = await asked()
+    expect((await request(app).get(`/practice/runs/${legacy.r.id}/assessments`).auth(token(owner), { type: 'bearer' })).body.assessments[0].status).toBe('NOT_ENABLED')
+    await endPractice(legacy.r.id, owner)
+    await enableLearner()
+    const { r } = await asked()
+    expect((await request(app).get(`/practice/runs/${r.id}/assessments`).auth(token(owner), { type: 'bearer' })).body.assessments[0].status).toBe('AWAITING_ANSWER')
   })
   it('creates, retries and reads a multi-selection run through PostgreSQL, including long combined tracks', async () => {
     const longTrack = `${fixture}-${'long-track-'.repeat(9)}`
