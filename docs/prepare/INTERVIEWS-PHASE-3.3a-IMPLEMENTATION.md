@@ -107,3 +107,25 @@ a new practice. Finish an answer, then open Review; technical findings appear
 when the job completes. Existing manual runs remain capture-only. Real AWS
 quality/latency calibration and human microphone behavior still need pilot
 verification before enabling learner evaluation in production.
+
+## Voice and playback corrections validated for release
+
+- Expiry blocks another question but leaves the current answer recordable,
+  including a resumed practice with no time remaining. Saving still mutes input.
+- Delivery extraction uses the existing bounded WAV conversion for browser
+  recordings, cleans temporary files after errors, and excludes acoustic windows
+  too short for Praat without inventing pitch measurements.
+- A missing aligned answer gets a bounded retry between already verified
+  neighboring words. Retries preserve segment clocks and existing results,
+  stop at three windows per segment, and never fill unmatched words synthetically.
+- Elevate and Interviews share playback fallback regions. Partial alignment
+  retains audible answers; complete verified timing skips coach-time gaps and
+  retains every word cluster around long pauses. Toggling Skip gaps during
+  playback preserves the playing state. Selected evidence clips retain pauses.
+
+Release verification: 568 server tests passed with four simulation-only cases
+skipped; 273 web tests and 44 focused Python audio/voice tests passed. Typechecks,
+lint of changed web files, and server/web production builds passed. A local
+recording was reprocessed to verify all four answers, including a recovered
+63-word answer; HTTP playback checks verified the exact gap-seek targets.
+Real AWS technical evaluator calibration remains outside these audio checks.

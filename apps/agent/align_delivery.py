@@ -26,6 +26,7 @@ MIN_WORD_COVERAGE = 0.90
 # Gentle answered, but its output failed validation. Retrying the same audio and
 # transcript reproduces the result, so the caller must not treat this as an outage.
 REJECTED_EXIT_CODE = 3
+MAX_WINDOW_RETRIES = 3
 REJECTION_CODES = frozenset({
     "invalid_alignment_timestamps",
     "missing_alignment_offsets",
@@ -174,6 +175,70 @@ def validate_result(raw, tokens, duration):
     return results
 
 
+def cut_audio(source, target, start, duration):
+    subprocess.run([
+        "ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(source),
+        "-ss", str(start), "-t", str(duration), "-ac", "1", "-ar", "16000", str(target),
+    ], check=True, timeout=60, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+
+
+async def transcribe_window(client, url, wav, turns, duration):
+    transcript, tokens = build_transcript(turns)
+    with open(wav, "rb") as audio:
+        form = aiohttp.FormData()
+        form.add_field("audio", audio, filename="segment.wav")
+        form.add_field("transcript", transcript)
+        async with client.post(f"{url}/transcriptions?async=false", data=form) as response:
+            response.raise_for_status()
+            raw = await response.json()
+    return validate_result(raw, tokens, duration)
+
+
+def retry_windows(turns, aligned, duration):
+    """Bound missing consecutive turns by already verified neighboring words.
+
+    No wall-clock or transcript-length estimates are used. A segment with no
+    anchors stays incomplete rather than retrying its identical full input.
+    """
+    by_id = {item["id"]: item for item in aligned}
+    windows = []
+    index = 0
+    previous_end = 0.0
+    while index < len(turns):
+        anchor = by_id.get(turns[index]["id"])
+        if anchor:
+            previous_end = anchor["words"][-1]["end"]
+            index += 1
+            continue
+        first = index
+        while index < len(turns) and turns[index]["id"] not in by_id:
+            index += 1
+        following = by_id.get(turns[index]["id"]) if index < len(turns) else None
+        end = following["words"][0]["start"] if following else duration
+        if end > previous_end and (previous_end > 0 or end < duration):
+            windows.append((previous_end, end, turns[first:index]))
+    return windows[:MAX_WINDOW_RETRIES]
+
+
+async def align_segment(client, url, wav, turns, duration, directory):
+    aligned = await transcribe_window(client, url, wav, turns, duration)
+    for index, (start, end, missing) in enumerate(retry_windows(turns, aligned, duration)):
+        cropped = str(Path(directory) / f"retry-{index}.wav")
+        try:
+            cut_audio(wav, cropped, start, end-start)
+            recovered = await transcribe_window(client, url, cropped, missing, end-start)
+        except (aiohttp.ClientError, asyncio.TimeoutError, subprocess.SubprocessError, ValueError):
+            # An optional retry must not erase the words already verified.
+            continue
+        for turn in recovered:
+            for word in turn["words"]:
+                word["start"] = round(word["start"] + start, 6)
+                word["end"] = round(word["end"] + start, 6)
+        aligned.extend(recovered)
+    order = {turn["id"]: index for index, turn in enumerate(turns)}
+    return sorted(aligned, key=lambda turn: order[turn["id"]])
+
+
 async def align(request):
     results = []
     url = os.getenv("GENTLE_URL", "http://localhost:8765").rstrip("/")
@@ -187,19 +252,8 @@ async def align(request):
                 if not tokens:
                     continue
                 wav = str(Path(directory) / f"segment-{n}.wav")
-                subprocess.run([
-                    "ffmpeg", "-nostdin", "-v", "error", "-y",
-                    "-i", request["audioPath"], "-ss", str(segment["replayOffsetSec"]),
-                    "-t", str(segment["durationSec"]), "-ac", "1", "-ar", "16000", wav,
-                ], check=True, timeout=60, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-                with open(wav, "rb") as audio:
-                    form = aiohttp.FormData()
-                    form.add_field("audio", audio, filename="segment.wav")
-                    form.add_field("transcript", transcript)
-                    async with client.post(f"{url}/transcriptions?async=false", data=form) as response:
-                        response.raise_for_status()
-                        raw = await response.json()
-                results.extend(validate_result(raw, tokens, segment["durationSec"]))
+                cut_audio(request["audioPath"], wav, segment["replayOffsetSec"], segment["durationSec"])
+                results.extend(await align_segment(client, url, wav, turns, segment["durationSec"], directory))
     return {"version": VERSION, "turns": results}
 
 

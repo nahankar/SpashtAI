@@ -215,6 +215,13 @@ export function buildSkipIntervalsFromTurnWords(
     }
     clusters.push(cur)
 
+    // Recording-bound words have already passed lexical and clock checks.
+    // Every cluster belongs to the answer; never discard shorter phrases.
+    if (raw.every((word: any) => ['actual', 'forced_alignment'].includes(word?.timingOrigin))) {
+      out.push(...clusters.map(({ start, end }) => ({ start, end })))
+      continue
+    }
+
     const best = clusters.reduce((a, b) => {
       const scoreA = (a.end - a.start) * a.weight
       const scoreB = (b.end - b.start) * b.weight

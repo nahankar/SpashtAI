@@ -28,6 +28,7 @@ import { getAuthHeaders, getAuthenticatedMediaUrl } from '@/lib/api-client'
 import { COACH_BUBBLE, USER_BUBBLE } from '@/lib/conversation'
 import { KaraokeText, type PlaybackWord as TurnWord } from '@/components/session/KaraokeText'
 import { interviewPlaybackWords } from '@/lib/interview-playback-words'
+import { fallbackSpeechRegions, partialPlaybackEnd, verifiedPlaybackWords, verifiedWordRegions, nextSpeechTime } from '@/lib/playback-regions'
 import { InterviewFindings } from '@/features/interviews/InterviewFindings'
 import { ConversationPanel } from '@/features/live-session/components/ConversationPanel'
 import type { ChatMessage } from '@/features/live-session/types'
@@ -287,6 +288,12 @@ function normalizeTurnPresentations(turns: ReplayTurn[]): Map<number, TurnPresen
   let prevTurnIndex: number | null = null
 
   for (const turn of userTurns) {
+    const verified = verifiedPlaybackWords(turn.words)
+    if (verified) {
+      out.set(turn.turnIndex, { words: verified, playStart: verified[0].start, playEnd: verified.at(-1)!.end })
+      prevTurnIndex = turn.turnIndex
+      continue
+    }
     if (!turn.words?.length) {
       out.set(turn.turnIndex, {
         words: [],
@@ -347,6 +354,8 @@ function buildSkipIntervalsFromTurnWords(
 
   for (const turn of turns) {
     if (turn.role !== 'user') continue
+    const verified = verifiedWordRegions(turn.words)
+    if (verified) { out.push(...verified); continue }
     const pres = presentations.get(turn.turnIndex)
     if (pres?.playStart != null && pres.playEnd != null) {
       out.push({ start: pres.playStart, end: pres.playEnd })
@@ -658,9 +667,12 @@ export function SessionReplay({
     return end
   }, [turns])
 
+  const partialSpeechRegions = useMemo(() => fallbackSpeechRegions(turns, speechRegions), [turns, speechRegions])
+
   const timelineEnd = useMemo(() => {
     const audioDuration =
       duration && Number.isFinite(duration) && duration > 0 ? duration : null
+    if (partialSpeechRegions !== null) return partialPlaybackEnd(audioDuration, lastUserEnd, partialSpeechRegions)
     if (lastUserEnd > 0) {
       if (audioDuration == null) return lastUserEnd
       if (lastUserEnd < audioDuration) return lastUserEnd
@@ -668,7 +680,7 @@ export function SessionReplay({
     }
     if (audioDuration == null) return duration ?? 0
     return audioDuration
-  }, [lastUserEnd, duration])
+  }, [lastUserEnd, duration, partialSpeechRegions])
 
   // ── Transport ────────────────────────────────────────────────────────
   const userIntervals = useMemo(
@@ -690,6 +702,7 @@ export function SessionReplay({
   )
 
   const skipIntervals = useMemo(() => {
+    if (partialSpeechRegions !== null) return partialSpeechRegions
     if (wordSkipIntervals.length > 0) return wordSkipIntervals
 
     const firstUserStart = turns.find(
@@ -709,18 +722,11 @@ export function SessionReplay({
         .sort((a, b) => a.start - b.start)
     }
     return userIntervals
-  }, [wordSkipIntervals, speechRegions, skipPlaybackRegions, userIntervals, turns])
+  }, [wordSkipIntervals, speechRegions, skipPlaybackRegions, userIntervals, turns, partialSpeechRegions])
 
   const resolveSkipGapsTime = useCallback(
     (t: number): number | 'stop' | null => {
-      if (!skipGaps || skipIntervals.length === 0) return null
-      const inside = skipIntervals.some(
-        (iv) => t >= iv.start - 0.05 && t <= iv.end + 0.05,
-      )
-      if (inside) return null
-      const next = skipIntervals.find((iv) => iv.start > t + 0.08)
-      if (next) return next.start
-      return 'stop'
+      return nextSpeechTime(t, skipGaps, skipIntervals)
     },
     [skipGaps, skipIntervals],
   )
@@ -1162,8 +1168,8 @@ export function SessionReplay({
     if (!skipGaps) return
     const a = audioRef.current
     if (a && deliveryClip.sync(a)) return
-    if (a) void applySkipGapsSeek(a)
-  }, [skipGaps, applySkipGapsSeek, deliveryClip])
+    if (a) void syncSkipGapsDuringPlay(a)
+  }, [skipGaps, syncSkipGapsDuringPlay, deliveryClip])
 
   // timeupdate fires ~4×/s — poll faster while playing so gaps are not audible.
   useEffect(() => {
@@ -1304,6 +1310,9 @@ export function SessionReplay({
           {audioAvailable && !hasTimings && (
             <span className="text-amber-600">Recording available · jumping to individual answers is unavailable</span>
           )}
+          {audioAvailable && hasTimings && partialSpeechRegions !== null && (
+            <span className="text-amber-600">Word highlighting is available for part of this recording.</span>
+          )}
         </div>
       </div>
 
@@ -1322,7 +1331,7 @@ export function SessionReplay({
 
       {/* Filters */}
       {isInterview && audioAvailable && !trendsAvailable && <p className="mb-3 text-xs text-muted-foreground">
-        Communication trends are unavailable for this recording.
+        There are not enough verified measurements to show communication trends for this recording.
       </p>}
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="inline-flex rounded-md border p-0.5">

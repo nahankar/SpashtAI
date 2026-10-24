@@ -1,6 +1,7 @@
 import unittest
+from unittest.mock import AsyncMock, patch
 
-from align_delivery import build_transcript, validate_result
+from align_delivery import align_segment, build_transcript, retry_windows, validate_result
 
 
 class DeliveryAlignmentTest(unittest.TestCase):
@@ -114,6 +115,48 @@ class DeliveryAlignmentTest(unittest.TestCase):
         self.assertEqual(kept[5]["tokenIndex"], 6)
         self.assertEqual(kept[0]["tokenIndex"], 0)
         self.assertEqual(kept[-1]["tokenIndex"], 11)
+
+
+class BoundedAlignmentRetryTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.turns = [{"id": "a", "text": "first"}, {"id": "b", "text": "missing"}, {"id": "c", "text": "last"}]
+        def placed(id, start, end):
+            return {"id": id, "words": [{"w": id, "start": start, "end": end, "tokenIndex": 0, "timingOrigin": "forced_alignment"}]}
+        self.initial = [placed("a", 2, 8), placed("c", 30, 38)]
+        self.recovered = [placed("b", 3, 9)]
+
+    async def test_retry_uses_real_neighbor_bounds_and_restores_segment_clock(self):
+        with patch("align_delivery.transcribe_window", AsyncMock(side_effect=[self.initial, self.recovered])) as transcribe, \
+             patch("align_delivery.cut_audio") as cut:
+            result = await align_segment(None, "http://gentle", "segment.wav", self.turns, 50, "/tmp")
+        cut.assert_called_once_with("segment.wav", "/tmp/retry-0.wav", 8, 22)
+        self.assertEqual([turn["id"] for turn in result], ["a", "b", "c"])
+        self.assertEqual(result[1]["words"][0]["start"], 11)
+        self.assertEqual(result[1]["words"][0]["end"], 17)
+        self.assertEqual(transcribe.call_args.args[3], [self.turns[1]])
+
+    async def test_failed_optional_retry_keeps_existing_verified_words(self):
+        with patch("align_delivery.transcribe_window", AsyncMock(side_effect=[self.initial, ValueError("rejected")])), \
+             patch("align_delivery.cut_audio"):
+            result = await align_segment(None, "http://gentle", "segment.wav", self.turns, 50, "/tmp")
+        self.assertEqual(result, self.initial)
+
+    def test_no_anchor_never_produces_an_estimated_or_identical_retry(self):
+        self.assertEqual(retry_windows(self.turns, [], 50), [])
+        self.assertEqual(retry_windows(self.turns, self.initial + self.recovered, 50), [])
+
+    def test_retry_can_cover_unaligned_first_or_last_answer_without_leaving_segment(self):
+        windows = retry_windows(self.turns, [self.initial[1]], 50)
+        self.assertEqual(windows[0][:2], (0.0, 30))
+        self.assertEqual([turn['id'] for turn in windows[0][2]], ['a', 'b'])
+        windows = retry_windows(self.turns, [self.initial[0]], 50)
+        self.assertEqual(windows[0][:2], (8, 50))
+        self.assertEqual([turn['id'] for turn in windows[0][2]], ['b', 'c'])
+
+    def test_retry_work_is_capped_when_many_separate_answers_are_unaligned(self):
+        turns = [{'id': str(index), 'text': 'word'} for index in range(12)]
+        anchors = [{'id': str(index), 'words': [{'start': index*5, 'end': index*5+1}]} for index in range(0, 12, 2)]
+        self.assertEqual(len(retry_windows(turns, anchors, 60)), 3)
 
 
 if __name__ == "__main__":
