@@ -9,6 +9,7 @@ import { learnerEligibleWhere } from '../bank/schemas'
 import { hash, questionSnapshotSchema } from '../evaluator/contracts'
 import { joinSelection, splitSelection, askedSchema, assistanceSchema, chunkSchema, MAX_ANSWER_LENGTH, MAX_QUESTIONS, PRACTICE_NAMESPACE, receiptSchema, startSchema, VOICE_CONSENT_VERSION } from './contracts'
 import { currentInterviewVoiceProfile, practiceExecutionAccess, voiceProfileSchema } from './access'
+import { learnerPolicy, enqueueLearnerAssessment, learnerEvaluationAccess } from '../evaluator/learner'
 
 type Tx = Prisma.TransactionClient
 const json = (value: unknown) => value as Prisma.InputJsonValue
@@ -74,10 +75,12 @@ export async function startPractice(input: unknown, ownerId: string) {
     const session = await tx.session.create({ data: { id: body.sessionId, userId: ownerId, module: 'elevate',
       purpose: 'INTERVIEW', contextScope: 'SESSION_ONLY', sessionName: `${body.track.join(', ')} interview practice`,
       configurationSnapshot: { capturePolicy: 'committed-turns-1', answerCompletion: 'explicit', technicalFeedback: 'pending' } } })
+    const evaluationPolicy = await learnerPolicy(ownerId, tx)
     const run = await tx.interviewRun.create({ data: { sessionId: session.id, ownerId, namespace: PRACTICE_NAMESPACE,
       track: joinSelection(body.track), experienceBand: joinSelection(body.experienceBand), startingDifficulty: joinSelection(body.startingDifficulty),
       durationMinutes: body.durationMinutes, maxQuestions: MAX_QUESTIONS,
-      recordingConsentAt: new Date(), recordingConsentVersion: VOICE_CONSENT_VERSION, voiceConfigSnapshot: json(voice) } })
+      recordingConsentAt: new Date(), recordingConsentVersion: VOICE_CONSENT_VERSION, voiceConfigSnapshot: json(voice),
+      evaluationPolicySnapshot: evaluationPolicy ? json(evaluationPolicy) : undefined } })
     return { id: run.id, sessionId: session.id, reused: false }
   })
 }
@@ -170,7 +173,7 @@ export async function recordAssistance(attemptId: string, input: unknown) {
 }
 export async function finishAnswer(runId: string, attemptId: string, ownerId: string, skip = false, receiptId?: string) {
   return prisma.$transaction(async tx => {
-    await writableRun(tx, runId, ownerId)
+    const run = await writableRun(tx, runId, ownerId)
     const attempt = await tx.interviewAttempt.findFirst({ where: { id: attemptId, runId } })
     if (!attempt) throw new BankError(404, 'Attempt not found')
     const receipt = receiptId && await tx.interviewCaptureReceipt.findFirst({ where: { id: receiptId, attemptId, action: skip ? 'SKIP' : 'FINISH' } })
@@ -193,7 +196,7 @@ export async function finishAnswer(runId: string, attemptId: string, ownerId: st
     const saved = await tx.interviewAnswerSnapshot.create({ data: { ownerId, source: 'LIVE_ATTEMPT', attemptId,
       questionId: attempt.questionId, questionSnapshot: json(attempt.questionSnapshot), questionHash: attempt.questionHash,
       answerText, answerHash: hash(answerText), textSource: 'AGENT_COMMITTED_TURNS', textRevision: 1, assistance: attempt.assistance } })
-    // Capture only. Source-aware learner quotas/worker enqueue are checkpoint 3.3.
+    await enqueueLearnerAssessment(tx, saved.id, run.evaluationPolicySnapshot)
     return { id: saved.id, status: 'ANSWERED', answerText, reused: false }
   })
 }
@@ -207,6 +210,7 @@ export async function practiceDetail(runId: string, ownerId: string) {
     return { id: run.id, sessionId: run.sessionId, track: run.track, experienceBand: run.experienceBand,
       startingDifficulty: run.startingDifficulty, durationMinutes: run.durationMinutes, ...session,
       recordingConsentAt: run.recordingConsentAt, recordingConsentVersion: run.recordingConsentVersion,
+      evaluationEnabled: run.evaluationPolicySnapshot !== null,
       attempts: attempts.map(a => ({ ...learnerAttempt(a), completionReason: a.completionReason,
         capturedText: a.chunks.sort((x,y) => x.segment.segmentIndex-y.segment.segmentIndex || x.localTurnIndex-y.localTurnIndex).map(c => c.text).join('\n'),
         capturedParts: a.chunks.map(c => ({ segmentId: c.segmentId, sourceTurnId: c.sourceTurnId, text: c.text, createdAt: c.createdAt })),
@@ -242,7 +246,7 @@ export async function practiceOptions(ownerId: string) {
     const coverage = await tx.questionBankQuestion.groupBy({ by: ['track','experienceBand','difficulty'],
       where: { ...learnerEligibleWhere, namespace: PRACTICE_NAMESPACE }, _count: { _all: true } })
     return { coverage: coverage.map(c => ({ track: c.track, experienceBand: c.experienceBand, difficulty: c.difficulty, count: c._count._all })),
-      consentVersion: VOICE_CONSENT_VERSION, maxQuestions: MAX_QUESTIONS }
+      consentVersion: VOICE_CONSENT_VERSION, maxQuestions: MAX_QUESTIONS, evaluationAvailable: await learnerEvaluationAccess(ownerId, tx) }
   })
 }
 export async function practiceHistory(ownerId: string) {

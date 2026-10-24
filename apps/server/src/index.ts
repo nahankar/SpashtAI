@@ -86,6 +86,7 @@ import adminLegalRouter from './routes/admin/legal'
 import adminPlatformRouter from './routes/admin/platform'
 import adminInterviewBankRouter from './routes/admin/interview-bank'
 import adminInterviewEvaluatorRouter from './routes/admin/interview-evaluator'
+import { startLearnerEvaluatorWorker } from './interviews/evaluator/learner'
 import { startInterviewEvaluatorWorker } from './interviews/evaluator/service'
 import { practiceRouter, practiceAgentRouter } from './routes/interview-practice'
 import { guardInterviewSession, requireSessionFeature } from './middleware/interviewSessionAccess'
@@ -470,6 +471,7 @@ async function startServer() {
   startAudioEnrichmentRetryWorker()
   startSessionInactivityWorker()
   startInterviewEvaluatorWorker()
+  startLearnerEvaluatorWorker()
 
   // During `tsx watch` hot-reloads the previous process can still hold the port
   // for a brief moment when the new one starts. Instead of crashing on

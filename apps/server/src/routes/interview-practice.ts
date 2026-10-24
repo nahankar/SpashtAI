@@ -7,6 +7,7 @@ import { reqLog } from '../lib/logger'
 import { prisma } from '../lib/prisma'
 import { deleteSession } from './sessions'
 import { recordFeatureUsage } from '../middleware/tracking'
+import { learnerFindings } from '../interviews/evaluator/learner'
 import { captureCommittedTurn, endPractice, finishAnswer, markQuestionAsked, ownedCaptureReceipt, practiceDetail, practiceHistory, practiceOptions, prepareBankAttempt, recordAssistance, saveCaptureReceipt, startPractice, voiceState } from '../interviews/practice/service'
 
 const route = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => { void fn(req, res).catch(next) }
@@ -32,6 +33,14 @@ practiceRouter.post('/runs', route(async (req, res) => {
   res.status(201).json(run)
 }))
 practiceRouter.get('/runs/:runId', route(async (req, res) => { res.json(await practiceDetail(req.params.runId, req.user!.userId)) }))
+practiceRouter.get('/runs/:runId/assessments', route(async (req, res) => {
+  res.json({ assessments: await prisma.$transaction(tx => learnerFindings(req.params.runId, req.user!.userId, tx)) })
+}))
+practiceRouter.get('/playback/:sessionId/assessments', route(async (req, res) => {
+  const run = await prisma.interviewRun.findFirst({ where: { sessionId: req.params.sessionId, ownerId: req.user!.userId }, select: { id: true } })
+  if (!run) throw new BankError(404, 'Interview not found')
+  res.json({ assessments: await prisma.$transaction(tx => learnerFindings(run.id, req.user!.userId, tx)) })
+}))
 practiceRouter.post('/runs/:runId/next', route(async (req, res) => { empty.parse(req.body); res.json(await prepareBankAttempt(req.params.runId, req.user!.userId)) }))
 practiceRouter.post('/runs/:runId/attempts/:attemptId/finish', route(async (req, res) => {
   const body = finish.parse(req.body)

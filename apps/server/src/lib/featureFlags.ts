@@ -4,7 +4,7 @@ import { prisma } from './prisma'
 /** Product modules that may be shown in navigation and counted in Pulse. */
 export type PlatformFeature = 'elevate' | 'replay' | 'prepare' | 'interviews' | 'quick_try'
 /** Controlled capabilities that are enabled from Admin but are not modules. */
-export type InternalFeature = 'delivery_moments' | 'session_chat' | 'interview_evaluator' | 'interview_voice'
+export type InternalFeature = 'delivery_moments' | 'session_chat' | 'interview_evaluator' | 'interview_voice' | 'interview_adaptive'
 export type ConfigurableFeature = PlatformFeature | InternalFeature
 
 export const PLATFORM_FEATURES: PlatformFeature[] = ['elevate', 'replay', 'prepare', 'interviews', 'quick_try']
@@ -14,6 +14,7 @@ export const CONFIGURABLE_FEATURES: ConfigurableFeature[] = [
   'session_chat',
   'interview_evaluator',
   'interview_voice',
+  'interview_adaptive',
 ]
 const PULSE_FEATURES: PlatformFeature[] = ['elevate', 'replay', 'prepare']
 
@@ -33,6 +34,9 @@ const DEFAULT_FLAGS: Array<{
   hidden: boolean
   disabled: boolean
 }> = [
+  { feature: 'interview_adaptive', label: 'Interview technical evaluation · learner pilot',
+    description: 'Evaluate saved learner answers. Separate from Admin tests; automatic conversation is a later checkpoint.',
+    audience: 'SELECTED_USERS', hidden: true, disabled: true },
   {
     feature: 'interview_voice', label: 'Interview voice · learner pilot',
     description: 'Technical interview voice capture pilot. Requires Interviews access plus an individual grant. Independent of Elevate and the Admin evaluator.',
@@ -170,6 +174,7 @@ export async function getFeatureFlagsMap(): Promise<FeatureFlagsMap> {
   await ensureFeatureFlags()
   const rows = await prisma.platformFeatureFlag.findMany()
   const map: FeatureFlagsMap = {
+    interview_adaptive: { hidden: true, disabled: true, audience: 'SELECTED_USERS', overlayComment: null, overlayPosition: 'center' },
     interview_voice: { hidden: true, disabled: true, audience: 'SELECTED_USERS', overlayComment: null, overlayPosition: 'center' },
     interview_evaluator: { hidden: true, disabled: true, audience: 'SELECTED_USERS', overlayComment: null, overlayPosition: 'center' },
     elevate: { hidden: false, disabled: false, overlayComment: null, overlayPosition: 'center' },

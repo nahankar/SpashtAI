@@ -1166,6 +1166,7 @@ model InterviewRun {
   recordingConsentAt DateTime?
   recordingConsentVersion String?
   voiceConfigSnapshot Json?
+  evaluationPolicySnapshot Json?
   attempts        InterviewAttempt[]
   createdAt       DateTime @default(now())
   @@index([ownerId, createdAt])

@@ -16,10 +16,11 @@ export type InterviewRun = {
   id: string; sessionId: string; track: string; experienceBand: string; startingDifficulty: string; durationMinutes: number;
   startedAt: string; endedAt: string|null; retainedAt: string|null; recordingConsentAt: string|null; recordingConsentVersion: string|null;
   attempts: InterviewAttempt[];
+  evaluationEnabled?: boolean;
 }
 export type InterviewHistory = { id: string; sessionId: string; track: string; experienceBand: string; startingDifficulty: string;
   startedAt: string; endedAt: string|null; retainedAt: string|null; questionCount: number }
-export type InterviewOptions = { coverage: Array<{ track: string; experienceBand: string; difficulty: string; count: number }>; maxQuestions: number; consentVersion: string }
+export type InterviewOptions = { coverage: Array<{ track: string; experienceBand: string; difficulty: string; count: number }>; maxQuestions: number; consentVersion: string; evaluationAvailable?: boolean }
 export type CaptureAction = 'FINISH'|'SKIP'|'PAUSE'|'LEAVE'
 export type InterviewOperation = 'saving'|'preparing'|null
 export type CaptureReceipt = { id: string; attemptId: string; segmentId: string; action: CaptureAction }

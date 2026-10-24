@@ -27,8 +27,13 @@ import { invalidateFeatureFlagCache } from '../src/lib/featureFlags'
 import sessionChatRouter from '../src/routes/session-chat'
 import { retainSession } from '../src/routes/sessions'
 import { getSessionTurns } from '../src/routes/turns'
+import { claimLearnerAssessment, finishLearnerAssessment, sweepLearnerAssessments, LEARNER_LIMITS } from '../src/interviews/evaluator/learner'
+import { EvaluationFailure } from '../src/interviews/evaluator/model'
+import { correctEvaluation, testAnswer } from './fixtures/interview-evaluation'
+import featureRouter from '../src/routes/admin/feature-flags'
 
 const app = express(); app.use(express.json()); app.use('/practice', practiceRouter); app.use('/agent', practiceAgentRouter)
+app.use('/flags', requireAuth, featureRouter)
 app.use('/chat',requireAuth,sessionChatRouter)
 app.put('/retain/:id', requireAuth, retainSession)
 app.use(guardInterviewSession)
@@ -42,6 +47,15 @@ let admin: string; let owner: string; let other: string; let questionId: string;
 const originalFlags: Array<Awaited<ReturnType<typeof prisma.platformFeatureFlag.findUnique>>> = []
 let originalVoices: Awaited<ReturnType<typeof prisma.voiceConfig.findMany>>; let testVoiceId: string
 const users: string[] = []; const questions: string[] = []
+let originalAdaptive: Awaited<ReturnType<typeof prisma.platformFeatureFlag.findUnique>>
+let originalLearnerBudget: Awaited<ReturnType<typeof prisma.interviewEvaluatorBudget.findUnique>>
+const learnerUsage: string[] = []
+const learnerDay = () => new Date().toISOString().slice(0, 10)
+async function enableLearner() {
+  await prisma.platformFeatureFlag.update({ where: { feature: 'interview_adaptive' }, data: { hidden: false, disabled: false, enabled: true, audience: 'SELECTED_USERS' } })
+  await prisma.userFeatureGrant.upsert({ where: { userId_feature: { userId: owner, feature: 'interview_adaptive' } }, create: { userId: owner, feature: 'interview_adaptive' }, update: {} })
+}
+async function learnerClaim() { const job = await claimLearnerAssessment(); expect(job).not.toBeNull(); learnerUsage.push(job!.leaseToken); return job! }
 const setup = () => ({ sessionId: randomUUID(), track: fixture, experienceBand: '2-5', startingDifficulty: 'Medium', durationMinutes: 10, recordingConsent: true })
 async function run() { return startPractice(setup(), owner) }
 async function segment(sessionId: string, index = 0) {
@@ -65,6 +79,10 @@ async function finish(runId: string, attemptId: string, skip = false) {
 const turn = (segmentId: string, text: string, localTurnIndex = 0) => ({ segmentId, text, localTurnIndex, sourceTurnId: `user_turn_${localTurnIndex}`, role: 'user' })
 describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
   beforeAll(async () => {
+    originalAdaptive = await prisma.platformFeatureFlag.findUnique({ where: { feature: 'interview_adaptive' } })
+    originalLearnerBudget = await prisma.interviewEvaluatorBudget.findUnique({ where: { scope_day: { scope: 'learner-global', day: learnerDay() } } })
+    await prisma.platformFeatureFlag.update({ where: { feature: 'interview_adaptive' }, data: { hidden: true, disabled: true } })
+    await prisma.interviewEvaluatorBudget.upsert({ where: { scope_day: { scope: 'learner-global', day: learnerDay() } }, create: { scope: 'learner-global', day: learnerDay() }, update: { used: 0 } })
     for (const feature of ['interviews','interview_voice']) {
       originalFlags.push(await prisma.platformFeatureFlag.findUnique({ where: { feature } }))
       await prisma.platformFeatureFlag.upsert({ where: { feature }, create: { feature, label: 'Test', hidden: false, disabled: false, enabled: true, audience: 'SELECTED_USERS' }, update: { hidden: false, disabled: false, enabled: true, audience: 'SELECTED_USERS' } })
@@ -90,10 +108,16 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
   })
   afterEach(async () => {
     await prisma.session.deleteMany({ where: { userId: { in: users } } })
+    await prisma.platformFeatureFlag.update({ where: { feature: 'interview_adaptive' }, data: { hidden: true, disabled: true, enabled: false } })
+    await prisma.interviewEvaluatorBudget.deleteMany({ where: { scope: `learner-${hash(owner)}` } })
     for (const feature of ['interviews','interview_voice']) await prisma.platformFeatureFlag.update({ where: { feature }, data: { hidden: false, disabled: false } })
     await prisma.userFeatureGrant.upsert({ where: { userId_feature: { userId: owner, feature: 'interviews' } }, create: { userId: owner, feature: 'interviews' }, update: {} })
   })
   afterAll(async () => {
+    await prisma.interviewEvaluatorUsage.deleteMany({ where: { invocationKey: { in: learnerUsage } } })
+    if (originalAdaptive) await prisma.platformFeatureFlag.update({ where: { feature: 'interview_adaptive' }, data: { hidden: originalAdaptive.hidden, disabled: originalAdaptive.disabled, enabled: originalAdaptive.enabled, audience: originalAdaptive.audience } })
+    if (originalLearnerBudget) await prisma.interviewEvaluatorBudget.update({ where: { scope_day: { scope: 'learner-global', day: learnerDay() } }, data: { used: originalLearnerBudget.used } })
+    else await prisma.interviewEvaluatorBudget.deleteMany({ where: { scope: 'learner-global', day: learnerDay() } })
     await prisma.questionBankQuestion.deleteMany({ where: { id: { in: questions } } })
     await prisma.user.deleteMany({ where: { id: { in: users } } })
     for (const [i,feature] of ['interviews','interview_voice'].entries()) {
@@ -107,6 +131,115 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
       await prisma.voiceConfig.update({ where: { id }, data })
     }
     await prisma.$disconnect()
+  })
+  it('never retroactively enables evaluation for a legacy manual run', async () => {
+    const { r, a, s } = await asked()
+    await enableLearner()
+    await captureCommittedTurn(a.id, turn(s.id, testAnswer))
+    const saved = await finish(r.id, a.id)
+    expect(await prisma.interviewAssessment.count({ where: { snapshotId: saved.id! } })).toBe(0)
+  })
+  it('does not grade a skipped answer even when learner evaluation is enabled', async () => {
+    await enableLearner()
+    const { r, a } = await asked()
+    await finish(r.id, a.id, true)
+    expect(await prisma.interviewAnswerSnapshot.count({ where: { attemptId: a.id } })).toBe(0)
+    expect(await claimLearnerAssessment()).toBeNull()
+  })
+  it.skipIf(!process.env.INTERVIEW_EVALUATOR_TEST_ENDPOINT).each([
+    [testAnswer, 'COMPLETED', null], ['[INVALID_OUTPUT]', 'FAILED', 'INVALID_OUTPUT'],
+    ['[THROTTLE]', 'PENDING', 'MODEL_UNAVAILABLE'], ['[TIMEOUT]', 'PENDING', 'TIMEOUT'],
+  ])('runs the actual learner worker and Bedrock SDK over local HTTP: %s', async (answer, status, code) => {
+    await enableLearner()
+    const { r, a, s } = await asked()
+    await captureCommittedTurn(a.id, turn(s.id, answer!)); const saved = await finish(r.id, a.id)
+    expect(await sweepLearnerAssessments()).toBe(true)
+    const row = await prisma.interviewAssessment.findUniqueOrThrow({ where: { snapshotId: saved.id! }, include: { usage: true } })
+    learnerUsage.push(...row.usage.map(u => u.invocationKey))
+    expect(row).toMatchObject({ status, errorCode: code, attempts: 1 })
+    expect(row.usage).toHaveLength(1)
+    if (status !== 'COMPLETED') expect(row.result).toBeNull()
+  }, 30000)
+  it('atomically queues one learner assessment and returns owned sanitized findings even after End', async () => {
+    await enableLearner()
+    const { r, a, s } = await asked()
+    await captureCommittedTurn(a.id, turn(s.id, testAnswer))
+    const receiptId = (await receipt(a.id, s.id)).id
+    const replies = await Promise.all([finishAnswer(r.id, a.id, owner, false, receiptId), finishAnswer(r.id, a.id, owner, false, receiptId)])
+    expect(replies[0].id).toBe(replies[1].id)
+    expect(await prisma.interviewAssessment.count({ where: { snapshotId: replies[0].id! } })).toBe(1)
+    const job = await learnerClaim()
+    await endPractice(r.id, owner)
+    await finishLearnerAssessment(job, { result: { ...correctEvaluation(), validationNotes: ['Answer depth was left unassessed because no evidence was supplied.'] }, inputTokens: 100, outputTokens: 50, latencyMs: 120 })
+    const response = await request(app).get(`/practice/playback/${r.sessionId}/assessments`).auth(token(owner), { type: 'bearer' })
+    expect(response.status).toBe(200)
+    expect(response.body.assessments[0]).toMatchObject({ status: 'COMPLETED', result: { classification: 'CORRECT' } })
+    expect(response.body.assessments[0].result.validationNotes).toHaveLength(1)
+    expect(JSON.stringify(response.body)).not.toMatch(/questionSnapshot|questionHash|answerHash|inputKey|followUpQuestion|goodAnswerPoints/)
+    expect((await request(app).get(`/practice/runs/${r.id}/assessments`).auth(token(other, 'SUPER_ADMIN'), { type: 'bearer' })).status).toBe(404)
+    await expect(assessmentDetail(job.id, admin)).rejects.toMatchObject({ status: 404 })
+    await prisma.user.update({ where: { id: owner }, data: { hideTranscriptText: true } })
+    try {
+      const hidden = await request(app).get(`/practice/runs/${r.id}/assessments`).auth(token(owner), { type: 'bearer' })
+      expect(hidden.body.assessments[0]).toMatchObject({ question: '', result: null })
+    } finally { await prisma.user.update({ where: { id: owner }, data: { hideTranscriptText: false } }) }
+    expect((await prisma.session.findUniqueOrThrow({ where: { id: r.sessionId } })).sessionPointsAwarded).toBe(false)
+  })
+  it('preserves the saved answer when learner budget is exhausted', async () => {
+    await enableLearner()
+    await prisma.interviewEvaluatorBudget.upsert({ where: { scope_day: { scope: `learner-${hash(owner)}`, day: learnerDay() } },
+      create: { scope: `learner-${hash(owner)}`, day: learnerDay(), used: LEARNER_LIMITS.perUser }, update: { used: LEARNER_LIMITS.perUser } })
+    const { r, a, s } = await asked(); await captureCommittedTurn(a.id, turn(s.id, testAnswer))
+    const saved = await finish(r.id, a.id)
+    expect((await prisma.interviewAnswerSnapshot.findUniqueOrThrow({ where: { id: saved.id! } })).answerText).toBe(testAnswer)
+    expect(await prisma.interviewAssessment.findUnique({ where: { snapshotId: saved.id! } })).toMatchObject({ status: 'FAILED', errorCode: 'EVALUATION_BUDGET_REACHED' })
+    expect(await claimLearnerAssessment()).toBeNull()
+  })
+  it('cancels queued learner work through the real Admin grant-revocation endpoint', async () => {
+    await enableLearner()
+    const { r, a, s } = await asked(); await captureCommittedTurn(a.id, turn(s.id, testAnswer))
+    const saved = await finish(r.id, a.id)
+    const reply = await request(app).put(`/flags/interview_adaptive/grants/${owner}`).auth(token(admin, 'SUPER_ADMIN'), { type: 'bearer' }).send({ granted: false })
+    expect(reply.status).toBe(200)
+    expect(await prisma.interviewAssessment.findUnique({ where: { snapshotId: saved.id! } })).toMatchObject({ status: 'CANCELLED', result: null, leaseToken: null })
+  })
+  it('fences publication after grant revocation and keeps disabled learner work out of the Admin worker', async () => {
+    await enableLearner()
+    const { r, a, s } = await asked(); await captureCommittedTurn(a.id, turn(s.id, testAnswer)); await finish(r.id, a.id)
+    const job = await learnerClaim()
+    await prisma.userFeatureGrant.deleteMany({ where: { userId: owner, feature: 'interview_adaptive' } })
+    await finishLearnerAssessment(job, { result: correctEvaluation(), inputTokens: 100, outputTokens: 30, latencyMs: 5 })
+    expect(await prisma.interviewAssessment.findUnique({ where: { id: job.id } })).toMatchObject({ status: 'CANCELLED', result: null })
+    await prisma.platformFeatureFlag.update({ where: { feature: 'interview_adaptive' }, data: { disabled: true } })
+    expect(await claimLearnerAssessment()).toBeNull()
+    expect(await claimAssessment()).toBeNull()
+  })
+  it('retries a transient model failure without making a second logical assessment', async () => {
+    await enableLearner()
+    const { r, a, s } = await asked(); await captureCommittedTurn(a.id, turn(s.id, testAnswer)); await finish(r.id, a.id)
+    const first = await learnerClaim()
+    await finishLearnerAssessment(first, new EvaluationFailure('TIMEOUT', true, { inputTokens: null, outputTokens: null, latencyMs: 20000 }))
+    await prisma.interviewAssessment.update({ where: { id: first.id }, data: { nextAt: new Date(0) } })
+    const second = await learnerClaim(); expect(second.id).toBe(first.id); expect(second.attempts).toBe(2)
+    await finishLearnerAssessment(second, { result: correctEvaluation(), inputTokens: 100, outputTokens: 30, latencyMs: 5 })
+    await finishLearnerAssessment(first, new EvaluationFailure('TIMEOUT', true, { inputTokens: null, outputTokens: null, latencyMs: 20000 }))
+    expect(await prisma.interviewAssessment.findUnique({ where: { id: first.id } })).toMatchObject({ status: 'COMPLETED', attempts: 2 })
+  })
+  it('records abstention as unassessed and fences a result arriving after discard', async () => {
+    await enableLearner()
+    const { r, a, s } = await asked(); await captureCommittedTurn(a.id, turn(s.id, "I don't know")); await finish(r.id, a.id)
+    const first = await learnerClaim()
+    await finishLearnerAssessment(first, { result: correctEvaluation("I don't know"), inputTokens: 100, outputTokens: 30, latencyMs: 5 })
+    const result = (await prisma.interviewAssessment.findUniqueOrThrow({ where: { id: first.id } })).result as { classification: string; criteria: Array<{finding:string}> }
+    expect(result.classification).toBe('NOT_ANSWERED'); expect(result.criteria.every(c => c.finding === 'NOT_ASSESSED')).toBe(true)
+    const next = await prepareBankAttempt(r.id, owner)
+    await markQuestionAsked(next.id, { segmentId: s.id, questionText: next.question.text })
+    await captureCommittedTurn(next.id, turn(s.id, testAnswer, 1)); await finish(r.id, next.id)
+    const late = await learnerClaim()
+    await prisma.session.update({ where: { id: r.sessionId }, data: { discardedAt: new Date() } })
+    await finishLearnerAssessment(late, { result: correctEvaluation(), inputTokens: 100, outputTokens: 30, latencyMs: 5 })
+    expect(await prisma.interviewAssessment.findUnique({ where: { id: late.id } })).toMatchObject({ status: 'CANCELLED', result: null })
+    expect((await request(app).get(`/practice/runs/${r.id}/assessments`).auth(token(owner), { type: 'bearer' })).status).toBe(410)
   })
   it('creates, retries and reads a multi-selection run through PostgreSQL, including long combined tracks', async () => {
     const longTrack = `${fixture}-${'long-track-'.repeat(9)}`
@@ -426,14 +559,14 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
     const {r}=await asked()
     const original=await prisma.platformFeatureFlag.findUnique({where:{feature:'session_chat'}})
     try {
-      await prisma.platformFeatureFlag.upsert({where:{feature:'session_chat'},create:{feature:'session_chat',label:'Chat test',hidden:false,disabled:false,audience:'EVERYONE'},update:{hidden:false,disabled:false,audience:'EVERYONE'}})
+      await prisma.platformFeatureFlag.upsert({where:{feature:'session_chat'},create:{feature:'session_chat',label:'Chat test',hidden:false,disabled:false,enabled:true,audience:'EVERYONE'},update:{hidden:false,disabled:false,enabled:true,audience:'EVERYONE'}})
       invalidateFeatureFlagCache()
       const body={module:'elevate',sessionId:r.sessionId,messages:[{role:'user',content:'What is the right technical answer?'}]}
       expect((await request(app).post('/chat').auth(token(other,'SUPER_ADMIN'),{type:'bearer'}).send(body)).status).toBe(404)
       const response=await request(app).post('/chat').auth(token(owner),{type:'bearer'}).send(body)
       expect(response.status).toBe(409);expect(response.body.code).toBe('INTERVIEW_TEACHING_PENDING')
     } finally {
-      if(original) await prisma.platformFeatureFlag.update({where:{feature:'session_chat'},data:{hidden:original.hidden,disabled:original.disabled,audience:original.audience}})
+      if(original) await prisma.platformFeatureFlag.update({where:{feature:'session_chat'},data:{hidden:original.hidden,disabled:original.disabled,enabled:original.enabled,audience:original.audience}})
       else await prisma.platformFeatureFlag.delete({where:{feature:'session_chat'}})
       invalidateFeatureFlagCache()
     }

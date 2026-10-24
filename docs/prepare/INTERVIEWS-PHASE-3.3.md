@@ -4,6 +4,12 @@ Plan date: 14 October 2026. Reviewed against GitHub/EC2 baseline `3913037`
 (including Cursor's analytics deployment) and interview review fix `a45839c`.
 This document is an implementation plan, not a claim that adaptation is live.
 
+25 October checkpoint: the compatibility correction and saved-answer learner
+evaluation are implemented separately on `codex/interviews-phase3.3a`, based on
+`b881296`. See [the implementation and verification contract](./INTERVIEWS-PHASE-3.3a-IMPLEMENTATION.md).
+Learner evaluation is default-off; automatic conversation and generated
+follow-ups remain later checkpoints. The eight-attempt cap is unchanged here.
+
 ## Product outcome
 
 The interviewer asks a question, listens to a complete answer, gives brief

@@ -5,10 +5,11 @@ const mocks = vi.hoisted(() => ({
   platformFeatureFlag: { findUnique: vi.fn(), update: vi.fn() },
   user: { findUnique: vi.fn() },
   userFeatureGrant: { findMany: vi.fn(), upsert: vi.fn(), deleteMany: vi.fn() },
+  interviewAssessment: { updateMany: vi.fn() },
 }))
 vi.mock('../src/lib/prisma', () => ({ prisma: mocks }))
 vi.mock('../src/lib/featureFlags', () => ({
-  CONFIGURABLE_FEATURES: ['interviews', 'interview_evaluator', 'interview_voice', 'elevate', 'replay'], ensureFeatureFlags: vi.fn(), invalidateFeatureFlagCache: vi.fn(),
+  CONFIGURABLE_FEATURES: ['interviews', 'interview_evaluator', 'interview_voice', 'interview_adaptive', 'elevate', 'replay'], ensureFeatureFlags: vi.fn(), invalidateFeatureFlagCache: vi.fn(),
 }))
 import { getUserSessionsMetrics } from '../src/routes/metrics'
 import { addConversationMessage } from '../src/routes/conversations'
@@ -62,7 +63,7 @@ describe('Phase 0 review boundaries', () => {
     expect((await request(app).put('/interview_voice').send({ audience: 'SELECTED_USERS', hidden: false, disabled: false })).status).toBe(200)
     expect(mocks.platformFeatureFlag.update).toHaveBeenLastCalledWith(expect.objectContaining({where:{feature:'interview_voice'},data:expect.objectContaining({audience:'SELECTED_USERS',enabled:true})}))
   })
-  it.each(['interviews','interview_evaluator','interview_voice'])('loads, grants and revokes selected-user access for %s',async feature=> {
+  it.each(['interviews','interview_evaluator','interview_voice','interview_adaptive'])('loads, grants and revokes selected-user access for %s',async feature=> {
     mocks.user.findUnique.mockImplementation(async ({where})=>where.id==='admin'?{role:'ADMIN'}:{id:where.id})
     const grant={userId:'pilot',user:{email:'pilot@example.invalid'}}
     mocks.userFeatureGrant.findMany.mockResolvedValue([grant])
@@ -74,6 +75,11 @@ describe('Phase 0 review boundaries', () => {
     expect(mocks.userFeatureGrant.upsert).toHaveBeenCalledWith({where:{userId_feature:{userId:'pilot',feature}},create:{userId:'pilot',feature,grantedBy:'admin'},update:{grantedBy:'admin'}})
     expect((await request(app).put(`/${feature}/grants/pilot`).send({granted:false})).status).toBe(200)
     expect(mocks.userFeatureGrant.deleteMany).toHaveBeenCalledWith({where:{userId:'pilot',feature}})
+    if (feature !== 'interview_evaluator') expect(mocks.interviewAssessment.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ snapshot: { source: 'LIVE_ATTEMPT', ownerId: 'pilot' } }),
+      data: expect.objectContaining({ status: 'CANCELLED', leaseToken: null, leaseUntil: null }),
+    }))
+    else expect(mocks.interviewAssessment.updateMany).not.toHaveBeenCalled()
   })
   it('still rejects unsupported pilot features and malformed grant requests',async()=> {
     mocks.user.findUnique.mockResolvedValue({role:'ADMIN'})

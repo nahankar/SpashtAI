@@ -1,0 +1,109 @@
+# Phase 3.3a — Saved-answer learner evaluation
+
+Implemented on `codex/interviews-phase3.3a`, from `b881296`.
+The separate compatibility commit is `2e0992f`.
+
+## Compatibility checkpoint
+
+The API accepts legacy scalar selections or arrays. It trims, deduplicates and
+sorts choices. Runs retain the existing `|` representation. The additive
+`20261025010000_interview_selection_contract` migration validates each track,
+experience and difficulty token rather than rejecting joined difficulty strings
+or applying a single-track length limit to an entire selection. Tracks permit
+20 values of up to 160 characters, matching the bank's track field; experience
+and difficulty accept only their four supported values. Empty, duplicate or
+unrecognized stored values fail database validation. No old run is rewritten.
+Setup reads its question cap from the server rather than hardcoding the UI cap.
+
+## Learner evaluation contract
+
+`interview_adaptive` is a new selected-user capability, hidden and disabled by
+default. This checkpoint uses it for technical evaluation only. Automatic voice
+handoff and adaptive question selection remain 3.3b/3.3c. New enabled runs pin
+`evaluationPolicySnapshot`; old runs keep NULL and are never retrospectively
+queued. A later flag change cannot turn a capture-only run into an evaluated run.
+
+Finish saves the existing immutable provider-final answer snapshot and queues a
+single LIVE_ATTEMPT assessment in the same Session/Run transaction. Retry Finish
+reuses the snapshot/job. Skip and incomplete closure do not create a grade.
+Quota exhaustion produces a failed evaluation status without rolling back or
+truncating the saved answer. Pinning uses the existing Nova 2 Lite configuration;
+all grading still uses the captured question's actual track/level/guidance.
+
+The source-specific learner worker reuses the evaluator's model client and
+schema/evidence validation. It cannot claim ADMIN_TEST jobs. Admin routes and
+worker remain source-restricted, and disabling Admin tests does not disable
+permitted learner work. Learner limits are 30 invocations/user/UTC day, 300
+global/day, two concurrent learner jobs, two attempts/job. Admin and learner
+claims share the provider claim lock and retain separate concurrency ceilings
+(at most two each). Retries reserve budget and append content-free usage to the
+same logical job. Expired leases fail explicitly; late results cannot overwrite
+a newer lease or publish after discard/revocation.
+
+The regular worker returns immediately while the learner capability is off.
+Administrative disabling or grant revocation cancels queued/running learner
+jobs. Claim/publication recheck saved source, pinned policy, flags/grants and
+session availability. Completed answers can finish evaluation after normal End;
+discard still fences publication. Content-free usage survives deletion with its
+assessment link cleared. The existing hourly budget retention worker also covers
+the learner-prefixed counters.
+
+No database Decision or generation-job table is added yet: those belong with
+the actual adaptive producer in 3.3c. No bank versioning, automatic generated
+question publication, Pulse contribution or numerical composite score is added.
+The eight-attempt pilot cap remains unchanged in this checkpoint; replacing it
+with duration-first practice needs its separate run/attempt policy migration.
+
+## Owned report endpoints
+
+- `GET /api/interviews/runs/:runId/assessments`
+- `GET /api/interviews/playback/:sessionId/assessments`
+
+Both require the session owner, including for Admin/Super Admin callers. They
+remain available for saved history after execution access is withdrawn. The
+response is `{ assessments: [...] }`, ordered by attempt index. Entries contain
+attempt ID/index, the actual question, status/error code, after-example marker
+and a sanitized result: classification, criteria/evidence, strengths, gaps,
+misconceptions, guidance and uncertainty. No private question snapshot, grading
+prompt/configuration, model raw output, hashes or generated follow-up proposal
+is returned. Transcript-hidden accounts receive no question/result text.
+
+Practice and playback show pending, completed, failed or cancelled evaluations.
+The shared communication player, All default, word highlighting, gap skipping,
+Skip badges and direct history Review links are preserved. Reports poll pending
+work, abort on navigation and never pretend a failed model call produced a grade.
+
+## Verification and local simulation
+
+PostgreSQL integration tests cover long/multiple selections, old runs,
+idempotency, immutable inputs, owner/privacy boundaries, separate sources,
+quotas, retries, lease fencing, abstention, discard and normal End. Fresh and
+upgrade migrations are checked separately. UI/typecheck and production builds
+are included in the checkpoint checks.
+
+The repository-local Postman simulation models only the Bedrock Converse path
+used by the SDK. Its fixed findings are transport fixtures, not calibration or
+proof of technical grading quality. No vendor-owned mock was supplied locally;
+the fixture follows the installed SDK's request/response contract. It is local,
+not published to a Postman workspace.
+
+Start it with:
+
+```sh
+postman simulation run postman/simulations/interview-evaluator.sim.yaml --port 4901 --no-history --output ndjson
+```
+
+Then run the integration tests with
+`INTERVIEW_EVALUATOR_TEST_ENDPOINT=http://127.0.0.1:4901/bedrock` and the isolated
+`BANK_TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:55441/simple_bank`.
+The model client accepts this endpoint only in NODE_ENV=test and only at a
+127.0.0.1 HTTP address. It uses fixed dummy credentials and HTTP/1 for this
+simulation; production retains the AWS SDK's normal transport/credential chain.
+The exercised cases include success, invalid JSON, throttling and model timeout.
+
+For a localhost human pilot, grant Interviews, Interview voice and Interview
+technical evaluation to the selected tester, enable the capabilities and start
+a new practice. Finish an answer, then open Review; technical findings appear
+when the job completes. Existing manual runs remain capture-only. Real AWS
+quality/latency calibration and human microphone behavior still need pilot
+verification before enabling learner evaluation in production.

@@ -1,4 +1,5 @@
 import { BedrockRuntimeClient, ConverseCommand } from '@aws-sdk/client-bedrock-runtime'
+import { NodeHttpHandler } from '@smithy/node-http-handler'
 import { awsCredentialsConfig } from '../../lib/awsCredentials'
 import { CONFIGS, LIMITS, parseResult, hash, type EvaluationResult, type QuestionSnapshot, configFor } from './contracts'
 
@@ -27,7 +28,11 @@ export async function evaluateAnswer(question: QuestionSnapshot, answer: string,
   if (!Object.keys(CONFIGS).some(key => hash(configFor(key as keyof typeof CONFIGS)) === hash(config))) {
     throw new EvaluationFailure('CONFIG_UNSUPPORTED', false, { inputTokens: null, outputTokens: null, latencyMs: 0 })
   }
-  const client = new BedrockRuntimeClient({ region: config.region, ...awsCredentialsConfig(), maxAttempts: 1 })
+  // Local HTTP contract simulation only; production cannot redirect evaluator traffic.
+  const testEndpoint = process.env.NODE_ENV === 'test' ? process.env.INTERVIEW_EVALUATOR_TEST_ENDPOINT : undefined
+  if (testEndpoint && !/^http:\/\/127\.0\.0\.1:\d+\/bedrock$/.test(testEndpoint)) throw new EvaluationFailure('CONFIG_UNSUPPORTED', false, { inputTokens: null, outputTokens: null, latencyMs: 0 })
+  const client = new BedrockRuntimeClient({ region: config.region, ...awsCredentialsConfig(), maxAttempts: 1,
+    ...(testEndpoint ? { endpoint: testEndpoint, requestHandler: new NodeHttpHandler(), credentials: { accessKeyId: 'simulation', secretAccessKey: 'simulation' } } : {}) })
   const start = Date.now(); let inputTokens: number | null = null; let outputTokens: number | null = null
   try {
     const response = await client.send(new ConverseCommand({

@@ -8,7 +8,13 @@ import {
 } from '../../lib/featureFlags'
 
 const router = Router()
-const PILOT_FEATURES = ['interviews', 'interview_evaluator', 'interview_voice']
+const PILOT_FEATURES = ['interviews', 'interview_evaluator', 'interview_voice', 'interview_adaptive']
+const LEARNER_FEATURES = ['interviews', 'interview_voice', 'interview_adaptive']
+async function cancelLearnerJobs(ownerId?: string) {
+  await prisma.interviewAssessment.updateMany({ where: { status: { in: ['PENDING', 'RUNNING'] },
+    snapshot: { source: 'LIVE_ATTEMPT', ...(ownerId ? { ownerId } : {}) } },
+    data: { status: 'CANCELLED', errorCode: 'PILOT_ACCESS_UNAVAILABLE', leaseToken: null, leaseUntil: null } })
+}
 router.use((req, res, next) => {
   if (!req.user?.userId) { res.status(403).json({ error: 'Admin access required' }); return }
   void prisma.user.findUnique({ where: { id: req.user.userId }, select: { role: true } }).then(user => {
@@ -74,6 +80,7 @@ router.put('/:feature', async (req: Request, res: Response) => {
       where: { feature },
       data,
     })
+    if (LEARNER_FEATURES.includes(feature) && (nextHidden || nextDisabled)) await cancelLearnerJobs()
 
     invalidateFeatureFlagCache()
     res.json({ flag: updated })
@@ -103,7 +110,10 @@ router.put('/:feature/grants/:userId', async (req, res) => {
     if (req.body.granted) await prisma.userFeatureGrant.upsert({
       where: { userId_feature: key }, update: { grantedBy: req.user!.userId }, create: { ...key, grantedBy: req.user!.userId },
     })
-    else await prisma.userFeatureGrant.deleteMany({ where: key })
+    else {
+      await prisma.userFeatureGrant.deleteMany({ where: key })
+      if (LEARNER_FEATURES.includes(req.params.feature)) await cancelLearnerJobs(req.params.userId)
+    }
     res.json({ success: true })
   } catch { res.status(500).json({ error: 'Failed to update pilot grant' }) }
 })

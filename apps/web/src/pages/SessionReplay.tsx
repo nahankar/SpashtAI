@@ -28,6 +28,7 @@ import { getAuthHeaders, getAuthenticatedMediaUrl } from '@/lib/api-client'
 import { COACH_BUBBLE, USER_BUBBLE } from '@/lib/conversation'
 import { KaraokeText, type PlaybackWord as TurnWord } from '@/components/session/KaraokeText'
 import { interviewPlaybackWords } from '@/lib/interview-playback-words'
+import { InterviewFindings } from '@/features/interviews/InterviewFindings'
 import { ConversationPanel } from '@/features/live-session/components/ConversationPanel'
 import type { ChatMessage } from '@/features/live-session/types'
 import { ElevateDeliveryClip, isElevateRecordingReady, watchElevateRecordingDuration } from '@/lib/elevateDeliveryClip'
@@ -1447,6 +1448,8 @@ export function SessionReplay({
           />
         </>
       )}
+
+      {isInterview && !transcriptHidden && <InterviewFindings sessionId={sessionId} />}
 
       {/* Transcript */}
       {isInterview && interviewMessages && !transcriptHidden && effectiveChips.size === 0 ? (

@@ -14,6 +14,7 @@ import { LiveSessionRoom } from '@/features/live-session/components/LiveSessionR
 import type { ChatMessage } from '@/features/live-session/types'
 import { ConversationPanel } from '@/features/live-session/components/ConversationPanel'
 import { interviewConversation } from '@/lib/interview-conversation'
+import { InterviewFindings } from '@/features/interviews/InterviewFindings'
 import { InterviewControls } from '@/features/interviews/InterviewControls'
 
 const difficulties=['Simple','Medium','Complex','Very Complex']
@@ -143,7 +144,7 @@ export function Interviews() {
   const matching=coverage.filter(c=>setup.track.includes(c.track) && setup.experienceBand.includes(c.experienceBand) && setup.startingDifficulty.includes(c.difficulty)).reduce((n,c)=>n+c.count,0)
   return <div className="mx-auto max-w-5xl space-y-6">
     <header className="space-y-2"><h1 className="text-3xl font-semibold">Interviews</h1><p className="text-muted-foreground">Practice technical questions aloud, at your own pace.</p>
-      <p className="text-sm text-muted-foreground">This preview saves questions, answers and recordings for review. Technical evaluation is not enabled yet. Interview activity stays outside Progress Pulse.</p></header>
+      <p className="text-sm text-muted-foreground">This preview saves questions, answers and recordings for review. {(detail ? detail.evaluationEnabled : options?.evaluationAvailable) ? 'Technical feedback is prepared from saved answers.' : 'Technical evaluation is not enabled for this practice.'} Interview activity stays outside Progress Pulse.</p></header>
     {accessError && <p role="alert" className="rounded-lg border p-4">{accessError} Your saved interview history is still available below.</p>}
     {error && <p role="alert" className="text-destructive">{error}</p>}
     {loading && <p role="status">Loading interview…</p>}
@@ -178,6 +179,7 @@ export function Interviews() {
           operationChanged={setOperation} changed={refreshDetail} preparing={()=>live.setAssistantState('unknown')} pause={()=>controller.pause(recorderRef.current)}
           leave={leave} incomplete={leave} reconnect={reconnect} discard={()=>controller.discard(recorderRef.current,adapter)} />} />}
       {!live.token && !detail.endedAt && <div className="rounded-xl border p-5 space-y-3"><p>Your interview is paused. Confirmed answers are saved.</p><div className="flex gap-2"><Button disabled={!options || live.isResuming || loading} onClick={()=>void resume()}>{live.isResuming?'Reconnecting…':'Resume practice'}</Button><Button variant="outline" disabled={live.isLeaving} onClick={()=>void leave()}>End practice</Button></div></div>}
+      <InterviewFindings runId={detail.id} refreshKey={`${current?.id}:${current?.status}`} />
       {conversation.length>0 && <ConversationPanel messages={conversation} stitchAdjacentUserMessages={false} />}
       {detail.endedAt && <Link className="text-sm underline" to={interviewPlaybackPath(detail.sessionId)}>Review answer recordings and communication feedback</Link>}
     </section>}

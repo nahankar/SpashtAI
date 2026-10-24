@@ -1,0 +1,5 @@
+simulation: interview-evaluator
+routing: path
+mocks:
+  - routeKey: bedrock
+    path: ../mocks/bedrock/default.js
