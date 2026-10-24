@@ -325,6 +325,7 @@ function Navbar() {
               <NavFeatureLink feature="replay" to="/replay" label="Replay" />
               <span className="text-muted-foreground/40 select-none" aria-hidden="true">·</span>
               <NavFeatureLink feature="elevate" to="/elevate" label="Elevate" />
+              <span className="text-muted-foreground/40 select-none" aria-hidden="true">·</span>
               <NavFeatureLink feature="interviews" to="/interviews" label="Interviews" />
               <span className="text-muted-foreground/40 select-none" aria-hidden="true">·</span>
               <NavFeatureLink feature="prepare" to="/prepare" label="Prepare" />

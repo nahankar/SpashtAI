@@ -3,6 +3,14 @@ import { chunkSchema, startSchema } from '../src/interviews/practice/contracts'
 
 describe('interview practice input boundaries', () => {
   const setup = { sessionId: 'session_1791800000000_ab123', track: 'Automation Testing', experienceBand: '2-5', startingDifficulty: 'Medium', recordingConsent: true }
+  it('accepts several values per dimension, de-duplicated and sorted', () => {
+    const parsed = startSchema.parse({ ...setup, experienceBand: ['5-8', '0-2', '5-8'], startingDifficulty: ['Medium', 'Simple'], track: ['B', 'A'] })
+    expect(parsed.experienceBand).toEqual(['0-2', '5-8'])
+    expect(parsed.startingDifficulty).toEqual(['Medium', 'Simple'].sort())
+    expect(parsed.track).toEqual(['A', 'B'])
+    expect(startSchema.safeParse({ ...setup, experienceBand: [] }).success).toBe(false)
+    expect(startSchema.safeParse({ ...setup, experienceBand: ['0-2', 'Unknown'] }).success).toBe(false)
+  })
   it('accepts the existing shared controller session ID and rejects caller-owned policy fields', () => {
     expect(startSchema.parse(setup).durationMinutes).toBe(10)
     for (const extra of [{ ownerId: 'someone' }, { namespace: 'other-bank' }, { purpose: 'COMMUNICATION' }, { contextScope: 'COMMUNICATION_PROFILE' }]) {

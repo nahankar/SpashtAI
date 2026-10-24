@@ -4,10 +4,17 @@ export const PRACTICE_NAMESPACE = 'automation-pilot'
 export const MAX_QUESTIONS = 8
 export const MAX_ANSWER_LENGTH = 8000
 const id = z.string().min(1).max(160)
+// A setup picks one or more values per dimension. Runs persist them '|'-joined
+// (a single value is stored exactly as before), de-duplicated and sorted.
+const selection = <T extends z.ZodTypeAny>(item: T) =>
+  z.union([item.transform(v => [v as string]), z.array(item).min(1).max(20)]).transform(v => [...new Set(v as string[])].sort())
+export const SELECTION_SEPARATOR = '|'
+export const joinSelection = (values: string[]) => values.join(SELECTION_SEPARATOR)
+export const splitSelection = (stored: string) => stored.split(SELECTION_SEPARATOR).filter(Boolean)
 export const startSchema = z.object({
-  sessionId: id.regex(/^[a-zA-Z0-9_-]+$/), track: z.string().trim().min(1).max(120),
-  experienceBand: z.enum(['0-2', '2-5', '5-8', '8+']),
-  startingDifficulty: z.enum(['Simple', 'Medium', 'Complex', 'Very Complex']),
+  sessionId: id.regex(/^[a-zA-Z0-9_-]+$/), track: selection(z.string().trim().min(1).max(120).regex(/^[^|]+$/)),
+  experienceBand: selection(z.enum(['0-2', '2-5', '5-8', '8+'])),
+  startingDifficulty: selection(z.enum(['Simple', 'Medium', 'Complex', 'Very Complex'])),
   durationMinutes: z.union([z.literal(5), z.literal(10), z.literal(15)]).default(10),
   recordingConsent: z.literal(true),
 }).strict()

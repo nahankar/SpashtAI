@@ -1,6 +1,9 @@
 import { ApiError, apiClient } from './api-client'
 export const INTERVIEWS_API = '/api/interviews'
-export type InterviewSetup = { track: string; experienceBand: string; startingDifficulty: string; durationMinutes: number; recordingConsent: true }
+// Runs store multi-select choices '|'-joined; single values from older runs read the same.
+export const selectionList = (stored: string) => stored.split('|').filter(Boolean)
+export const selectionLabel = (stored: string, suffix = '') => selectionList(stored).map(v => v + suffix).join(', ')
+export type InterviewSetup = { track: string[]; experienceBand: string[]; startingDifficulty: string[]; durationMinutes: number; recordingConsent: true }
 export type InterviewAttempt = {
   id: string; index: number; status: 'PREPARED'|'ASKED'|'ANSWERED'|'SKIPPED'|'INCOMPLETE'; assistance: string;
   question: { text: string; track: string; topic: string; difficulty: string; expectedDepth: string };

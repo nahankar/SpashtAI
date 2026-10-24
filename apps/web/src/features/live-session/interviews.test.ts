@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fixture, recorder } from './test-fixtures'
 import { interviewsAdapter } from './adapters/interviews'
-const setup={track:'Automation Testing',experienceBand:'2-5',startingDifficulty:'Medium',durationMinutes:10,recordingConsent:true as const}
+const setup={track:['Automation Testing'],experienceBand:['2-5'],startingDifficulty:['Medium'],durationMinutes:10,recordingConsent:true as const}
 function pilot(){
   const f=fixture();let run:string|null=null
   const original=f.fetcher.getMockImplementation()!

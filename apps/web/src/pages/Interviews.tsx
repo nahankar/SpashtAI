@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { MultiSelect } from '@/components/ui/multi-select'
 import { RetainCheckbox } from '@/components/session/SessionRetain'
 import type { SessionRecorderHandle } from '@/components/session/SessionRecorder'
 import { apiClient } from '@/lib/api-client'
-import { getInterview, interviewWrite, interviewHistoryPath, interviewPlaybackPath, INTERVIEWS_API, type InterviewHistory, type InterviewOptions, type InterviewRun, type InterviewSetup, type InterviewOperation } from '@/lib/interview-practice'
+import { getInterview, interviewWrite, interviewHistoryPath, interviewPlaybackPath, INTERVIEWS_API, selectionLabel, type InterviewHistory, type InterviewOptions, type InterviewRun, type InterviewSetup, type InterviewOperation } from '@/lib/interview-practice'
 import { useLiveSession } from '@/features/live-session/useLiveSession'
 import { liveSessionApi } from '@/features/live-session/browser'
 import { interviewsAdapter } from '@/features/live-session/adapters/interviews'
@@ -22,7 +23,7 @@ export function Interviews() {
   const [params,setParams]=useSearchParams(); const selected=params.get('run')
   const [options,setOptions]=useState<InterviewOptions|null>(null); const [optionsLoaded,setOptionsLoaded]=useState(false)
   const [history,setHistory]=useState<InterviewHistory[]>([]); const [detail,setDetail]=useState<InterviewRun|null>(null)
-  const [setup,setSetup]=useState({track:'Automation Testing',experienceBand:'2-5',startingDifficulty:'Simple',durationMinutes:10})
+  const [setup,setSetup]=useState<{track:string[];experienceBand:string[];startingDifficulty:string[];durationMinutes:number}>({track:['Automation Testing'],experienceBand:['2-5'],startingDifficulty:['Simple'],durationMinutes:10})
   const [consent,setConsent]=useState(false); const [error,setError]=useState(''); const [accessError,setAccessError]=useState('')
   const [loading,setLoading]=useState(false); const [messages,setMessages]=useState<ChatMessage[]>([])
   const [observedId,setObservedId]=useState<string|null>(null)
@@ -66,7 +67,7 @@ export function Interviews() {
       if (results[0].status==='fulfilled') {
         const result=results[0].value; setOptions(result)
         const initial=result.coverage.find(c=>c.track==='Automation Testing' && c.difficulty==='Simple') ?? result.coverage[0]
-        if (initial) setSetup(s=>({...s,track:initial.track,experienceBand:initial.experienceBand,startingDifficulty:initial.difficulty}))
+        if (initial) setSetup(s=>({...s,track:[initial.track],experienceBand:[initial.experienceBand],startingDifficulty:[initial.difficulty]}))
       } else setAccessError(results[0].reason instanceof Error ? results[0].reason.message : 'Interview practice is unavailable')
       if (results[1].status==='fulfilled') setHistory(results[1].value.runs)
       setOptionsLoaded(true)
@@ -139,15 +140,7 @@ export function Interviews() {
   }
   const coverage=options?.coverage ?? []
   const tracks=[...new Set(coverage.map(c=>c.track))].sort()
-  const experience=bands.filter(b=>coverage.some(c=>c.track===setup.track && c.experienceBand===b))
-  const levels=difficulties.filter(d=>coverage.some(c=>c.track===setup.track && c.experienceBand===setup.experienceBand && c.difficulty===d))
-  const matching=coverage.find(c=>c.track===setup.track && c.experienceBand===setup.experienceBand && c.difficulty===setup.startingDifficulty)?.count ?? 0
-  function choose(track:string,experienceBand=setup.experienceBand) {
-    const choices=coverage.filter(c=>c.track===track)
-    const band=choices.some(c=>c.experienceBand===experienceBand)?experienceBand:choices[0]?.experienceBand ?? '2-5'
-    const available=difficulties.filter(d=>choices.some(c=>c.experienceBand===band && c.difficulty===d))
-    setSetup(s=>({...s,track,experienceBand:band,startingDifficulty:available.includes(s.startingDifficulty)?s.startingDifficulty:available[0] ?? 'Simple'}))
-  }
+  const matching=coverage.filter(c=>setup.track.includes(c.track) && setup.experienceBand.includes(c.experienceBand) && setup.startingDifficulty.includes(c.difficulty)).reduce((n,c)=>n+c.count,0)
   return <div className="mx-auto max-w-5xl space-y-6">
     <header className="space-y-2"><h1 className="text-3xl font-semibold">Interviews</h1><p className="text-muted-foreground">Practice technical questions aloud, at your own pace.</p>
       <p className="text-sm text-muted-foreground">This preview saves questions, answers and recordings for review. Technical evaluation is not enabled yet. Interview activity stays outside Progress Pulse.</p></header>
@@ -157,9 +150,9 @@ export function Interviews() {
     {!selected && <section className="rounded-xl border bg-card p-5 space-y-5">
       <h2 className="text-xl font-semibold">Start interview practice</h2>
       <div className="grid gap-4 sm:grid-cols-2">
-        <label className="space-y-1 text-sm">Track<select className={selectClass} value={setup.track} disabled={!options} onChange={e=>choose(e.target.value)}>{tracks.map(t=><option key={t}>{t}</option>)}</select></label>
-        <label className="space-y-1 text-sm">Experience<select className={selectClass} value={setup.experienceBand} disabled={!options} onChange={e=>choose(setup.track,e.target.value)}>{experience.map(b=><option key={b} value={b}>{b} years</option>)}</select></label>
-        <label className="space-y-1 text-sm">Starting difficulty<select className={selectClass} value={setup.startingDifficulty} disabled={!options} onChange={e=>setSetup(s=>({...s,startingDifficulty:e.target.value}))}>{levels.map(d=><option key={d}>{d}</option>)}</select></label>
+        <MultiSelect label="Track" disabled={!options} options={tracks.map(t=>({value:t,label:t}))} value={setup.track} onChange={track=>setSetup(s=>({...s,track}))} />
+        <MultiSelect label="Experience" disabled={!options} options={bands.map(b=>({value:b,label:`${b} years`}))} value={setup.experienceBand} onChange={experienceBand=>setSetup(s=>({...s,experienceBand}))} />
+        <MultiSelect label="Difficulty" disabled={!options} options={difficulties.map(d=>({value:d,label:d}))} value={setup.startingDifficulty} onChange={startingDifficulty=>setSetup(s=>({...s,startingDifficulty}))} />
         <label className="space-y-1 text-sm">Practice time<select className={selectClass} value={setup.durationMinutes} onChange={e=>setSetup(s=>({...s,durationMinutes:Number(e.target.value)}))}>{[5,10,15].map(n=><option key={n} value={n}>{n} minutes</option>)}</select></label>
       </div>
       <p className="text-sm text-muted-foreground">{!options ? 'Practice becomes available once your pilot access and voice pipeline are enabled.' : matching ? `${matching} eligible questions · up to ${Math.min(matching,8)} per practice · pauses do not use practice time` : 'No reviewed questions are ready for this selection. Choose another combination or ask an administrator to confirm a pilot set.'}</p>
@@ -168,7 +161,7 @@ export function Interviews() {
       {history.some(h=>!h.endedAt) && <p className="text-sm text-muted-foreground">Resume or end your unfinished interview below before starting another.</p>}
     </section>}
     {detail && <section className="space-y-4">
-      <div className="flex flex-wrap justify-between gap-3"><h2 className="text-xl font-semibold">{detail.track} practice</h2><Link className="text-sm underline" to="/interviews" onClick={e=> { if (live.token) { e.preventDefault(); toast.info('Pause or end this practice before opening history.') } }}>Interview history</Link></div>
+      <div className="flex flex-wrap justify-between gap-3"><h2 className="text-xl font-semibold">{selectionLabel(detail.track)} practice</h2><Link className="text-sm underline" to="/interviews" onClick={e=> { if (live.token) { e.preventDefault(); toast.info('Pause or end this practice before opening history.') } }}>Interview history</Link></div>
       {current && !detail.endedAt && <div className="rounded-xl border p-5 space-y-2"><p className="text-sm text-muted-foreground">Question {current.index} · {current.question.difficulty} · {current.question.topic}</p><p className="text-lg font-medium whitespace-pre-wrap">{current.question.text}</p><p className="text-sm text-muted-foreground">{current.question.expectedDepth}</p></div>}
       {live.token && live.url && current && <LiveSessionRoom {...live} token={live.token} url={live.url} recorderRef={recorderRef}
         handleDisconnected={()=>controller.onDisconnected(recorderRef.current,{sessionId:live.sessionId,segmentId:live.segmentId})}
@@ -190,7 +183,7 @@ export function Interviews() {
     </section>}
     {!selected && <section className="space-y-3"><h2 className="text-xl font-semibold">Your interview history</h2><p className="text-sm text-muted-foreground">Unfinished practice closes after 24 hours without activity. Retain one interview to keep it open.</p>
       {!history.length && <p className="text-sm text-muted-foreground">Your interviews will appear here.</p>}
-      {history.map(h=><article key={h.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4"><div><h3 className="font-medium">{h.track}</h3><p className="text-sm text-muted-foreground">{h.startingDifficulty} · {h.experienceBand} years · {new Date(h.startedAt).toLocaleString()} · {h.endedAt?'Ended':'In progress'}</p></div><div className="flex items-center gap-3">{!h.endedAt && <RetainCheckbox sessionId={h.sessionId} retained={!!h.retainedAt} onChange={result=>setHistory(rows=>rows.map(r=>({...r,retainedAt:r.sessionId===h.sessionId?result.retainedAt:result.releasedSessionIds.includes(r.sessionId)?null:r.retainedAt})))} />}<Link className="text-sm underline" to={interviewHistoryPath(h)}>{h.endedAt?'Review':'Resume'}</Link></div></article>)}
+      {history.map(h=><article key={h.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4"><div><h3 className="font-medium">{selectionLabel(h.track)}</h3><p className="text-sm text-muted-foreground">{selectionLabel(h.startingDifficulty)} · {selectionLabel(h.experienceBand,' years')} · {new Date(h.startedAt).toLocaleString()} · {h.endedAt?'Ended':'In progress'}</p></div><div className="flex items-center gap-3">{!h.endedAt && <RetainCheckbox sessionId={h.sessionId} retained={!!h.retainedAt} onChange={result=>setHistory(rows=>rows.map(r=>({...r,retainedAt:r.sessionId===h.sessionId?result.retainedAt:result.releasedSessionIds.includes(r.sessionId)?null:r.retainedAt})))} />}<Link className="text-sm underline" to={interviewHistoryPath(h)}>{h.endedAt?'Review':'Resume'}</Link></div></article>)}
     </section>}
   </div>
 }

@@ -7,7 +7,7 @@ import { activeSegmentDurationSec } from '../../analytics/sessionSegments'
 import { BankError } from '../bank/csv'
 import { learnerEligibleWhere } from '../bank/schemas'
 import { hash, questionSnapshotSchema } from '../evaluator/contracts'
-import { askedSchema, assistanceSchema, chunkSchema, MAX_ANSWER_LENGTH, MAX_QUESTIONS, PRACTICE_NAMESPACE, receiptSchema, startSchema, VOICE_CONSENT_VERSION } from './contracts'
+import { joinSelection, splitSelection, askedSchema, assistanceSchema, chunkSchema, MAX_ANSWER_LENGTH, MAX_QUESTIONS, PRACTICE_NAMESPACE, receiptSchema, startSchema, VOICE_CONSENT_VERSION } from './contracts'
 import { currentInterviewVoiceProfile, practiceExecutionAccess, voiceProfileSchema } from './access'
 
 type Tx = Prisma.TransactionClient
@@ -59,8 +59,8 @@ export async function startPractice(input: unknown, ownerId: string) {
       if (existing.userId !== ownerId) throw new BankError(404, 'Interview not found')
       await lockWritableSession(tx, existing.id)
       const run = existing.interviewRun
-      if (!run || existing.endedAt || run.track !== body.track || run.experienceBand !== body.experienceBand
-        || run.startingDifficulty !== body.startingDifficulty || run.durationMinutes !== body.durationMinutes) {
+      if (!run || existing.endedAt || run.track !== joinSelection(body.track) || run.experienceBand !== joinSelection(body.experienceBand)
+        || run.startingDifficulty !== joinSelection(body.startingDifficulty) || run.durationMinutes !== body.durationMinutes) {
         throw new BankError(409, 'Session ID already belongs to another setup or completed interview')
       }
       return { id: run.id, sessionId: run.sessionId, reused: true }
@@ -68,14 +68,14 @@ export async function startPractice(input: unknown, ownerId: string) {
     const unfinished = await tx.interviewRun.findFirst({ where: { ownerId, session: { endedAt: null, discardedAt: null } } })
     if (unfinished) throw new BankError(409, 'Resume or end your current interview first')
     const eligible = await tx.questionBankQuestion.count({ where: { ...learnerEligibleWhere, namespace: PRACTICE_NAMESPACE,
-      track: body.track, experienceBand: body.experienceBand, difficulty: body.startingDifficulty } })
+      track: { in: body.track }, experienceBand: { in: body.experienceBand }, difficulty: { in: body.startingDifficulty } } })
     if (!eligible) throw new BankError(409, 'No eligible questions match this track, experience and difficulty yet')
     const voice = await currentInterviewVoiceProfile(tx)
     const session = await tx.session.create({ data: { id: body.sessionId, userId: ownerId, module: 'elevate',
-      purpose: 'INTERVIEW', contextScope: 'SESSION_ONLY', sessionName: `${body.track} interview practice`,
+      purpose: 'INTERVIEW', contextScope: 'SESSION_ONLY', sessionName: `${body.track.join(', ')} interview practice`,
       configurationSnapshot: { capturePolicy: 'committed-turns-1', answerCompletion: 'explicit', technicalFeedback: 'pending' } } })
     const run = await tx.interviewRun.create({ data: { sessionId: session.id, ownerId, namespace: PRACTICE_NAMESPACE,
-      track: body.track, experienceBand: body.experienceBand, startingDifficulty: body.startingDifficulty,
+      track: joinSelection(body.track), experienceBand: joinSelection(body.experienceBand), startingDifficulty: joinSelection(body.startingDifficulty),
       durationMinutes: body.durationMinutes, maxQuestions: MAX_QUESTIONS,
       recordingConsentAt: new Date(), recordingConsentVersion: VOICE_CONSENT_VERSION, voiceConfigSnapshot: json(voice) } })
     return { id: run.id, sessionId: session.id, reused: false }
@@ -95,8 +95,8 @@ export async function prepareBankAttempt(runId: string, ownerId: string) {
     const count = await tx.interviewAttempt.count({ where: { runId } })
     if (count >= run.maxQuestions) throw new BankError(409, 'You have completed the questions for this practice.', 'PRACTICE_QUESTION_LIMIT')
     const where: Prisma.QuestionBankQuestionWhereInput = { ...learnerEligibleWhere, namespace: run.namespace,
-      track: run.track, experienceBand: run.experienceBand, difficulty: run.startingDifficulty,
-      interviewAttempts: { none: { runId } } }
+      track: { in: splitSelection(run.track) }, experienceBand: { in: splitSelection(run.experienceBand) },
+      difficulty: { in: splitSelection(run.startingDifficulty) }, interviewAttempts: { none: { runId } } }
     const candidates = await tx.questionBankQuestion.findMany({ where, take: 2000 })
     const exposure = await tx.interviewAttempt.findMany({ where: { run: { ownerId }, runId: { not: runId },
       askedAt: { gte: new Date(Date.now() - 14 * 86400000) }, questionId: { not: null } }, select: { questionId: true, askedAt: true } })
