@@ -108,6 +108,44 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
     }
     await prisma.$disconnect()
   })
+  it('creates, retries and reads a multi-selection run through PostgreSQL, including long combined tracks', async () => {
+    const longTrack = `${fixture}-${'long-track-'.repeat(9)}`
+    const q = await createQuestion({ namespace: 'automation-pilot', externalQid: `${fixture}-multi` },
+      { ...readyDraft(), track: longTrack, difficulty: 'Simple', experienceBand: '0-2' }, admin)
+    questions.push(q)
+    await confirmProvenance({ questions: [{ id: q, revision: 1 }], confirmed: true, note: 'Original disposable multi-selection integration test content.' }, admin)
+    await questionAction(q, 1, 'approve_activate', admin)
+    const body = { ...setup(), track: [longTrack, fixture], experienceBand: ['2-5', '0-2'], startingDifficulty: ['Medium', 'Simple'] }
+    const response = await request(app).post('/practice/runs').auth(token(owner), { type: 'bearer' }).send(body)
+    expect(response.status).toBe(201)
+    const r = response.body
+    expect((await startPractice({ ...body, track: [fixture, longTrack, fixture], startingDifficulty: ['Simple', 'Medium'] }, owner)).id).toBe(r.id)
+    const detail = await practiceDetail(r.id, owner)
+    expect(detail.track.length).toBeGreaterThan(120)
+    expect(detail.track.split('|')).toEqual([fixture, longTrack].sort())
+    expect(detail.startingDifficulty).toBe('Medium|Simple')
+    const s = await segment(r.sessionId)
+    const selected = []
+    for (let i = 0; i < 3; i++) {
+      const a = await prepareBankAttempt(r.id, owner)
+      selected.push(a.question.track)
+      expect(['Simple', 'Medium']).toContain(a.question.difficulty)
+      expect([fixture, longTrack]).toContain(a.question.track)
+      await markQuestionAsked(a.id, { segmentId: s.id, questionText: a.question.text })
+      await finish(r.id, a.id, true)
+    }
+    expect(selected).toContain(longTrack)
+    expect((await practiceHistory(owner)).runs.find(h => h.id === r.id)?.startingDifficulty).toBe(detail.startingDifficulty)
+    await expect(prepareBankAttempt(r.id, owner)).rejects.toMatchObject({ code: 'QUESTION_BANK_EXHAUSTED' })
+  })
+  it('rejects malformed stored selections independently of request parsing', async () => {
+    const rows = await prisma.$queryRaw<Array<{ empty: boolean; duplicate: boolean; invalid: boolean; valid: boolean }>>`
+      SELECT public.valid_interview_selection('Simple|', ARRAY['Simple','Medium'], 4, 12) AS empty,
+        public.valid_interview_selection('Simple|Simple', ARRAY['Simple','Medium'], 4, 12) AS duplicate,
+        public.valid_interview_selection('Simple|Unknown', ARRAY['Simple','Medium'], 4, 12) AS invalid,
+        public.valid_interview_selection('Medium|Simple', ARRAY['Simple','Medium'], 4, 12) AS valid`
+    expect(rows[0]).toEqual({ empty: false, duplicate: false, invalid: false, valid: true })
+  })
   it('uses server purpose and current rollout/grants; deduplicates concurrent starts', async () => {
     await prisma.platformFeatureFlag.update({ where: { feature: 'interviews' }, data: { disabled: true } })
     await expect(run()).rejects.toMatchObject({ status: 403 })
