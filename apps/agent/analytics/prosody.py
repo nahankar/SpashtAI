@@ -39,12 +39,31 @@ def _to_wav(audio_path: str) -> tuple[str, Optional[str]]:
         return audio_path, None
     tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
     tmp.close()
-    subprocess.run(
-        ["ffmpeg", "-y", "-i", audio_path, "-ar", "16000", "-ac", "1",
-         "-acodec", "pcm_s16le", tmp.name],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120, check=True,
-    )
+    try:
+        subprocess.run(
+            ["ffmpeg", "-nostdin", "-y", "-i", audio_path, "-vn", "-ar", "16000", "-ac", "1",
+             "-acodec", "pcm_s16le", tmp.name],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20, check=True,
+        )
+    except Exception:
+        Path(tmp.name).unlink(missing_ok=True)
+        raise
     return tmp.name, tmp.name
+
+
+def load_praat_sound(audio_path: str):
+    """Decode browser audio using the same clock-preserving WAV conversion as
+    prosody. Praat loads samples into memory, so the temporary file can be
+    removed before returning. The original recording is never changed.
+    """
+    import parselmouth
+
+    wav_path, cleanup = _to_wav(audio_path)
+    try:
+        return parselmouth.Sound(wav_path)
+    finally:
+        if cleanup:
+            Path(cleanup).unlink(missing_ok=True)
 
 
 def _detect_pauses(audio_path: str) -> tuple[int, float]:
@@ -81,8 +100,9 @@ def analyze_prosody(audio_path: str) -> Optional[dict]:
         logger.warning("prosody: parselmouth/numpy unavailable (%s)", e)
         return None
 
-    wav_path, cleanup = _to_wav(audio_path)
+    cleanup = None
     try:
+        wav_path, cleanup = _to_wav(audio_path)
         sound = parselmouth.Sound(wav_path)
 
         # Constrain f0 to a human speech band so the long quiet stretches (coach

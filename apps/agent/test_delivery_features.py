@@ -1,8 +1,11 @@
 import tempfile
+import hashlib
+import subprocess
 import unittest
 import wave
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
@@ -292,6 +295,88 @@ class DeliveryFeatureExtractionTest(unittest.TestCase):
         second = [item.to_dict() for item in extract_delivery_features(self.request)]
 
         self.assertEqual(first, second)
+
+    def test_tiny_aligned_words_do_not_crash_other_acoustic_observations(self) -> None:
+        words = (replace(self.turn.words[0], end_sec=0.51), *self.turn.words[1:])
+        result = extract_delivery_feature_result(replace(self.request,
+            turns=(replace(self.turn, words=words),)))
+        self.assertEqual(result.state, "available")
+        self.assertGreater(result.observations[0].raw_features["voiced_duration_sec"], 0)
+        self.assertEqual(result.observations[0].raw_features["pause_intervals"][0]["start_sec"], 0.51)
+
+    def test_only_tiny_word_windows_return_insufficient_evidence_without_invented_pitch(self) -> None:
+        words = tuple(replace(word, end_sec=word.start_sec+0.01) for word in self.turn.words)
+        result = extract_delivery_feature_result(replace(self.request,
+            turns=(replace(self.turn, words=words),)))
+        self.assertEqual(result.state, "insufficient_evidence")
+        self.assertEqual(result.observations[0].evidence_state, "insufficient_evidence")
+        self.assertIsNone(result.observations[0].raw_features["mean_f0_hz"])
+        self.assertEqual(result.observations[0].raw_features["voiced_duration_sec"], 0)
+
+    def test_browser_webm_is_decoded_without_changing_clock_or_original(self) -> None:
+        webm = self.audio_path.with_suffix(".webm")
+        subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-i", str(self.audio_path),
+            "-c:a", "libopus", str(webm)], check=True, timeout=20, capture_output=True)
+        original_hash = hashlib.sha256(webm.read_bytes()).hexdigest()
+        converted = []
+        create_temp = tempfile.NamedTemporaryFile
+
+        def track_temp(*args, **kwargs):
+            result = create_temp(*args, **kwargs)
+            converted.append(Path(result.name))
+            return result
+
+        with patch("analytics.prosody.tempfile.NamedTemporaryFile", side_effect=track_temp):
+            result = extract_delivery_feature_result(replace(self.request,
+                audio_path=str(webm), segments=(SegmentClock("segment", 0.0, 6.0),)))
+        self.assertEqual(result.state, "available")
+        observation = result.observations[0]
+        self.assertEqual(observation.start_sec, self.turn.start_sec)
+        self.assertEqual(observation.end_sec, self.turn.end_sec)
+        self.assertEqual(observation.audio_input_signature, "server-signature")
+        self.assertEqual(observation.raw_features["pause_intervals"][1]["duration_sec"], 0.8)
+        self.assertGreater(observation.raw_features["voiced_duration_sec"], 0)
+        self.assertTrue(converted)
+        self.assertTrue(all(not path.exists() for path in converted))
+        self.assertEqual(hashlib.sha256(webm.read_bytes()).hexdigest(), original_hash)
+
+    def test_corrupt_browser_recording_fails_closed_and_removes_temporary_audio(self) -> None:
+        webm = self.audio_path.with_suffix(".webm")
+        webm.write_bytes(b"invalid browser audio")
+        converted = []
+        create_temp = tempfile.NamedTemporaryFile
+
+        def track_temp(*args, **kwargs):
+            result = create_temp(*args, **kwargs)
+            converted.append(Path(result.name))
+            return result
+
+        with patch("analytics.prosody.tempfile.NamedTemporaryFile", side_effect=track_temp):
+            result = extract_delivery_feature_result(replace(self.request, audio_path=str(webm)))
+        self.assertEqual(result.state, "suppressed")
+        self.assertEqual(result.reason, "recording_unreadable")
+        self.assertEqual(result.observations, ())
+        self.assertTrue(converted)
+        self.assertTrue(all(not path.exists() for path in converted))
+
+    def test_conversion_timeout_is_bounded_and_cleans_up(self) -> None:
+        webm = self.audio_path.with_suffix(".webm")
+        webm.write_bytes(b"browser audio")
+        converted = []
+        create_temp = tempfile.NamedTemporaryFile
+
+        def track_temp(*args, **kwargs):
+            result = create_temp(*args, **kwargs)
+            converted.append(Path(result.name))
+            return result
+
+        with patch("analytics.prosody.tempfile.NamedTemporaryFile", side_effect=track_temp), \
+             patch("analytics.prosody.subprocess.run", side_effect=subprocess.TimeoutExpired("ffmpeg", 20)) as convert:
+            result = extract_delivery_feature_result(replace(self.request, audio_path=str(webm)))
+        self.assertEqual(result.reason, "recording_unreadable")
+        self.assertEqual(convert.call_args.kwargs["timeout"], 20)
+        self.assertTrue(converted)
+        self.assertTrue(all(not path.exists() for path in converted))
 
 
 if __name__ == "__main__":

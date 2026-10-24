@@ -13,6 +13,8 @@ from typing import Any, Iterable, Literal, Mapping, Sequence
 
 import numpy as np
 
+from analytics.prosody import load_praat_sound
+
 EvidenceState = Literal["available", "insufficient_evidence", "suppressed"]
 TimingOrigin = Literal["actual", "forced_alignment", "synthetic", "unknown"]
 AlignmentClock = Literal["merged", "segment"]
@@ -20,6 +22,9 @@ AlignmentClock = Literal["merged", "segment"]
 _VERIFIED_ORIGINS = {"actual", "forced_alignment"}
 _MIN_ALIGNMENT_COVERAGE = 0.95
 _CLIP_CONTEXT_SEC = 0.8
+# Praat needs several pitch periods inside a window. Tiny aligned words remain
+# usable for transcript/pause timing but cannot support these acoustic measures.
+_MIN_ACOUSTIC_WORD_SEC = 0.1
 
 
 @dataclass(frozen=True)
@@ -318,6 +323,8 @@ def _extract_acoustics(
     pitch_step = 0.0
 
     for _, start_sec, end_sec in word_spans:
+        if end_sec - start_sec < _MIN_ACOUSTIC_WORD_SEC:
+            continue
         window = sound.extract_part(
             from_time=start_sec,
             to_time=end_sec,
@@ -422,9 +429,7 @@ def extract_delivery_feature_result(
         return DeliveryFeatureResult("suppressed", "recording_missing", ())
 
     try:
-        import parselmouth
-
-        sound = parselmouth.Sound(str(audio_path))
+        sound = load_praat_sound(str(audio_path))
     except Exception:
         return DeliveryFeatureResult("suppressed", "recording_unreadable", ())
 
