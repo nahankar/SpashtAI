@@ -44,11 +44,12 @@ export function InterviewControls({ runId, attemptId, segmentId, status, ready, 
     return () => { room.localParticipant.off(ParticipantEvent.LocalTrackPublished,sync); room.off(RoomEvent.Reconnected,sync) }
   },[room])
   useEffect(() => {
-    desiredMic.current=canSpeak && status==='ASKED' && !blocked && !busy && !error && !timeUp
+    // The time limit stops new questions, not speech for the open answer.
+    desiredMic.current=canSpeak && status==='ASKED' && !blocked && !busy && !error
     const track=room.localParticipant.getTrackPublication(Track.Source.Microphone)?.track?.mediaStreamTrack
     if (track) track.enabled=desiredMic.current
     setMuted(!desiredMic.current)
-  },[canSpeak,status,blocked,busy,error,timeUp,room])
+  },[canSpeak,status,blocked,busy,error,room])
   useEffect(() => {
     const control=(bytes: Uint8Array, participant: { isAgent: boolean; metadata?: string }|undefined, _kind: unknown, topic?: string) => {
       if (topic!=='lk.control' || !participant?.isAgent) return
@@ -135,7 +136,7 @@ export function InterviewControls({ runId, attemptId, segmentId, status, ready, 
       {status==='ASKED' && <><Button disabled={!canSpeak || busy || blocked || !!error} onClick={() => void action('FINISH')}>Finish answer</Button>
         <Button variant="outline" disabled={!canSpeak || busy || blocked || !!error} onClick={() => void action('SKIP')}>Skip question</Button></>}
       {['ANSWERED','SKIPPED'].includes(status) && !completionMessage && <Button disabled={busy || blocked || timeUp} onClick={() => void next()}>Next question</Button>}
-      <Button variant="outline" disabled={!canSpeak || status!=='ASKED' || busy || blocked || !!error || timeUp} onClick={() => microphone(muted)}>{muted ? 'Unmute' : 'Mute'}</Button>
+      <Button variant="outline" disabled={!canSpeak || status!=='ASKED' || busy || blocked || !!error} onClick={() => microphone(muted)}>{muted ? 'Unmute' : 'Mute'}</Button>
       <Button variant="outline" disabled={!canSpeak || busy || blocked || !!error} onClick={() => void action('PAUSE')}>Pause</Button>
       <Button variant="secondary" disabled={!canSpeak || busy || blocked || !!error} onClick={() => void action('LEAVE')}>End practice</Button>
       <Button variant="ghost" disabled={busy || blocked} onClick={() => setConfirmDiscard(true)}>Discard</Button>

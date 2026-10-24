@@ -140,8 +140,8 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
         ctx.add_shutdown_callback(shutdown)
         async def duration_limit():
             await asyncio.sleep(state["secondsRemaining"])
-            capture.time_up = True
-            session.input.set_audio_enabled(False)
+            # Leave the current answer open, including when a resumed segment
+            # starts with zero time remaining. New questions are server-fenced.
             await ctx.room.local_participant.publish_data(json.dumps({"type":"interview_time_up",
                 "text":"Practice time is up. Finish your current answer or end practice."}).encode(), topic="lk.control")
         duration_task = asyncio.create_task(duration_limit())

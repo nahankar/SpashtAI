@@ -31,7 +31,6 @@ class InterviewCapture:
         self.lock = asyncio.Lock()
         self.finished_requests = {}
         self.sealed = False
-        self.time_up = False
 
     def observe_provider_transcript(self, text: str, is_final: bool) -> None:
         if not self.accepting or not text or not text.strip():
@@ -135,7 +134,9 @@ class InterviewCapture:
             self.pending_audio = False
             self.accepting = True
             session.clear_user_turn()
-            session.input.set_audio_enabled(not self.time_up)
+            # An expired practice can resume its existing question. The server
+            # fences new questions; keep this answer recordable until drained.
+            session.input.set_audio_enabled(True)
             return attempt
 
 
