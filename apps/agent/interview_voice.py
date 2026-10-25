@@ -68,6 +68,8 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
         def speech_started(event):
             if event.new_state == "speaking":
                 capture.observe_speech_start()
+            elif event.old_state == "speaking":
+                capture.observe_speech_end()
 
         class InterviewAgent(Agent):
             def __init__(self):
@@ -108,7 +110,8 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
                             await ctx.room.local_participant.publish_data(json.dumps({"type": "session_state", "text": "greeting_failed"}).encode(), topic="lk.control")
                     question_task = asyncio.create_task(ask_saved_question())
                     return json.dumps({"asking": True})
-                return json.dumps(await capture.drain(session, body["action"], body["requestId"]))
+                return json.dumps(await capture.drain(session, body["action"], body["requestId"],
+                                                      accept_unresolved=body.get("acceptUnresolved", False)))
             except CaptureUnavailable as error:
                 return json.dumps({"error": error.code})
             except Exception as error:
