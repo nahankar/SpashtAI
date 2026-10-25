@@ -89,7 +89,7 @@ practiceAgentRouter.post('/attempts/:attemptId/finish', route(async (req, res) =
     wakeLearnerEvaluator()
     const owner = await prisma.user.findUnique({ where: { id: ownerId }, select: { role: true } })
     recordUserFeatureUsage({ userId: ownerId, role: owner?.role }, 'interviews', result.status === 'SKIPPED' ? 'answer_skipped' : 'answer_completed', null, {
-      outcome: result.status === 'SKIPPED' ? 'skipped' : 'completed', metadata: { completion: 'coordinator' },
+      outcome: result.status === 'SKIPPED' ? 'skipped' : 'completed', metadata: { source: 'coordinator' },
     })
   }
   res.json(result)

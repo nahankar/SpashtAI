@@ -228,7 +228,9 @@ export async function practiceDetail(runId: string, ownerId: string) {
     return { id: run.id, sessionId: run.sessionId, track: run.track, experienceBand: run.experienceBand,
       startingDifficulty: run.startingDifficulty, durationMinutes: run.durationMinutes, ...session,
       recordingConsentAt: run.recordingConsentAt, recordingConsentVersion: run.recordingConsentVersion,
-      evaluationEnabled: run.evaluationPolicySnapshot !== null, conversationMode: run.conversationPolicySnapshot !== null,
+      // Conversation only while the run pinned it and the owner still has access, matching the agent's voiceState.
+      evaluationEnabled: run.evaluationPolicySnapshot !== null,
+      conversationMode: run.conversationPolicySnapshot !== null && await conversationAccess(ownerId, tx),
       attempts: attempts.map(a => ({ ...learnerAttempt(a), completionReason: a.completionReason,
         capturedText: a.chunks.sort((x,y) => x.segment.segmentIndex-y.segment.segmentIndex || x.localTurnIndex-y.localTurnIndex).map(c => c.text).join('\n'),
         capturedParts: a.chunks.map(c => ({ segmentId: c.segmentId, sourceTurnId: c.sourceTurnId, text: c.text, createdAt: c.createdAt })),
@@ -298,9 +300,16 @@ export async function voiceState(sessionId: string, segmentId: string, room: str
       conversation: { enabled: policy.success && await conversationAccess(run.ownerId, tx), policy: policy.success ? policy.data : null },
       // Speech saved for this answer in earlier segments, and a completion receipt the server has not applied yet.
       attemptHasSpeech: open && (await tx.interviewAnswerChunk.count({ where: { attemptId: attempt.id } })) > 0,
-      unfinishedReceipt: open ? await tx.interviewCaptureReceipt.findFirst({ where: { attemptId: attempt.id, action: { in: ['FINISH', 'SKIP'] } },
-        select: { id: true, action: true, segmentId: true } }) : null }
+      unfinishedReceipt: open ? await unfinishedReceipt(tx, attempt.id) : null }
   })
+}
+/** The newest completion receipt of an open attempt, unless speech saved after it shows the learner went on answering. */
+async function unfinishedReceipt(tx: Prisma.TransactionClient, attemptId: string) {
+  const receipt = await tx.interviewCaptureReceipt.findFirst({ where: { attemptId, action: { in: ['FINISH', 'SKIP'] } },
+    orderBy: { createdAt: 'desc' }, select: { id: true, action: true, segmentId: true, createdAt: true } })
+  if (!receipt) return null
+  const later = await tx.interviewAnswerChunk.count({ where: { attemptId, createdAt: { gt: receipt.createdAt } } })
+  return later ? null : { id: receipt.id, action: receipt.action, segmentId: receipt.segmentId }
 }
 /** The run an internal coordinator call acts for: the owner's, and only while conversation is enabled for it. */
 async function conversationRun(where: { attemptId: string } | { runId: string }) {

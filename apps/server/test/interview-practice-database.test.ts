@@ -392,7 +392,17 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
     await request(app).put(`/flags/interview_conversation/grants/${owner}`).auth(token(admin, 'SUPER_ADMIN'), { type: 'bearer' }).send({ granted: false })
     state = await voiceState(r.sessionId, s.id, s.roomName, `user_${owner}`)
     expect(state.conversation.enabled).toBe(false)
+    // The browser follows the same rule, so it shows manual controls to match the manual agent.
+    expect((await practiceDetail(r.id, owner)).conversationMode).toBe(false)
     expect((await finish(r.id, a.id)).status).toBe('ANSWERED')
+  })
+  it('never offers an older completion receipt once the learner has said more for that answer', async () => {
+    const { r, a, s } = await asked(); await captureCommittedTurn(a.id, turn(s.id, testAnswer))
+    await receipt(a.id, s.id)
+    await prisma.sessionSegment.update({ where: { id: s.id }, data: { endedAt: new Date() } })
+    const next = await segment(r.sessionId, 1)
+    await captureCommittedTurn(a.id, turn(next.id, 'More after reconnecting.'))
+    expect((await voiceState(r.sessionId, next.id, next.roomName, `user_${owner}`)).unfinishedReceipt).toBeNull()
   })
   it('lets a FINISH receipt complete an answer whose segment closed before the finish call', async () => {
     const { r, a, s } = await asked(); await captureCommittedTurn(a.id, turn(s.id, testAnswer))
