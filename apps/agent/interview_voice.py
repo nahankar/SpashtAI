@@ -10,6 +10,7 @@ import aiohttp
 from livekit.agents import Agent, stt, room_io
 from livekit import rtc
 from interview_capture import CaptureUnavailable, InterviewCapture, parse_control
+from interview_coordinator import InterviewCoordinator, ServerRefused
 from interview_audio import keep_interview_audio_alive, INTERVIEW_SAMPLE_RATE
 from voice_backends import VoiceBackendConfig, build_interview_session
 
@@ -40,6 +41,26 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
                     await asyncio.sleep(.5 * (2 ** attempt))
             raise CaptureUnavailable("SAVE_FAILED")
 
+        async def request(path, body=None, method="POST"):
+            """Coordinator calls: expected refusals (time up, bank exhausted, access) carry their code."""
+            for attempt in range(3):
+                try:
+                    async with http.request(method, base+path, json=body,
+                        headers={"x-internal-agent-token": token}) as response:
+                        try:
+                            payload = await response.json()
+                        except (aiohttp.ContentTypeError, json.JSONDecodeError, ValueError):
+                            payload = {}
+                        if response.status < 400:
+                            return payload
+                        if response.status < 500 and response.status != 429:
+                            raise ServerRefused(response.status, (payload or {}).get("code"))
+                except (aiohttp.ClientError, asyncio.TimeoutError):
+                    pass
+                if attempt < 2:
+                    await asyncio.sleep(.5 * (2 ** attempt))
+            raise CaptureUnavailable("SAVE_FAILED")
+
         query = urlencode({"room": ctx.room.name, "identity": participant.identity})
         state_path = f"/sessions/{quote(session_id, safe='')}/segments/{quote(segment_id, safe='')}?{query}"
         state = await send(state_path, method="GET")
@@ -64,12 +85,30 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
         question_task = None
         async def ready():
             await ctx.room.local_participant.publish_data(json.dumps({"type": "session_state", "text": "ready"}).encode(), topic="lk.control")
+
+        async def publish_state(name, extra):
+            # Participant attributes persist across reconnects; the data message is only a prompt to re-read.
+            attributes = {"interview.state": name, "interview.attemptId": str(extra.get("attemptId", "")),
+                          "interview.reason": str(extra.get("reason", "")), "interview.handoffAt": str(extra.get("handoffAt", ""))}
+            await ctx.room.local_participant.set_attributes(attributes)
+            await ctx.room.local_participant.publish_data(json.dumps({"type": "interview_state", "state": name, **{k: str(v) for k, v in extra.items()}}).encode(), topic="lk.control")
+            if name == "listening":
+                await ready()
+
+        # Automatic conversation only for runs that pinned it and still have access; others stay manual.
+        conversation = state.get("conversation") or {}
+        coordinator = InterviewCoordinator(capture=capture, session=session, request=request,
+            voice_state=lambda: send(state_path, method="GET"), publish_state=publish_state, run_id=state["runId"],
+            policy=conversation["policy"], attempt_has_speech=bool(state.get("attemptHasSpeech"))) if conversation.get("enabled") else None
+
         @session.on("user_state_changed")
         def speech_started(event):
             if event.new_state == "speaking":
                 capture.observe_speech_start()
             elif event.old_state == "speaking":
                 capture.observe_speech_end()
+            if coordinator is not None and (event.new_state == "speaking" or event.old_state == "speaking"):
+                coordinator.on_vad(event.new_state == "speaking")
 
         class InterviewAgent(Agent):
             def __init__(self):
@@ -80,13 +119,27 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
                     if isinstance(event, stt.SpeechEvent) and event.alternatives:
                         if event.type == stt.SpeechEventType.FINAL_TRANSCRIPT:
                             capture.observe_provider_transcript(event.alternatives[0].text, True)
+                            if coordinator is not None:
+                                coordinator.on_transcript(True)
                         elif event.type == stt.SpeechEventType.INTERIM_TRANSCRIPT:
                             capture.observe_provider_transcript(event.alternatives[0].text, False)
+                            if coordinator is not None and event.alternatives[0].text.strip():
+                                coordinator.on_transcript(False)
                     yield event
 
             async def on_enter(self):
+                receipt = state.get("unfinishedReceipt")
+                if coordinator is not None and receipt:
+                    # A previous connection saved this answer but never finished it on the server.
+                    try:
+                        await coordinator.resume_unfinished(receipt, state["attempt"]["id"])
+                        return
+                    except Exception:
+                        logger.warning("Unfinished interview receipt could not be completed; continuing manually")
                 await capture.activate_question(session, state)
                 await ready()
+                if coordinator is not None:
+                    await coordinator.question_ready(bool(state.get("attemptHasSpeech")))
 
         @ctx.room.local_participant.register_rpc_method("interview.control")
         async def control(data: rtc.RpcInvocationData):
@@ -97,6 +150,30 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
                 body = parse_control(data.payload)
                 if closed.is_set():
                     return json.dumps({"error": "VOICE_DISCONNECTED"})
+                action = body["action"]
+                if action in {"PAUSE", "LEAVE"}:
+                    # Stop a question mid-sentence; the answer it belongs to stays open and is re-read on resume.
+                    capture.interrupt_speech()
+                    if coordinator is not None:
+                        coordinator.suspend()
+                        try:
+                            receipt = await capture.drain(session, action, body["requestId"])
+                        except Exception:
+                            coordinator.suspended = False  # the answer stays open; automatic handoff resumes
+                            raise
+                        coordinator.stop()
+                        return json.dumps(receipt)
+                if action == "REPEAT":
+                    return json.dumps({"repeated": await (coordinator.repeat() if coordinator is not None else capture.repeat_question(session))})
+                if action in {"HOLD", "RESUME_AUTO"}:
+                    if coordinator is not None:
+                        coordinator.set_hold(action == "HOLD")
+                    return json.dumps({"hold": action == "HOLD"})
+                if coordinator is not None and action in {"FINISH", "SKIP"}:
+                    return json.dumps(await coordinator.complete(action, body["requestId"], body.get("attemptId"),
+                                                                 accept_unresolved=body.get("acceptUnresolved", False)))
+                if coordinator is not None and action == "NEXT" and body.get("attemptId"):
+                    return json.dumps(await coordinator.next_after(body["attemptId"]))
                 if body["action"] == "NEXT":
                     if question_task is not None and not question_task.done():
                         return json.dumps({"asking": True})
@@ -114,6 +191,8 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
                                                       accept_unresolved=body.get("acceptUnresolved", False)))
             except CaptureUnavailable as error:
                 return json.dumps({"error": error.code})
+            except ServerRefused as error:
+                return json.dumps({"error": error.code or "SERVER_REFUSED"})
             except Exception as error:
                 logger.warning("Interview control failed without a save acknowledgement (%s)", type(error).__name__)
                 return json.dumps({"error": "SAVE_FAILED"})
