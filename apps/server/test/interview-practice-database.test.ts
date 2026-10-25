@@ -314,6 +314,16 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
     const findings = await request(app).get(`/practice/runs/${r.id}/assessments`).auth(token(owner), { type: 'bearer' })
     expect(findings.body.assessments[0]).toMatchObject({ status: 'COMPLETED', result: { classification: 'NOT_ANSWERED', strengths: [], misconceptions: [] } })
   })
+  it('completes a request-only answer under learner-evaluation-4 as no evidence, without a model call or budget', async () => {
+    await enableLearner()
+    const { r, a, s } = await asked(); await pin(r.id, 'learner-evaluation-4')
+    await captureCommittedTurn(a.id, turn(s.id, 'Can you repeat that question one more time, please?')); const saved = await finish(r.id, a.id)
+    const row = await prisma.interviewAssessment.findUniqueOrThrow({ where: { snapshotId: saved.id! }, include: { usage: true } })
+    expect(row).toMatchObject({ status: 'COMPLETED', attempts: 0 }); expect(row.usage).toHaveLength(0)
+    expect(await ownerBudget()).toBeNull()
+    const findings = await request(app).get(`/practice/runs/${r.id}/assessments`).auth(token(owner), { type: 'bearer' })
+    expect(findings.body.assessments[0].result).toMatchObject({ classification: 'NOT_ANSWERED', responseKind: 'REQUEST_ONLY', strengths: [] })
+  })
   it('records a ledger row at claim that survives lease expiry and takes the late actual usage', async () => {
     await enableLearner()
     const { r, a, s } = await asked(); await captureCommittedTurn(a.id, turn(s.id, testAnswer)); await finish(r.id, a.id)

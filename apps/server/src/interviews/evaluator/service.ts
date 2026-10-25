@@ -3,7 +3,7 @@ import type { Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
 import { BankError } from '../bank/csv'
-import { ACTIONS, CONFIGS, LEARNER_POLICIES, LIMITS, PREVIEW_POLICIES, abstentionResult, adminConfig, configFor, explicitAbstention, explicitDontKnow, hash, previewPolicy, questionSnapshotSchema, submitSchema, supportedConfig, type EvaluationResult, type EvaluatorConfig, type QuestionSnapshot } from './contracts'
+import { ACTIONS, CONFIGS, LEARNER_POLICIES, LIMITS, PREVIEW_POLICIES, adminConfig, configFor, deterministicResult, explicitDontKnow, hash, previewPolicy, questionSnapshotSchema, submitSchema, supportedConfig, type EvaluationResult, type EvaluatorConfig, type QuestionSnapshot } from './contracts'
 import { evaluateAnswer, EvaluationFailure, type Invocation } from './model'
 type Tx = Prisma.TransactionClient
 const FEATURE = 'interview_evaluator'
@@ -35,7 +35,8 @@ export async function enqueueAssessment(input: unknown, ownerId: string) {
   const body = submitSchema.parse(input); const config = adminConfig(body.model)
   // A learner-policy preview follows that policy, including its free deterministic abstention.
   const preview = previewPolicy(config)
-  const abstained = Boolean(preview?.deterministicAbstention && explicitAbstention(body.answer))
+  const deterministic = deterministicResult(preview, body.answer)
+  const abstained = Boolean(deterministic)
   return prisma.$transaction(async tx => {
     await assertAccess(ownerId, tx)
     // Serialize capture with edits/deletion so the supplied revision identifies exactly this text.
@@ -57,7 +58,7 @@ export async function enqueueAssessment(input: unknown, ownerId: string) {
       ownerId, questionId: question.id, questionSnapshot: json(snapshot), questionHash, answerText: body.answer, answerHash,
       assistance: body.assistance, language: body.language,
       assessment: { create: { inputKey, config: json(config), ...(abstained ? { status: 'COMPLETED', completedAt: new Date(),
-        result: json({ ...abstentionResult(), next: null, assistance: body.assistance, afterExample: body.assistance === 'EXAMPLE', calibrated: false }) } : {}) } },
+        result: json({ ...deterministic!, next: null, assistance: body.assistance, afterExample: body.assistance === 'EXAMPLE', calibrated: false }) } : {}) } },
     }, include: { assessment: true } })
     return { id: saved.assessment!.id, reused: false }
   })

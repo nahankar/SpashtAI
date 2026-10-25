@@ -5,14 +5,14 @@ import { prisma } from '../../lib/prisma'
 import { logger } from '../../lib/logger'
 import { lockWritableSession } from '../../lib/sessionDiscard'
 import { BankError } from '../bank/csv'
-import { CURRENT_LEARNER_POLICY, LEARNER_POLICIES, abstentionResult, explicitAbstention, hash, explicitDontKnow, questionSnapshotSchema, resultSchema } from './contracts'
+import { CURRENT_LEARNER_POLICY, LEARNER_POLICIES, deterministicResult, hash, explicitDontKnow, questionSnapshotSchema, resultSchema } from './contracts'
 import { evaluateAnswer, EvaluationFailure, type Invocation } from './model'
 
 type Tx = Prisma.TransactionClient
 const json = (v: unknown) => v as Prisma.InputJsonValue
 const today = () => new Date().toISOString().slice(0, 10)
 export const LEARNER_LIMITS = { perUser: 30, global: 300, concurrent: 2, attempts: 2, leaseMs: 60_000 }
-const persistedResult = resultSchema.extend({ validationNotes: z.array(z.string().max(2000)).max(6).optional() })
+const persistedResult = resultSchema.extend({ validationNotes: z.array(z.string().max(2000)).max(6).optional(), responseKind: z.enum(['REQUEST_ONLY', 'DONT_KNOW']).optional() })
 const scopes = (ownerId: string) => ['learner-global', `learner-${hash(ownerId)}`]
 
 export async function learnerEvaluationAccess(ownerId: string, tx: Tx = prisma) {
@@ -61,7 +61,7 @@ export async function enqueueLearnerAssessment(tx: Tx, snapshotId: string, polic
   let status = 'PENDING'; let errorCode: string | null = null; let result: unknown = null
   if (!entry) { status = 'CANCELLED'; errorCode = 'EVALUATOR_POLICY_UNAVAILABLE' }
   else if (!await learnerEvaluationAccess(snapshot.ownerId, tx)) { status = 'CANCELLED'; errorCode = 'PILOT_ACCESS_UNAVAILABLE' }
-  else if (entry.deterministicAbstention && explicitAbstention(snapshot.answerText)) { status = 'COMPLETED'; result = abstentionResult() }
+  else if ((result = deterministicResult(entry, snapshot.answerText))) status = 'COMPLETED'
   else {
     try { await budget(snapshot.ownerId, tx) } catch (e) {
       if (!(e instanceof BankError) || e.status !== 429) throw e
@@ -159,7 +159,8 @@ export async function learnerFindings(runId: string, ownerId: string, tx: Tx = p
       errorCode: assessment?.errorCode ?? null, assistance: snapshot?.assistance ?? a.assistance, afterExample: snapshot?.assistance === 'EXAMPLE',
       result: result?.success && !run.owner.hideTranscriptText ? { classification: result.data.classification, criteria: result.data.criteria, strengths: result.data.strengths,
         gaps: result.data.gaps, misconceptions: result.data.misconceptions, guidance: result.data.guidance, uncertainty: result.data.uncertainty,
-        ...(result.data.validationNotes ? { validationNotes: result.data.validationNotes } : {}) } : null }
+        ...(result.data.validationNotes ? { validationNotes: result.data.validationNotes } : {}),
+        ...(result.data.responseKind ? { responseKind: result.data.responseKind } : {}) } : null }
   })
 }
 

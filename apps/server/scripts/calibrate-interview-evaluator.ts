@@ -10,10 +10,11 @@ import { ADMIN_MODELS, CONFIGS, PREVIEW_POLICIES, adminConfig } from '../src/int
 import { assessmentDetail, enqueueAssessment, retryAssessment, sweepAssessments } from '../src/interviews/evaluator/service'
 
 type Case = { id?: string; name?: string; qid: string; category?: string; expected: string; acceptable?: string[]; mustNotBe?: string[]
-  answer: string; evidence?: string[]; mustNotQuote?: string[]; mustNotGap?: string[]; expectMisconception?: boolean; expectGap?: string; notes?: string }
+  answer: string; evidence?: string[]; mustNotQuote?: string[]; mustNotGap?: string[]; expectMisconception?: boolean; expectGap?: string; notes?: string
+  mustNotSay?: string[]; expectReasoning?: boolean; expectedKind?: string; expectAcknowledged?: string[] }
 type Fixture = { fixtureVersion: string; reviewer?: string; questions?: Record<string, { revision: number; guidanceIssues: string[] }>; cases: Case[] }
 type Result = { classification?: string; criteria?: { criterion: string; finding: string; evidence: string[] }[]; strengths?: string[]
-  gaps?: string[]; misconceptions?: string[]; uncertainty?: string[]; next?: { action: string; topic: string | null; source: string } }
+  gaps?: string[]; misconceptions?: string[]; uncertainty?: string[]; guidance?: string; responseKind?: string; next?: { action: string; topic: string | null; source: string } }
 
 const [actorId, output, ...flags] = process.argv.slice(2)
 if (!actorId || !output) throw new Error('Provide a pilot Admin ID and report path. Model calls incur usage.')
@@ -33,6 +34,8 @@ const percentile = (values: number[], p: number) => {
   const sorted = [...values].sort((a, b) => a - b)
   return sorted[Math.min(sorted.length - 1, Math.ceil(p / 100 * sorted.length) - 1)]
 }
+const feedbackText = (result: Result) => [...(result.criteria ?? []).map(c => (c as { explanation?: string }).explanation ?? ''),
+  ...(result.gaps ?? []), ...(result.strengths ?? []), result.guidance ?? ''].join(' ').toLowerCase()
 function review(test: Case, answer: string, result: Result | null) {
   if (!result?.classification) return null
   const quotes = (result.criteria ?? []).flatMap(c => c.evidence)
@@ -49,6 +52,11 @@ function review(test: Case, answer: string, result: Result | null) {
     expectedGapReported: test.expectGap ? lower(result.gaps).includes(test.expectGap.toLowerCase()) : null,
     // A misheard term reported against the candidate (transcription-artifact cases).
     forbiddenGap: test.mustNotGap?.length ? test.mustNotGap.some(t => [result.gaps, result.misconceptions].some(items => lower(items).includes(t.toLowerCase()))) : null,
+    // Human-pilot checks: wording the feedback must not use, credited reasoning, and the server-owned response kind.
+    forbiddenWording: test.mustNotSay?.length ? test.mustNotSay.some(t => feedbackText(result).includes(t.toLowerCase())) : null,
+    reasoningCredited: test.expectReasoning === undefined ? null : (result.criteria ?? []).some(c => c.criterion === 'REASONING' && c.finding !== 'NOT_ASSESSED'),
+    responseKindMatches: test.expectedKind === undefined ? null : result.responseKind === test.expectedKind,
+    acknowledged: test.expectAcknowledged?.length ? test.expectAcknowledged.every(t => lower([...(result.strengths ?? []), ...(result.criteria ?? []).map(c => (c as { explanation?: string }).explanation ?? '')]).includes(t.toLowerCase())) : null,
   }
 }
 

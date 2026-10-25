@@ -1,5 +1,7 @@
 import { createHash } from 'crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { deterministicResult, requestOnly, requestResult, statedReasons } from '../src/interviews/evaluator/contracts'
+import { LEARNER_PROMPT_7 } from '../src/interviews/evaluator/model'
 import { CONFIGS, CURRENT_LEARNER_POLICY, LEARNER_POLICIES, PREVIEW_POLICIES, abstentionResult, adminConfig, configFor, previewPolicy, explicitAbstention, explicitDontKnow, hash, invalidOutputReason, parseResult, resultSchema, structuredRubric, submitSchema, supportedConfig } from '../src/interviews/evaluator/contracts'
 import { correctEvaluation, testAnswer } from './fixtures/interview-evaluation'
 const sdk = vi.hoisted(() => ({ send: vi.fn(), destroy: vi.fn() }))
@@ -112,11 +114,15 @@ describe('learner policy registry and learner-evaluation-2 contract', () => {
     expect(hash(LEARNER_POLICIES['learner-evaluation-1'].config)).toBe('a0c031d33359bc45e379b757878cf073360353e5a0b23a06aed246c792916478')
     expect(hash(learner2)).toBe('de2333a2f15fb6f23c594d8cc07994a96c19122662d8653ee77bb1292b71bc4f')
     expect(hash(LEARNER_POLICIES['learner-evaluation-3'].config)).toBe('a283a0abdcc8d5bdebe8cc5a37d51a7e276486b660f600dd28eab41909d33d96')
+    expect(hash(LEARNER_POLICIES['learner-evaluation-4'].config)).toBe('9e1eb80928ae0dab62cdb0545338477dc960a2f15cdca8a83ed53eb87ec87df3')
+    expect(hash(LEARNER_POLICIES['learner-evaluation-5'].config)).toBe('9f458e3dfb7edbe289843abac286d1bf9cd0fdfd28310b7c9ca91c2f3f4dd7be')
     const sha = (text: string) => createHash('sha256').update(text).digest('hex')
     expect(Object.fromEntries(Object.entries(PROMPTS).map(([id, text]) => [id, sha(text)]))).toEqual({
       'interview-answer-4': '6529a9f6cf7ebbc99016081a3dea4da01ee82207681cbbf630f513136798602a',
       'interview-answer-5': 'd8f5c0c28076d15e9fae5e06d57e25dff3250d2a5ab0eb7147762ff96779c7cd',
       'interview-answer-6': 'e2f458693f9f3fa434e4b59155fa073b5e094fd1429a41bccfcaf1be47d24594',
+      'interview-answer-7': 'b7d62529d91f20adb4758ac2e7223c1601e22fa048e6540139e3bbe2a31549bf',
+      'interview-answer-8': 'cc83e5d41eacc3481b5e34ea0142b7cb2f54fd036607c71e716b79548a677364',
     })
     expect(LEARNER_PROMPT_6).toContain('"get dissect" for git bisect'); expect(LEARNER_PROMPT_6.startsWith(LEARNER_PROMPT_5.slice(0, 400))).toBe(true)
     for (const policy of Object.values(LEARNER_POLICIES)) expect(PROMPTS[policy.config.prompt]).toBeTruthy()
@@ -135,6 +141,16 @@ describe('learner policy registry and learner-evaluation-2 contract', () => {
     expect(message).toMatchObject({ candidateAnswer: testAnswer, answerSource: 'SPEECH_TRANSCRIPT', assistance: 'NONE' })
     expect(JSON.stringify(message)).not.toContain('Ask about parallel workers'); expect(message.question.externalQid).toBeUndefined()
     expect(sdk.send.mock.calls[0][1].abortSignal).toBeInstanceOf(AbortSignal)
+  })
+  it('names stated reasons to the model only under learner-evaluation-5', async () => {
+    sdk.send.mockResolvedValue({ stopReason: 'end_turn', output: { message: { content: [{ text: learnerOutput() }] } }, usage: { inputTokens: 900, outputTokens: 300 } })
+    const answer = 'Give each test its own data because shared rows leak between tests.'
+    // Only the request matters here; the canned output quotes another answer and is rejected.
+    await evaluateAnswer(bankQuestion, answer, LEARNER_POLICIES['learner-evaluation-5'].config, 'NONE').catch(() => undefined)
+    await evaluateAnswer(bankQuestion, answer, LEARNER_POLICIES['learner-evaluation-3'].config, 'NONE').catch(() => undefined)
+    const [v5, v3] = sdk.send.mock.calls.map(([command]) => JSON.parse(command.input.messages[0].content[0].text))
+    expect(v5.statedReasons).toEqual([answer]); expect(v3).not.toHaveProperty('statedReasons')
+    expect(sdk.send.mock.calls[0][0].input.system[0].text).toContain('statedReasons, when present')
   })
   it('treats unlabelled guidance as required points', () => {
     expect(structuredRubric({ ...bankQuestion, goodAnswerPoints: 'Fresh independent state' })).toMatchObject({ requiredPoints: 'Fresh independent state', optionalDepth: '' })
@@ -199,7 +215,7 @@ describe('learner policy registry and learner-evaluation-2 contract', () => {
     expect(explicitAbstention(`Sorry, ${'um, '.repeat(10)}I don't know.`)).toBe(true)
   })
   it('offers only learner policies with their own configuration as Admin previews', () => {
-    expect(PREVIEW_POLICIES).toEqual(['learner-evaluation-2', 'learner-evaluation-3'])
+    expect(PREVIEW_POLICIES).toEqual(['learner-evaluation-2', 'learner-evaluation-3', 'learner-evaluation-4', 'learner-evaluation-5'])
     expect(adminConfig('learner-evaluation-2')).toEqual(learner2); expect(previewPolicy(learner2)?.key).toBe('learner-evaluation-2')
     expect(previewPolicy(configFor('nova2_lite'))).toBeNull()
     expect(() => submitSchema.parse({ questionId: 'q', revision: 1, answer: testAnswer, model: 'learner-evaluation-1' })).toThrow()
@@ -210,5 +226,62 @@ describe('learner policy registry and learner-evaluation-2 contract', () => {
     expect(resultSchema.parse(modelShape)).toBeTruthy(); expect(validationNotes).toHaveLength(1)
     expect(result).toMatchObject({ classification: 'NOT_ANSWERED', strengths: [], misconceptions: [] })
     expect(result.criteria.every(c => c.finding === 'NOT_ASSESSED')).toBe(true)
+  })
+})
+
+// Human pilot (session_1792914992205_vcdezwozx): requests and "I don't know" are distinct, and
+// command-like words inside a technical answer are never matched.
+describe('learner-evaluation-4 request-only answers', () => {
+  const v3 = LEARNER_POLICIES['learner-evaluation-3'], v4 = LEARNER_POLICIES['learner-evaluation-4']
+  it.each(['Can you repeat that question one more time, please?', "Let's skip this question and move to the next one.", 'Sorry, could you repeat the question?',
+    'Next question, please.', 'Um, can we skip this one?', "I didn't catch that. Can you say it again?", 'Can we take a short break?', 'Let’s move on to the next question.'])(
+    'treats a whole-answer request as no evidence, not a knowledge deficit: %s', answer => {
+      const result = deterministicResult(v4, answer)!
+      expect(result).toMatchObject({ classification: 'NOT_ANSWERED', responseKind: 'REQUEST_ONLY', strengths: [], gaps: [], misconceptions: [] })
+      expect(result.guidance).not.toMatch(/review|study|do not know/i)
+    })
+  it.each(['Soft assertions collect failures, and you can repeat the check, but you must call assertAll or the test passes.',
+    'Skip the retry when the response is 4xx because repeating a client error will not help.',
+    'Can you repeat it? Standalone components declare their own imports instead of an NgModule.',
+    'Next, the request specification centralizes transport setup.', 'Pause the test with cy.pause to debug.',
+    'Because its container changes without a viewport resize.'])('leaves a technical answer containing command-like words to the model: %s', answer => {
+    expect(requestOnly(answer)).toBe(false); expect(deterministicResult(v4, answer)).toBeNull()
+  })
+  it('keeps an explicit "I don\'t know" distinct from a request', () => {
+    expect(deterministicResult(v4, "I don't know.")).toMatchObject({ classification: 'NOT_ANSWERED', responseKind: 'DONT_KNOW' })
+    expect(deterministicResult(v4, 'Skip.')?.responseKind).toBe('REQUEST_ONLY')
+  })
+  it('leaves pinned learner-evaluation-3 behaviour unchanged', () => {
+    expect(deterministicResult(v3, 'Can you repeat that question one more time, please?')).toBeNull()
+    expect(deterministicResult(v3, "I don't know.")).toEqual(abstentionResult())
+    expect(abstentionResult()).not.toHaveProperty('responseKind')
+  })
+  it('authors a schema-valid request outcome and bounds matching on adversarial input', () => {
+    const { validationNotes, responseKind, ...modelShape } = requestResult()
+    expect(resultSchema.parse(modelShape)).toBeTruthy(); expect(validationNotes).toHaveLength(1); expect(responseKind).toBe('REQUEST_ONLY')
+    const start = performance.now()
+    for (const answer of ['please, '.repeat(19) + 'x', 'can you repeat that '.repeat(8) + 'and', 'skip this one and '.repeat(9) + 'then'])
+      expect(requestOnly(answer)).toBe(false)
+    expect(performance.now() - start).toBeLessThan(200)
+  })
+  it('prompts credit stated reasons and every transcript fragment without inventing explanation', () => {
+    expect(LEARNER_PROMPT_7).toContain('"because ..."'); expect(LEARNER_PROMPT_7).toContain('Never describe a multi-line answer as a single statement')
+    expect(LEARNER_PROMPT_7).toContain('never credit an explanation, reason or detail the candidate did not give')
+  })
+})
+
+describe('learner-evaluation-5 stated reasons', () => {
+  it('names exact passages that state a reason, and nothing else', () => {
+    expect(statedReasons('Because its container changes without a viewport resize.')).toEqual(['Because its container changes without a viewport resize.'])
+    const answer = 'A request specification centralizes transport setup.\nWithout mutable.\ncross test.\nLeakage'
+    expect(statedReasons(answer)).toEqual([])
+    const mixed = 'Use should for retries. Avoid then for assertions because the callback runs once, so the UI may not have settled.'
+    expect(statedReasons(mixed)).toEqual(['Avoid then for assertions because the callback runs once, so the UI may not have settled.'])
+    for (const quote of statedReasons(mixed)) expect(mixed.includes(quote)).toBe(true)
+  })
+  it('is the current policy for new evaluated runs; earlier pins are unchanged', () => {
+    expect(CURRENT_LEARNER_POLICY).toBe('learner-evaluation-5')
+    expect(LEARNER_POLICIES['learner-evaluation-5']).toMatchObject({ deterministicRequests: true, config: { rubric: 'bank-guidance-3', prompt: 'interview-answer-8' } })
+    expect(LEARNER_POLICIES['learner-evaluation-3'].config.rubric).toBe('bank-guidance-2')
   })
 })

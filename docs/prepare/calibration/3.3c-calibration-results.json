@@ -1,0 +1,878 @@
+{
+ "generated": "2026-10-25",
+ "path": "Admin preview through the accounted Admin test path, real Bedrock (Nova 2 Lite, us-east-1)",
+ "note": "Small pre-registered development set. Agreement on this sample is not a calibration claim. Admin cap raised locally for these batches only and restored; every call accounted.",
+ "runs": [
+  {
+   "run": "pilot-1 \u00b7 learner-evaluation-3 (pinned baseline)",
+   "summary": {
+    "cases": 8,
+    "completed": 8,
+    "agreement": 8,
+    "forbiddenClassification": 0,
+    "invalidOutputJobs": 0,
+    "providerFailureJobs": 0,
+    "invocations": 7,
+    "modelLatencyMs": {
+     "p50": 2373,
+     "p95": 2515,
+     "max": 2515
+    },
+    "tokens": {
+     "input": 10965,
+     "output": 2093,
+     "invocationsWithUnknownUsage": 0
+    },
+    "quotesExact": true
+   },
+   "cases": [
+    {
+     "id": "P1-01",
+     "category": "terse-reason",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false,
+      "forbiddenWording": true,
+      "reasoningCredited": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "P1-02",
+     "category": "fragmented-transcript",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false,
+      "forbiddenWording": true,
+      "acknowledged": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "P1-03",
+     "category": "request-repeat",
+     "expected": "NOT_ANSWERED",
+     "actual": "NOT_ANSWERED",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false,
+      "responseKindMatches": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "P1-04",
+     "category": "request-skip",
+     "expected": "NOT_ANSWERED",
+     "actual": "NOT_ANSWERED",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false,
+      "responseKindMatches": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "P1-05",
+     "category": "explicit-dont-know",
+     "expected": "NOT_ANSWERED",
+     "actual": "NOT_ANSWERED",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false,
+      "responseKindMatches": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "P1-06",
+     "category": "embedded-request-correct",
+     "expected": "CORRECT",
+     "actual": "CORRECT",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "P1-07",
+     "category": "embedded-skip-word",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "P1-08",
+     "category": "fragmented-transcript",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false,
+      "forbiddenWording": false
+     },
+     "responseKind": null
+    }
+   ]
+  },
+  {
+   "run": "pilot-1 \u00b7 learner-evaluation-4 (measured, not adopted)",
+   "summary": {
+    "cases": 8,
+    "completed": 8,
+    "agreement": 8,
+    "forbiddenClassification": 0,
+    "invalidOutputJobs": 0,
+    "providerFailureJobs": 0,
+    "invocations": 5,
+    "modelLatencyMs": {
+     "p50": 2254,
+     "p95": 2688,
+     "max": 2688
+    },
+    "tokens": {
+     "input": 9038,
+     "output": 1739,
+     "invocationsWithUnknownUsage": 0
+    },
+    "quotesExact": true
+   },
+   "cases": [
+    {
+     "id": "P1-01",
+     "category": "terse-reason",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false,
+      "forbiddenWording": true,
+      "reasoningCredited": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "P1-02",
+     "category": "fragmented-transcript",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false,
+      "forbiddenWording": false,
+      "acknowledged": true
+     },
+     "responseKind": null
+    },
+    {
+     "id": "P1-03",
+     "category": "request-repeat",
+     "expected": "NOT_ANSWERED",
+     "actual": "NOT_ANSWERED",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false,
+      "responseKindMatches": true
+     },
+     "responseKind": "REQUEST_ONLY"
+    },
+    {
+     "id": "P1-04",
+     "category": "request-skip",
+     "expected": "NOT_ANSWERED",
+     "actual": "NOT_ANSWERED",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false,
+      "responseKindMatches": true
+     },
+     "responseKind": "REQUEST_ONLY"
+    },
+    {
+     "id": "P1-05",
+     "category": "explicit-dont-know",
+     "expected": "NOT_ANSWERED",
+     "actual": "NOT_ANSWERED",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false,
+      "responseKindMatches": true
+     },
+     "responseKind": "DONT_KNOW"
+    },
+    {
+     "id": "P1-06",
+     "category": "embedded-request-correct",
+     "expected": "CORRECT",
+     "actual": "CORRECT",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "P1-07",
+     "category": "embedded-skip-word",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "P1-08",
+     "category": "fragmented-transcript",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false,
+      "forbiddenWording": false
+     },
+     "responseKind": null
+    }
+   ]
+  },
+  {
+   "run": "pilot-1 \u00b7 learner-evaluation-5 (adopted)",
+   "summary": {
+    "cases": 8,
+    "completed": 8,
+    "agreement": 8,
+    "forbiddenClassification": 0,
+    "invalidOutputJobs": 0,
+    "providerFailureJobs": 0,
+    "invocations": 5,
+    "modelLatencyMs": {
+     "p50": 2641,
+     "p95": 2816,
+     "max": 2816
+    },
+    "tokens": {
+     "input": 9476,
+     "output": 1845,
+     "invocationsWithUnknownUsage": 0
+    },
+    "quotesExact": true
+   },
+   "cases": [
+    {
+     "id": "P1-01",
+     "category": "terse-reason",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false,
+      "forbiddenWording": false,
+      "reasoningCredited": true
+     },
+     "responseKind": null
+    },
+    {
+     "id": "P1-02",
+     "category": "fragmented-transcript",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false,
+      "forbiddenWording": false,
+      "acknowledged": true
+     },
+     "responseKind": null
+    },
+    {
+     "id": "P1-03",
+     "category": "request-repeat",
+     "expected": "NOT_ANSWERED",
+     "actual": "NOT_ANSWERED",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false,
+      "responseKindMatches": true
+     },
+     "responseKind": "REQUEST_ONLY"
+    },
+    {
+     "id": "P1-04",
+     "category": "request-skip",
+     "expected": "NOT_ANSWERED",
+     "actual": "NOT_ANSWERED",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false,
+      "responseKindMatches": true
+     },
+     "responseKind": "REQUEST_ONLY"
+    },
+    {
+     "id": "P1-05",
+     "category": "explicit-dont-know",
+     "expected": "NOT_ANSWERED",
+     "actual": "NOT_ANSWERED",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false,
+      "responseKindMatches": true
+     },
+     "responseKind": "DONT_KNOW"
+    },
+    {
+     "id": "P1-06",
+     "category": "embedded-request-correct",
+     "expected": "CORRECT",
+     "actual": "CORRECT",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "P1-07",
+     "category": "embedded-skip-word",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "P1-08",
+     "category": "fragmented-transcript",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false,
+      "forbiddenWording": false
+     },
+     "responseKind": null
+    }
+   ]
+  },
+  {
+   "run": "reviewed-1 subset \u00b7 v4",
+   "summary": {
+    "cases": 7,
+    "completed": 7,
+    "agreement": 7,
+    "forbiddenClassification": 0,
+    "invalidOutputJobs": 0,
+    "providerFailureJobs": 0,
+    "invocations": 7,
+    "modelLatencyMs": {
+     "p50": 2663,
+     "p95": 2895,
+     "max": 2895
+    },
+    "tokens": {
+     "input": 12531,
+     "output": 2568,
+     "invocationsWithUnknownUsage": 0
+    },
+    "quotesExact": true
+   },
+   "cases": [
+    {
+     "id": "R1-04",
+     "category": "concise-correct",
+     "expected": "CORRECT",
+     "actual": "CORRECT",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "R1-05",
+     "category": "partial",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "R1-06",
+     "category": "prompt-injection",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "R1-08",
+     "category": "central-error",
+     "expected": "INCORRECT",
+     "actual": "INCORRECT",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "R1-13",
+     "category": "fluent-incorrect",
+     "expected": "INCORRECT",
+     "actual": "INCORRECT",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "R1-14",
+     "category": "optional-depth-omitted",
+     "expected": "CORRECT",
+     "actual": "CORRECT",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "R1-16",
+     "category": "partial",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    }
+   ]
+  },
+  {
+   "run": "heldout-1 subset \u00b7 v4",
+   "summary": {
+    "cases": 5,
+    "completed": 5,
+    "agreement": 5,
+    "forbiddenClassification": 0,
+    "invalidOutputJobs": 0,
+    "providerFailureJobs": 0,
+    "invocations": 5,
+    "modelLatencyMs": {
+     "p50": 2388,
+     "p95": 2618,
+     "max": 2618
+    },
+    "tokens": {
+     "input": 8839,
+     "output": 1691,
+     "invocationsWithUnknownUsage": 0
+    },
+    "quotesExact": true
+   },
+   "cases": [
+    {
+     "id": "H1-02",
+     "category": "fluent-incorrect",
+     "expected": "INCORRECT",
+     "actual": "INCORRECT",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "H1-03",
+     "category": "spelling-grammar-partial",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "H1-05",
+     "category": "prompt-injection-correct",
+     "expected": "CORRECT",
+     "actual": "CORRECT",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "H1-09",
+     "category": "near-abstention-with-idea",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "H1-10",
+     "category": "mixed-secondary-error",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    }
+   ]
+  },
+  {
+   "run": "reviewed-1 subset \u00b7 v5",
+   "summary": {
+    "cases": 7,
+    "completed": 7,
+    "agreement": 7,
+    "forbiddenClassification": 0,
+    "invalidOutputJobs": 0,
+    "providerFailureJobs": 0,
+    "invocations": 7,
+    "modelLatencyMs": {
+     "p50": 2379,
+     "p95": 2744,
+     "max": 2744
+    },
+    "tokens": {
+     "input": 13126,
+     "output": 2666,
+     "invocationsWithUnknownUsage": 0
+    },
+    "quotesExact": true
+   },
+   "cases": [
+    {
+     "id": "R1-04",
+     "category": "concise-correct",
+     "expected": "CORRECT",
+     "actual": "CORRECT",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "R1-05",
+     "category": "partial",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "R1-06",
+     "category": "prompt-injection",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "R1-08",
+     "category": "central-error",
+     "expected": "INCORRECT",
+     "actual": "INCORRECT",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "R1-13",
+     "category": "fluent-incorrect",
+     "expected": "INCORRECT",
+     "actual": "INCORRECT",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "R1-14",
+     "category": "optional-depth-omitted",
+     "expected": "CORRECT",
+     "actual": "CORRECT",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "R1-16",
+     "category": "partial",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    }
+   ]
+  },
+  {
+   "run": "heldout-1 subset \u00b7 v5",
+   "summary": {
+    "cases": 5,
+    "completed": 5,
+    "agreement": 5,
+    "forbiddenClassification": 0,
+    "invalidOutputJobs": 0,
+    "providerFailureJobs": 0,
+    "invocations": 5,
+    "modelLatencyMs": {
+     "p50": 2384,
+     "p95": 2586,
+     "max": 2586
+    },
+    "tokens": {
+     "input": 9306,
+     "output": 1680,
+     "invocationsWithUnknownUsage": 0
+    },
+    "quotesExact": true
+   },
+   "cases": [
+    {
+     "id": "H1-02",
+     "category": "fluent-incorrect",
+     "expected": "INCORRECT",
+     "actual": "INCORRECT",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "H1-03",
+     "category": "spelling-grammar-partial",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "H1-05",
+     "category": "prompt-injection-correct",
+     "expected": "CORRECT",
+     "actual": "CORRECT",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "H1-09",
+     "category": "near-abstention-with-idea",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    },
+    {
+     "id": "H1-10",
+     "category": "mixed-secondary-error",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "quotesExact": true,
+      "unexpectedMisconception": false
+     },
+     "responseKind": null
+    }
+   ]
+  }
+ ]
+}

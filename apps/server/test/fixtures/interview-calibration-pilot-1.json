@@ -1,0 +1,41 @@
+{
+  "fixtureVersion": "pilot-1",
+  "preRegistered": "Human-pilot regression cases from local session session_1792914992205_vcdezwozx (answers copied exactly from the saved snapshots) plus command-like phrases inside technical answers. Labels and checks fixed before any run. Run against learner-evaluation-3 and learner-evaluation-4.",
+  "reviewer": "Claude (AI) against the saved bank guidance and the user's confirmed pilot findings. Not an independent human expert review.",
+  "namespace": "automation-pilot",
+  "questions": {
+    "WEB-NEW-033": { "revision": 2, "guidanceIssues": [] },
+    "AUT-NEW-056": { "revision": 2, "guidanceIssues": [] },
+    "AUT-NEW-047": { "revision": 2, "guidanceIssues": [] },
+    "WEB-NEW-055": { "revision": 2, "guidanceIssues": [] },
+    "WEB-003": { "revision": 2, "guidanceIssues": [] },
+    "WEB-008": { "revision": 2, "guidanceIssues": [] }
+  },
+  "cases": [
+    { "id": "P1-01", "qid": "WEB-NEW-033", "category": "terse-reason", "expected": "PARTIAL", "acceptable": ["PARTIAL", "CORRECT"],
+      "answer": "Because its container changes without a viewport resize.",
+      "expectReasoning": true, "mustNotSay": ["does not provide reasoning", "no reasoning", "does not explain why", "not provide any reasoning", "lacks reasoning"],
+      "notes": "Pilot Q1. The answer states the reason (element/container size changes independently of the viewport). Reasoning must be credited; further elaboration is optional guidance." },
+    { "id": "P1-02", "qid": "AUT-NEW-056", "category": "fragmented-transcript", "expected": "PARTIAL", "acceptable": ["PARTIAL"],
+      "answer": "A request specification centralizes transport setup.\nWithout mutable.\ncross test.\nLeakage",
+      "mustNotSay": ["single statement", "only one statement", "one statement", "beyond the single"], "expectAcknowledged": ["leak"],
+      "notes": "Pilot Q2. All four fragments must be considered; mutable cross-test leakage should be acknowledged as a named concept, not as a full explanation. ResponseSpecification is genuinely missing." },
+    { "id": "P1-03", "qid": "AUT-NEW-047", "category": "request-repeat", "expected": "NOT_ANSWERED", "expectedKind": "REQUEST_ONLY",
+      "answer": "Can you repeat that question one more time, please?",
+      "notes": "Pilot Q5. No assessable evidence; must not imply a knowledge deficit." },
+    { "id": "P1-04", "qid": "WEB-NEW-055", "category": "request-skip", "expected": "NOT_ANSWERED", "expectedKind": "REQUEST_ONLY",
+      "answer": "Let's skip this question and move to the next one.", "notes": "Pilot Q6." },
+    { "id": "P1-05", "qid": "WEB-003", "category": "explicit-dont-know", "expected": "NOT_ANSWERED", "expectedKind": "DONT_KNOW",
+      "answer": "I don't know.", "notes": "Pilot Q7: distinct from a request." },
+    { "id": "P1-06", "qid": "AUT-NEW-047", "category": "embedded-request-correct", "expected": "CORRECT", "acceptable": ["CORRECT", "PARTIAL"], "mustNotBe": ["NOT_ANSWERED"],
+      "answer": "Can you repeat that? Actually, I know this one. Soft assertions collect independent failures so one run reports several mismatches, but if you forget to call assertAll at the end the failures are never thrown and the test passes.",
+      "evidence": ["assertAll"], "notes": "A request inside a technical answer is neither evidence nor a weakness." },
+    { "id": "P1-07", "qid": "WEB-NEW-055", "category": "embedded-skip-word", "expected": "PARTIAL", "acceptable": ["PARTIAL", "CORRECT"], "mustNotBe": ["NOT_ANSWERED"],
+      "answer": "I'll skip the history. Standalone components import their template dependencies directly instead of being declared in an NgModule, so lazy loading a route is simpler.",
+      "evidence": ["import their template dependencies directly"], "notes": "Command-like word 'skip' inside a substantive answer." },
+    { "id": "P1-08", "qid": "WEB-008", "category": "fragmented-transcript", "expected": "PARTIAL", "acceptable": ["PARTIAL"],
+      "answer": "Uh, real button.\nSupplies.\nKeywords and keyboard and semantic behavior beyond.\nVisual styling?",
+      "mustNotSay": ["single statement", "only one statement", "one statement"],
+      "notes": "Pilot Q4 (fragments). WCAG principles are missing; native button keyboard/semantic behaviour is a supported concept." }
+  ]
+}
