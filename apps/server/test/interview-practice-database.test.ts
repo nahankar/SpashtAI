@@ -226,9 +226,11 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
     await finishLearnerAssessment(first, new EvaluationFailure('TIMEOUT', true, { inputTokens: null, outputTokens: null, latencyMs: 20000 }))
     expect(await prisma.interviewAssessment.findUnique({ where: { id: first.id } })).toMatchObject({ status: 'COMPLETED', attempts: 2 })
   })
-  it('records abstention as unassessed and fences a result arriving after discard', async () => {
+  it('records abstention as unassessed under learner-evaluation-1 and fences a result arriving after discard', async () => {
     await enableLearner()
-    const { r, a, s } = await asked(); await captureCommittedTurn(a.id, turn(s.id, "I don't know")); await finish(r.id, a.id)
+    // learner-evaluation-1 calls the model and overrides an explicit abstention afterwards.
+    const { r, a, s } = await asked(); await pin(r.id, 'learner-evaluation-1')
+    await captureCommittedTurn(a.id, turn(s.id, "I don't know")); await finish(r.id, a.id)
     const first = await learnerClaim()
     await finishLearnerAssessment(first, { result: correctEvaluation("I don't know"), inputTokens: 100, outputTokens: 30, latencyMs: 5 })
     const result = (await prisma.interviewAssessment.findUniqueOrThrow({ where: { id: first.id } })).result as { classification: string; criteria: Array<{finding:string}> }
@@ -282,7 +284,7 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
   it('cancels a job whose stored config no longer matches its run policy with a distinct code', async () => {
     await enableLearner()
     const { r, a, s } = await asked(); await captureCommittedTurn(a.id, turn(s.id, testAnswer)); const saved = await finish(r.id, a.id)
-    await prisma.interviewAssessment.update({ where: { snapshotId: saved.id! }, data: { config: { ...LEARNER_POLICIES['learner-evaluation-2'].config } } })
+    await prisma.interviewAssessment.update({ where: { snapshotId: saved.id! }, data: { config: { ...LEARNER_POLICIES['learner-evaluation-1'].config } } })
     expect(await claimLearnerAssessment()).toBeNull()
     expect(await prisma.interviewAssessment.findUnique({ where: { snapshotId: saved.id! } })).toMatchObject({ status: 'CANCELLED', errorCode: 'CONFIG_MISMATCH' })
     await endPractice(r.id, owner)
