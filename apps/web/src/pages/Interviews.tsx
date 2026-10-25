@@ -168,7 +168,7 @@ export function Interviews() {
       {live.token && live.url && current && <LiveSessionRoom {...live} token={live.token} url={live.url} recorderRef={recorderRef}
         handleDisconnected={()=>controller.onDisconnected(recorderRef.current,{sessionId:live.sessionId,segmentId:live.segmentId})}
         handleNewMessage={m=>controller.handleMessage(m)} setAssistantState={live.setAssistantState} handleConversationRestart={()=>live.setAssistantState('recovering')}
-        statusOverride={operation ? {label:operation==='saving' ? 'Saving answer…' : 'Starting next question…',hint:'Your microphone is muted.'}
+        statusOverride={operation ? {label:operation==='saving' ? 'Saving answer…' : operation==='waiting' ? 'Interviewer waiting' : 'Starting next question…',hint:'Your microphone is muted.'}
           : ['ANSWERED','SKIPPED'].includes(current.status) && !detail.conversationMode ? {label:current.status==='ANSWERED' ? 'Answer saved' : 'Question skipped',hint:'Your microphone is muted. Continue or end practice.'} : undefined}
         onTurnMetrics={()=>undefined} updateMetrics={()=>undefined} handleLeave={leave} showMetrics={false} setShowMetrics={()=>undefined}
         handlePause={()=>controller.pause(recorderRef.current)} exportFlags={{enableAudioExport:false}}
