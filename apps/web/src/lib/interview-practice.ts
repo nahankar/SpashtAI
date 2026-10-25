@@ -21,7 +21,8 @@ export type InterviewRun = {
   conversationMode?: boolean;
 }
 export type InterviewHistory = { id: string; sessionId: string; track: string; experienceBand: string; startingDifficulty: string;
-  startedAt: string; endedAt: string|null; retainedAt: string|null; questionCount: number }
+  startedAt: string; endedAt: string|null; retainedAt: string|null; questionCount: number
+  answeredCount?: number; skippedCount?: number; incompleteCount?: number }
 export type InterviewOptions = { coverage: Array<{ track: string; experienceBand: string; difficulty: string; count: number }>; maxQuestions: number; consentVersion: string; evaluationAvailable?: boolean; conversationAvailable?: boolean }
 /** Coordinator states published by the interviewer agent in conversation practices. */
 export type ConversationState = 'asking'|'listening'|'candidate_end'|'confirming'|'saving'|'preparing'|'waiting'|''

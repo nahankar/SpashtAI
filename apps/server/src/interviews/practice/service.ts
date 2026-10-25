@@ -274,8 +274,12 @@ export async function practiceHistory(ownerId: string) {
   const rows = await prisma.interviewRun.findMany({ where: { ownerId, session: { discardedAt: null } }, orderBy: { createdAt: 'desc' }, take: 50,
     select: { id: true, sessionId: true, track: true, experienceBand: true, startingDifficulty: true, createdAt: true,
       session: { select: { endedAt: true, retainedAt: true } }, _count: { select: { attempts: true } } } })
+  // Outcome counts for the history list, from the same owner-scoped runs (one grouped query).
+  const counts = rows.length ? await prisma.interviewAttempt.groupBy({ by: ['runId', 'status'], where: { runId: { in: rows.map(r => r.id) } }, _count: { _all: true } }) : []
+  const count = (runId: string, status: string) => counts.find(c => c.runId === runId && c.status === status)?._count._all ?? 0
   return { runs: rows.map(r => ({ id: r.id, sessionId: r.sessionId, track: r.track, experienceBand: r.experienceBand,
-    startingDifficulty: r.startingDifficulty, startedAt: r.createdAt, ...r.session, questionCount: r._count.attempts })) }
+    startingDifficulty: r.startingDifficulty, startedAt: r.createdAt, ...r.session, questionCount: r._count.attempts,
+    answeredCount: count(r.id, 'ANSWERED'), skippedCount: count(r.id, 'SKIPPED'), incompleteCount: count(r.id, 'INCOMPLETE') })) }
 }
 export async function voiceState(sessionId: string, segmentId: string, room: string, identity: string) {
   return prisma.$transaction(async tx => {

@@ -5,6 +5,8 @@ export interface ChatMessage {
   timestamp: string
   /** Interview question outcome; never a technical grade. */
   attemptStatus?: 'SKIPPED' | 'INCOMPLETE'
+  /** Interview attempt this question or answer belongs to: the stable key for its technical feedback. */
+  attemptId?: string
 }
 
 export type AudioStatus = 'available' | 'pending' | 'failed' | 'unavailable'

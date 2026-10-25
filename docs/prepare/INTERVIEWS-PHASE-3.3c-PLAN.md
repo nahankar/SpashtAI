@@ -70,3 +70,23 @@ Unit and DB tests for request-only/embedded/abstention distinctions, policy regi
 web tests for history filters/Resume/Review, feedback association by attempt id (skips, out-of-order
 completion) and playback stability; calibration on real Bedrock for v3 vs v4. Grading and UI changes in
 separate commits.
+
+## Results (25 Oct 2026, local)
+
+Grading (real Bedrock through the accounted Admin preview path; small pre-registered set, not a calibration
+claim; evidence in `docs/prepare/calibration/3.3c-calibration-results.json`):
+
+| Policy | pilot-1 classification | Pilot-specific checks | Earlier regression subset |
+| --- | --- | --- | --- |
+| learner-evaluation-3 (pinned baseline) | 8/8 | Q1 reasoning not credited; Q1/Q2 wording ("does not provide reasoning", "single statement"); Q5–Q7 no response kind | — |
+| learner-evaluation-4 (prompt rule; measured, not adopted) | 8/8 | Q2 fixed, Q5–Q7 kinds correct; **Q1 still unreasoned** | 12/12 |
+| learner-evaluation-5 (adopted for new evaluated runs) | 8/8 | all pass (reasoning credited from `statedReasons`, fragments acknowledged, request/don't-know kinds) | 12/12 |
+
+No invalid outputs; v5 model latency p50 2.38–2.64 s, p95 2.59–2.82 s. Request-only and "I don't know"
+answers are deterministic (no model call, no budget). Historical assessments are unchanged; their
+NOT_ANSWERED label now reads "No technical answer".
+
+UI (local browser, test learner): history shows counts, search/no-match, Review opens playback with All;
+playback shows one collapsed disclosure per answer keyed by attempt id, the skipped question keeps its badge,
+the old findings section is gone; expanding feedback during playback kept audio playing (27.96 → 29.72 s),
+scroll unchanged and focus on the play button; no horizontal overflow at 390 px; no page errors.

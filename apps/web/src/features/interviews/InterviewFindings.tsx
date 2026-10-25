@@ -1,44 +1,24 @@
-import { useEffect, useState } from 'react'
-import { apiClient } from '@/lib/api-client'
-import { labels, type Assessment } from '@/lib/interview-evaluator'
+import { labels, outcomeLabel } from '@/lib/interview-evaluator'
+import { PENDING_FINDING, useInterviewFindings } from './useInterviewFindings'
 
-export type LearnerFinding = { attemptId: string; index: number; question: string; status: string; errorCode: string | null; assistance: string; afterExample: boolean;
-  result: Omit<NonNullable<Assessment['result']>, 'next'> | null }
+export type { LearnerFinding } from './useInterviewFindings'
 
+/** Live practice list of technical findings. Playback shows the same data inline under each answer. */
 export function InterviewFindings({ runId, sessionId, refreshKey = '' }: { runId?: string; sessionId?: string; refreshKey?: string }) {
-  const [rows, setRows] = useState<LearnerFinding[]>([])
-  const [error, setError] = useState(false)
-  // A different practice starts empty; a refresh of the same one keeps its findings on screen.
-  useEffect(() => { setRows([]); setError(false) }, [runId, sessionId])
-  useEffect(() => {
-    if (!runId && !sessionId) return
-    const abort = new AbortController(); let timer: ReturnType<typeof setTimeout> | undefined
-    const path = runId ? `/runs/${encodeURIComponent(runId)}` : `/playback/${encodeURIComponent(sessionId!)}`
-    async function load() {
-      try {
-        const result = await apiClient<{ assessments: LearnerFinding[] }>(`/api/interviews${path}/assessments`, { signal: abort.signal })
-        if (abort.signal.aborted) return
-        setRows(result.assessments); setError(false)
-        // Evaluations usually finish within a few seconds of saving; check every second while one is running.
-        if (result.assessments.some(r => ['PENDING', 'RUNNING'].includes(r.status))) timer = setTimeout(() => void load(), 1000)
-      } catch { if (!abort.signal.aborted) setError(true) }
-    }
-    void load()
-    return () => { abort.abort(); clearTimeout(timer) }
-  }, [runId, sessionId, refreshKey])
-  const assessed = rows.filter(r => ['PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED'].includes(r.status))
+  const { rows, error } = useInterviewFindings({ runId, sessionId, refreshKey })
+  const assessed = rows.filter(r => [...PENDING_FINDING, 'COMPLETED', 'FAILED', 'CANCELLED'].includes(r.status))
   if (!assessed.length && !error) return null
   return <section className="my-5 space-y-3" aria-label="Technical answer feedback">
     <h2 className="text-lg font-semibold">Technical answer feedback</h2>
     <p className="text-sm text-muted-foreground">Based on your saved answers. Separate from communication feedback and Progress Pulse.</p>
     {error && <p role="status" className="text-sm text-muted-foreground">Technical feedback could not be loaded. Reload to retry; your saved answers are safe.</p>}
     {assessed.map(row => <details key={row.attemptId} className="rounded-lg border p-4" open={assessed.length === 1}>
-      <summary className="cursor-pointer font-medium">Question {row.index} · {labels[row.status] ?? row.status}{row.result ? ` · ${labels[row.result.classification]}` : ''}</summary>
+      <summary className="cursor-pointer font-medium">Question {row.index} · {labels[row.status] ?? row.status}{row.result ? ` · ${outcomeLabel(row.result)}` : ''}</summary>
       <div className="mt-3 space-y-3 text-sm">
         <p>{row.question}</p>
         {row.afterExample && <p className="text-orange-700 dark:text-orange-300">After seeing an example · this response does not establish independent recall.</p>}
         {row.assistance === 'HINT' && <p className="text-orange-700 dark:text-orange-300">Hint-assisted answer</p>}
-        {['PENDING', 'RUNNING'].includes(row.status) && <p role="status">Evaluation is pending. You can continue practicing.</p>}
+        {PENDING_FINDING.includes(row.status) && <p role="status">Evaluation is pending. You can continue practicing.</p>}
         {['FAILED', 'CANCELLED'].includes(row.status) && <p>Technical evaluation is unavailable for this answer. No grade was invented.</p>}
         {row.result && <>
           {row.result.validationNotes?.map((note, i) => <p className="text-muted-foreground" key={i}>{note}</p>)}

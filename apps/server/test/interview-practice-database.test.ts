@@ -14,6 +14,7 @@ vi.mock('../src/lib/prisma', async () => {
 import { prisma } from '../src/lib/prisma'
 import { createQuestion, confirmProvenance, editQuestion, questionAction } from '../src/interviews/bank/service'
 import { readyDraft } from './fixtures/bank-draft'
+import { readInterviewPlaybackConversation } from '../src/interviews/practice/projection'
 import { captureCommittedTurn, endPractice, finishAnswer, markQuestionAsked, practiceDetail, prepareBankAttempt, recordAssistance, startPractice, saveCaptureReceipt, voiceState, practiceHistory } from '../src/interviews/practice/service'
 import { LEARNER_POLICIES, hash } from '../src/interviews/evaluator/contracts'
 import { assessmentDetail, claimAssessment } from '../src/interviews/evaluator/service'
@@ -323,6 +324,21 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
     expect(await ownerBudget()).toBeNull()
     const findings = await request(app).get(`/practice/runs/${r.id}/assessments`).auth(token(owner), { type: 'bearer' })
     expect(findings.body.assessments[0].result).toMatchObject({ classification: 'NOT_ANSWERED', responseKind: 'REQUEST_ONLY', strengths: [] })
+  })
+  it('lists only the owner\'s practices with answered, skipped and incomplete counts, and links playback by attempt', async () => {
+    // Skipped first question, answered second, then a third left open when the practice ends.
+    const { r, a, s } = await asked(); await finish(r.id, a.id, true)
+    const second = await prepareBankAttempt(r.id, owner, a.id)
+    await markQuestionAsked(second.id, { segmentId: s.id, questionText: second.question.text })
+    await captureCommittedTurn(second.id, turn(s.id, testAnswer)); await finish(r.id, second.id)
+    await endPractice(r.id, owner)
+    const listed = (await request(app).get('/practice/runs').auth(token(owner), { type: 'bearer' })).body.runs.find((h: { id: string }) => h.id === r.id)
+    expect(listed).toMatchObject({ questionCount: 2, answeredCount: 1, skippedCount: 1, incompleteCount: 0 })
+    expect(listed.endedAt).toBeTruthy()
+    expect((await request(app).get('/practice/runs').auth(token(other), { type: 'bearer' })).body.runs.some((h: { id: string }) => h.id === r.id)).toBe(false)
+    const playback = await readInterviewPlaybackConversation(prisma, r.id)
+    expect(playback.filter(m => m.role === 'user').map(m => m.attemptId)).toEqual([second.id])
+    expect(playback.find(m => m.id === `interview_question_${a.id}`)).toMatchObject({ attemptId: a.id, attemptStatus: 'SKIPPED' })
   })
   it('records a ledger row at claim that survives lease expiry and takes the late actual usage', async () => {
     await enableLearner()

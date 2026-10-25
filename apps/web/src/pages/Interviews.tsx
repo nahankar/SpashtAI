@@ -3,10 +3,9 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { MultiSelect } from '@/components/ui/multi-select'
-import { RetainCheckbox } from '@/components/session/SessionRetain'
 import type { SessionRecorderHandle } from '@/components/session/SessionRecorder'
 import { apiClient } from '@/lib/api-client'
-import { getInterview, interviewWrite, interviewHistoryPath, interviewPlaybackPath, INTERVIEWS_API, selectionLabel, type InterviewHistory, type InterviewOptions, type InterviewRun, type InterviewSetup, type InterviewOperation } from '@/lib/interview-practice'
+import { getInterview, interviewWrite, interviewPlaybackPath, INTERVIEWS_API, selectionLabel, type InterviewHistory, type InterviewOptions, type InterviewRun, type InterviewSetup, type InterviewOperation } from '@/lib/interview-practice'
 import { useLiveSession } from '@/features/live-session/useLiveSession'
 import { liveSessionApi } from '@/features/live-session/browser'
 import { interviewsAdapter } from '@/features/live-session/adapters/interviews'
@@ -16,6 +15,8 @@ import { ConversationPanel } from '@/features/live-session/components/Conversati
 import { interviewConversation } from '@/lib/interview-conversation'
 import { InterviewFindings } from '@/features/interviews/InterviewFindings'
 import { InterviewControls } from '@/features/interviews/InterviewControls'
+import { InterviewHistoryList } from '@/features/interviews/InterviewHistoryList'
+import { applyRetain } from '@/lib/interview-history'
 
 const difficulties=['Simple','Medium','Complex','Very Complex']
 const bands=['0-2','2-5','5-8','8+']
@@ -143,7 +144,7 @@ export function Interviews() {
   const tracks=[...new Set(coverage.map(c=>c.track))].sort()
   const matching=coverage.filter(c=>setup.track.includes(c.track) && setup.experienceBand.includes(c.experienceBand) && setup.startingDifficulty.includes(c.difficulty)).reduce((n,c)=>n+c.count,0)
   return <div className="mx-auto max-w-5xl space-y-6">
-    <header className="space-y-2"><h1 className="text-3xl font-semibold">Interviews</h1><p className="text-muted-foreground">Practice technical questions aloud, at your own pace.</p>
+    <header className="space-y-2"><div className="flex flex-wrap items-center justify-between gap-2"><h1 className="text-3xl font-semibold">Interviews</h1><Button asChild variant="ghost" size="sm"><Link to="/interviews/history">Interview history</Link></Button></div><p className="text-muted-foreground">Practice technical questions aloud, at your own pace.</p>
       <p className="text-sm text-muted-foreground">This preview saves questions, answers and recordings for review. {(detail ? detail.evaluationEnabled : options?.evaluationAvailable) ? 'Technical feedback is prepared from saved answers.' : 'Technical evaluation is not enabled for this practice.'} Interview activity stays outside Progress Pulse.</p></header>
     {accessError && <p role="alert" className="rounded-lg border p-4">{accessError} Your saved interview history is still available below.</p>}
     {error && <p role="alert" className="text-destructive">{error}</p>}
@@ -186,9 +187,13 @@ export function Interviews() {
       {conversation.length>0 && <ConversationPanel messages={conversation} stitchAdjacentUserMessages={false} />}
       {detail.endedAt && <Link className="text-sm underline" to={interviewPlaybackPath(detail.sessionId)}>Review answer recordings and communication feedback</Link>}
     </section>}
-    {!selected && <section className="space-y-3"><h2 className="text-xl font-semibold">Your interview history</h2><p className="text-sm text-muted-foreground">Unfinished practice closes after 24 hours without activity. Retain one interview to keep it open.</p>
+    {!selected && <section className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-xl font-semibold">Recent practice</h2>
+        <Button asChild variant="outline" size="sm"><Link to="/interviews/history">Interview history</Link></Button></div>
+      <p className="text-sm text-muted-foreground">Unfinished practice closes after 24 hours without activity. Retain one interview to keep it open.</p>
       {!history.length && <p className="text-sm text-muted-foreground">Your interviews will appear here.</p>}
-      {history.map(h=><article key={h.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4"><div><h3 className="font-medium">{selectionLabel(h.track)}</h3><p className="text-sm text-muted-foreground">{selectionLabel(h.startingDifficulty)} · {selectionLabel(h.experienceBand,' years')} · {new Date(h.startedAt).toLocaleString()} · {h.endedAt?'Ended':'In progress'}</p></div><div className="flex items-center gap-3">{!h.endedAt && <RetainCheckbox sessionId={h.sessionId} retained={!!h.retainedAt} onChange={result=>setHistory(rows=>rows.map(r=>({...r,retainedAt:r.sessionId===h.sessionId?result.retainedAt:result.releasedSessionIds.includes(r.sessionId)?null:r.retainedAt})))} />}<Link className="text-sm underline" to={interviewHistoryPath(h)}>{h.endedAt?'Review':'Resume'}</Link></div></article>)}
+      <InterviewHistoryList runs={history.slice(0,3)} onRetain={(run,result)=>setHistory(rows=>applyRetain(rows,run,result))} />
+      {history.length>3 && <Link className="text-sm underline" to="/interviews/history">View all {history.length} practices</Link>}
     </section>}
   </div>
 }

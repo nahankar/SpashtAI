@@ -101,6 +101,7 @@ interface ChatGroup {
   timestamp: string
   count: number
   attemptStatus?: ChatMessage['attemptStatus']
+  attemptId?: string
 }
 
 function groupConsecutive(messages: ChatMessage[], stitchAdjacentUserMessages: boolean): ChatGroup[] {
@@ -127,6 +128,7 @@ function groupConsecutive(messages: ChatMessage[], stitchAdjacentUserMessages: b
       last.content = content
       last.timestamp = m.timestamp || last.timestamp
       last.attemptStatus = m.attemptStatus
+      last.attemptId = m.attemptId
     } else if (userTimeStitch) {
       last.content = `${last.content} ${content}`.replace(/\s+/g, ' ').trim()
       last.timestamp = m.timestamp || last.timestamp
@@ -139,6 +141,7 @@ function groupConsecutive(messages: ChatMessage[], stitchAdjacentUserMessages: b
         timestamp: m.timestamp,
         count: 1,
         attemptStatus: m.attemptStatus,
+        attemptId: m.attemptId,
       })
     }
   }
@@ -160,6 +163,7 @@ export function ConversationPanel({
   autoScroll = true,
   scrollable = true,
   renderMessage,
+  renderAfterMessage,
 }: {
   messages: ChatMessage[]
   turnMetricsByIndex?: Record<number, TurnMetrics>
@@ -179,6 +183,8 @@ export function ConversationPanel({
   /** Playback uses the page scrollbar instead of a second transcript scrollbar. */
   scrollable?: boolean
   renderMessage?: (message: ChatMessage) => ReactNode
+  /** Rendered below a message bubble, inside its column (for example interview feedback under an answer). */
+  renderAfterMessage?: (message: ChatMessage) => ReactNode
 }) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [collapsed, setCollapsed] = useState(collapsible && defaultCollapsed)
@@ -361,6 +367,7 @@ export function ConversationPanel({
                   <div className="text-[10px] mt-1 px-1 text-muted-foreground">
                     {formatTime(g.timestamp)}
                   </div>
+                  {renderAfterMessage?.(g)}
                 </div>
               </div>
             )})})()}

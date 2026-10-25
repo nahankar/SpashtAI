@@ -29,7 +29,8 @@ import { COACH_BUBBLE, USER_BUBBLE } from '@/lib/conversation'
 import { KaraokeText, type PlaybackWord as TurnWord } from '@/components/session/KaraokeText'
 import { interviewPlaybackWords } from '@/lib/interview-playback-words'
 import { fallbackSpeechRegions, partialPlaybackEnd, verifiedPlaybackWords, verifiedWordRegions, nextSpeechTime } from '@/lib/playback-regions'
-import { InterviewFindings } from '@/features/interviews/InterviewFindings'
+import { InterviewFeedbackDisclosure } from '@/features/interviews/InterviewFeedbackDisclosure'
+import { useInterviewFindings } from '@/features/interviews/useInterviewFindings'
 import { ConversationPanel } from '@/features/live-session/components/ConversationPanel'
 import type { ChatMessage } from '@/features/live-session/types'
 import { ElevateDeliveryClip, isElevateRecordingReady, watchElevateRecordingDuration } from '@/lib/elevateDeliveryClip'
@@ -408,6 +409,8 @@ export function SessionReplay({
   const [sessionInfo, setSessionInfo] = useState<SessionInfo | null>(null)
   const [interviewMessages, setInterviewMessages] = useState<ChatMessage[] | null>(null)
   const isInterview = variant === 'interview' || sessionInfo?.purpose === 'INTERVIEW'
+  // Technical feedback for each answer, keyed by attempt id (one read; polled only while one is pending).
+  const interviewFindings = useInterviewFindings({ sessionId: isInterview ? sessionId : undefined })
   const backPath = isInterview ? '/interviews' : '/elevate'
   const backLabel = isInterview ? 'Interviews' : 'Elevate'
   const assistantLabel = isInterview ? 'Interviewer' : 'Coach'
@@ -1458,7 +1461,10 @@ export function SessionReplay({
         </>
       )}
 
-      {isInterview && !transcriptHidden && <InterviewFindings sessionId={sessionId} />}
+      {isInterview && !transcriptHidden && interviewFindings.error && <p role="status" className="mb-3 text-xs text-muted-foreground">
+        Technical feedback could not be loaded; your saved answers and recording are unaffected.{' '}
+        <button type="button" className="underline hover:text-foreground" onClick={interviewFindings.retry}>Retry</button>
+      </p>}
 
       {/* Transcript */}
       {isInterview && interviewMessages && !transcriptHidden && effectiveChips.size === 0 ? (
@@ -1468,7 +1474,9 @@ export function SessionReplay({
             return words?.length ? <KaraokeText text={message.content} words={words} currentTime={currentTime}
               active={currentTime >= words[0].start && currentTime <= words.at(-1)!.end}
               onSeek={playFrom} lightOnDark /> : undefined
-          }} />
+          }}
+          renderAfterMessage={message => message.role === 'user' && message.attemptId
+            ? <InterviewFeedbackDisclosure finding={interviewFindings.byAttempt.get(message.attemptId)} /> : null} />
       ) : <div className="space-y-3">
         {visibleTurns.length === 0 && (
           <Card>
