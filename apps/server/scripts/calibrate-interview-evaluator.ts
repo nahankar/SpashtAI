@@ -10,7 +10,7 @@ import { ADMIN_MODELS, CONFIGS, PREVIEW_POLICIES, adminConfig } from '../src/int
 import { assessmentDetail, enqueueAssessment, sweepAssessments } from '../src/interviews/evaluator/service'
 
 type Case = { id?: string; name?: string; qid: string; category?: string; expected: string; acceptable?: string[]; mustNotBe?: string[]
-  answer: string; evidence?: string[]; mustNotQuote?: string[]; expectMisconception?: boolean; expectGap?: string; notes?: string }
+  answer: string; evidence?: string[]; mustNotQuote?: string[]; mustNotGap?: string[]; expectMisconception?: boolean; expectGap?: string; notes?: string }
 type Fixture = { fixtureVersion: string; reviewer?: string; questions?: Record<string, { revision: number; guidanceIssues: string[] }>; cases: Case[] }
 type Result = { classification?: string; criteria?: { criterion: string; finding: string; evidence: string[] }[]; strengths?: string[]
   gaps?: string[]; misconceptions?: string[]; uncertainty?: string[]; next?: { action: string; topic: string | null; source: string } }
@@ -47,6 +47,8 @@ function review(test: Case, answer: string, result: Result | null) {
     misconceptionReported: test.expectMisconception === undefined ? null : (result.misconceptions?.length ?? 0) > 0,
     unexpectedMisconception: !test.expectMisconception && (result.misconceptions?.length ?? 0) > 0,
     expectedGapReported: test.expectGap ? lower(result.gaps).includes(test.expectGap.toLowerCase()) : null,
+    // A misheard term reported against the candidate (transcription-artifact cases).
+    forbiddenGap: test.mustNotGap?.length ? test.mustNotGap.some(t => [result.gaps, result.misconceptions].some(items => lower(items).includes(t.toLowerCase()))) : null,
   }
 }
 

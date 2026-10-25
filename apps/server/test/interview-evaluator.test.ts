@@ -7,7 +7,7 @@ vi.mock('@aws-sdk/client-bedrock-runtime', () => ({
   BedrockRuntimeClient: class { send = sdk.send; destroy = sdk.destroy },
   ConverseCommand: class { constructor(public input: unknown) {} },
 }))
-import { evaluateAnswer, EvaluationFailure, LEARNER_PROMPT_5, PROMPTS, SYSTEM_PROMPT } from '../src/interviews/evaluator/model'
+import { evaluateAnswer, EvaluationFailure, LEARNER_PROMPT_5, LEARNER_PROMPT_6, PROMPTS, SYSTEM_PROMPT } from '../src/interviews/evaluator/model'
 const question = { id: 'q', namespace: 'pilot', externalQid: 'Q-1', revision: 1, questionText: 'How do tests remain independent?',
   track: 'Automation Testing', category: 'Testing', topic: 'Isolation', difficulty: 'Simple', experienceBand: '0-2', goodAnswerPoints: 'Fresh independent state', exampleAnswer: '', expectedDepth: 'Short answer', followUpGuidance: '' }
 describe('interview evaluator contracts and model boundary', () => {
@@ -111,11 +111,14 @@ describe('learner policy registry and learner-evaluation-2 contract', () => {
     // learner-evaluation-1 must stay byte-identical to the config new runs pinned before the registry existed.
     expect(hash(LEARNER_POLICIES['learner-evaluation-1'].config)).toBe('a0c031d33359bc45e379b757878cf073360353e5a0b23a06aed246c792916478')
     expect(hash(learner2)).toBe('de2333a2f15fb6f23c594d8cc07994a96c19122662d8653ee77bb1292b71bc4f')
+    expect(hash(LEARNER_POLICIES['learner-evaluation-3'].config)).toBe('a283a0abdcc8d5bdebe8cc5a37d51a7e276486b660f600dd28eab41909d33d96')
     const sha = (text: string) => createHash('sha256').update(text).digest('hex')
     expect(Object.fromEntries(Object.entries(PROMPTS).map(([id, text]) => [id, sha(text)]))).toEqual({
       'interview-answer-4': '6529a9f6cf7ebbc99016081a3dea4da01ee82207681cbbf630f513136798602a',
       'interview-answer-5': 'd8f5c0c28076d15e9fae5e06d57e25dff3250d2a5ab0eb7147762ff96779c7cd',
+      'interview-answer-6': 'e2f458693f9f3fa434e4b59155fa073b5e094fd1429a41bccfcaf1be47d24594',
     })
+    expect(LEARNER_PROMPT_6).toContain('"get dissect" for git bisect'); expect(LEARNER_PROMPT_6.startsWith(LEARNER_PROMPT_5.slice(0, 400))).toBe(true)
     for (const policy of Object.values(LEARNER_POLICIES)) expect(PROMPTS[policy.config.prompt]).toBeTruthy()
     expect(LEARNER_POLICIES[CURRENT_LEARNER_POLICY]).toBeTruthy()
     expect(supportedConfig({ ...learner2 })).toEqual(learner2)
@@ -196,7 +199,7 @@ describe('learner policy registry and learner-evaluation-2 contract', () => {
     expect(explicitAbstention(`Sorry, ${'um, '.repeat(10)}I don't know.`)).toBe(true)
   })
   it('offers only learner policies with their own configuration as Admin previews', () => {
-    expect(PREVIEW_POLICIES).toEqual(['learner-evaluation-2'])
+    expect(PREVIEW_POLICIES).toEqual(['learner-evaluation-2', 'learner-evaluation-3'])
     expect(adminConfig('learner-evaluation-2')).toEqual(learner2); expect(previewPolicy(learner2)?.key).toBe('learner-evaluation-2')
     expect(previewPolicy(configFor('nova2_lite'))).toBeNull()
     expect(() => submitSchema.parse({ questionId: 'q', revision: 1, answer: testAnswer, model: 'learner-evaluation-1' })).toThrow()

@@ -1,0 +1,33 @@
+{
+  "fixtureVersion": "asr-1",
+  "preRegistered": "Transcription-artifact cases written after the real-speech pilot showed 'get dissect' (git bisect) graded as a knowledge gap. Labels and anchors are fixed before any run. Run against learner-evaluation-2 and learner-evaluation-3.",
+  "reviewer": "Claude (AI) against the saved bank guidance. Not an independent human expert review.",
+  "namespace": "automation-pilot",
+  "questions": {
+    "AUT-NEW-097": { "revision": 2, "guidanceIssues": [] },
+    "AUT-NEW-016": { "revision": 2, "guidanceIssues": ["The misconception's 'Correction' restates the object model instead of saying pages in one context share cookies."] },
+    "AUT-019": { "revision": 2, "guidanceIssues": [] },
+    "PY-NEW-021": { "revision": 2, "guidanceIssues": [] },
+    "AUT-NEW-005": { "revision": 2, "guidanceIssues": ["expectedDepth asks the candidate to 'identify why the stated misconception is false'; a correct answer need not mention the misconception."] }
+  },
+  "cases": [
+    { "id": "A1-01", "qid": "AUT-NEW-097", "category": "misheard-term-correct", "expected": "CORRECT", "acceptable": ["CORRECT", "PARTIAL"],
+      "answer": "Mark a known good commit and the current bad commit, then let get dissect check out the midpoint, run the test, mark it good or bad, and repeat until it finds the first bad commit. You can automate it with get dissect run and a script whose exit code says good or bad, but the test has to be reproducible.",
+      "evidence": ["known good commit", "first bad commit"], "mustNotGap": ["dissect", "misstated", "familiar"],
+      "notes": "Core content is complete. PARTIAL is tolerable only for a genuine content gap; any gap or misconception about 'get dissect' is the defect under test." },
+    { "id": "A1-02", "qid": "AUT-NEW-016", "category": "misheard-term-correct", "expected": "CORRECT", "acceptable": ["CORRECT"],
+      "answer": "a browser is the launched engine process, a browser con text is an isolated in cognito like profile with its own cookies and storage, and a page is a tab inside that con text, so two pages in the same con text share cookies",
+      "evidence": ["launched engine process", "share cookies"], "mustNotGap": ["con text", "cognito"] },
+    { "id": "A1-03", "qid": "AUT-019", "category": "misheard-term-correct", "expected": "CORRECT", "acceptable": ["CORRECT", "PARTIAL"],
+      "answer": "In jay meter you start with a thread group for the virtual users and ramp up, add samplers like the HTTP request, config elements like the CSV data set config for test data, timers for think time, assertions to check responses, and listeners for results, and you run it in non GUI mode for the real test.",
+      "evidence": ["thread group", "non GUI mode"], "mustNotGap": ["jay meter"],
+      "notes": "PARTIAL is defensible only for the output metrics in Core (throughput, percentiles, error rate)." },
+    { "id": "A1-04", "qid": "PY-NEW-021", "category": "misheard-term-correct", "expected": "CORRECT", "acceptable": ["CORRECT"],
+      "answer": "The if name equals main block only runs when you execute the file directly with python. When another module imports it, that block is skipped, so the import doesn't start the command line part.",
+      "evidence": ["only runs when you execute the file directly"], "mustNotGap": ["name equals main"] },
+    { "id": "A1-05", "qid": "AUT-NEW-005", "category": "misheard-term-incorrect", "expected": "INCORRECT", "acceptable": ["INCORRECT"],
+      "answer": "stale element reference exception happens when the element takes too long to load so it is basically a time out, you just retry the same web element in a loop until it works",
+      "evidence": ["basically a time out", "retry the same web element"], "expectMisconception": true,
+      "notes": "Transcription leniency must not excuse a real false claim." }
+  ]
+}

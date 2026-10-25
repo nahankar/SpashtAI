@@ -51,8 +51,15 @@ followUpQuestion: always the empty string "".
 Arrays hold at most 6 short strings (uncertainty at most 4); empty lists are []. No numerical score. Do not reproduce the rubric at length. Assistance is reported by the application; an answer given after an example does not demonstrate independent recall.
 The shape below is a FORMAT EXAMPLE only. Replace all of its content with this answer's actual findings. Do not copy the placeholder quote:
 {"classification":"CORRECT","criteria":[{"criterion":"ACCURACY","finding":"MET","evidence":["EXACT SUBSTRING FROM candidateAnswer"],"explanation":"Subject-specific rationale."},{"criterion":"REASONING","finding":"NOT_ASSESSED","evidence":[],"explanation":"Reasoning was not demonstrated."},{"criterion":"DEPTH","finding":"NOT_ASSESSED","evidence":[],"explanation":"No further depth established."}],"strengths":["Correct subject concept."],"gaps":[],"misconceptions":[],"guidance":"Useful subject guidance.","uncertainty":[],"followUpQuestion":""}`
+// learner-evaluation-3: the real-speech pilot showed Transcribe output such as "get dissect" for
+// git bisect being reported as a knowledge gap despite the generic artifact rule above.
+const TRANSCRIPT_RULE = 'They are never subject errors and never lower the classification.'
+const MISHEARD_TERMS = `${TRANSCRIPT_RULE}
+Speech recognition often turns technical terms into similar-sounding words, for example "get dissect" for git bisect, "dome" for DOM, "jay meter" for JMeter, "con text" for context or "name equals main" for __name__ == "__main__". When a word sounds like a term that fits the question, read it as that term. Never report a misheard term as a gap, a misconception, an error or a sign of unfamiliarity, and never quote it as evidence against the candidate.`
+if (!LEARNER_PROMPT_5.includes(TRANSCRIPT_RULE)) throw new Error('interview-answer-6 base text changed')
+export const LEARNER_PROMPT_6 = LEARNER_PROMPT_5.replace(TRANSCRIPT_RULE, MISHEARD_TERMS)
 // Prompt text is part of its version: editing an entry requires a new ID (sha256 frozen in tests).
-export const PROMPTS: Record<string, string> = { 'interview-answer-4': SYSTEM_PROMPT, 'interview-answer-5': LEARNER_PROMPT_5 }
+export const PROMPTS: Record<string, string> = { 'interview-answer-4': SYSTEM_PROMPT, 'interview-answer-5': LEARNER_PROMPT_5, 'interview-answer-6': LEARNER_PROMPT_6 }
 function userMessage(question: QuestionSnapshot, answer: string, assistance: string, rubric: string) {
   if (rubric !== 'bank-guidance-2') return { question, candidateAnswer: answer, assistance }
   const { questionText, track, topic, difficulty, experienceBand } = question
