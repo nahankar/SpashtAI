@@ -1,4 +1,4 @@
-"""Provider-final speech and manual save barrier regression tests."""
+"""Provider-final speech and save barrier regression tests."""
 import asyncio
 import json
 import unittest
@@ -6,6 +6,9 @@ from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 from interview_capture import InterviewCapture, CaptureUnavailable, parse_control
 from voice_backends import VoiceBackendConfig, build_interview_session, _build_pipeline_bedrock
+
+SETTLE, MAX_BARRIER, UNVOICED = .05, .4, .15
+
 
 def state(index=0, attempt='attempt-1'):
     return {'nextTurnIndex':index,'segmentId':'segment-1','attempt':{'id':attempt,'status':'ASKED','question':{'text':'Explain queue retries.'}}}
@@ -17,31 +20,88 @@ class CaptureTests(unittest.IsolatedAsyncioTestCase):
             self.sent.append((path,body.copy()))
             return {'id':body.get('id','chunk')}
         self.send=send
-        self.capture=InterviewCapture(state(),send,AsyncMock())
+        self.capture=InterviewCapture(state(),send,AsyncMock(),settle=SETTLE,max_barrier=MAX_BARRIER,unvoiced=UNVOICED,poll=.005)
         self.capture.accepting=True
         self.session=Mock()
+        self.session.user_state='listening'
         self.session.commit_user_turn=AsyncMock(return_value='SDK promoted interim must never be saved')
+
+    def later(self, delay, action):
+        async def run():
+            await asyncio.sleep(delay); action()
+        return asyncio.create_task(run())
 
     async def test_delayed_final_is_persisted_before_receipt(self):
         self.capture.observe_provider_transcript('partial',False)
-        async def commit(**kwargs):
-            await asyncio.sleep(0)
-            self.capture.observe_provider_transcript('Actual final.',True)
-        self.session.commit_user_turn.side_effect=commit
+        self.later(.03,lambda:self.capture.observe_provider_transcript('Actual final.',True))
         ack=await self.capture.drain(self.session,'FINISH',str(uuid4()))
         self.assertEqual(ack['action'],'FINISH')
         self.assertEqual(self.sent[0][1]['text'],'Actual final.')
         self.assertEqual(self.sent[1][1]['lastTurnIndex'],0)
         self.assertFalse(self.capture.accepting)
         self.session.input.set_audio_enabled.assert_called_with(False)
-        self.session.commit_user_turn.assert_called_with(transcript_timeout=8.,stt_flush_duration=2.,skip_reply=True)
+        # The SDK commit (and its fixed 8 s transcript wait) is no longer part of saving.
+        self.session.commit_user_turn.assert_not_called()
 
-    async def test_interim_and_unfinished_audio_cannot_be_saved(self):
-        for observer in (lambda:self.capture.observe_provider_transcript('not final',False),self.capture.observe_speech_start):
-            observer()
-            with self.assertRaisesRegex(CaptureUnavailable,'TRANSCRIPT_PENDING'):
-                await self.capture.drain(self.session,'FINISH',str(uuid4()))
+    async def test_an_interim_that_never_finalises_cannot_be_saved(self):
+        self.capture.observe_provider_transcript('not final',False)
+        loop=asyncio.get_running_loop(); start=loop.time()
+        with self.assertRaisesRegex(CaptureUnavailable,'TRANSCRIPT_PENDING'):
+            await self.capture.drain(self.session,'FINISH',str(uuid4()))
+        self.assertGreaterEqual(loop.time()-start,MAX_BARRIER-.01)
         self.assertEqual(self.sent,[])
+        self.assertTrue(self.capture.accepting)
+
+    async def test_voiced_speech_with_an_interim_waits_for_its_final(self):
+        self.capture.observe_speech_start()
+        self.capture.observe_provider_transcript('still speaking',False)
+        with self.assertRaisesRegex(CaptureUnavailable,'TRANSCRIPT_PENDING'):
+            await self.capture.drain(self.session,'FINISH',str(uuid4()))
+        self.assertEqual(self.sent,[])
+
+    async def test_speech_in_progress_at_the_request_waits_for_a_final(self):
+        self.session.user_state='speaking'
+        self.capture.observe_provider_transcript('First sentence.',True)
+        await self.capture.worker
+        self.later(.1,lambda:self.capture.observe_provider_transcript('Second sentence.',True))
+        await self.capture.drain(self.session,'FINISH',str(uuid4()))
+        self.assertEqual([body['text'] for path,body in self.sent if path.endswith('/chunks')],['First sentence.','Second sentence.'])
+        self.assertEqual(self.sent[-1][1]['lastTurnIndex'],1)
+
+    async def test_new_speech_events_restart_the_settle_window(self):
+        loop=asyncio.get_running_loop(); start=loop.time()
+        self.later(.04,lambda:self.capture.observe_provider_transcript('Late words.',True))
+        await self.capture.drain(self.session,'FINISH',str(uuid4()))
+        self.assertGreaterEqual(loop.time()-start,.04+SETTLE-.01)
+        self.assertEqual(self.sent[0][1]['text'],'Late words.')
+
+    async def test_unvoiced_vad_speech_does_not_block_the_answer(self):
+        self.capture.observe_provider_transcript('Complete answer.',True)
+        self.capture.observe_speech_start()  # a cough or breath that Transcribe never transcribes
+        ack=await self.capture.drain(self.session,'FINISH',str(uuid4()))
+        self.assertEqual(ack['action'],'FINISH')
+        self.assertEqual(self.sent[-1][1]['lastTurnIndex'],0)
+
+    async def test_skip_does_not_wait_for_pending_speech(self):
+        self.capture.observe_provider_transcript('unfinished thought',False)
+        loop=asyncio.get_running_loop(); start=loop.time()
+        ack=await self.capture.drain(self.session,'SKIP',str(uuid4()))
+        self.assertEqual(ack['action'],'SKIP')
+        self.assertLess(loop.time()-start,SETTLE)
+        self.assertEqual(self.sent[-1][1]['lastTurnIndex'],-1)
+
+    async def test_speech_after_the_barrier_is_not_attached_to_the_answer(self):
+        self.capture.observe_provider_transcript('The answer.',True)
+        await self.capture.drain(self.session,'FINISH',str(uuid4()))
+        self.capture.observe_provider_transcript('Talking after saving.',True)
+        self.assertEqual(len(self.capture.pending),0)
+        self.assertEqual([body.get('text') for path,body in self.sent if path.endswith('/chunks')],['The answer.'])
+
+    async def test_complete_speech_saves_after_the_settle_window_not_a_fixed_wait(self):
+        self.capture.observe_provider_transcript('Done.',True)
+        loop=asyncio.get_running_loop(); start=loop.time()
+        await self.capture.drain(self.session,'FINISH',str(uuid4()))
+        self.assertLess(loop.time()-start,SETTLE*4)
 
     async def test_failed_storage_keeps_chunk_then_idempotent_retry_seals_segment(self):
         fail=True
@@ -64,7 +124,7 @@ class CaptureTests(unittest.IsolatedAsyncioTestCase):
             await self.capture.drain(self.session,'LEAVE',request)
         self.assertEqual(len(self.sent),2)
 
-    async def test_silent_commit_never_saves_sdk_fallback_text(self):
+    async def test_silent_finish_never_saves_sdk_fallback_text(self):
         await self.capture.drain(self.session,'FINISH',str(uuid4()))
         self.assertEqual(len(self.sent),1)
         self.assertEqual(self.sent[0][1]['lastTurnIndex'],-1)
