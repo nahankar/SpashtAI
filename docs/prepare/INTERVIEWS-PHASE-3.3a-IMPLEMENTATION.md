@@ -54,6 +54,44 @@ question publication, Pulse contribution or numerical composite score is added.
 The eight-attempt pilot cap remains unchanged in this checkpoint; replacing it
 with duration-first practice needs its separate run/attempt policy migration.
 
+## Policy versions and pinned runs (acceptance checkpoint)
+
+Learner grading policies are frozen entries in `LEARNER_POLICIES`
+(`evaluator/contracts.ts`). A new evaluated run pins `{ version, config }` from
+`CURRENT_LEARNER_POLICY`; every job for that run is evaluated with exactly that
+registered config, prompt text and parse rules, never with whatever is current.
+
+- `learner-evaluation-1` is byte-identical to the config pinned before the
+  registry existed (hash `a0c031d3…`, prompt `interview-answer-4`). Runs pinned
+  to it keep that behaviour, including the post-model abstention override.
+- `learner-evaluation-2` (prompt `interview-answer-5`, rubric `bank-guidance-2`,
+  schema `interview-result-3`) is registered for calibration through the Admin
+  preview. It treats answers as speech transcripts, passes the bank's labelled
+  sections as separate rubric fields, ignores follow-ups, rejects grades whose
+  classification contradicts their criteria and answers an explicit "I don't
+  know" deterministically without a model call or budget.
+- Prompt text is registered by ID and frozen by sha256 in tests. Never edit an
+  entry or prompt in place: add a version and move `CURRENT_LEARNER_POLICY`.
+- A pinned policy this code does not recognise, or one whose stored config was
+  altered, never aborts Finish. The answer commits and its assessment is
+  `CANCELLED` with `EVALUATOR_POLICY_UNAVAILABLE`, using no budget.
+- Claim cancellations are distinct: `SESSION_DISCARDED`,
+  `EVALUATOR_POLICY_UNAVAILABLE`, `CONFIG_MISMATCH`, `ATTEMPTS_EXHAUSTED`,
+  `PILOT_ACCESS_UNAVAILABLE`.
+- A usage row is written at claim (`STARTED`, unknown tokens). Lease expiry and
+  Admin cancellation close it as `LEASE_EXPIRED`/`CANCELLED`; a late finish
+  records the actual usage. Lease expiry locks and re-checks rows, so a result
+  committed meanwhile is never overwritten.
+- Validation failures record content-free reasons (`INVALID_OUTPUT_JSON`,
+  `INVALID_OUTPUT_SCHEMA_<field>_<code>`, `INVALID_OUTPUT_INCONSISTENT`, …) and
+  provider stop reasons (`INCOMPLETE_OUTPUT_MAX_TOKENS` and similar).
+- Open answers in an evaluated run report `AWAITING_ANSWER`; `NOT_ENABLED`
+  is reserved for capture-only runs.
+
+Admins can preview `learner-evaluation-2` on the accounted Admin test path
+(no adaptive next step, its own input key). `learner-evaluation-1` is not
+offered separately because it is identical to the `nova2_lite` Admin config.
+
 ## Owned report endpoints
 
 - `GET /api/interviews/runs/:runId/assessments`

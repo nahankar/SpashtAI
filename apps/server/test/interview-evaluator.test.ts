@@ -157,6 +157,19 @@ describe('learner policy registry and learner-evaluation-2 contract', () => {
     // The Admin schema is unchanged: it still publishes without the learner consistency rules.
     expect(parseResult(JSON.stringify(notMet), testAnswer).classification).toBe('CORRECT')
   })
+  it('keeps the first allowed quotes and list items in a learner grade, never the Admin one', () => {
+    const answer = 'One false claim. Two false claim. Three false claim. Four false claim.'
+    const long = correctEvaluation(answer); long.classification = 'INCORRECT'
+    long.criteria[0] = { criterion: 'ACCURACY', finding: 'NOT_MET', evidence: ['One false claim.', 'Two false claim.', 'Three false claim.', 'Four false claim.'], explanation: 'Several false claims.' }
+    const output = JSON.stringify({ ...long, strengths: [], misconceptions: Array.from({ length: 8 }, (_, i) => `Claim ${i}`) })
+    const parsed = parseResult(output, answer, learner2.schema)
+    expect(parsed.criteria[0].evidence).toEqual(['One false claim.', 'Two false claim.', 'Three false claim.'])
+    expect(parsed.misconceptions).toHaveLength(6); expect(parsed.validationNotes).toHaveLength(1)
+    expect(() => parseResult(JSON.stringify({ ...long, strengths: [] }), answer)).toThrow()
+    // Trimming never rescues an inexact quote.
+    long.criteria[0].evidence = ['Invented quote', 'One false claim.', 'Two false claim.', 'Three false claim.']
+    expect(() => parseResult(JSON.stringify({ ...long, strengths: [], misconceptions: ['x'] }), answer, learner2.schema)).toThrow('UNSUPPORTED_EVIDENCE')
+  })
   it('removes an unquoted NOT_MET from a learner abstention without inventing evidence', () => {
     const abstain = correctEvaluation(); abstain.criteria[0] = { criterion: 'ACCURACY', finding: 'NOT_MET', evidence: [], explanation: 'Nothing was said.' }
     const parsed = parseResult(learnerOutput({ classification: 'NOT_ANSWERED', criteria: abstain.criteria, strengths: [] }), testAnswer, learner2.schema)

@@ -78,9 +78,9 @@ export function configFor(model: keyof typeof CONFIGS): EvaluatorConfig {
 export function parseResult(output: string, answer: string, schema = 'interview-result-2'): EvaluationResult {
   const raw: unknown = JSON.parse(output.replace(/^\s*```(?:json)?\s*/, '').replace(/\s*```\s*$/, ''))
   const learner = schema === 'interview-result-3'
-  const result = resultSchema.parse(learner && raw && typeof raw === 'object' && !Array.isArray(raw) ? { ...raw, followUpQuestion: '' } : raw)
-  if (new Set(result.criteria.map(c => c.criterion)).size !== 3) throw new Error('INVALID_CRITERIA')
   const validationNotes: string[] = []
+  const result = resultSchema.parse(learner && raw && typeof raw === 'object' && !Array.isArray(raw) ? { ...trimLists(raw as Record<string, unknown>, validationNotes), followUpQuestion: '' } : raw)
+  if (new Set(result.criteria.map(c => c.criterion)).size !== 3) throw new Error('INVALID_CRITERIA')
   for (const criterion of result.criteria) {
     if (criterion.finding !== 'NOT_ASSESSED' && !criterion.evidence.length) {
       // Missing reasoning/depth is not evidence of a false claim. Remove only the
@@ -106,6 +106,20 @@ export function parseResult(output: string, answer: string, schema = 'interview-
     if (!consistent) throw new Error('INCONSISTENT')
   }
   return validationNotes.length ? { ...result, validationNotes } : result
+}
+// Learner grades keep the first allowed items when the model returns longer lists (for example
+// more than three quotations for an answer with many false claims). Kept quotes are still checked
+// as exact; nothing is invented or reworded.
+const LIST_LIMITS = { strengths: 6, gaps: 6, misconceptions: 6, uncertainty: 4 } as const
+function trimLists(raw: Record<string, unknown>, notes: string[]) {
+  let trimmed = false
+  const cap = (value: unknown, limit: number) => Array.isArray(value) && value.length > limit ? (trimmed = true, value.slice(0, limit)) : value
+  const out: Record<string, unknown> = { ...raw }
+  for (const [key, limit] of Object.entries(LIST_LIMITS)) out[key] = cap(raw[key], limit)
+  if (Array.isArray(raw.criteria)) out.criteria = raw.criteria.map(c => c && typeof c === 'object' && !Array.isArray(c)
+    ? { ...c, evidence: cap((c as Record<string, unknown>).evidence, 3) } : c)
+  if (trimmed) notes.push('The evaluator returned more items than the report shows; only the first ones were kept.')
+  return out
 }
 /** Bounded, content-free failure reason: schema keys and Zod issue codes only, never output text. */
 export function invalidOutputReason(error: unknown) {
