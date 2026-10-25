@@ -181,11 +181,29 @@ Findings:
 `shared-replay-evidence.test.ts` failed once under full-suite load and passed 3/3 alone and on the next full
 run; treated as an existing timing flake.
 
+## Addendum — 25 October follow-up batch
+
+Run with the user's approval to raise the **local** per-Admin daily cap from 20 to 40 for one batch (restored
+afterwards, never committed; every call still through the accounted Admin path). Commits `fc4afa4` (harness
+`--retry-failed`) and `5f1ba30` (new evaluated runs pin `learner-evaluation-3`).
+
+| Set | Policy | Agrees | Misheard term reported against the learner |
+| --- | --- | --- | --- |
+| asr-1 (5 transcription-artifact cases) | `learner-evaluation-2` | 4 / 5 | 1 (A1-01: "command name is incorrect ('get dissect')") |
+| asr-1 | `learner-evaluation-3` | **5 / 5** | 0; the deliberately false answer stayed INCORRECT |
+| Held-out regression (6 cases) | `learner-evaluation-3` | 6 / 6 | — |
+| H1-02, H1-11 (previously interrupted by host sleep) | `learner-evaluation-2` | 2 / 2 | — |
+| R1-02 (overlong quotes), R1-19 (never run) | `learner-evaluation-2` | 2 / 2 | — |
+
+The quote-trimming rule from `0e42588` applied in 4 of these 20 real grades, including R1-02. Call latency for
+the 20 calls: p50 2.41 s, p95 2.78 s, max 2.93 s; mean tokens 1,519 in / 371 out. With these runs,
+`learner-evaluation-2` agreed with all 11 held-out cases and `learner-evaluation-3` is the policy new evaluated
+runs pin. Earlier pinned runs keep `learner-evaluation-1` or `-2`.
+
 ## Unresolved and next steps
 
-1. Run on the next Admin budget (20, UTC day): `asr-1` under v2 and v3 (10), H1-02 and H1-11 (interrupted by
-   sleep), R1-02 (overlong-quote fix) and R1-19 (not run). Adopt `learner-evaluation-3` only if it removes the
-   misheard-term penalty without excusing real false claims.
+1. Done in the addendum: `asr-1` under v2 and v3, the four unresolved cases and a v3 regression check;
+   `learner-evaluation-3` adopted for new runs. Real-speech behaviour of v3 still needs the human run below.
 2. A human microphone run with an identified tester (Interviews, Interview voice, Interview technical
    evaluation granted; a new practice). Include an accent and natural thinking pauses.
 3. An independent human review of a sample of labels and grades, particularly PARTIAL versus CORRECT on Medium
