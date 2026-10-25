@@ -8,17 +8,19 @@ export type LearnerFinding = { attemptId: string; index: number; question: strin
 export function InterviewFindings({ runId, sessionId, refreshKey = '' }: { runId?: string; sessionId?: string; refreshKey?: string }) {
   const [rows, setRows] = useState<LearnerFinding[]>([])
   const [error, setError] = useState(false)
+  // A different practice starts empty; a refresh of the same one keeps its findings on screen.
+  useEffect(() => { setRows([]); setError(false) }, [runId, sessionId])
   useEffect(() => {
     if (!runId && !sessionId) return
     const abort = new AbortController(); let timer: ReturnType<typeof setTimeout> | undefined
-    setRows([]); setError(false)
     const path = runId ? `/runs/${encodeURIComponent(runId)}` : `/playback/${encodeURIComponent(sessionId!)}`
     async function load() {
       try {
         const result = await apiClient<{ assessments: LearnerFinding[] }>(`/api/interviews${path}/assessments`, { signal: abort.signal })
         if (abort.signal.aborted) return
         setRows(result.assessments); setError(false)
-        if (result.assessments.some(r => ['PENDING', 'RUNNING'].includes(r.status))) timer = setTimeout(() => void load(), 3000)
+        // Evaluations usually finish within a few seconds of saving; check every second while one is running.
+        if (result.assessments.some(r => ['PENDING', 'RUNNING'].includes(r.status))) timer = setTimeout(() => void load(), 1000)
       } catch { if (!abort.signal.aborted) setError(true) }
     }
     void load()

@@ -163,12 +163,13 @@ export function Interviews() {
     </section>}
     {detail && <section className="space-y-4">
       <div className="flex flex-wrap justify-between gap-3"><h2 className="text-xl font-semibold">{selectionLabel(detail.track)} practice</h2><Link className="text-sm underline" to="/interviews" onClick={e=> { if (live.token) { e.preventDefault(); toast.info('Pause or end this practice before opening history.') } }}>Interview history</Link></div>
+      {detail.conversationMode && !detail.endedAt && <p className="text-sm text-muted-foreground">Automatic conversation: after you finish, stay quiet for about 5 seconds and the interviewer moves on. Finish answer, Skip and More time are always available.</p>}
       {current && !detail.endedAt && <div className="rounded-xl border p-5 space-y-2"><p className="text-sm text-muted-foreground">Question {current.index} · {current.question.difficulty} · {current.question.topic}</p><p className="text-lg font-medium whitespace-pre-wrap">{current.question.text}</p><p className="text-sm text-muted-foreground">{current.question.expectedDepth}</p></div>}
       {live.token && live.url && current && <LiveSessionRoom {...live} token={live.token} url={live.url} recorderRef={recorderRef}
         handleDisconnected={()=>controller.onDisconnected(recorderRef.current,{sessionId:live.sessionId,segmentId:live.segmentId})}
         handleNewMessage={m=>controller.handleMessage(m)} setAssistantState={live.setAssistantState} handleConversationRestart={()=>live.setAssistantState('recovering')}
         statusOverride={operation ? {label:operation==='saving' ? 'Saving answer…' : 'Starting next question…',hint:'Your microphone is muted.'}
-          : ['ANSWERED','SKIPPED'].includes(current.status) ? {label:current.status==='ANSWERED' ? 'Answer saved' : 'Question skipped',hint:'Your microphone is muted. Continue or end practice.'} : undefined}
+          : ['ANSWERED','SKIPPED'].includes(current.status) && !detail.conversationMode ? {label:current.status==='ANSWERED' ? 'Answer saved' : 'Question skipped',hint:'Your microphone is muted. Continue or end practice.'} : undefined}
         onTurnMetrics={()=>undefined} updateMetrics={()=>undefined} handleLeave={leave} showMetrics={false} setShowMetrics={()=>undefined}
         handlePause={()=>controller.pause(recorderRef.current)} exportFlags={{enableAudioExport:false}}
         canDiscardPreparePractice={false} isPrepare={false} handleDiscard={()=>controller.discard(recorderRef.current,adapter)}
@@ -177,7 +178,8 @@ export function Interviews() {
         controls={<InterviewControls runId={detail.id} attemptId={current.id} segmentId={live.segmentId!} status={current.status}
           ready={live.assistantState==='ready'} blocked={live.isPausing || live.isLeaving || !!live.pauseAudioFailure} recorder={()=>recorderRef.current}
           operationChanged={setOperation} changed={refreshDetail} preparing={()=>live.setAssistantState('unknown')} pause={()=>controller.pause(recorderRef.current)}
-          leave={leave} incomplete={leave} reconnect={reconnect} discard={()=>controller.discard(recorderRef.current,adapter)} />} />}
+          leave={leave} incomplete={leave} reconnect={reconnect} discard={()=>controller.discard(recorderRef.current,adapter)}
+          conversation={!!detail.conversationMode} />} />}
       {!live.token && !detail.endedAt && <div className="rounded-xl border p-5 space-y-3"><p>Your interview is paused. Confirmed answers are saved.</p><div className="flex gap-2"><Button disabled={!options || live.isResuming || loading} onClick={()=>void resume()}>{live.isResuming?'Reconnecting…':'Resume practice'}</Button><Button variant="outline" disabled={live.isLeaving} onClick={()=>void leave()}>End practice</Button></div></div>}
       <InterviewFindings runId={detail.id} refreshKey={`${current?.id}:${current?.status}`} />
       {conversation.length>0 && <ConversationPanel messages={conversation} stitchAdjacentUserMessages={false} />}

@@ -17,10 +17,31 @@ export type InterviewRun = {
   startedAt: string; endedAt: string|null; retainedAt: string|null; recordingConsentAt: string|null; recordingConsentVersion: string|null;
   attempts: InterviewAttempt[];
   evaluationEnabled?: boolean;
+  // Pinned when the practice started with Interview conversation access; earlier runs stay manual.
+  conversationMode?: boolean;
 }
 export type InterviewHistory = { id: string; sessionId: string; track: string; experienceBand: string; startingDifficulty: string;
   startedAt: string; endedAt: string|null; retainedAt: string|null; questionCount: number }
-export type InterviewOptions = { coverage: Array<{ track: string; experienceBand: string; difficulty: string; count: number }>; maxQuestions: number; consentVersion: string; evaluationAvailable?: boolean }
+export type InterviewOptions = { coverage: Array<{ track: string; experienceBand: string; difficulty: string; count: number }>; maxQuestions: number; consentVersion: string; evaluationAvailable?: boolean; conversationAvailable?: boolean }
+/** Coordinator states published by the interviewer agent in conversation practices. */
+export type ConversationState = 'asking'|'listening'|'candidate_end'|'confirming'|'saving'|'preparing'|'waiting'|''
+export const CONVERSATION_STOP_REASONS = ['PRACTICE_DURATION_REACHED', 'PRACTICE_QUESTION_LIMIT', 'QUESTION_BANK_EXHAUSTED']
+export function conversationStatus(state: ConversationState, reason: string, hold: boolean): string {
+  if (state === 'asking') return 'The interviewer is reading the question.'
+  if (state === 'confirming') return 'Confirming your final words…'
+  if (state === 'saving') return 'Saving your answer…'
+  if (state === 'preparing') return 'Preparing the next question…'
+  if (state === 'waiting') return CONVERSATION_STOP_REASONS.includes(reason)
+    ? 'This practice has no more questions. End practice to review your answers.'
+    : 'Automatic progression has stopped. Choose Next question or end practice.'
+  if (state === 'candidate_end') return 'Pause noticed. Your answer will be saved shortly — keep talking to continue.'
+  if (state === 'listening') {
+    if (hold) return 'Listening. Automatic finish is off for this answer; choose Finish answer when you are done.'
+    if (reason === 'SPEECH_UNCONFIRMED') return 'Listening. Some speech has not been transcribed yet; choose Finish answer when you are done.'
+    return 'Listening. Thinking pauses are fine. When you have finished, stay quiet for about 5 seconds or choose Finish answer.'
+  }
+  return 'Waiting for the interviewer…'
+}
 export type CaptureAction = 'FINISH'|'SKIP'|'PAUSE'|'LEAVE'
 export type InterviewOperation = 'saving'|'preparing'|null
 export type CaptureReceipt = { id: string; attemptId: string; segmentId: string; action: CaptureAction }
@@ -43,15 +64,21 @@ export function interviewCompletionMessage(error: unknown): string | null {
     ['QUESTION_BANK_EXHAUSTED', 'PRACTICE_DURATION_REACHED', 'PRACTICE_QUESTION_LIMIT'].includes(error.code ?? '')
     ? error.message : null
 }
+/** A capture failure with its agent code, so the UI can offer the matching recovery. */
+export class CaptureError extends Error {
+  constructor(public code?: string) { super(captureFailure(code)) }
+}
+export const UNCONFIRMED_SPEECH_HELP = 'Some speech could not be confirmed as transcribed. Retry saving, or save only the confirmed speech (the unconfirmed part will not be included).'
 export async function confirmedInterviewDrain(port: {
   seal(): Promise<void>; mute(): Promise<void>;
-  rpc(payload: { action: CaptureAction; requestId: string }): Promise<string>;
+  rpc(payload: { action: CaptureAction; requestId: string; acceptUnresolved?: true }): Promise<string>;
   verify(id: string): Promise<CaptureReceipt>;
-}, action: CaptureAction, requestId: string, attemptId: string, segmentId: string) {
+}, action: CaptureAction, requestId: string, attemptId: string, segmentId: string, options: { acceptUnresolved?: boolean } = {}) {
   if (action === 'PAUSE' || action === 'LEAVE') await port.seal()
   await port.mute()
-  const result = JSON.parse(await port.rpc({ action, requestId })) as { error?: string; receiptId?: string }
-  if (result.error || !result.receiptId) throw new Error(captureFailure(result.error))
+  // acceptUnresolved is only ever the learner's explicit choice after TRANSCRIPT_PENDING.
+  const result = JSON.parse(await port.rpc({ action, requestId, ...(options.acceptUnresolved && action === 'FINISH' ? { acceptUnresolved: true as const } : {}) })) as { error?: string; receiptId?: string }
+  if (result.error || !result.receiptId) throw new CaptureError(result.error)
   const receipt = await port.verify(result.receiptId)
   if (receipt.action !== action || receipt.attemptId !== attemptId || receipt.segmentId !== segmentId || receipt.id !== requestId) {
     throw new Error('Speech-save confirmation belongs to another action. Retry saving.')

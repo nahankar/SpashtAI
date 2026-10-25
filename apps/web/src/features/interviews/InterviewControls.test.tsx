@@ -47,18 +47,19 @@ vi.mock('@/components/ui/button', () => ({ Button: (props: { children: string; d
   h.buttons.set(props.children, props)
   return <button disabled={props.disabled}>{props.children}</button>
 } }))
-function render(status = 'ASKED') {
+function render(status = 'ASKED', conversation = false) {
   h.cursor = 0; h.effectCursor = 0; h.effects.length = 0; h.buttons.clear()
   const html = renderToStaticMarkup(<InterviewControls runId="run" attemptId="attempt" segmentId="segment"
-    status={status} ready blocked={false} recorder={() => null} changed={vi.fn()} preparing={vi.fn()}
-    pause={vi.fn()} leave={vi.fn()} incomplete={vi.fn()} discard={vi.fn()} reconnect={vi.fn()} operationChanged={vi.fn()} />)
+    status={status} ready blocked={false} recorder={() => null} changed={vi.fn(async () => {})} preparing={vi.fn()}
+    pause={vi.fn()} leave={vi.fn()} incomplete={vi.fn()} discard={vi.fn()} reconnect={vi.fn()} operationChanged={vi.fn()} conversation={conversation} />)
   h.effects.forEach(effect => effect())
   return html
 }
-function control(type: string, text?: string) {
-  const bytes = new TextEncoder().encode(JSON.stringify({ type, text }))
+function control(type: string, text?: string, extra: Record<string, string> = {}) {
+  const bytes = new TextEncoder().encode(JSON.stringify({ type, text, ...extra }))
   h.listeners.get(RoomEvent.DataReceived)?.forEach(listener => listener(bytes, participant, undefined, 'lk.control'))
 }
+const flush = () => new Promise(resolve => setTimeout(resolve, 0))
 beforeEach(() => {
   h.slots.splice(0).forEach(slot => slot.cleanup?.())
   h.states.length = 0; h.listeners.clear(); h.track.enabled = false; h.rpc.mockReset()
@@ -84,6 +85,17 @@ describe('interview time limit and the current answer', () => {
     h.buttons.get('Unmute')!.onClick()
     expect(h.track.enabled).toBe(true)
   })
+  it('offers saving only the confirmed speech after a transcript stays pending, never automatically', async () => {
+    render(); control('session_state', 'ready'); render(); render()
+    h.rpc.mockResolvedValueOnce(JSON.stringify({ error: 'TRANSCRIPT_PENDING' }))
+    h.buttons.get('Finish answer')!.onClick(); await flush(); await flush()
+    const html = render()
+    expect(html).toContain('Some speech could not be confirmed')
+    expect(h.buttons.has('Save confirmed speech only')).toBe(true)
+    h.rpc.mockResolvedValueOnce(JSON.stringify({ error: 'SAVE_FAILED' }))
+    h.buttons.get('Save confirmed speech only')!.onClick(); await flush()
+    expect(JSON.parse(h.rpc.mock.calls.at(-1)![0].payload)).toMatchObject({ action: 'FINISH', acceptUnresolved: true })
+  })
   it('still mutes and locks the microphone while saving an expired answer', () => {
     render(); control('interview_time_up'); control('session_state', 'ready'); render(); render()
     h.rpc.mockImplementation(() => new Promise(() => {}))
@@ -91,5 +103,49 @@ describe('interview time limit and the current answer', () => {
     expect(h.track.enabled).toBe(false)
     expect(h.buttons.get('Unmute')?.disabled).toBe(true)
     expect(render()).toContain('Saving and confirming your speech')
+  })
+})
+describe('conversation practices', () => {
+  const ready = () => { render('ASKED', true); control('session_state', 'ready'); render('ASKED', true) }
+  it('opens the microphone only while the interviewer is listening and shows its state', () => {
+    ready(); control('interview_state', undefined, { state: 'asking' }); render('ASKED', true); render('ASKED', true)
+    expect(h.track.enabled).toBe(false)
+    expect(render('ASKED', true)).toContain('reading the question')
+    control('interview_state', undefined, { state: 'listening' }); render('ASKED', true); render('ASKED', true)
+    expect(h.track.enabled).toBe(true)
+    expect(render('ASKED', true)).toContain('stay quiet for about 5 seconds')
+    control('interview_state', undefined, { state: 'confirming' }); render('ASKED', true); render('ASKED', true)
+    expect(h.track.enabled).toBe(false)
+    expect(h.buttons.get('Finish answer')?.disabled).toBe(true)
+  })
+  it('sends Finish and Skip to the interviewer naming the current answer; no manual finish call', async () => {
+    ready(); control('interview_state', undefined, { state: 'listening' }); render('ASKED', true)
+    h.rpc.mockResolvedValue(JSON.stringify({ completed: true }))
+    h.buttons.get('Finish answer')!.onClick(); await flush()
+    expect(JSON.parse(h.rpc.mock.calls[0][0].payload)).toMatchObject({ action: 'FINISH', attemptId: 'attempt' })
+    render('ASKED', true)
+    h.buttons.get('Skip question')!.onClick(); await flush()
+    expect(JSON.parse(h.rpc.mock.calls[1][0].payload)).toMatchObject({ action: 'SKIP', attemptId: 'attempt' })
+  })
+  it('offers Next question only when progression stopped for a reason other than a practice limit', () => {
+    ready(); control('interview_state', undefined, { state: 'waiting', reason: 'PRACTICE_DURATION_REACHED' }); render('ANSWERED', true)
+    expect(h.buttons.has('Next question')).toBe(false)
+    expect(render('ANSWERED', true)).toContain('no more questions')
+    control('interview_state', undefined, { state: 'waiting', reason: 'QUESTION_UNAVAILABLE' }); render('ANSWERED', true)
+    expect(h.buttons.has('Next question')).toBe(true)
+  })
+  it('More time holds automatic finish and Repeat asks the interviewer to re-read', async () => {
+    ready(); control('interview_state', undefined, { state: 'listening' }); render('ASKED', true)
+    h.rpc.mockResolvedValue(JSON.stringify({ hold: true }))
+    h.buttons.get('More time')!.onClick(); await flush()
+    expect(JSON.parse(h.rpc.mock.calls[0][0].payload).action).toBe('HOLD')
+    expect(render('ASKED', true)).toContain('Automatic finish is off')
+    h.buttons.get('Repeat question')!.onClick(); await flush()
+    expect(JSON.parse(h.rpc.mock.calls[1][0].payload).action).toBe('REPEAT')
+  })
+  it('keeps manual practices on their own Next question control', () => {
+    render('ANSWERED'); control('session_state', 'ready'); render('ANSWERED')
+    expect(h.buttons.has('Next question')).toBe(true)
+    expect(h.buttons.has('More time')).toBe(false)
   })
 })
