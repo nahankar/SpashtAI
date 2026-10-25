@@ -1,5 +1,5 @@
 // Opt-in local/internal benchmark. Uses the same gate, quota and saved-job path as Admin.
-// Example: tsx scripts/calibrate-interview-evaluator.ts <admin-id> <report.json> [--fixture reviewed-1] [--model nova2_lite|nova_pro|learner-evaluation-2|all] [--only R1-01,R1-02]
+// Example: tsx scripts/calibrate-interview-evaluator.ts <admin-id> <report.json> [--fixture reviewed-1] [--model nova2_lite|nova_pro|learner-evaluation-2|all] [--only R1-01,R1-02] [--retry-failed]
 // A learner-evaluation-N model previews that learner grading policy through the Admin test path.
 // The default fixture is the original synthetic set. Each model-evaluated case costs one Admin test
 // from the daily quota (a learner-policy preview of an explicit "I don't know" is deterministic and
@@ -7,7 +7,7 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { prisma } from '../src/lib/prisma'
 import { ADMIN_MODELS, CONFIGS, PREVIEW_POLICIES, adminConfig } from '../src/interviews/evaluator/contracts'
-import { assessmentDetail, enqueueAssessment, sweepAssessments } from '../src/interviews/evaluator/service'
+import { assessmentDetail, enqueueAssessment, retryAssessment, sweepAssessments } from '../src/interviews/evaluator/service'
 
 type Case = { id?: string; name?: string; qid: string; category?: string; expected: string; acceptable?: string[]; mustNotBe?: string[]
   answer: string; evidence?: string[]; mustNotQuote?: string[]; mustNotGap?: string[]; expectMisconception?: boolean; expectGap?: string; notes?: string }
@@ -88,6 +88,11 @@ try {
       const submitted = await enqueueAssessment({ questionId: question.id, revision: question.revision, answer: test.answer, source: 'ADMIN_TEST', model }, actorId)
       // The normal API worker may claim the job concurrently. Persisted input keys share its result.
       let assessment = await assessmentDetail(submitted.id, actorId)
+      // --retry-failed re-runs an earlier FAILED/CANCELLED test through the normal accounted retry.
+      if (flags.includes('--retry-failed') && submitted.reused && ['FAILED', 'CANCELLED'].includes(assessment.status)) {
+        await retryAssessment(submitted.id, actorId); assessment = await assessmentDetail(submitted.id, actorId)
+        console.log(JSON.stringify({ id: test.id ?? test.name, retried: true }))
+      }
       const deadline = Date.now() + 100_000
       while (['PENDING','RUNNING'].includes(assessment.status) && Date.now() < deadline) {
         await sweepAssessments()
