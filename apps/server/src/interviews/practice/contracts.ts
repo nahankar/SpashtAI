@@ -29,3 +29,12 @@ export const receiptSchema = z.object({
   lastTurnIndex: z.number().int().min(-1),
 }).strict()
 export const VOICE_CONSENT_VERSION = 'interview-recording-1'
+// Pinned on new runs with Interview conversation access; NULL keeps today's manual mode. Frozen once
+// pinned: changing timings needs a new version so earlier runs keep their behaviour.
+export const CONVERSATION_POLICY = { version: 'conversation-1', handoffSilenceMs: 5000, settleMs: 1200, maxBarrierMs: 8000 } as const
+export const conversationPolicySchema = z.object({ version: z.literal('conversation-1'), handoffSilenceMs: z.number().int().positive(),
+  settleMs: z.number().int().positive(), maxBarrierMs: z.number().int().positive() }).strict()
+// Advancing names the attempt it follows, so a stale tab or a late handler cannot create an extra question.
+export const nextSchema = z.object({ afterAttemptId: id.optional() }).strict()
+export const agentFinishSchema = z.object({ receiptId: z.string().uuid(), skip: z.boolean().default(false) }).strict()
+export const agentNextSchema = z.object({ afterAttemptId: id }).strict()

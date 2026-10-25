@@ -20,6 +20,16 @@ export async function practiceExecutionAccess(ownerId: string, tx: Prisma.Transa
     }
   }
 }
+/** Interview conversation (automatic progression) on top of execution access; false rather than an error. */
+export async function conversationAccess(ownerId: string, tx: Prisma.TransactionClient = prisma) {
+  try { await practiceExecutionAccess(ownerId, tx) } catch (error) { if (error instanceof BankError) return false; throw error }
+  await tx.$queryRaw`SELECT feature FROM "PlatformFeatureFlag" WHERE feature='interview_conversation' FOR SHARE`
+  const flag = await tx.platformFeatureFlag.findUnique({ where: { feature: 'interview_conversation' } })
+  if (!flag || flag.hidden || flag.disabled) return false
+  if (flag.audience !== 'SELECTED_USERS') return true
+  await tx.$queryRaw`SELECT id FROM "UserFeatureGrant" WHERE "userId"=${ownerId} AND feature='interview_conversation' FOR SHARE`
+  return Boolean(await tx.userFeatureGrant.findUnique({ where: { userId_feature: { userId: ownerId, feature: 'interview_conversation' } } }))
+}
 export async function currentInterviewVoiceProfile(tx: Prisma.TransactionClient = prisma) {
   const voice = await tx.voiceConfig.findFirst({ where: { isActive: true } })
   if (!voice) throw new BankError(409, 'The interview voice pipeline is not configured')

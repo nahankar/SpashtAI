@@ -4,7 +4,7 @@ import { prisma } from './prisma'
 /** Product modules that may be shown in navigation and counted in Pulse. */
 export type PlatformFeature = 'elevate' | 'replay' | 'prepare' | 'interviews' | 'quick_try'
 /** Controlled capabilities that are enabled from Admin but are not modules. */
-export type InternalFeature = 'delivery_moments' | 'session_chat' | 'interview_evaluator' | 'interview_voice' | 'interview_adaptive'
+export type InternalFeature = 'delivery_moments' | 'session_chat' | 'interview_evaluator' | 'interview_voice' | 'interview_adaptive' | 'interview_conversation'
 export type ConfigurableFeature = PlatformFeature | InternalFeature
 
 export const PLATFORM_FEATURES: PlatformFeature[] = ['elevate', 'replay', 'prepare', 'interviews', 'quick_try']
@@ -15,6 +15,7 @@ export const CONFIGURABLE_FEATURES: ConfigurableFeature[] = [
   'interview_evaluator',
   'interview_voice',
   'interview_adaptive',
+  'interview_conversation',
 ]
 const PULSE_FEATURES: PlatformFeature[] = ['elevate', 'replay', 'prepare']
 
@@ -34,6 +35,9 @@ const DEFAULT_FLAGS: Array<{
   hidden: boolean
   disabled: boolean
 }> = [
+  { feature: 'interview_conversation', label: 'Interview conversation · learner pilot',
+    description: 'Automatic answer completion and next question in new interview practices. Finish, Skip and Next stay as fallbacks. Requires Interviews and Interview voice access.',
+    audience: 'SELECTED_USERS', hidden: true, disabled: true },
   { feature: 'interview_adaptive', label: 'Interview technical evaluation · learner pilot',
     description: 'Evaluate saved learner answers. Separate from Admin tests; automatic conversation is a later checkpoint.',
     audience: 'SELECTED_USERS', hidden: true, disabled: true },
@@ -174,6 +178,7 @@ export async function getFeatureFlagsMap(): Promise<FeatureFlagsMap> {
   await ensureFeatureFlags()
   const rows = await prisma.platformFeatureFlag.findMany()
   const map: FeatureFlagsMap = {
+    interview_conversation: { hidden: true, disabled: true, audience: 'SELECTED_USERS', overlayComment: null, overlayPosition: 'center' },
     interview_adaptive: { hidden: true, disabled: true, audience: 'SELECTED_USERS', overlayComment: null, overlayPosition: 'center' },
     interview_voice: { hidden: true, disabled: true, audience: 'SELECTED_USERS', overlayComment: null, overlayPosition: 'center' },
     interview_evaluator: { hidden: true, disabled: true, audience: 'SELECTED_USERS', overlayComment: null, overlayPosition: 'center' },

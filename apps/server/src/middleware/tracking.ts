@@ -56,6 +56,13 @@ export function trackFeatureUsage(
   }
 }
 
+/** Records an action taken for a user by an internal service (for example the interview coordinator). */
+export function recordUserFeatureUsage(user: { userId: string; role?: string | null }, feature: string, action: string,
+  sessionId: string | null = null, extra?: EventExtra) {
+  if (isPrivilegedRole(user.role ?? undefined)) return
+  writeFeatureUsage({ userId: user.userId, role: user.role, feature, action, sessionId, extra })
+}
+
 /**
  * Records a successful action inside a handler when its durable ownership is
  * only known after the handler has loaded or created the resource.

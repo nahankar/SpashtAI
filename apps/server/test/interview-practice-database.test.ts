@@ -55,6 +55,11 @@ async function enableLearner() {
   await prisma.platformFeatureFlag.update({ where: { feature: 'interview_adaptive' }, data: { hidden: false, disabled: false, enabled: true, audience: 'SELECTED_USERS' } })
   await prisma.userFeatureGrant.upsert({ where: { userId_feature: { userId: owner, feature: 'interview_adaptive' } }, create: { userId: owner, feature: 'interview_adaptive' }, update: {} })
 }
+let originalConversation: Awaited<ReturnType<typeof prisma.platformFeatureFlag.findUnique>>
+async function enableConversation() {
+  await prisma.platformFeatureFlag.update({ where: { feature: 'interview_conversation' }, data: { hidden: false, disabled: false, enabled: true, audience: 'SELECTED_USERS' } })
+  await prisma.userFeatureGrant.upsert({ where: { userId_feature: { userId: owner, feature: 'interview_conversation' } }, create: { userId: owner, feature: 'interview_conversation' }, update: {} })
+}
 async function learnerClaim() { const job = await claimLearnerAssessment(); expect(job).not.toBeNull(); learnerUsage.push(job!.leaseToken); return job! }
 const setup = () => ({ sessionId: randomUUID(), track: fixture, experienceBand: '2-5', startingDifficulty: 'Medium', durationMinutes: 10, recordingConsent: true })
 async function run() { return startPractice(setup(), owner) }
@@ -80,6 +85,7 @@ const turn = (segmentId: string, text: string, localTurnIndex = 0) => ({ segment
 describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
   beforeAll(async () => {
     originalAdaptive = await prisma.platformFeatureFlag.findUnique({ where: { feature: 'interview_adaptive' } })
+    originalConversation = await prisma.platformFeatureFlag.findUnique({ where: { feature: 'interview_conversation' } })
     originalLearnerBudget = await prisma.interviewEvaluatorBudget.findUnique({ where: { scope_day: { scope: 'learner-global', day: learnerDay() } } })
     await prisma.platformFeatureFlag.update({ where: { feature: 'interview_adaptive' }, data: { hidden: true, disabled: true } })
     await prisma.interviewEvaluatorBudget.upsert({ where: { scope_day: { scope: 'learner-global', day: learnerDay() } }, create: { scope: 'learner-global', day: learnerDay() }, update: { used: 0 } })
@@ -109,6 +115,8 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
   afterEach(async () => {
     await prisma.session.deleteMany({ where: { userId: { in: users } } })
     await prisma.platformFeatureFlag.update({ where: { feature: 'interview_adaptive' }, data: { hidden: true, disabled: true, enabled: false } })
+    await prisma.platformFeatureFlag.update({ where: { feature: 'interview_conversation' }, data: { hidden: true, disabled: true, enabled: false } })
+    await prisma.userFeatureGrant.deleteMany({ where: { userId: { in: users }, feature: 'interview_conversation' } })
     await prisma.interviewEvaluatorBudget.deleteMany({ where: { scope: `learner-${hash(owner)}` } })
     for (const feature of ['interviews','interview_voice']) await prisma.platformFeatureFlag.update({ where: { feature }, data: { hidden: false, disabled: false } })
     await prisma.userFeatureGrant.upsert({ where: { userId_feature: { userId: owner, feature: 'interviews' } }, create: { userId: owner, feature: 'interviews' }, update: {} })
@@ -116,6 +124,7 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
   afterAll(async () => {
     await prisma.interviewEvaluatorUsage.deleteMany({ where: { invocationKey: { in: learnerUsage } } })
     if (originalAdaptive) await prisma.platformFeatureFlag.update({ where: { feature: 'interview_adaptive' }, data: { hidden: originalAdaptive.hidden, disabled: originalAdaptive.disabled, enabled: originalAdaptive.enabled, audience: originalAdaptive.audience } })
+    if (originalConversation) await prisma.platformFeatureFlag.update({ where: { feature: 'interview_conversation' }, data: { hidden: originalConversation.hidden, disabled: originalConversation.disabled, enabled: originalConversation.enabled, audience: originalConversation.audience } })
     if (originalLearnerBudget) await prisma.interviewEvaluatorBudget.update({ where: { scope_day: { scope: 'learner-global', day: learnerDay() } }, data: { used: originalLearnerBudget.used } })
     else await prisma.interviewEvaluatorBudget.deleteMany({ where: { scope: 'learner-global', day: learnerDay() } })
     await prisma.questionBankQuestion.deleteMany({ where: { id: { in: questions } } })
@@ -364,6 +373,88 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
     await enableLearner()
     const { r } = await asked()
     expect((await request(app).get(`/practice/runs/${r.id}/assessments`).auth(token(owner), { type: 'bearer' })).body.assessments[0].status).toBe('AWAITING_ANSWER')
+  })
+  it('pins conversation mode only with Interview conversation access and falls back to manual when it is revoked', async () => {
+    const manual = await asked()
+    expect((await practiceDetail(manual.r.id, owner)).conversationMode).toBe(false)
+    expect((await voiceState(manual.r.sessionId, manual.s.id, manual.s.roomName, `user_${owner}`)).conversation).toEqual({ enabled: false, policy: null })
+    await endPractice(manual.r.id, owner)
+    await enableConversation()
+    expect((await request(app).get('/practice/options').auth(token(owner), { type: 'bearer' })).body.conversationAvailable).toBe(true)
+    const { r, a, s } = await asked()
+    expect((await prisma.interviewRun.findUniqueOrThrow({ where: { id: r.id } })).conversationPolicySnapshot).toMatchObject({ version: 'conversation-1', handoffSilenceMs: 5000 })
+    expect((await practiceDetail(r.id, owner)).conversationMode).toBe(true)
+    let state = await voiceState(r.sessionId, s.id, s.roomName, `user_${owner}`)
+    expect(state).toMatchObject({ conversation: { enabled: true, policy: { version: 'conversation-1' } }, attemptHasSpeech: false, unfinishedReceipt: null })
+    await captureCommittedTurn(a.id, turn(s.id, testAnswer))
+    expect((await voiceState(r.sessionId, s.id, s.roomName, `user_${owner}`)).attemptHasSpeech).toBe(true)
+    // Revoking only the conversation grant keeps the practice usable in manual mode.
+    await request(app).put(`/flags/interview_conversation/grants/${owner}`).auth(token(admin, 'SUPER_ADMIN'), { type: 'bearer' }).send({ granted: false })
+    state = await voiceState(r.sessionId, s.id, s.roomName, `user_${owner}`)
+    expect(state.conversation.enabled).toBe(false)
+    expect((await finish(r.id, a.id)).status).toBe('ANSWERED')
+  })
+  it('lets a FINISH receipt complete an answer whose segment closed before the finish call', async () => {
+    const { r, a, s } = await asked(); await captureCommittedTurn(a.id, turn(s.id, testAnswer))
+    const ack = await receipt(a.id, s.id)
+    // Reload or disconnect: the open segment closes while the attempt is still ASKED.
+    await prisma.sessionSegment.update({ where: { id: s.id }, data: { endedAt: new Date() } })
+    expect((await prisma.sessionSegment.findUniqueOrThrow({ where: { id: s.id } })).interviewDrainAttemptId).toBe(a.id)
+    expect((await voiceState(r.sessionId, (await segment(r.sessionId, 1)).id, (await prisma.sessionSegment.findFirstOrThrow({ where: { sessionId: r.sessionId, segmentIndex: 1 } })).roomName, `user_${owner}`)).unfinishedReceipt)
+      .toMatchObject({ id: ack.id, action: 'FINISH', segmentId: s.id })
+    const saved = await finishAnswer(r.id, a.id, owner, false, ack.id)
+    expect(saved).toMatchObject({ status: 'ANSWERED', answerText: testAnswer })
+  })
+  it('still blocks Finish while a closed segment without a FINISH receipt may hold unsaved speech', async () => {
+    const { r, a, s } = await asked(); await captureCommittedTurn(a.id, turn(s.id, testAnswer))
+    await prisma.sessionSegment.update({ where: { id: s.id }, data: { endedAt: new Date() } })
+    const next = await segment(r.sessionId, 1)
+    const ack = await receipt(a.id, next.id)
+    await expect(finishAnswer(r.id, a.id, owner, false, ack.id)).rejects.toMatchObject({ status: 409 })
+  })
+  it('advances only from the named attempt and returns the existing next question on a repeat', async () => {
+    const { r, a, s } = await asked(); await captureCommittedTurn(a.id, turn(s.id, testAnswer))
+    await expect(prepareBankAttempt(r.id, owner, a.id)).rejects.toMatchObject({ code: 'ANSWER_OPEN' })
+    await finish(r.id, a.id)
+    const second = await prepareBankAttempt(r.id, owner, a.id)
+    expect(second.index).toBe(2)
+    expect((await prepareBankAttempt(r.id, owner, a.id)).id).toBe(second.id)
+    expect((await request(app).post(`/practice/runs/${r.id}/next`).auth(token(owner), { type: 'bearer' }).send({ afterAttemptId: a.id })).body.id).toBe(second.id)
+    await expect(prepareBankAttempt(r.id, owner, 'not-an-attempt')).rejects.toMatchObject({ code: 'STALE_ADVANCE' })
+    await markQuestionAsked(second.id, { segmentId: s.id, questionText: second.question.text })
+    await finish(r.id, second.id, true)
+    await expect(prepareBankAttempt(r.id, owner, a.id)).rejects.toMatchObject({ code: 'STALE_ADVANCE' })
+    // Without a precondition the existing learner contract is unchanged.
+    expect((await request(app).post(`/practice/runs/${r.id}/next`).auth(token(owner), { type: 'bearer' }).send({})).status).toBe(409)
+  })
+  it('exposes internal finish and next only for conversation-enabled runs, independent of evaluation', async () => {
+    const previousToken = process.env.INTERNAL_AGENT_TOKEN
+    process.env.INTERNAL_AGENT_TOKEN = `${fixture}-internal`
+    const agent = (path: string, body: unknown) => request(app).post(`/agent${path}`).set('x-internal-agent-token', `${fixture}-internal`).send(body)
+    try {
+      const manual = await asked(); await captureCommittedTurn(manual.a.id, turn(manual.s.id, testAnswer))
+      const manualAck = await receipt(manual.a.id, manual.s.id)
+      const refused = await agent(`/attempts/${manual.a.id}/finish`, { receiptId: manualAck.id })
+      expect(refused.status).toBe(403); expect(refused.body.code).toBe('CONVERSATION_UNAVAILABLE')
+      await endPractice(manual.r.id, owner)
+      // Evaluation is pinned but its budget is exhausted: progression must not depend on it.
+      await enableLearner(); await enableConversation()
+      await prisma.interviewEvaluatorBudget.upsert({ where: { scope_day: { scope: `learner-${hash(owner)}`, day: learnerDay() } },
+        create: { scope: `learner-${hash(owner)}`, day: learnerDay(), used: LEARNER_LIMITS.perUser }, update: { used: LEARNER_LIMITS.perUser } })
+      const { r, a, s } = await asked(); await captureCommittedTurn(a.id, turn(s.id, testAnswer))
+      const ack = await receipt(a.id, s.id)
+      const done = await agent(`/attempts/${a.id}/finish`, { receiptId: ack.id })
+      expect(done.status).toBe(200); expect(done.body).toMatchObject({ status: 'ANSWERED', reused: false }); expect(done.body.ownerId).toBeUndefined()
+      expect((await agent(`/attempts/${a.id}/finish`, { receiptId: ack.id })).body.reused).toBe(true)
+      expect(await prisma.interviewAssessment.findFirst({ where: { snapshot: { attemptId: a.id } } })).toMatchObject({ status: 'FAILED', errorCode: 'EVALUATION_BUDGET_REACHED' })
+      const next = await agent(`/runs/${r.id}/next`, { afterAttemptId: a.id })
+      expect(next.status).toBe(200); expect(next.body.index).toBe(2)
+      expect((await agent(`/runs/${r.id}/next`, { afterAttemptId: a.id })).body.id).toBe(next.body.id)
+      expect((await agent(`/runs/${r.id}/next`, {})).status).toBe(400)
+    } finally {
+      if (previousToken === undefined) delete process.env.INTERNAL_AGENT_TOKEN
+      else process.env.INTERNAL_AGENT_TOKEN = previousToken
+    }
   })
   it('creates, retries and reads a multi-selection run through PostgreSQL, including long combined tracks', async () => {
     const longTrack = `${fixture}-${'long-track-'.repeat(9)}`

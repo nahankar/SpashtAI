@@ -6,9 +6,10 @@ import { SessionDiscardedError, SessionMissingError } from '../lib/sessionDiscar
 import { reqLog } from '../lib/logger'
 import { prisma } from '../lib/prisma'
 import { deleteSession } from './sessions'
-import { recordFeatureUsage } from '../middleware/tracking'
-import { learnerFindings } from '../interviews/evaluator/learner'
-import { captureCommittedTurn, endPractice, finishAnswer, markQuestionAsked, ownedCaptureReceipt, practiceDetail, practiceHistory, practiceOptions, prepareBankAttempt, recordAssistance, saveCaptureReceipt, startPractice, voiceState } from '../interviews/practice/service'
+import { recordFeatureUsage, recordUserFeatureUsage } from '../middleware/tracking'
+import { learnerFindings, wakeLearnerEvaluator } from '../interviews/evaluator/learner'
+import { nextSchema } from '../interviews/practice/contracts'
+import { agentFinishAnswer, agentPrepareNext, captureCommittedTurn, endPractice, finishAnswer, markQuestionAsked, ownedCaptureReceipt, practiceDetail, practiceHistory, practiceOptions, prepareBankAttempt, recordAssistance, saveCaptureReceipt, startPractice, voiceState } from '../interviews/practice/service'
 
 const route = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => { void fn(req, res).catch(next) }
 const empty = z.object({}).strict()
@@ -41,11 +42,15 @@ practiceRouter.get('/playback/:sessionId/assessments', route(async (req, res) =>
   if (!run) throw new BankError(404, 'Interview not found')
   res.json({ assessments: await prisma.$transaction(tx => learnerFindings(run.id, req.user!.userId, tx)) })
 }))
-practiceRouter.post('/runs/:runId/next', route(async (req, res) => { empty.parse(req.body); res.json(await prepareBankAttempt(req.params.runId, req.user!.userId)) }))
+practiceRouter.post('/runs/:runId/next', route(async (req, res) => {
+  const body = nextSchema.parse(req.body ?? {})
+  res.json(await prepareBankAttempt(req.params.runId, req.user!.userId, body.afterAttemptId))
+}))
 practiceRouter.post('/runs/:runId/attempts/:attemptId/finish', route(async (req, res) => {
   const body = finish.parse(req.body)
   const result = await finishAnswer(req.params.runId, req.params.attemptId, req.user!.userId, body.skip, body.receiptId)
   if (!result.reused) {
+    wakeLearnerEvaluator()
     recordFeatureUsage(req, 'interviews', result.status === 'SKIPPED' ? 'answer_skipped' : 'answer_completed', null, {
       outcome: result.status === 'SKIPPED' ? 'skipped' : 'completed',
     })
@@ -77,6 +82,19 @@ practiceAgentRouter.post('/attempts/:attemptId/asked', route(async (req, res) =>
 practiceAgentRouter.post('/attempts/:attemptId/chunks', route(async (req, res) => { res.json(await captureCommittedTurn(req.params.attemptId, req.body)) }))
 practiceAgentRouter.post('/attempts/:attemptId/assistance', route(async (req, res) => { await recordAssistance(req.params.attemptId, req.body); res.json({ saved: true }) }))
 practiceAgentRouter.post('/attempts/:attemptId/receipts', route(async (req, res) => { res.json(await saveCaptureReceipt(req.params.attemptId, req.body)) }))
+// Conversation coordinator: finish and advance for the run owner, only on conversation-enabled runs.
+practiceAgentRouter.post('/attempts/:attemptId/finish', route(async (req, res) => {
+  const { ownerId, sessionId: _sessionId, ...result } = await agentFinishAnswer(req.params.attemptId, req.body)
+  if (!result.reused) {
+    wakeLearnerEvaluator()
+    const owner = await prisma.user.findUnique({ where: { id: ownerId }, select: { role: true } })
+    recordUserFeatureUsage({ userId: ownerId, role: owner?.role }, 'interviews', result.status === 'SKIPPED' ? 'answer_skipped' : 'answer_completed', null, {
+      outcome: result.status === 'SKIPPED' ? 'skipped' : 'completed', metadata: { completion: 'coordinator' },
+    })
+  }
+  res.json(result)
+}))
+practiceAgentRouter.post('/runs/:runId/next', route(async (req, res) => { res.json(await agentPrepareNext(req.params.runId, req.body)) }))
 practiceAgentRouter.get('/sessions/:sessionId/segments/:segmentId', route(async (req, res) => {
   const query = z.object({ room: z.string().min(1).max(256), identity: z.string().min(1).max(160) }).strict().parse(req.query)
   res.json(await voiceState(req.params.sessionId, req.params.segmentId, query.room, query.identity))

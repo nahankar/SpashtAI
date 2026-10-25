@@ -173,13 +173,19 @@ export async function sweepLearnerAssessments() {
   catch (e) { invocation = e instanceof EvaluationFailure ? e : new EvaluationFailure('EVALUATION_FAILED', false, { inputTokens: null, outputTokens: null, latencyMs: 0 }) }
   await finishLearnerAssessment(job, invocation); return true
 }
-let timer: NodeJS.Timeout | null = null; let running = false
+let timer: NodeJS.Timeout | null = null; let running = false; let rerun = false
+// Single-flight sweep. A claimed job is followed immediately by another sweep, so queued answers do
+// not wait for the next interval; a wake during a sweep is remembered rather than dropped.
+function tick() {
+  if (running) { rerun = true; return }
+  running = true; rerun = false
+  void sweepLearnerAssessments().then(claimed => { if (claimed) rerun = true })
+    .catch(e => logger.error({ event: 'interviews.learner_evaluation_failed', errorType: e instanceof Error ? e.name : 'unknown' }, 'Learner evaluation worker failed'))
+    .finally(() => { running = false; if (rerun) setImmediate(tick) })
+}
 export function startLearnerEvaluatorWorker() {
   if (timer) return
-  timer = setInterval(() => {
-    if (running) return
-    running = true
-    void sweepLearnerAssessments().catch(e => logger.error({ event: 'interviews.learner_evaluation_failed', errorType: e instanceof Error ? e.name : 'unknown' }, 'Learner evaluation worker failed'))
-      .finally(() => { running = false })
-  }, 2000); timer.unref?.()
+  timer = setInterval(tick, 2000); timer.unref?.()
 }
+/** Call after a finish transaction commits; it is a no-op when the worker is not running in this process. */
+export function wakeLearnerEvaluator() { if (timer) setImmediate(tick) }

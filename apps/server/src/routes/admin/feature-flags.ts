@@ -8,7 +8,9 @@ import {
 } from '../../lib/featureFlags'
 
 const router = Router()
-const PILOT_FEATURES = ['interviews', 'interview_evaluator', 'interview_voice', 'interview_adaptive']
+// interview_conversation is a pilot capability but not a learner-evaluation dependency: toggling it
+// never cancels evaluation jobs (revocation falls back to manual progression).
+const PILOT_FEATURES = ['interviews', 'interview_evaluator', 'interview_voice', 'interview_adaptive', 'interview_conversation']
 const LEARNER_FEATURES = ['interviews', 'interview_voice', 'interview_adaptive']
 async function cancelLearnerJobs(ownerId?: string) {
   const where = { snapshot: { source: 'LIVE_ATTEMPT' as const, ...(ownerId ? { ownerId } : {}) } }

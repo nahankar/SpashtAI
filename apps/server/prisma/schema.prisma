@@ -1167,6 +1167,8 @@ model InterviewRun {
   recordingConsentVersion String?
   voiceConfigSnapshot Json?
   evaluationPolicySnapshot Json?
+  // Automatic conversation policy pinned at launch; NULL = manual Finish/Next (all earlier runs).
+  conversationPolicySnapshot Json?
   attempts        InterviewAttempt[]
   createdAt       DateTime @default(now())
   @@index([ownerId, createdAt])

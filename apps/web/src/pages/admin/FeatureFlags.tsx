@@ -174,7 +174,7 @@ export function FeatureFlagsAdmin() {
                   <p className="text-sm text-muted-foreground">{flag.description}</p>
                 )}
 
-                {['interviews','interview_evaluator','interview_voice','interview_adaptive'].includes(flag.feature) && <div className="space-y-1">
+                {['interviews','interview_evaluator','interview_voice','interview_adaptive','interview_conversation'].includes(flag.feature) && <div className="space-y-1">
                   <Label htmlFor={`${flag.feature}-audience`}>Audience</Label>
                   <select
                     id={`${flag.feature}-audience`}
@@ -186,7 +186,7 @@ export function FeatureFlagsAdmin() {
                     <option value="SELECTED_USERS">Selected users</option>
                   </select>
                 </div>}
-                {['interviews','interview_evaluator','interview_voice','interview_adaptive'].includes(flag.feature) && d.audience === 'SELECTED_USERS' && <PilotGrants feature={flag.feature} />}
+                {['interviews','interview_evaluator','interview_voice','interview_adaptive','interview_conversation'].includes(flag.feature) && d.audience === 'SELECTED_USERS' && <PilotGrants feature={flag.feature} />}
 
                 <div className="flex flex-wrap gap-4">
                   <FlagToggle

@@ -7,8 +7,9 @@ import { activeSegmentDurationSec } from '../../analytics/sessionSegments'
 import { BankError } from '../bank/csv'
 import { learnerEligibleWhere } from '../bank/schemas'
 import { hash, questionSnapshotSchema } from '../evaluator/contracts'
-import { joinSelection, splitSelection, askedSchema, assistanceSchema, chunkSchema, MAX_ANSWER_LENGTH, MAX_QUESTIONS, PRACTICE_NAMESPACE, receiptSchema, startSchema, VOICE_CONSENT_VERSION } from './contracts'
-import { currentInterviewVoiceProfile, practiceExecutionAccess, voiceProfileSchema } from './access'
+import { joinSelection, splitSelection, askedSchema, assistanceSchema, chunkSchema, MAX_ANSWER_LENGTH, MAX_QUESTIONS, PRACTICE_NAMESPACE, receiptSchema, startSchema, VOICE_CONSENT_VERSION,
+  CONVERSATION_POLICY, conversationPolicySchema, agentFinishSchema, agentNextSchema } from './contracts'
+import { conversationAccess, currentInterviewVoiceProfile, practiceExecutionAccess, voiceProfileSchema } from './access'
 import { learnerPolicy, enqueueLearnerAssessment, learnerEvaluationAccess } from '../evaluator/learner'
 
 type Tx = Prisma.TransactionClient
@@ -76,18 +77,30 @@ export async function startPractice(input: unknown, ownerId: string) {
       purpose: 'INTERVIEW', contextScope: 'SESSION_ONLY', sessionName: `${body.track.join(', ')} interview practice`,
       configurationSnapshot: { capturePolicy: 'committed-turns-1', answerCompletion: 'explicit', technicalFeedback: 'pending' } } })
     const evaluationPolicy = await learnerPolicy(ownerId, tx)
+    const conversation = await conversationAccess(ownerId, tx)
     const run = await tx.interviewRun.create({ data: { sessionId: session.id, ownerId, namespace: PRACTICE_NAMESPACE,
       track: joinSelection(body.track), experienceBand: joinSelection(body.experienceBand), startingDifficulty: joinSelection(body.startingDifficulty),
       durationMinutes: body.durationMinutes, maxQuestions: MAX_QUESTIONS,
       recordingConsentAt: new Date(), recordingConsentVersion: VOICE_CONSENT_VERSION, voiceConfigSnapshot: json(voice),
-      evaluationPolicySnapshot: evaluationPolicy ? json(evaluationPolicy) : undefined } })
+      evaluationPolicySnapshot: evaluationPolicy ? json(evaluationPolicy) : undefined,
+      conversationPolicySnapshot: conversation ? json(CONVERSATION_POLICY) : undefined } })
     return { id: run.id, sessionId: session.id, reused: false }
   })
 }
 
-export async function prepareBankAttempt(runId: string, ownerId: string) {
+export async function prepareBankAttempt(runId: string, ownerId: string, afterAttemptId?: string) {
   return prisma.$transaction(async tx => {
     const run = await writableRun(tx, runId, ownerId)
+    if (afterAttemptId !== undefined) {
+      // A repeated or late advance gets the question that already follows, never another one.
+      const latest = await tx.interviewAttempt.findFirst({ where: { runId }, orderBy: { index: 'desc' } })
+      if (!latest || latest.id !== afterAttemptId) {
+        const after = await tx.interviewAttempt.findFirst({ where: { id: afterAttemptId, runId } })
+        if (after && latest && latest.index === after.index + 1 && ['PREPARED', 'ASKED'].includes(latest.status)) return learnerAttempt(latest)
+        throw new BankError(409, 'This practice has already moved on from that question', 'STALE_ADVANCE')
+      }
+      if (['PREPARED', 'ASKED'].includes(latest.status)) throw new BankError(409, 'Finish or skip the current question first', 'ANSWER_OPEN')
+    }
     const open = await tx.interviewAttempt.findFirst({ where: { runId, status: { in: ['PREPARED', 'ASKED'] } } })
     if (open) return learnerAttempt(open)
     const segments = await tx.sessionSegment.findMany({ where: { sessionId: run.sessionId }, select: { startedAt: true, endedAt: true, activeDurationSec: true } })
@@ -178,8 +191,13 @@ export async function finishAnswer(runId: string, attemptId: string, ownerId: st
     if (!attempt) throw new BankError(404, 'Attempt not found')
     const receipt = receiptId && await tx.interviewCaptureReceipt.findFirst({ where: { id: receiptId, attemptId, action: skip ? 'SKIP' : 'FINISH' } })
     if (!receipt) throw new BankError(409, 'Wait for the interviewer to confirm that your speech has been saved')
-    if (!skip && await tx.sessionSegment.findFirst({ where: { sessionId: (await tx.interviewRun.findUniqueOrThrow({ where: { id: runId } })).sessionId,
-      interviewDrainAttemptId: attemptId, interviewDrainedAt: null } })) throw new BankError(409, 'A previous connection has not finished saving this answer. Retry or end it as incomplete.')
+    if (!skip) {
+      // A segment closed while this answer was open may still hold unsaved speech, unless a FINISH receipt
+      // for this attempt already covers it (chunks after that receipt are refused).
+      const bound = await tx.sessionSegment.findMany({ where: { sessionId: run.sessionId, interviewDrainAttemptId: attemptId, interviewDrainedAt: null }, select: { id: true } })
+      const covered = bound.length ? await tx.interviewCaptureReceipt.findMany({ where: { attemptId, action: 'FINISH', segmentId: { in: bound.map(b => b.id) } }, select: { segmentId: true } }) : []
+      if (bound.some(b => !covered.some(c => c.segmentId === b.id))) throw new BankError(409, 'A previous connection has not finished saving this answer. Retry or end it as incomplete.')
+    }
     if (attempt.status === 'ANSWERED' && !skip) {
       const saved = await tx.interviewAnswerSnapshot.findUniqueOrThrow({ where: { attemptId_textRevision: { attemptId, textRevision: 1 } } })
       return { id: saved.id, status: 'ANSWERED', answerText: saved.answerText, reused: true }
@@ -210,7 +228,7 @@ export async function practiceDetail(runId: string, ownerId: string) {
     return { id: run.id, sessionId: run.sessionId, track: run.track, experienceBand: run.experienceBand,
       startingDifficulty: run.startingDifficulty, durationMinutes: run.durationMinutes, ...session,
       recordingConsentAt: run.recordingConsentAt, recordingConsentVersion: run.recordingConsentVersion,
-      evaluationEnabled: run.evaluationPolicySnapshot !== null,
+      evaluationEnabled: run.evaluationPolicySnapshot !== null, conversationMode: run.conversationPolicySnapshot !== null,
       attempts: attempts.map(a => ({ ...learnerAttempt(a), completionReason: a.completionReason,
         capturedText: a.chunks.sort((x,y) => x.segment.segmentIndex-y.segment.segmentIndex || x.localTurnIndex-y.localTurnIndex).map(c => c.text).join('\n'),
         capturedParts: a.chunks.map(c => ({ segmentId: c.segmentId, sourceTurnId: c.sourceTurnId, text: c.text, createdAt: c.createdAt })),
@@ -246,7 +264,8 @@ export async function practiceOptions(ownerId: string) {
     const coverage = await tx.questionBankQuestion.groupBy({ by: ['track','experienceBand','difficulty'],
       where: { ...learnerEligibleWhere, namespace: PRACTICE_NAMESPACE }, _count: { _all: true } })
     return { coverage: coverage.map(c => ({ track: c.track, experienceBand: c.experienceBand, difficulty: c.difficulty, count: c._count._all })),
-      consentVersion: VOICE_CONSENT_VERSION, maxQuestions: MAX_QUESTIONS, evaluationAvailable: await learnerEvaluationAccess(ownerId, tx) }
+      consentVersion: VOICE_CONSENT_VERSION, maxQuestions: MAX_QUESTIONS, evaluationAvailable: await learnerEvaluationAccess(ownerId, tx),
+      conversationAvailable: await conversationAccess(ownerId, tx) }
   })
 }
 export async function practiceHistory(ownerId: string) {
@@ -270,10 +289,38 @@ export async function voiceState(sessionId: string, segmentId: string, room: str
     const max = await tx.interviewAnswerChunk.aggregate({ where: { segmentId }, _max: { localTurnIndex: true } })
     const segments = await tx.sessionSegment.findMany({ where: { sessionId }, select: { startedAt: true, endedAt: true, activeDurationSec: true } })
     const activeSeconds=segments.reduce((sum,s) => sum+(s.activeDurationSec ?? Math.max(0,((s.endedAt?.getTime() ?? Date.now())-s.startedAt.getTime())/1000)),0)
+    // Conversation stays on only while the run pinned it and the owner still has access; otherwise manual.
+    const policy = conversationPolicySchema.safeParse(run.conversationPolicySnapshot)
+    const open = attempt.status === 'ASKED'
     return { runId: run.id, sessionId, segmentId, identity, attempt: learnerAttempt(attempt),
       nextTurnIndex: (max._max.localTurnIndex ?? -1) + 1, secondsRemaining: Math.max(0,run.durationMinutes*60-activeSeconds),
-      voiceProfile: voiceProfileSchema.parse(run.voiceConfigSnapshot) }
+      voiceProfile: voiceProfileSchema.parse(run.voiceConfigSnapshot),
+      conversation: { enabled: policy.success && await conversationAccess(run.ownerId, tx), policy: policy.success ? policy.data : null },
+      // Speech saved for this answer in earlier segments, and a completion receipt the server has not applied yet.
+      attemptHasSpeech: open && (await tx.interviewAnswerChunk.count({ where: { attemptId: attempt.id } })) > 0,
+      unfinishedReceipt: open ? await tx.interviewCaptureReceipt.findFirst({ where: { attemptId: attempt.id, action: { in: ['FINISH', 'SKIP'] } },
+        select: { id: true, action: true, segmentId: true } }) : null }
   })
+}
+/** The run an internal coordinator call acts for: the owner's, and only while conversation is enabled for it. */
+async function conversationRun(where: { attemptId: string } | { runId: string }) {
+  const run = 'runId' in where ? await prisma.interviewRun.findUnique({ where: { id: where.runId } })
+    : (await prisma.interviewAttempt.findUnique({ where: { id: where.attemptId }, include: { run: true } }))?.run
+  if (!run) throw new BankError(404, 'Interview not found')
+  if (!conversationPolicySchema.safeParse(run.conversationPolicySnapshot).success || !await conversationAccess(run.ownerId)) {
+    throw new BankError(403, 'Automatic conversation is not enabled for this practice', 'CONVERSATION_UNAVAILABLE')
+  }
+  return run
+}
+export async function agentFinishAnswer(attemptId: string, input: unknown) {
+  const body = agentFinishSchema.parse(input)
+  const run = await conversationRun({ attemptId })
+  return { ...await finishAnswer(run.id, attemptId, run.ownerId, body.skip, body.receiptId), ownerId: run.ownerId, sessionId: run.sessionId }
+}
+export async function agentPrepareNext(runId: string, input: unknown) {
+  const body = agentNextSchema.parse(input)
+  const run = await conversationRun({ runId })
+  return prepareBankAttempt(run.id, run.ownerId, body.afterAttemptId)
 }
 export async function saveCaptureReceipt(attemptId: string, input: unknown) {
   const body = receiptSchema.parse(input)
