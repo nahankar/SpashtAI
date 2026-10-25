@@ -21,7 +21,7 @@ export const LEARNER_POLICIES: Record<string, { config: EvaluatorConfig; determi
   'learner-evaluation-3': { deterministicAbstention: true, config: { id: 'nova2-lite-learner-3', modelId: 'us.amazon.nova-2-lite-v1:0', region: 'us-east-1', label: 'Nova 2 Lite · learner grading 3',
     prompt: 'interview-answer-6', schema: 'interview-result-3', rubric: 'bank-guidance-2', policy: 'learner-evaluation-3', temperature: 0, maxTokens: 2000, timeoutMs: 20_000 } },
 }
-export const CURRENT_LEARNER_POLICY = 'learner-evaluation-2'
+export const CURRENT_LEARNER_POLICY = 'learner-evaluation-3'
 // Admins can preview a learner policy through the accounted Admin test path. learner-evaluation-1
 // is byte-identical to nova2_lite, so only policies with their own configuration are offered.
 export const PREVIEW_POLICIES = Object.keys(LEARNER_POLICIES).filter(key =>
