@@ -11,7 +11,7 @@ from livekit.agents import Agent, stt, room_io
 from livekit import rtc
 from interview_capture import CaptureUnavailable, InterviewCapture, parse_control
 from interview_coordinator import InterviewCoordinator, ServerRefused
-from interview_audio import keep_interview_audio_alive, INTERVIEW_SAMPLE_RATE
+from interview_audio import ProviderClock, keep_interview_audio_alive, INTERVIEW_SAMPLE_RATE
 from voice_backends import VoiceBackendConfig, build_interview_session
 
 logger = logging.getLogger("spashtai-agent.interview_voice")
@@ -81,33 +81,40 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
                 # UI delivery is independent of successful durable speech storage.
                 logger.warning("Interview text notification unavailable")
 
-        capture = InterviewCapture(state, send, publish)
+        # Automatic conversation only for runs that pinned it and still have access; others stay manual.
+        # A pinned run keeps its pinned save-barrier timings either way.
+        conversation = state.get("conversation") or {}
+        policy = conversation.get("policy") or {}
+        timings = {"settle": policy["settleMs"] / 1000, "max_barrier": policy["maxBarrierMs"] / 1000} if policy else {}
+        capture = InterviewCapture(state, send, publish, **timings)
         question_task = None
         async def ready():
             await ctx.room.local_participant.publish_data(json.dumps({"type": "session_state", "text": "ready"}).encode(), topic="lk.control")
 
         async def publish_state(name, extra):
             # Participant attributes persist across reconnects; the data message is only a prompt to re-read.
-            attributes = {"interview.state": name, "interview.attemptId": str(extra.get("attemptId", "")),
-                          "interview.reason": str(extra.get("reason", "")), "interview.handoffAt": str(extra.get("handoffAt", ""))}
-            await ctx.room.local_participant.set_attributes(attributes)
-            await ctx.room.local_participant.publish_data(json.dumps({"type": "interview_state", "state": name, **{k: str(v) for k, v in extra.items()}}).encode(), topic="lk.control")
+            values = {k: ("1" if v is True else "" if v is False else str(v)) for k, v in extra.items()}
+            attributes = {f"interview.{key}": values.get(key, "") for key in ("attemptId", "reason", "handoffAt", "hold", "receiptId", "receiptAction")}
+            await ctx.room.local_participant.set_attributes({"interview.state": name, **attributes})
+            await ctx.room.local_participant.publish_data(json.dumps({"type": "interview_state", "state": name, **values}).encode(), topic="lk.control")
             if name == "listening":
                 await ready()
 
-        # Automatic conversation only for runs that pinned it and still have access; others stay manual.
-        conversation = state.get("conversation") or {}
         coordinator = InterviewCoordinator(capture=capture, session=session, request=request,
             voice_state=lambda: send(state_path, method="GET"), publish_state=publish_state, run_id=state["runId"],
-            policy=conversation["policy"], attempt_has_speech=bool(state.get("attemptHasSpeech"))) if conversation.get("enabled") else None
+            policy=policy, attempt_has_speech=bool(state.get("attemptHasSpeech"))) if conversation.get("enabled") else None
+
+        def conversing() -> bool:
+            # Withdrawn access turns the coordinator off mid-practice; the learner continues manually.
+            return coordinator is not None and coordinator.active
 
         @session.on("user_state_changed")
         def speech_started(event):
             if event.new_state == "speaking":
-                capture.observe_speech_start()
+                capture.observe_speech_start(event.created_at)
             elif event.old_state == "speaking":
-                capture.observe_speech_end()
-            if coordinator is not None and (event.new_state == "speaking" or event.old_state == "speaking"):
+                capture.observe_speech_end(event.created_at)
+            if conversing() and (event.new_state == "speaking" or event.old_state == "speaking"):
                 coordinator.on_vad(event.new_state == "speaking")
 
         class InterviewAgent(Agent):
@@ -115,31 +122,33 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
                 super().__init__(instructions="Read only saved interview questions. Wait for explicit user controls; never invent feedback.")
 
             async def stt_node(self, audio, model_settings):
+                # Each recognizer stream gets its own clock; question changes restart the stream.
+                clock = ProviderClock(time.time())
                 async for event in Agent.default.stt_node(self, keep_interview_audio_alive(audio), model_settings):
                     if isinstance(event, stt.SpeechEvent) and event.alternatives:
+                        alternative = event.alternatives[0]
+                        has_words = bool(alternative.text and alternative.text.strip())
                         if event.type == stt.SpeechEventType.FINAL_TRANSCRIPT:
-                            capture.observe_provider_transcript(event.alternatives[0].text, True)
-                            if coordinator is not None:
-                                coordinator.on_transcript(True)
+                            capture.observe_provider_transcript(alternative.text, True, **clock.timing(alternative))
+                            if conversing():
+                                coordinator.on_transcript(True, has_words)
                         elif event.type == stt.SpeechEventType.INTERIM_TRANSCRIPT:
-                            capture.observe_provider_transcript(event.alternatives[0].text, False)
-                            if coordinator is not None and event.alternatives[0].text.strip():
+                            capture.observe_provider_transcript(alternative.text, False, **clock.timing(alternative))
+                            if conversing() and has_words:
                                 coordinator.on_transcript(False)
                     yield event
 
             async def on_enter(self):
-                receipt = state.get("unfinishedReceipt")
-                if coordinator is not None and receipt:
-                    # A previous connection saved this answer but never finished it on the server.
+                if conversing():
                     try:
-                        await coordinator.resume_unfinished(receipt, state["attempt"]["id"])
-                        return
+                        await coordinator.begin(state, state.get("unfinishedReceipt"))
                     except Exception:
-                        logger.warning("Unfinished interview receipt could not be completed; continuing manually")
+                        # The coordinator has published a waiting state the learner can continue from.
+                        logger.warning("Interview conversation could not resume automatically")
+                    return
                 await capture.activate_question(session, state)
-                await ready()
-                if coordinator is not None:
-                    await coordinator.question_ready(bool(state.get("attemptHasSpeech")))
+                if capture.accepting:
+                    await ready()
 
         @ctx.room.local_participant.register_rpc_method("interview.control")
         async def control(data: rtc.RpcInvocationData):
@@ -151,29 +160,39 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
                 if closed.is_set():
                     return json.dumps({"error": "VOICE_DISCONNECTED"})
                 action = body["action"]
+                unresolved = body.get("acceptUnresolved", False)
                 if action in {"PAUSE", "LEAVE"}:
                     # Stop a question mid-sentence; the answer it belongs to stays open and is re-read on resume.
                     capture.interrupt_speech()
-                    if coordinator is not None:
-                        coordinator.suspend()
-                        try:
-                            receipt = await capture.drain(session, action, body["requestId"])
-                        except Exception:
-                            coordinator.suspended = False  # the answer stays open; automatic handoff resumes
-                            raise
-                        coordinator.stop()
-                        return json.dumps(receipt)
+                    try:
+                        if conversing():
+                            # No automatic handoff or advance from here; an in-flight save finishes first so
+                            # this receipt names a settled answer and no unheard question is created.
+                            coordinator.suspend()
+                            async with coordinator.lock:
+                                capture.interrupt_speech()
+                                receipt = await capture.drain(session, action, body["requestId"], accept_unresolved=unresolved)
+                            coordinator.stop()
+                            return json.dumps(receipt)
+                        return json.dumps(await capture.drain(session, action, body["requestId"], accept_unresolved=unresolved))
+                    except Exception:
+                        # The learner retries Pause or End (automatic progression stays off); questions may be read again.
+                        capture.reading_stopped = False
+                        raise
                 if action == "REPEAT":
-                    return json.dumps({"repeated": await (coordinator.repeat() if coordinator is not None else capture.repeat_question(session))})
+                    return json.dumps({"repeated": await (coordinator.repeat() if conversing() else capture.repeat_question(session))})
                 if action in {"HOLD", "RESUME_AUTO"}:
-                    if coordinator is not None:
+                    if conversing():
                         coordinator.set_hold(action == "HOLD")
                     return json.dumps({"hold": action == "HOLD"})
-                if coordinator is not None and action in {"FINISH", "SKIP"}:
+                if conversing() and action in {"FINISH", "SKIP"}:
                     return json.dumps(await coordinator.complete(action, body["requestId"], body.get("attemptId"),
-                                                                 accept_unresolved=body.get("acceptUnresolved", False)))
-                if coordinator is not None and action == "NEXT" and body.get("attemptId"):
-                    return json.dumps(await coordinator.next_after(body["attemptId"]))
+                                                                 accept_unresolved=unresolved))
+                if conversing() and action == "NEXT":
+                    # The coordinator owns questions in conversation runs; a bare NEXT (transport recovery) is a no-op.
+                    if body.get("attemptId"):
+                        return json.dumps(await coordinator.next_after(body["attemptId"]))
+                    return json.dumps({"asking": coordinator.state == "asking"})
                 if body["action"] == "NEXT":
                     if question_task is not None and not question_task.done():
                         return json.dumps({"asking": True})
@@ -181,7 +200,8 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
                     async def ask_saved_question():
                         try:
                             await capture.activate_question(session, fresh)
-                            await ready()
+                            if capture.accepting:
+                                await ready()
                         except Exception:
                             logger.warning("Saved interview question could not be spoken")
                             await ctx.room.local_participant.publish_data(json.dumps({"type": "session_state", "text": "greeting_failed"}).encode(), topic="lk.control")

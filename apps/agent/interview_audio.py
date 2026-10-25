@@ -9,6 +9,31 @@ from livekit import rtc
 
 INTERVIEW_SAMPLE_RATE = 16000
 
+
+class ProviderClock:
+    """Maps one recognizer stream's audio timestamps to wall-clock time.
+
+    LiveKit adds the stream's start_time_offset to provider times and also records it on each word, so the
+    stream opened at about `opened - start_time_offset` on the shared timeline. Audio reaches the recognizer
+    in real time (silence keeps flowing while input is detached), so an audio timestamp maps to the
+    wall-clock moment it was spoken. Until a result with words names the offset, results are untimed.
+    """
+
+    def __init__(self, opened: float):
+        self.opened = opened
+        self.anchor = None
+
+    def timing(self, alternative) -> dict:
+        words = getattr(alternative, "words", None) or []
+        offset = getattr(words[0], "start_time_offset", None) if words else None
+        if self.anchor is None and isinstance(offset, (int, float)):
+            self.anchor = self.opened - offset
+        if self.anchor is None:
+            return {}
+        last = getattr(words[-1], "end_time", None) if words else None
+        return {"start": self.anchor + alternative.start_time, "end": self.anchor + alternative.end_time,
+                "word_end": self.anchor + last if isinstance(last, (int, float)) else None}
+
 async def keep_interview_audio_alive(audio: AsyncIterable[rtc.AudioFrame], interval: float = .1) -> AsyncIterator[rtc.AudioFrame]:
     iterator = audio.__aiter__()
     pending = None

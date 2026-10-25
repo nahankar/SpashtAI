@@ -37,11 +37,14 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
                 return {'id': 'a2', 'status': 'PREPARED'}
             return {'status': 'SKIPPED' if body.get('skip') else 'ANSWERED'}
 
+        self.published = []
+
         async def publish_state(name, extra):
             self.states.append((name, extra.get('reason')))
+            self.published.append((name, extra))
 
-        self.capture = InterviewCapture(voice(), send, AsyncMock(), settle=.03, max_barrier=.3, unresolved_wait=.06, vad_tail=.02, poll=.005)
-        self.capture.accepting = True
+        self.capture = InterviewCapture(voice(), send, AsyncMock(), settle=.03, max_barrier=.3, unresolved_wait=.06, vad_tail=.02, grace=.005, poll=.005)
+        self.capture.accepting = True; self.capture.attached = True
         self.session = Mock()
         self.session.user_state = 'listening'
         self.session.say = AsyncMock()
@@ -186,6 +189,92 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(HANDOFF + .1)
         self.assertEqual(self.finishes(), [])
 
+
+    # ---- review findings -------------------------------------------------------------------------
+    async def test_an_empty_final_never_starts_an_automatic_finish(self):
+        self.capture.observe_provider_transcript('', True); self.coordinator.on_transcript(True, False)  # a cough
+        await asyncio.sleep(HANDOFF * 2)
+        self.assertEqual(self.finishes(), [])
+        self.assertEqual([p for p, _ in self.sent if p.endswith('/receipts')], [])
+
+    async def test_finish_before_any_answer_keeps_listening_without_a_receipt(self):
+        with self.assertRaisesRegex(CaptureUnavailable, 'NO_SPEECH'):
+            await self.coordinator.complete('FINISH', str(uuid4()), 'a1')
+        self.assertEqual(self.states[-1], ('listening', 'NO_SPEECH'))
+        self.assertEqual([p for p, _ in self.sent if p.endswith('/receipts')], [])
+        self.final('Now the answer.')  # the answer is still open
+        self.assertEqual(self.capture.pending[0]['body']['text'] if self.capture.pending else
+                         [b['text'] for p, b in self.sent if p.endswith('/chunks')][-1], 'Now the answer.')
+
+    async def test_a_failed_finish_stops_in_waiting_and_continue_finishes_it_without_draining_again(self):
+        self.finish_error = ConnectionError()
+        self.final('Answer.')
+        with self.assertRaises(ConnectionError):
+            await self.coordinator.complete('FINISH', str(uuid4()), 'a1')
+        self.assertEqual(self.states[-1], ('waiting', 'FINISH_FAILED'))
+        self.finish_error = None
+        await self.coordinator.next_after('a1')
+        await self.settle_tasks()
+        self.assertEqual(len([p for p, _ in self.sent if p.endswith('/receipts')]), 1)
+        self.assertEqual(len(self.finishes()), 2)
+        self.assertEqual(self.requests[-1], ('/runs/run/next', {'afterAttemptId': 'a1'}))
+        self.assertEqual(self.coordinator.state, 'listening')
+
+    async def test_a_failed_advance_stops_in_waiting_and_continue_advances_once(self):
+        self.next_error = ConnectionError()
+        self.final('Answer.')
+        result = await self.coordinator.complete('FINISH', str(uuid4()), 'a1')
+        self.assertTrue(result['completed'])
+        self.assertEqual(self.states[-1], ('waiting', 'NEXT_FAILED'))
+        self.next_error = None
+        await self.coordinator.next_after('a1')
+        await self.settle_tasks()
+        self.assertEqual(len(self.finishes()), 1)
+        self.assertEqual(self.coordinator.state, 'listening')
+
+    async def test_pause_during_an_automatic_save_never_creates_the_next_question(self):
+        self.final('Last answer before pausing.')
+        task = asyncio.create_task(self.coordinator.complete('FINISH', str(uuid4()), 'a1'))
+        await asyncio.sleep(0)
+        self.coordinator.suspend()
+        result = await task
+        self.assertTrue(result['completed'])
+        self.assertFalse(any(p.endswith('/next') for p, _ in self.requests))
+
+    async def test_resuming_after_a_finished_answer_moves_to_the_next_question(self):
+        self.capture.state = voice('a1', 'ANSWERED'); self.capture.accepting = False; self.states.clear()
+        await self.coordinator.begin(voice('a1', 'ANSWERED'))
+        await self.settle_tasks()
+        self.assertEqual(self.requests, [('/runs/run/next', {'afterAttemptId': 'a1'})])
+        self.assertEqual([s for s, _ in self.states], ['preparing', 'asking', 'listening'])  # never 'listening' with no question
+        self.assertEqual(self.coordinator.state, 'listening')
+
+    async def test_the_first_question_is_announced_as_asking_before_it_is_read(self):
+        self.capture.accepting = False; self.states.clear()
+        await self.coordinator.begin(voice('a1', 'PREPARED'))
+        self.assertEqual([s for s, _ in self.states][:2], ['asking', 'listening'])
+
+    async def test_resume_auto_outside_listening_never_arms_a_handoff(self):
+        self.final('Answer.')
+        self.coordinator.state = 'saving'
+        self.coordinator.set_hold(True); self.coordinator.set_hold(False)
+        await asyncio.sleep(HANDOFF * 2)
+        self.assertEqual(self.finishes(), [])
+
+    async def test_hold_is_published_so_the_browser_matches_the_agent(self):
+        self.coordinator.set_hold(True)
+        await asyncio.sleep(0.01)
+        self.assertTrue(self.published[-1][1]['hold'])
+
+    async def test_withdrawn_access_hands_the_saved_receipt_to_the_browser(self):
+        self.finish_error = ServerRefused(403, 'CONVERSATION_UNAVAILABLE')
+        self.final('Answer.')
+        with self.assertRaises(ServerRefused):
+            await self.coordinator.complete('FINISH', str(uuid4()), 'a1')
+        name, extra = self.published[-1]
+        self.assertEqual((name, extra['reason'], extra['receiptAction']), ('waiting', 'CONVERSATION_UNAVAILABLE', 'FINISH'))
+        self.assertTrue(extra['receiptId'])
+        self.assertFalse(self.coordinator.active)
 
 if __name__ == '__main__':
     unittest.main()

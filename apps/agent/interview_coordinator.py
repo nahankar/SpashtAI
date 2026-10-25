@@ -18,6 +18,8 @@ logger = logging.getLogger("spashtai-agent.interview_coordinator")
 
 # Server codes that end automatic progression for this practice (the learner can still end it).
 STOP_CODES = {"PRACTICE_DURATION_REACHED", "PRACTICE_QUESTION_LIMIT", "QUESTION_BANK_EXHAUSTED"}
+# The learner's access to automatic conversation was withdrawn: continue with manual controls.
+WITHDRAWN = "CONVERSATION_UNAVAILABLE"
 CLOSING_LINE = "That's the end of this practice. You can end it now to review your answers."
 
 
@@ -25,6 +27,10 @@ class ServerRefused(RuntimeError):
     def __init__(self, status: int, code: str | None):
         super().__init__(code or str(status))
         self.status, self.code = status, code
+
+
+def _code(error: Exception, default: str) -> str:
+    return getattr(error, "code", None) or default
 
 
 class InterviewCoordinator:
@@ -42,35 +48,45 @@ class InterviewCoordinator:
         self.handoff = policy["handoffSilenceMs"] / 1000
         self.lock = asyncio.Lock()
         self.state = "idle"
+        self.extra: dict = {}
         self.timer = None
         self.hold = False
         self.has_speech = attempt_has_speech
         self.vad_speaking = False
         self.outcomes: dict[str, dict] = {}
         self.completed: dict[str, dict] = {}
+        # What stopped automatic progression, so Continue (or a reconnect) can resume exactly that step.
+        self.failure: dict | None = None
         self.ask_task = None
+        self.active = True
         self.stopped = False
         self.suspended = False
 
     # ---- state -----------------------------------------------------------------------------
     async def _set(self, state: str, **extra):
-        self.state = state
+        self.state, self.extra = state, extra
         try:
-            await self.publish_state(state, {"attemptId": self.capture.state["attempt"]["id"], **extra})
+            await self.publish_state(state, {"attemptId": self.capture.state["attempt"]["id"], "hold": self.hold, **extra})
         except Exception:
             logger.warning("Interview coordinator state could not be published")
 
+    async def _republish(self):
+        await self._set(self.state, **self.extra)
+
     def _listening(self) -> bool:
-        return self.state in {"listening", "candidate_end"} and self.capture.accepting and not self.stopped
+        return (self.active and not self.stopped and self.state in {"listening", "candidate_end"}
+                and self.capture.accepting)
 
     # ---- speech events (from the voice adapter) ---------------------------------------------
-    def on_transcript(self, is_final: bool):
+    def on_transcript(self, is_final: bool, has_words: bool = True):
         if not self._listening():
             return
         if is_final:
-            self.has_speech = True
+            # Only words make an answer; an empty final may still have resolved pending speech.
+            if has_words:
+                self.has_speech = True
             self._arm()
-        else:
+        elif has_words:
             self._cancel("listening")
 
     def on_vad(self, speaking: bool):
@@ -84,7 +100,7 @@ class InterviewCoordinator:
 
     def _arm(self):
         """Start the handoff countdown only after real silence that follows provider-final speech."""
-        if self.hold or self.vad_speaking or self.suspended:
+        if not self._listening() or self.hold or self.vad_speaking or self.suspended:
             return
         if self.capture.unresolved_speech:
             # Voiced audio without any transcript is never saved or discarded automatically.
@@ -128,77 +144,141 @@ class InterviewCoordinator:
             self._cancel("listening")
         else:
             self._arm()
+        asyncio.create_task(self._republish())
 
     async def repeat(self) -> bool:
         """Re-read the open question; the answer so far is kept and the countdown restarts afterwards."""
-        if not self._listening():
+        if not self._listening() or self.lock.locked():
             return False
         self._cancel(None)
         await self._set("asking")
         try:
             return await self.capture.repeat_question(self.session)
         finally:
-            await self._set("listening")
-            self._arm()
+            # Finish, Skip, Pause or End may have taken over while the question was read.
+            if self.state == "asking" and not self.lock.locked() and not self.suspended and self.capture.accepting:
+                await self._set("listening")
+                self._arm()
 
     async def complete(self, action: str, request_id: str, attempt_id: str | None, *, origin: str = "manual",
                        accept_unresolved: bool = False) -> dict:
         """Save the answer (FINISH) or skip it, then finish it on the server and move to the next question."""
         async with self.lock:
-            if request_id in self.outcomes:
-                return self.outcomes[request_id]
-            current = self.capture.state["attempt"]["id"]
-            # A control aimed at an answer that has already completed (or at a question that has not been
-            # loaded yet) returns that answer's outcome and never touches the next question.
-            if current in self.completed:
-                return {**self.completed[current], "duplicate": True}
-            if attempt_id is not None and attempt_id != current:
-                return {**self.completed.get(attempt_id, {}), "stale": True, "attemptId": attempt_id}
-            self._cancel(None)
-            started = time.monotonic()
-            await self._set("confirming")
-            try:
-                receipt = await self.capture.drain(self.session, action, request_id, accept_unresolved=accept_unresolved)
-            except CaptureUnavailable as error:
-                if error.code == "TRANSCRIPT_PENDING" and self.capture.accepting:
-                    # The learner is still speaking or a final is late: keep listening rather than cut them off.
-                    self.session.input.set_audio_enabled(True)
-                    await self._set("listening")
-                raise
-            drained = time.monotonic()
-            await self._set("saving")
-            try:
-                await self.request(f"/attempts/{current}/finish", {"receiptId": receipt["receiptId"], "skip": action == "SKIP"})
-            except ServerRefused as error:
-                # The receipt is durable; a reconnect or a retried Finish completes it (unfinishedReceipt).
-                await self._set("waiting", reason=error.code or "FINISH_FAILED")
-                raise
-            finished = time.monotonic()
-            outcome = {**receipt, "completed": True, "origin": origin}
-            self.completed[current] = outcome
-            await self._advance(current)
-            logger.info("interview_coordinator completed origin=%s action=%s drain_ms=%d finish_ms=%d next_ms=%d",
-                        origin, action, round((drained - started) * 1000), round((finished - drained) * 1000),
-                        round((time.monotonic() - finished) * 1000))
-            self.outcomes[request_id] = outcome
-            return outcome
+            return await self._complete(action, request_id, attempt_id, origin=origin, accept_unresolved=accept_unresolved)
+
+    async def _complete(self, action: str, request_id: str, attempt_id: str | None, *, origin: str,
+                        accept_unresolved: bool = False) -> dict:
+        if request_id in self.outcomes:
+            return self.outcomes[request_id]
+        current = self.capture.state["attempt"]["id"]
+        # A control aimed at an answer that has already completed (or at a question that has not been
+        # loaded yet) returns that answer's outcome and never touches the next question.
+        if current in self.completed:
+            return {**self.completed[current], "duplicate": True}
+        if attempt_id is not None and attempt_id != current:
+            return {**self.completed.get(attempt_id, {}), "stale": True, "attemptId": attempt_id}
+        if self.failure and self.failure.get("attemptId") == current and self.failure["stage"] == "finish":
+            # Already saved: finish it on the server instead of draining again.
+            return await self._retry_failure()
+        self._cancel(None)
+        started = time.monotonic()
+        await self._set("confirming")
+        try:
+            receipt = await self.capture.drain(self.session, action, request_id, accept_unresolved=accept_unresolved)
+        except Exception as error:
+            code = _code(error, "SAVE_FAILED")
+            if self.capture.accepting and not self.stopped and not self.suspended:
+                # The answer is still open (late or unconfirmed speech, nothing said yet, or an upload to
+                # retry): keep listening rather than cut the learner off.
+                if not self.capture.attached:
+                    self.capture.enable_input(self.session)
+                await self._set("listening", reason=code)
+            else:
+                self.failure = {"stage": "drain", "attemptId": current, "action": action, "requestId": request_id}
+                await self._set("waiting", reason=code)
+            raise
+        drained = time.monotonic()
+        self.has_speech = False
+        await self._set("saving")
+        try:
+            await self.request(f"/attempts/{current}/finish", {"receiptId": receipt["receiptId"], "skip": action == "SKIP"})
+        except Exception as error:
+            # The receipt is durable: Continue or a reconnect finishes it without draining again.
+            self.failure = {"stage": "finish", "attemptId": current, "receiptId": receipt["receiptId"], "action": action}
+            await self._stopped(_code(error, "FINISH_FAILED"))
+            raise
+        finished = time.monotonic()
+        self.failure = None
+        outcome = {**receipt, "completed": True, "origin": origin}
+        self.completed[current] = outcome
+        self.outcomes[request_id] = outcome
+        await self._advance(current)
+        logger.info("interview_coordinator completed origin=%s action=%s drain_ms=%d finish_ms=%d next_ms=%d",
+                    origin, action, round((drained - started) * 1000), round((finished - drained) * 1000),
+                    round((time.monotonic() - finished) * 1000))
+        return outcome
+
+    async def _stopped(self, code: str):
+        """Automatic progression stopped at a step the learner can retry (Continue) or leave by ending."""
+        if code == WITHDRAWN:
+            # Access was withdrawn: hand the saved receipt to the browser, which finishes it manually.
+            self.active = False
+            self.stop()
+            failure = self.failure or {}
+            await self._set("waiting", reason=code, receiptId=failure.get("receiptId", ""),
+                            receiptAction=failure.get("action", "") if failure.get("stage") == "finish" else "")
+            return
+        await self._set("waiting", reason=code)
 
     async def next_after(self, attempt_id: str) -> dict:
-        """Manual Next (for example after a failed automatic advance); idempotent through afterAttemptId."""
+        """Continue after a stop: retry what failed, or move on from a completed answer (idempotent)."""
         async with self.lock:
-            return await self._advance(attempt_id)
+            if self.failure:
+                return await self._retry_failure()
+            if self.ask_task is not None and not self.ask_task.done():
+                return {"asking": True}
+            current = self.capture.state["attempt"]
+            if current["id"] in self.completed or current["status"] in {"ANSWERED", "SKIPPED"}:
+                return await self._advance(current["id"])
+            return {"advanced": False, "attemptId": current["id"]}
+
+    async def _retry_failure(self) -> dict:
+        failure, self.failure = self.failure, None
+        if failure["stage"] == "drain":
+            return await self._complete(failure["action"], failure["requestId"], failure["attemptId"], origin="retry")
+        if failure["stage"] == "ask":
+            self._start_asking()
+            return {"asking": True}
+        if failure["stage"] == "finish":
+            await self._set("saving")
+            try:
+                await self.request(f"/attempts/{failure['attemptId']}/finish",
+                                   {"receiptId": failure["receiptId"], "skip": failure["action"] == "SKIP"})
+            except Exception as error:
+                self.failure = failure
+                await self._stopped(_code(error, "FINISH_FAILED"))
+                raise
+            self.completed[failure["attemptId"]] = {"receiptId": failure["receiptId"], "action": failure["action"],
+                                                    "completed": True, "origin": "retry"}
+        return await self._advance(failure["attemptId"])
 
     async def _advance(self, completed_attempt_id: str) -> dict:
+        if self.suspended or self.stopped:
+            # Pause or End arrived during this save: the next question is prepared on resume, never now.
+            return {"advanced": False, "reason": "STOPPED"}
         await self._set("preparing")
         try:
             attempt = await self.request(f"/runs/{self.run_id}/next", {"afterAttemptId": completed_attempt_id})
-        except ServerRefused as error:
-            if error.code in STOP_CODES:
-                await self._set("waiting", reason=error.code)
+        except Exception as error:
+            code = _code(error, "NEXT_FAILED")
+            if code in STOP_CODES:
+                await self._set("waiting", reason=code)
                 await self._say_closing()
-                return {"advanced": False, "reason": error.code}
-            await self._set("waiting", reason=error.code or "NEXT_FAILED")
-            raise
+                return {"advanced": False, "reason": code}
+            # The answer itself is complete; only the move to the next question is retried.
+            self.failure = {"stage": "next", "attemptId": completed_attempt_id}
+            await self._stopped(code)
+            return {"advanced": False, "reason": code}
         self._start_asking()
         return {"advanced": True, "attemptId": attempt["id"]}
 
@@ -206,15 +286,21 @@ class InterviewCoordinator:
         async def ask():
             try:
                 fresh = await self.voice_state()
+                if self.suspended or self.stopped:
+                    return
                 await self._set("asking", attemptId=fresh["attempt"]["id"])
                 await self.capture.activate_question(self.session, fresh)
                 self.has_speech = bool(fresh.get("attemptHasSpeech"))
                 self.hold = False
-                await self._set("listening")
+                if self.capture.accepting and not self.suspended and not self.stopped:
+                    await self._set("listening")
             except asyncio.CancelledError:
                 raise
             except Exception:
+                if self.suspended or self.stopped:
+                    return
                 logger.warning("Interview coordinator could not read the next question")
+                self.failure = {"stage": "ask"}
                 await self._set("waiting", reason="QUESTION_UNAVAILABLE")
         self.ask_task = asyncio.create_task(ask())
 
@@ -224,27 +310,37 @@ class InterviewCoordinator:
         except Exception:
             logger.warning("Interview coordinator closing line unavailable")
 
+    # ---- connection lifecycle ----------------------------------------------------------------
+    async def begin(self, state: dict, unfinished_receipt: dict | None = None):
+        """Start or resume on a new connection: finish a saved answer, continue after a completed one,
+        or read the open question."""
+        attempt = state["attempt"]
+        if unfinished_receipt:
+            await self.resume_unfinished(unfinished_receipt, attempt["id"])
+        elif attempt["status"] in {"ANSWERED", "SKIPPED"}:
+            await self.next_after(attempt["id"])
+        else:
+            await self._set("asking")
+            await self.capture.activate_question(self.session, state)
+            await self.question_ready(bool(state.get("attemptHasSpeech")))
+
     async def resume_unfinished(self, receipt: dict, attempt_id: str):
         """A previous connection saved a completion receipt but the finish never reached the server."""
         async with self.lock:
-            await self._set("saving")
-            try:
-                await self.request(f"/attempts/{attempt_id}/finish", {"receiptId": receipt["id"], "skip": receipt["action"] == "SKIP"})
-            except ServerRefused as error:
-                await self._set("waiting", reason=error.code or "FINISH_FAILED")
-                raise
-            self.completed[attempt_id] = {"receiptId": receipt["id"], "action": receipt["action"], "completed": True, "origin": "resume"}
-            return await self._advance(attempt_id)
+            self.failure = {"stage": "finish", "attemptId": attempt_id, "receiptId": receipt["id"], "action": receipt["action"]}
+            return await self._retry_failure()
 
     async def question_ready(self, attempt_has_speech: bool):
         self.has_speech = attempt_has_speech
         self.hold = False
+        if not self.capture.accepting:
+            return  # the question was interrupted (Pause or End): there is nothing to listen for
         await self._set("listening")
         if attempt_has_speech and not self.vad_speaking:
             self._arm()
 
     def suspend(self):
-        """Pause or End requested: no automatic handoff while that save runs."""
+        """Pause or End requested: no automatic handoff or advance while that save runs."""
         self.suspended = True
         self._cancel(None)
 
