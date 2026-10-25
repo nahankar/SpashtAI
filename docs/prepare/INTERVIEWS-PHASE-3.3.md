@@ -139,6 +139,10 @@ the inverse does not expose learner work to the Admin worker or API.
 
 ## 3.3b — Natural turn coordination using the existing engine
 
+> Superseded where different by the reviewed [3.3b plan](./INTERVIEWS-PHASE-3.3b-PLAN.md) (25 October 2026): new
+> `interview_conversation` flag, a 5 s initial handoff window, an agent-owned coordinator with internal
+> finish/next routes, and a replacement for the 8 s save wait.
+
 ### Reuse and patient completion
 
 - Keep Transcribe, Polly, Silero, Hush when configured, room ownership, audio
