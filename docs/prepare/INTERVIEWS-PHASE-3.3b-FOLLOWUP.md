@@ -219,3 +219,12 @@ model** and was not added. v8 is a safe candidate to adopt later (no grading cha
 
 Still open (semantic grading): REASONING judgement, mixed-answer strengths (Q6), substantive vs no technical
 answer (Q8 on Nova 2 Lite).
+
+## learner-evaluation-8 adopted (26 Oct 2026)
+
+`learner-evaluation-8` is current for newly started evaluated practices. Its only differences from v5 are its
+identity fields and the versioned `interview-result-4` evidence-matching schema (same prompt, rubric, model,
+temperature, limits and deterministic request/abstention handling; asserted in tests). Runs pinned to earlier
+policies, and their stored assessments, are unchanged. Nova 2 Lite remains the model. Technical grading stays
+**experimental**: reasoning judgement, mixed-answer strengths and substantive-versus-no-answer classification
+are unresolved, and D-1 (recording loss on refresh) remains open.

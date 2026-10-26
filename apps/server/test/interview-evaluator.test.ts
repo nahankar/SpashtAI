@@ -286,8 +286,7 @@ describe('learner-evaluation-5 stated reasons', () => {
     expect(statedReasons(mixed)).toEqual(['Avoid then for assertions because the callback runs once, so the UI may not have settled.'])
     for (const quote of statedReasons(mixed)) expect(mixed.includes(quote)).toBe(true)
   })
-  it('is the current policy for new evaluated runs; earlier pins are unchanged', () => {
-    expect(CURRENT_LEARNER_POLICY).toBe('learner-evaluation-5')
+  it('keeps its own configuration for runs that pinned it', () => {
     expect(LEARNER_POLICIES['learner-evaluation-5']).toMatchObject({ deterministicRequests: true, config: { rubric: 'bank-guidance-3', prompt: 'interview-answer-8' } })
     expect(LEARNER_POLICIES['learner-evaluation-3'].config.rubric).toBe('bank-guidance-2')
   })
@@ -323,7 +322,14 @@ describe('interview-result-4 evidence matching', () => {
     expect(() => parseResult(output, q8, 'interview-result-3')).toThrow('UNSUPPORTED_EVIDENCE')
     expect(parseResult(output, q8, 'interview-result-4').criteria[0].evidence).toEqual(['Across the data.\ncombination of the data aggregation of the data.'])
     expect(LEARNER_POLICIES['learner-evaluation-5'].config.schema).toBe('interview-result-3')
-    expect(CURRENT_LEARNER_POLICY).toBe('learner-evaluation-5')
+  })
+  it('learner-evaluation-8 is current and differs from v5 only by the versioned evidence-matching schema', () => {
+    expect(CURRENT_LEARNER_POLICY).toBe('learner-evaluation-8')
+    const v5 = LEARNER_POLICIES['learner-evaluation-5'], v8 = LEARNER_POLICIES['learner-evaluation-8']
+    const differing = (Object.keys(v5.config) as (keyof typeof v5.config)[]).filter(key => v5.config[key] !== v8.config[key])
+    expect(differing.sort()).toEqual(['id', 'label', 'policy', 'schema'])
+    expect(v8.config.schema).toBe('interview-result-4')
+    expect([v8.deterministicAbstention, v8.deterministicRequests]).toEqual([v5.deterministicAbstention, v5.deterministicRequests])
   })
   it('stays linear on adversarial input', () => {
     const start = performance.now()

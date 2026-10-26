@@ -344,6 +344,17 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
     expect(playback.filter(m => m.role === 'user').map(m => m.attemptId)).toEqual([second.id])
     expect(playback.find(m => m.id === `interview_question_${a.id}`)).toMatchObject({ attemptId: a.id, attemptStatus: 'SKIPPED' })
   })
+  it('pins learner-evaluation-8 for a newly started evaluated practice while earlier pins keep their own policy', async () => {
+    await enableLearner()
+    const fresh = await asked()
+    expect((await prisma.interviewRun.findUniqueOrThrow({ where: { id: fresh.r.id } })).evaluationPolicySnapshot).toEqual({ version: 'learner-evaluation-8', config: LEARNER_POLICIES['learner-evaluation-8'].config })
+    await endPractice(fresh.r.id, owner)
+    const older = await asked(); await pin(older.r.id, 'learner-evaluation-5')
+    await captureCommittedTurn(older.a.id, turn(older.s.id, testAnswer)); await finish(older.r.id, older.a.id)
+    const job = await learnerClaim()
+    expect(job.policy.config).toEqual(LEARNER_POLICIES['learner-evaluation-5'].config)
+    expect(job.policy.config.schema).toBe('interview-result-3')
+  })
   it('pages history with honest totals and applies search and status to the whole owned history', async () => {
     const ids: string[] = []
     for (let i = 0; i < 3; i++) { const { r } = await asked(); await endPractice(r.id, owner); ids.push(r.id) }

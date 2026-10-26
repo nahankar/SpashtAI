@@ -39,15 +39,17 @@ export const LEARNER_POLICIES: Record<string, LearnerPolicy> = {
   // comparison with v5 isolates the model.
   'learner-evaluation-5-nova-pro': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova-pro-learner-5', modelId: 'amazon.nova-pro-v1:0', region: 'us-east-1', label: 'Nova Pro · learner grading 5 (benchmark)',
     prompt: 'interview-answer-8', schema: 'interview-result-3', rubric: 'bank-guidance-3', policy: 'learner-evaluation-5-nova-pro', temperature: 0, maxTokens: 2000, timeoutMs: 20_000 } },
-  // learner-evaluation-5 with interview-result-4 evidence matching (whitespace-only differences mapped back to
-  // the original passage). Same prompt and rubric: grading semantics are unchanged.
+  // Current: learner-evaluation-5 with interview-result-4 evidence matching (whitespace-only differences mapped
+  // back to the original passage). Same prompt, rubric and model: grading semantics are unchanged.
   'learner-evaluation-8': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova2-lite-learner-8', modelId: 'us.amazon.nova-2-lite-v1:0', region: 'us-east-1', label: 'Nova 2 Lite · learner grading 8',
     prompt: 'interview-answer-8', schema: 'interview-result-4', rubric: 'bank-guidance-3', policy: 'learner-evaluation-8', temperature: 0, maxTokens: 2000, timeoutMs: 20_000 } },
   // Benchmark only (never current): learner-evaluation-8 on Nova Pro.
   'learner-evaluation-8-nova-pro': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova-pro-learner-8', modelId: 'amazon.nova-pro-v1:0', region: 'us-east-1', label: 'Nova Pro · learner grading 8 (benchmark)',
     prompt: 'interview-answer-8', schema: 'interview-result-4', rubric: 'bank-guidance-3', policy: 'learner-evaluation-8-nova-pro', temperature: 0, maxTokens: 2000, timeoutMs: 20_000 } },
 }
-export const CURRENT_LEARNER_POLICY = 'learner-evaluation-5'
+// learner-evaluation-8: v5's prompt, rubric and model with the versioned interview-result-4 evidence matching.
+// Technical grading remains experimental (reasoning, mixed-answer strengths and no-answer classification are open).
+export const CURRENT_LEARNER_POLICY = 'learner-evaluation-8'
 // Admins can preview a learner policy through the accounted Admin test path. learner-evaluation-1
 // is byte-identical to nova2_lite, so only policies with their own configuration are offered.
 export const PREVIEW_POLICIES = Object.keys(LEARNER_POLICIES).filter(key =>
