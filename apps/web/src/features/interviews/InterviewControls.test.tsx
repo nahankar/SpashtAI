@@ -130,7 +130,10 @@ describe('conversation practices', () => {
   it('offers Next question only when progression stopped for a reason other than a practice limit', () => {
     ready(); control('interview_state', undefined, { state: 'waiting', reason: 'PRACTICE_DURATION_REACHED' }); render('ANSWERED', true)
     expect(h.buttons.has('Next question')).toBe(false)
-    expect(render('ANSWERED', true)).toContain('no more questions')
+    expect(render('ANSWERED', true)).toContain('Practice time is up')
+    control('interview_state', undefined, { state: 'waiting', reason: 'QUESTION_BANK_EXHAUSTED' }); render('ANSWERED', true)
+    expect(h.buttons.has('Next question')).toBe(false)
+    expect(render('ANSWERED', true)).toContain('answered every available question')
     control('interview_state', undefined, { state: 'waiting', reason: 'QUESTION_UNAVAILABLE' }); render('ANSWERED', true)
     expect(h.buttons.has('Next question')).toBe(true)
   })

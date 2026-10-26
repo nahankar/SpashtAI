@@ -6,6 +6,7 @@ export function feedbackSummary(finding: LearnerFinding | undefined): string | n
   if (!finding) return null
   if (finding.status === 'COMPLETED' && finding.result) return `Technical feedback · ${outcomeLabel(finding.result)}`
   if (PENDING_FINDING.includes(finding.status)) return 'Technical feedback · Evaluating…'
+  if (finding.errorCode === 'EVALUATION_BUDGET_REACHED') return 'Technical feedback · Daily limit reached'
   if (['FAILED', 'CANCELLED'].includes(finding.status)) return 'Technical feedback · Unavailable'
   if (finding.status === 'INCOMPLETE') return 'Incomplete answer · not evaluated'
   // Speech saved before a Skip stays in the transcript; it is never graded.

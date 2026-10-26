@@ -33,10 +33,12 @@ export type InterviewHistory = { id: string; sessionId: string; track: string; e
   answeredCount?: number; skippedCount?: number; incompleteCount?: number }
 /** Practice times the learner's plan allows (server-verified); null is no time limit. */
 export type PracticeDurations = { plan: 'ultra' | 'pro' | 'standard'; allowed: (number | null)[]; default: number | null }
-export type InterviewOptions = { coverage: Array<{ track: string; experienceBand: string; difficulty: string; count: number }>; maxQuestions: number; consentVersion: string; evaluationAvailable?: boolean; conversationAvailable?: boolean
+export type InterviewOptions = { coverage: Array<{ track: string; experienceBand: string; difficulty: string; count: number }>; maxQuestions: number | null; consentVersion: string; evaluationAvailable?: boolean;
+  /** Answers per learner per day that receive technical feedback; later answers are saved without it. */
+  evaluationDailyLimit?: number; conversationAvailable?: boolean
   durations?: PracticeDurations }
-/** "No time limit" never means unlimited questions: the question cap still ends the practice. */
-export const durationLabel = (minutes: number | null, maxQuestions: number) => minutes === null ? `No time limit (up to ${maxQuestions} questions)` : `${minutes} minutes`
+/** New practices have no fixed question count: they end when time runs out, the learner ends them, or questions run out. */
+export const durationLabel = (minutes: number | null) => minutes === null ? 'No time limit' : `${minutes} minutes`
 /** The one-time Interviews recording and AI-processing acknowledgment (server-owned text and version). */
 export type RecordingAcknowledgment = { current: { version: string; scope: string[]; text: string }; accepted: { version: string; acceptedAt: string } | null }
 /**
@@ -57,8 +59,9 @@ export function conversationStatus(state: ConversationState, reason: string, hol
   if (state === 'confirming') return 'Confirming your final words…'
   if (state === 'saving') return 'Saving your answer…'
   if (state === 'preparing') return 'Preparing the next question…'
-  if (state === 'waiting') return CONVERSATION_STOP_REASONS.includes(reason)
-    ? 'This practice has no more questions. End practice to review your answers.'
+  if (state === 'waiting') return reason === 'PRACTICE_DURATION_REACHED' ? 'Practice time is up. End practice to review your answers.'
+    : reason === 'QUESTION_BANK_EXHAUSTED' ? 'You have answered every available question for this selection. End practice to review your answers.'
+    : reason === 'PRACTICE_QUESTION_LIMIT' ? 'This practice has no more questions. End practice to review your answers.'
     : reason === 'CONVERSATION_UNAVAILABLE' ? 'Automatic conversation is no longer available for this practice. Continue with the controls below.'
     : 'Automatic progression has stopped. Choose Continue (or Next question) to retry, or end practice. Your saved answers are safe.'
   if (state === 'candidate_end') return 'Pause noticed. Keep talking if you have more to add; otherwise your answer is saved in a few seconds.'

@@ -1166,9 +1166,10 @@ model InterviewRun {
   // acknowledgment row (plain id, no FK, so immutable runs never need updating). NULL on older runs.
   recordingConsentSource    String?
   recordingAcknowledgmentId String?
-  // Minutes; NULL = no time limit (Ultra). The question cap (maxQuestions) is independent.
+  // Minutes; NULL = no time limit (Ultra).
   durationMinutes Int? @default(10)
-  maxQuestions    Int @default(8)
+  // Stored question limit; NULL = none (new practices). Earlier practices keep 8, enforced per attempt.
+  maxQuestions    Int?
   recordingConsentAt DateTime?
   recordingConsentVersion String?
   voiceConfigSnapshot Json?

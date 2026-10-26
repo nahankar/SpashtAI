@@ -1,7 +1,6 @@
 import { z } from 'zod'
 
 export const PRACTICE_NAMESPACE = 'automation-pilot'
-export const MAX_QUESTIONS = 8
 export const MAX_ANSWER_LENGTH = 8000
 const id = z.string().min(1).max(160)
 // A setup picks one or more values per dimension. Runs persist them '|'-joined

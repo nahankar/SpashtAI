@@ -31,7 +31,9 @@ export const InterviewFeedbackDisclosure = memo(function InterviewFeedbackDisclo
     </summary>
     <div className="space-y-2.5 border-t px-3 py-2.5">
       {PENDING_FINDING.includes(finding.status) && <p>Evaluation is in progress. Playback is unaffected; the result appears here when it is ready.</p>}
-      {['FAILED', 'CANCELLED'].includes(finding.status) && <p>Technical evaluation is unavailable for this answer. No grade was invented, and your saved answer is unchanged.</p>}
+      {finding.errorCode === 'EVALUATION_BUDGET_REACHED'
+        ? <p>Today's technical feedback limit was reached before this answer, so it was not evaluated. Your saved answer is unchanged.</p>
+        : ['FAILED', 'CANCELLED'].includes(finding.status) && <p>Technical evaluation is unavailable for this answer. No grade was invented, and your saved answer is unchanged.</p>}
       {finding.status === 'INCOMPLETE' && <p>This answer was not finished, so it was not evaluated.</p>}
       {finding.afterExample && <p className="text-orange-700 dark:text-orange-300">Given after seeing an example, so it does not establish independent recall.</p>}
       {finding.assistance === 'HINT' && <p className="text-orange-700 dark:text-orange-300">Hint-assisted answer.</p>}

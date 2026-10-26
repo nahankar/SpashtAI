@@ -63,6 +63,10 @@ describe('interview playback feedback', () => {
     expect(feedbackSummary({ ...base, result: { ...base.result!, classification: 'NOT_ANSWERED' } })).toBe('Technical feedback · No technical answer')
     expect(feedbackSummary({ ...base, status: 'INCOMPLETE', result: null })).toBe('Incomplete answer · not evaluated')
     expect(renderToStaticMarkup(<InterviewFeedbackDisclosure finding={{ ...base, status: 'FAILED', result: null }} />)).toContain('No grade was invented')
+    // The daily feedback limit is named, never shown as a generic failure or a grade.
+    const overLimit = { ...base, status: 'FAILED', errorCode: 'EVALUATION_BUDGET_REACHED', result: null }
+    expect(feedbackSummary(overLimit)).toBe('Technical feedback · Daily limit reached')
+    expect(renderToStaticMarkup(<InterviewFeedbackDisclosure finding={overLimit} />)).toContain('technical feedback limit was reached')
     expect(feedbackSummary({ ...base, status: 'NOT_ENABLED', result: null })).toBe('Technical feedback · Not enabled for this practice')
     expect(feedbackSummary({ ...base, status: 'SKIPPED', result: null })).toBe('Skipped · not evaluated')
     expect(feedbackSummary(undefined)).toBeNull()

@@ -385,7 +385,61 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
       expect(learnerOptions.body.durations).toEqual({ plan: 'standard', allowed: [5, 10, 15], default: 10 })
     } finally { await plan({ enablePro: true, enableUltra: true }) }
   })
-  it('never ends a no-time-limit practice by time, keeps the question cap, and leaves older durations alone', async () => {
+  it('runs a new practice past eight questions until eligible questions run out; earlier practices keep their stored limit', async () => {
+    const track = `${fixture}-many`
+    const extra: string[] = []
+    try {
+      for (let i = 0; i < 10; i++) {
+        const id = await createQuestion({ namespace: 'automation-pilot', externalQid: `${track}-${i}` }, { ...readyDraft(), track }, admin)
+        extra.push(id)
+        await confirmProvenance({ questions: [{ id, revision: 1 }], confirmed: true, note: 'Original disposable interview capture test content; no imported material.' }, admin)
+        await questionAction(id, 1, 'approve_activate', admin)
+      }
+      const r = await startPractice({ ...setup(), track: [track], durationMinutes: null }, owner)
+      const stored = await prisma.interviewRun.findUniqueOrThrow({ where: { id: r.id } })
+      expect(stored.maxQuestions).toBeNull()
+      const s = await segment(r.sessionId)
+      const seen = new Set<string>()
+      let previous: string | undefined
+      for (let i = 1; i <= 10; i++) {
+        const a = await prepareBankAttempt(r.id, owner, previous)
+        expect(a.index).toBe(i)
+        seen.add(a.question.text + a.id)
+        await markQuestionAsked(a.id, { segmentId: s.id, questionText: a.question.text })
+        await finish(r.id, a.id, true)
+        previous = a.id
+      }
+      // No question repeats within the practice; the eleventh request reports the exhausted bank, never a new question.
+      const asked = await prisma.interviewAttempt.findMany({ where: { runId: r.id }, select: { questionId: true } })
+      expect(new Set(asked.map(a => a.questionId)).size).toBe(10)
+      await expect(prepareBankAttempt(r.id, owner, previous)).rejects.toMatchObject({ code: 'QUESTION_BANK_EXHAUSTED' })
+      const options = await request(app).get('/practice/options').auth(token(owner), { type: 'bearer' })
+      expect(options.body.maxQuestions).toBeNull()
+      expect(options.body.evaluationDailyLimit).toBe(30)
+      await endPractice(r.id, owner)
+
+      // An earlier practice stored with eight questions cannot gain a ninth, even written directly.
+      const template = await prisma.interviewAttempt.findFirstOrThrow({ where: { runId: r.id, index: 9 } })
+      const session = await prisma.session.create({ data: { id: randomUUID(), userId: owner, module: 'elevate', purpose: 'INTERVIEW', contextScope: 'SESSION_ONLY' } })
+      const legacy = await prisma.interviewRun.create({ data: { sessionId: session.id, ownerId: owner, namespace: 'automation-pilot', track, experienceBand: '2-5',
+        startingDifficulty: 'Medium', durationMinutes: 10, maxQuestions: 8, recordingConsentAt: new Date(), recordingConsentVersion: 'interview-recording-1',
+        recordingConsentSource: 'PRACTICE_CHECKBOX', voiceConfigSnapshot: stored.voiceConfigSnapshot as never } })
+      const attempt = (index: number) => prisma.interviewAttempt.create({ data: { runId: legacy.id, index, questionId: template.questionId,
+        questionSnapshot: template.questionSnapshot as never, questionHash: template.questionHash } })
+      await expect(attempt(8)).resolves.toMatchObject({ index: 8 })
+      await expect(attempt(9)).rejects.toThrow()
+      expect(await prisma.interviewRun.findUniqueOrThrow({ where: { id: legacy.id } })).toMatchObject({ maxQuestions: 8 })
+      // A stored limit other than 8 (or none) is refused for any run.
+      const other = await prisma.session.create({ data: { id: randomUUID(), userId: owner, module: 'elevate', purpose: 'INTERVIEW', contextScope: 'SESSION_ONLY' } })
+      await expect(prisma.interviewRun.create({ data: { sessionId: other.id, ownerId: owner, namespace: 'automation-pilot', track, experienceBand: '2-5',
+        startingDifficulty: 'Medium', durationMinutes: 10, maxQuestions: 1000, recordingConsentAt: new Date(), recordingConsentVersion: 'interview-recording-1',
+        voiceConfigSnapshot: stored.voiceConfigSnapshot as never } })).rejects.toThrow()
+    } finally {
+      await prisma.session.deleteMany({ where: { userId: owner } })
+      await prisma.questionBankQuestion.deleteMany({ where: { id: { in: extra } } })
+    }
+  })
+  it('never ends a no-time-limit practice by time and leaves older durations alone', async () => {
     const older = await asked(); expect((await prisma.interviewRun.findUniqueOrThrow({ where: { id: older.r.id } })).durationMinutes).toBe(10)
     await endPractice(older.r.id, owner)
     const r = await startPractice({ ...setup(), durationMinutes: null }, owner)
@@ -397,8 +451,8 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
     await captureCommittedTurn(a.id, turn(s.id, testAnswer)); await finish(r.id, a.id)
     const next = await prepareBankAttempt(r.id, owner, a.id)
     expect(next.index).toBe(2)
-    // No time limit is not unlimited questions: the stored cap stays 8 (also enforced by a database check).
-    expect((await prisma.interviewRun.findUniqueOrThrow({ where: { id: r.id } })).maxQuestions).toBe(8)
+    // New practices store no question limit at all (NULL), not a large number.
+    expect((await prisma.interviewRun.findUniqueOrThrow({ where: { id: r.id } })).maxQuestions).toBeNull()
     expect((await practiceDetail(r.id, owner)).durationMinutes).toBeNull()
   })
   it('replaces the per-practice checkbox only after an explicit, versioned, append-only acknowledgment', async () => {

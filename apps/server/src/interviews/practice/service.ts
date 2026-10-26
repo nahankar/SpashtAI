@@ -8,10 +8,10 @@ import { activeSegmentDurationSec } from '../../analytics/sessionSegments'
 import { BankError } from '../bank/csv'
 import { learnerEligibleWhere } from '../bank/schemas'
 import { hash, questionSnapshotSchema } from '../evaluator/contracts'
-import { RECORDING_ACKNOWLEDGMENT, RECORDING_CONSENT_VERSIONS, acknowledgmentSchema, joinSelection, splitSelection, askedSchema, assistanceSchema, chunkSchema, MAX_ANSWER_LENGTH, MAX_QUESTIONS, PRACTICE_NAMESPACE, receiptSchema, startSchema, VOICE_CONSENT_VERSION,
+import { RECORDING_ACKNOWLEDGMENT, RECORDING_CONSENT_VERSIONS, acknowledgmentSchema, joinSelection, splitSelection, askedSchema, assistanceSchema, chunkSchema, MAX_ANSWER_LENGTH, PRACTICE_NAMESPACE, receiptSchema, startSchema, VOICE_CONSENT_VERSION,
   CONVERSATION_POLICY, conversationPolicySchema, agentFinishSchema, agentNextSchema } from './contracts'
 import { conversationAccess, currentInterviewVoiceProfile, ownerPracticeDurations, practiceExecutionAccess, voiceProfileSchema } from './access'
-import { learnerPolicy, enqueueLearnerAssessment, learnerEvaluationAccess } from '../evaluator/learner'
+import { LEARNER_LIMITS, learnerPolicy, enqueueLearnerAssessment, learnerEvaluationAccess } from '../evaluator/learner'
 
 type Tx = Prisma.TransactionClient
 const json = (value: unknown) => value as Prisma.InputJsonValue
@@ -90,7 +90,7 @@ export async function startPractice(input: unknown, ownerId: string) {
     const conversation = await conversationAccess(ownerId, tx)
     const run = await tx.interviewRun.create({ data: { sessionId: session.id, ownerId, namespace: PRACTICE_NAMESPACE,
       track: joinSelection(body.track), experienceBand: joinSelection(body.experienceBand), startingDifficulty: joinSelection(body.startingDifficulty),
-      durationMinutes, maxQuestions: MAX_QUESTIONS,
+      durationMinutes, maxQuestions: null,
       recordingConsentAt: new Date(), recordingConsentVersion: acknowledgment ? acknowledgment.version : VOICE_CONSENT_VERSION,
       recordingConsentSource: acknowledgment ? 'ACCOUNT_ACKNOWLEDGMENT' : 'PRACTICE_CHECKBOX', recordingAcknowledgmentId: acknowledgment?.id ?? null,
       voiceConfigSnapshot: json(voice),
@@ -117,12 +117,13 @@ export async function prepareBankAttempt(runId: string, ownerId: string, afterAt
     if (open) return learnerAttempt(open)
     const segments = await tx.sessionSegment.findMany({ where: { sessionId: run.sessionId }, select: { startedAt: true, endedAt: true, activeDurationSec: true } })
     const activeSeconds = segments.reduce((sum, s) => sum + (s.activeDurationSec ?? Math.max(0, ((s.endedAt?.getTime() ?? Date.now())-s.startedAt.getTime())/1000)), 0)
-    // No time limit (null) never ends a practice by time; the question cap still applies.
+    // No time limit (null) never ends a practice by time.
     if (run.durationMinutes !== null && activeSeconds >= run.durationMinutes * 60) {
       throw new BankError(409, 'Practice duration reached. Your saved answers are ready for review.', 'PRACTICE_DURATION_REACHED')
     }
     const count = await tx.interviewAttempt.count({ where: { runId } })
-    if (count >= run.maxQuestions) throw new BankError(409, 'You have completed the questions for this practice.', 'PRACTICE_QUESTION_LIMIT')
+    // Only earlier practices have a stored question limit (8); new ones continue until time or eligible questions run out.
+    if (run.maxQuestions !== null && count >= run.maxQuestions) throw new BankError(409, 'You have completed the questions for this practice.', 'PRACTICE_QUESTION_LIMIT')
     const where: Prisma.QuestionBankQuestionWhereInput = { ...learnerEligibleWhere, namespace: run.namespace,
       track: { in: splitSelection(run.track) }, experienceBand: { in: splitSelection(run.experienceBand) },
       difficulty: { in: splitSelection(run.startingDifficulty) }, interviewAttempts: { none: { runId } } }
@@ -279,7 +280,9 @@ export async function practiceOptions(ownerId: string) {
     const coverage = await tx.questionBankQuestion.groupBy({ by: ['track','experienceBand','difficulty'],
       where: { ...learnerEligibleWhere, namespace: PRACTICE_NAMESPACE }, _count: { _all: true } })
     return { coverage: coverage.map(c => ({ track: c.track, experienceBand: c.experienceBand, difficulty: c.difficulty, count: c._count._all })),
-      consentVersion: VOICE_CONSENT_VERSION, maxQuestions: MAX_QUESTIONS, durations: await ownerPracticeDurations(ownerId, tx), evaluationAvailable: await learnerEvaluationAccess(ownerId, tx),
+      consentVersion: VOICE_CONSENT_VERSION, maxQuestions: null, durations: await ownerPracticeDurations(ownerId, tx), evaluationAvailable: await learnerEvaluationAccess(ownerId, tx),
+      // Technical feedback is limited per learner per day; answers beyond it are saved but not evaluated.
+      evaluationDailyLimit: LEARNER_LIMITS.perUser,
       conversationAvailable: await conversationAccess(ownerId, tx) }
   })
 }

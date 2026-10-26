@@ -21,8 +21,19 @@ minutes; pause and resume behave as before.
 accounts (`schema.prisma`), so every new learner currently gets Ultra and therefore defaults to **no time
 limit**. Changing license defaults is a separate product decision.
 
-**Separate decision:** the eight-question cap (`maxQuestions = 8`, also a database check) is unchanged. No time
-limit is not unlimited questions; the setup label says "No time limit (up to 8 questions)".
+## Question count (no fixed cap for new practices)
+
+New practices store `maxQuestions = NULL` (migration `20261027110000_interview_open_question_count`). A timed
+practice continues until its active time expires, the learner ends it, or no eligible unasked question remains
+(`QUESTION_BANK_EXHAUSTED`; no question is generated). "No time limit" has neither a time nor a question limit.
+Practices created earlier keep their stored `maxQuestions = 8`; a trigger enforces that stored limit on every
+attempt insert, and the run check now allows only NULL or 8. The attempt index check is `index >= 1`.
+No-repeat selection, ownership, access and evaluation budgets are unchanged.
+
+**Evaluation quota:** learner technical feedback stays limited to 30 answers per learner per day (300 across all
+learners). Longer practices can reach it. Answers past the limit are saved and labelled "Technical feedback ·
+Daily limit reached" rather than graded or shown as a generic failure, and setup states the daily limit. The quota
+was not raised.
 
 ## Setup and recent history
 
