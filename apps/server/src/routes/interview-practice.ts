@@ -27,7 +27,7 @@ function errors(error: unknown, req: Request, res: Response, _next: NextFunction
 export const practiceRouter = Router()
 practiceRouter.use(requireAuth)
 practiceRouter.get('/options', route(async (req, res) => { res.json(await practiceOptions(req.user!.userId)) }))
-practiceRouter.get('/runs', route(async (req, res) => { res.json(await practiceHistory(req.user!.userId)) }))
+practiceRouter.get('/runs', route(async (req, res) => { res.json(await practiceHistory(req.user!.userId, req.query)) }))
 practiceRouter.post('/runs', route(async (req, res) => {
   const run = await startPractice(req.body, req.user!.userId)
   if (!run.reused) recordFeatureUsage(req, 'interviews', 'practice_start', run.sessionId, { outcome: 'started' })

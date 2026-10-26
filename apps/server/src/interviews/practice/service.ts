@@ -1,6 +1,7 @@
 import { projectInterviewTranscript } from './projection'
 import { requestDeliveryAlignment } from '../../lib/deliveryAlignmentWorker'
 import type { Prisma } from '@prisma/client'
+import { z } from 'zod'
 import { prisma } from '../../lib/prisma'
 import { lockWritableSession } from '../../lib/sessionDiscard'
 import { activeSegmentDurationSec } from '../../analytics/sessionSegments'
@@ -271,16 +272,34 @@ export async function practiceOptions(ownerId: string) {
       conversationAvailable: await conversationAccess(ownerId, tx) }
   })
 }
-export async function practiceHistory(ownerId: string) {
-  const rows = await prisma.interviewRun.findMany({ where: { ownerId, session: { discardedAt: null } }, orderBy: { createdAt: 'desc' }, take: 50,
-    select: { id: true, sessionId: true, track: true, experienceBand: true, startingDifficulty: true, createdAt: true,
-      session: { select: { endedAt: true, retainedAt: true } }, _count: { select: { attempts: true } } } })
+export const historyQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20), offset: z.coerce.number().int().min(0).max(100_000).default(0),
+  q: z.string().trim().max(120).default(''), status: z.enum(['all', 'active', 'ended']).default('all'),
+  sort: z.enum(['date', 'name', 'status']).default('date'), dir: z.enum(['asc', 'desc']).default('desc'),
+}).strict()
+/** One page of the owner's practices. Search, status and sort apply to the whole history, not just the page. */
+export async function practiceHistory(ownerId: string, input: unknown = {}) {
+  const query = historyQuerySchema.parse(input)
+  const owned: Prisma.InterviewRunWhereInput = { ownerId, session: { discardedAt: null } }
+  const text = query.q ? { OR: (['track', 'startingDifficulty', 'experienceBand'] as const).map(field => ({ [field]: { contains: query.q, mode: 'insensitive' as const } })) } : {}
+  const status = query.status === 'all' ? {} : { session: { discardedAt: null, endedAt: query.status === 'ended' ? { not: null } : null } }
+  const where: Prisma.InterviewRunWhereInput = { AND: [owned, text, status] }
+  const order: Prisma.InterviewRunOrderByWithRelationInput[] = query.sort === 'name' ? [{ track: query.dir }]
+    : query.sort === 'status' ? [{ session: { endedAt: { sort: query.dir, nulls: query.dir === 'asc' ? 'first' : 'last' } } }] : []
+  const [rows, total, ownerTotal] = await Promise.all([
+    prisma.interviewRun.findMany({ where, orderBy: [...order, { createdAt: query.sort === 'date' ? query.dir : 'desc' }, { id: 'desc' }], skip: query.offset, take: query.limit,
+      select: { id: true, sessionId: true, track: true, experienceBand: true, startingDifficulty: true, createdAt: true,
+        session: { select: { endedAt: true, retainedAt: true } }, _count: { select: { attempts: true } } } }),
+    prisma.interviewRun.count({ where }), prisma.interviewRun.count({ where: owned }),
+  ])
   // Outcome counts for the history list, from the same owner-scoped runs (one grouped query).
   const counts = rows.length ? await prisma.interviewAttempt.groupBy({ by: ['runId', 'status'], where: { runId: { in: rows.map(r => r.id) } }, _count: { _all: true } }) : []
   const count = (runId: string, status: string) => counts.find(c => c.runId === runId && c.status === status)?._count._all ?? 0
+  const next = query.offset + rows.length
   return { runs: rows.map(r => ({ id: r.id, sessionId: r.sessionId, track: r.track, experienceBand: r.experienceBand,
     startingDifficulty: r.startingDifficulty, startedAt: r.createdAt, ...r.session, questionCount: r._count.attempts,
-    answeredCount: count(r.id, 'ANSWERED'), skippedCount: count(r.id, 'SKIPPED'), incompleteCount: count(r.id, 'INCOMPLETE') })) }
+    answeredCount: count(r.id, 'ANSWERED'), skippedCount: count(r.id, 'SKIPPED'), incompleteCount: count(r.id, 'INCOMPLETE') })),
+    total, ownerTotal, nextOffset: next < total ? next : null }
 }
 export async function voiceState(sessionId: string, segmentId: string, room: string, identity: string) {
   return prisma.$transaction(async tx => {

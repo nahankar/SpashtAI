@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import { ConversationPanel } from '@/features/live-session/components/ConversationPanel'
 import type { ChatMessage } from '@/features/live-session/types'
-import { applyRetain, filterPractices, practiceCounts } from '@/lib/interview-history'
+import { applyRetain, historyPath, practiceCounts } from '@/lib/interview-history'
 import type { InterviewHistory } from '@/lib/interview-practice'
 import { InterviewFeedbackDisclosure, InterviewFeedbackPlaceholder } from './InterviewFeedbackDisclosure'
 import { feedbackSummary } from './feedback-summary'
@@ -73,12 +73,9 @@ describe('interview history', () => {
   const run = (id: string, over: Partial<InterviewHistory> = {}): InterviewHistory => ({ id, sessionId: `s-${id}`, track: 'Automation Testing', experienceBand: '2-5',
     startingDifficulty: 'Simple', startedAt: at(10), endedAt: null, retainedAt: null, questionCount: 3, answeredCount: 2, skippedCount: 1, ...over })
   const runs = [run('a', { endedAt: at(30), startedAt: at(1) }), run('b', { track: 'Web Development|Automation Testing', startedAt: at(20) }), run('c', { endedAt: at(40), startedAt: at(5), track: 'Python' })]
-  it('searches, filters by status and sorts like the other history screens', () => {
-    expect(filterPractices(runs, '', 'all', 'date', 'desc').map(r => r.id)).toEqual(['b', 'c', 'a'])
-    expect(filterPractices(runs, '', 'ended', 'date', 'asc').map(r => r.id)).toEqual(['a', 'c'])
-    expect(filterPractices(runs, 'web', 'all', 'date', 'desc').map(r => r.id)).toEqual(['b'])
-    expect(filterPractices(runs, 'python', 'active', 'date', 'desc')).toEqual([])
-    expect(filterPractices(runs, '', 'all', 'name', 'asc').map(r => r.id)).toEqual(['a', 'c', 'b'])
+  it('asks the server for one page with the whole-history search, status and sort', () => {
+    expect(historyPath({ q: ' web ', status: 'ended', sort: 'name', dir: 'asc' }, 20)).toBe('/api/interviews/runs?limit=20&offset=20&status=ended&sort=name&dir=asc&q=web')
+    expect(historyPath({ q: '', status: 'all', sort: 'score', dir: 'desc' })).toBe('/api/interviews/runs?limit=20&offset=0&status=all&sort=date&dir=desc')
   })
   it('shows answered and skipped counts, Resume for unfinished and Review straight to playback', () => {
     expect(practiceCounts(run('x', { incompleteCount: 1 }))).toBe('2 answered · 1 skipped · 1 incomplete')

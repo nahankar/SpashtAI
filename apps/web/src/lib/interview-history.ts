@@ -1,7 +1,7 @@
 import type { SortDir, SortField } from '@/components/SessionFilters'
 import type { RetainResult } from '@/lib/sessionRetain'
 import { apiClient } from '@/lib/api-client'
-import { selectionLabel, type InterviewHistory } from '@/lib/interview-practice'
+import type { InterviewHistory } from '@/lib/interview-practice'
 
 export function practiceCounts(run: InterviewHistory) {
   const parts = [`${run.answeredCount ?? 0} answered`, `${run.skippedCount ?? 0} skipped`]
@@ -14,13 +14,13 @@ export function applyRetain(runs: InterviewHistory[], run: InterviewHistory, res
   return runs.map(r => ({ ...r, retainedAt: r.sessionId === run.sessionId ? result.retainedAt : result.releasedSessionIds.includes(r.sessionId) ? null : r.retainedAt }))
 }
 
-/** Search, filter and sort the owner's interview practices (the same rules as Elevate and Replay history). */
-export function filterPractices(runs: InterviewHistory[], search: string, status: string, sortField: SortField, sortDir: SortDir) {
-  const query = search.trim().toLowerCase()
-  const rows = runs.filter(run => (status === 'all' || (status === 'ended') === Boolean(run.endedAt))
-    && (!query || [selectionLabel(run.track), selectionLabel(run.startingDifficulty), selectionLabel(run.experienceBand)].join(' ').toLowerCase().includes(query)))
-  const key = (run: InterviewHistory) => sortField === 'name' ? selectionLabel(run.track).toLowerCase() : sortField === 'status' ? (run.endedAt ? 1 : 0) : Date.parse(run.startedAt)
-  return [...rows].sort((a, b) => { const x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * (sortDir === 'asc' ? 1 : -1) })
+export type HistoryPage = { runs: InterviewHistory[]; total: number; ownerTotal: number; nextOffset: number | null }
+export type HistoryQuery = { q: string; status: string; sort: SortField; dir: SortDir }
+/** The server applies search, status and sort to the whole owned history; the page only asks for a slice. */
+export function historyPath(query: HistoryQuery, offset = 0, limit = 20) {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset), status: query.status, sort: query.sort === 'name' || query.sort === 'status' ? query.sort : 'date', dir: query.dir })
+  if (query.q.trim()) params.set('q', query.q.trim())
+  return `/api/interviews/runs?${params}`
 }
 
 

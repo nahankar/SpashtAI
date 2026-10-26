@@ -27,7 +27,7 @@ const selectClass='w-full rounded-md border bg-background px-3 py-2'
 export function Interviews() {
   const [params,setParams]=useSearchParams(); const selected=params.get('run')
   const [options,setOptions]=useState<InterviewOptions|null>(null); const [optionsLoaded,setOptionsLoaded]=useState(false)
-  const [history,setHistory]=useState<InterviewHistory[]>([]); const [detail,setDetail]=useState<InterviewRun|null>(null)
+  const [history,setHistory]=useState<InterviewHistory[]>([]); const [historyTotal,setHistoryTotal]=useState(0); const [detail,setDetail]=useState<InterviewRun|null>(null)
   const [setup,setSetup]=useState<{track:string[];experienceBand:string[];startingDifficulty:string[];durationMinutes:number}>({track:['Automation Testing'],experienceBand:['2-5'],startingDifficulty:['Simple'],durationMinutes:10})
   const [consent,setConsent]=useState(false); const [error,setError]=useState(''); const [accessError,setAccessError]=useState('')
   const [loading,setLoading]=useState(false); const [messages,setMessages]=useState<ChatMessage[]>([])
@@ -51,7 +51,7 @@ export function Interviews() {
     await refreshHistory().catch(()=>undefined)
   }
   async function refreshHistory() {
-    const result=await apiClient<{runs:InterviewHistory[]}>(`${INTERVIEWS_API}/runs`); setHistory(result.runs)
+    const result=await apiClient<{runs:InterviewHistory[];total:number}>(`${INTERVIEWS_API}/runs`); setHistory(result.runs); setHistoryTotal(result.total)
   }
   async function refreshDetail() {
     const id=activeRun.current; if (!id) return
@@ -81,7 +81,7 @@ export function Interviews() {
     const abort=new AbortController()
     void Promise.allSettled([
       apiClient<InterviewOptions>(`${INTERVIEWS_API}/options`,{signal:abort.signal}),
-      apiClient<{runs:InterviewHistory[]}>(`${INTERVIEWS_API}/runs`,{signal:abort.signal}),
+      apiClient<{runs:InterviewHistory[];total:number}>(`${INTERVIEWS_API}/runs`,{signal:abort.signal}),
     ]).then(results=> {
       if (abort.signal.aborted) return
       if (results[0].status==='fulfilled') {
@@ -89,7 +89,7 @@ export function Interviews() {
         const initial=result.coverage.find(c=>c.track==='Automation Testing' && c.difficulty==='Simple') ?? result.coverage[0]
         if (initial) setSetup(s=>({...s,track:[initial.track],experienceBand:[initial.experienceBand],startingDifficulty:[initial.difficulty]}))
       } else setAccessError(results[0].reason instanceof Error ? results[0].reason.message : 'Interview practice is unavailable')
-      if (results[1].status==='fulfilled') setHistory(results[1].value.runs)
+      if (results[1].status==='fulfilled') { setHistory(results[1].value.runs); setHistoryTotal(results[1].value.total) }
       setOptionsLoaded(true)
     })
     return ()=>abort.abort()
@@ -214,7 +214,7 @@ export function Interviews() {
       <p className="text-sm text-muted-foreground">Unfinished practice closes after 24 hours without activity. Retain one interview to keep it open.</p>
       {!history.length && <p className="text-sm text-muted-foreground">Your interviews will appear here.</p>}
       <InterviewHistoryList runs={history.slice(0,3)} onRetain={(run,result)=>setHistory(rows=>applyRetain(rows,run,result))} onDelete={run=>void removePractice(run)} />
-      {history.length>3 && <Link className="text-sm underline" to="/interviews/history" onClick={guardHistory}>View all {history.length} practices</Link>}
+      {historyTotal>3 && <Link className="text-sm underline" to="/interviews/history" onClick={guardHistory}>View all {historyTotal} practices</Link>}
     </section>}
   </div>
 }

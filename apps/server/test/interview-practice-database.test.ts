@@ -44,6 +44,7 @@ app.get('/sessions/:sessionId/turns', requireAuth, getSessionTurns)
 app.delete('/sessions/:id', requireAuth, requireSessionFeature(), deleteSession)
 app.get('/sessions/:id', requireAuth, requireSessionFeature(), (_req,res)=>res.json({ok:true}))
 app.post('/sessions/:sessionId/segments', requireAuth, (_req,res)=>res.json({ok:true}))
+const ownerTrackFragment = () => fixture.slice(0, 10).toUpperCase()
 const token = (id: string, role = 'USER') => signToken({ userId: id, role, email: `${fixture}@example.invalid` })
 
 const fixture = `practice_${randomUUID().replaceAll('-', '')}`
@@ -342,6 +343,25 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
     const playback = await readInterviewPlaybackConversation(prisma, r.id)
     expect(playback.filter(m => m.role === 'user').map(m => m.attemptId)).toEqual([second.id])
     expect(playback.find(m => m.id === `interview_question_${a.id}`)).toMatchObject({ attemptId: a.id, attemptStatus: 'SKIPPED' })
+  })
+  it('pages history with honest totals and applies search and status to the whole owned history', async () => {
+    const ids: string[] = []
+    for (let i = 0; i < 3; i++) { const { r } = await asked(); await endPractice(r.id, owner); ids.push(r.id) }
+    const get = async (query: string, who = owner) => (await request(app).get(`/practice/runs?${query}`).auth(token(who), { type: 'bearer' })).body
+    const ownerTotal = (await get('limit=1')).ownerTotal
+    const first = await get('limit=2'); const second = await get(`limit=2&offset=${first.nextOffset}`)
+    expect(first.runs).toHaveLength(2); expect(first.total).toBe(ownerTotal); expect(first.nextOffset).toBe(2)
+    expect(new Set([...first.runs, ...second.runs].map((r: { id: string }) => r.id)).size).toBe(first.runs.length + second.runs.length)
+    expect(ids.slice().reverse().slice(0, 2)).toEqual(first.runs.map((r: { id: string }) => r.id))
+    expect((await get(`limit=100`)).nextOffset).toBeNull()
+    expect((await get('status=active&limit=100')).runs.some((r: { id: string }) => ids.includes(r.id))).toBe(false)
+    const ended = await get('status=ended&limit=100'); expect(ended.total).toBe(ended.runs.length)
+    expect((await get('q=no-such-track-xyz')).total).toBe(0)
+    expect((await get(`q=${encodeURIComponent(ownerTrackFragment())}&limit=100`)).runs.some((r: { id: string }) => ids.includes(r.id))).toBe(true)
+    expect((await get('sort=date&dir=asc&limit=1')).runs[0].id).not.toBe(ids[2])
+    // Ownership: another learner sees none of these, and bad parameters are refused.
+    expect((await get('limit=100', other)).runs.some((r: { id: string }) => ids.includes(r.id))).toBe(false)
+    expect((await request(app).get('/practice/runs?limit=1000').auth(token(owner), { type: 'bearer' })).status).toBe(400)
   })
   it('deletes only an owned interview from history, fences a late result and keeps usage accounting', async () => {
     await enableLearner()
