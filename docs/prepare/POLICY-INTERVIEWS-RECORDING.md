@@ -49,8 +49,8 @@ be loaded, the per-practice checkbox remains the gate.
 > can delete any practice, with its recording, transcript and feedback, from Interview history at any time. Do
 > not share confidential company or personal information in your answers.
 
-Button: **I agree**. Reminder near Start afterwards: "Recording: your answers are recorded, transcribed and may be
-evaluated by AI, as you agreed on {date}. You can delete any practice from Interview history."
+Button: **I agree**. After acceptance nothing is repeated near Start (removed at the user's request, 26 Oct
+2026); the acceptance stays on record and each practice records its consent source.
 
 Approved as drafted: providers named; "experimental" stays while grading is not accepted; no model-training
 statement unless confirmed (see §4).

@@ -13,9 +13,3 @@ export function RecordingAcknowledgmentCard({ value, busy, error, onAccept }: { 
     <Button disabled={busy} onClick={onAccept}>{busy ? 'Saving…' : 'I agree'}</Button>
   </div>
 }
-
-/** The short recording reminder near Start once the acknowledgment is on record. */
-export function RecordingNotice({ acceptedAt }: { acceptedAt: string }) {
-  return <p className="text-sm text-muted-foreground">Recording: your answers are recorded, transcribed and may be evaluated by AI, as you agreed on{' '}
-    {new Date(acceptedAt).toLocaleDateString()}. You can delete any practice from Interview history.</p>
-}

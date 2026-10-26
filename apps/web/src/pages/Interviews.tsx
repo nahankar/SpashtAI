@@ -17,7 +17,7 @@ import { useInterviewFindings } from '@/features/interviews/useInterviewFindings
 import { inlineFeedback } from '@/features/interviews/InlineFeedback'
 import { InterviewControls } from '@/features/interviews/InterviewControls'
 import { InterviewHistoryList } from '@/features/interviews/InterviewHistoryList'
-import { RecordingAcknowledgmentCard, RecordingNotice } from '@/features/interviews/RecordingAcknowledgmentCard'
+import { RecordingAcknowledgmentCard } from '@/features/interviews/RecordingAcknowledgmentCard'
 import { ConversationToggle } from '@/features/interviews/ConversationToggle'
 import { applyRetain, deletePractices, historyNavigationBlocked } from '@/lib/interview-history'
 import { useConfirm } from '@/hooks/useConfirm'
@@ -207,7 +207,6 @@ export function Interviews() {
       {setupMessage && <p role="status" className="text-sm text-muted-foreground">{setupMessage}</p>}
       {gate==='loading' && <p role="status" className="text-sm text-muted-foreground">Checking your recording notice…</p>}
       {gate==='acknowledge' && acknowledgment.value && <RecordingAcknowledgmentCard value={acknowledgment.value} busy={acknowledging} error={acknowledgeError} onAccept={()=>void acceptRecording()} />}
-      {gate==='accepted' && acknowledgment.value?.accepted && <RecordingNotice acceptedAt={acknowledgment.value.accepted.acceptedAt} />}
       {gate==='checkbox' && <label className="flex items-start gap-3 text-sm"><input type="checkbox" className="mt-1" checked={consent} onChange={e=>setConsent(e.target.checked)} /><span>I agree to my answers being recorded and transcribed for review. I will avoid sharing confidential company or personal information.</span></label>}
       <Button disabled={!recordingReady || !matching || live.isJoining || history.some(h=>!h.endedAt)} onClick={()=>void start()}>{live.isJoining?'Starting…':'Start practice'}</Button>
       {history.some(h=>!h.endedAt) && <p className="text-sm text-muted-foreground">Resume or end your unfinished interview below before starting another.</p>}
