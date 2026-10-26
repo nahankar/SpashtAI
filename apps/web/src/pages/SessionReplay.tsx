@@ -29,7 +29,7 @@ import { COACH_BUBBLE, USER_BUBBLE } from '@/lib/conversation'
 import { KaraokeText, type PlaybackWord as TurnWord } from '@/components/session/KaraokeText'
 import { interviewPlaybackWords } from '@/lib/interview-playback-words'
 import { fallbackSpeechRegions, partialPlaybackEnd, verifiedPlaybackWords, verifiedWordRegions, nextSpeechTime } from '@/lib/playback-regions'
-import { InterviewFeedbackDisclosure } from '@/features/interviews/InterviewFeedbackDisclosure'
+import { InterviewFeedbackDisclosure, InterviewFeedbackPlaceholder } from '@/features/interviews/InterviewFeedbackDisclosure'
 import { useInterviewFindings } from '@/features/interviews/useInterviewFindings'
 import { ConversationPanel } from '@/features/live-session/components/ConversationPanel'
 import type { ChatMessage } from '@/features/live-session/types'
@@ -1475,8 +1475,13 @@ export function SessionReplay({
               active={currentTime >= words[0].start && currentTime <= words.at(-1)!.end}
               onSeek={playFrom} lightOnDark /> : undefined
           }}
-          renderAfterMessage={message => message.role === 'user' && message.attemptId
-            ? <InterviewFeedbackDisclosure finding={interviewFindings.byAttempt.get(message.attemptId)} /> : null} />
+          renderAfterMessage={message => {
+            if (message.role !== 'user' || !message.attemptId) return null
+            // Reserve the feedback line from the first render so results arriving never move the page.
+            if (!interviewFindings.loaded) return <InterviewFeedbackPlaceholder />
+            if (interviewFindings.error) return <InterviewFeedbackPlaceholder text="Technical feedback · Could not load" />
+            return <InterviewFeedbackDisclosure finding={interviewFindings.byAttempt.get(message.attemptId)} />
+          }} />
       ) : <div className="space-y-3">
         {visibleTurns.length === 0 && (
           <Card>

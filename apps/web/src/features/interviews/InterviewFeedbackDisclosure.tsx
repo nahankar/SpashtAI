@@ -2,6 +2,15 @@ import { memo } from 'react'
 import { feedbackSummary } from './feedback-summary'
 import { PENDING_FINDING, type LearnerFinding } from './useInterviewFindings'
 
+const SUMMARY = 'block rounded-lg px-3 py-1.5 text-xs font-medium text-muted-foreground'
+
+/** The same-height line shown below an answer before its feedback has loaded (or when it cannot load). */
+export function InterviewFeedbackPlaceholder({ text = 'Technical feedback · Loading…' }: { text?: string }) {
+  return <div className="mt-1.5 w-full max-w-xl rounded-lg border border-dashed bg-background/60 text-left" aria-hidden="true">
+    <span className={SUMMARY}>{text}</span>
+  </div>
+}
+
 function List({ title, items }: { title: string; items: string[] }) {
   if (!items.length) return null
   return <div><h4 className="font-medium">{title}</h4><ul className="list-disc space-y-0.5 pl-5">{items.map((item, i) => <li key={i}>{item}</li>)}</ul></div>
@@ -14,6 +23,7 @@ function List({ title, items }: { title: string; items: string[] }) {
 export const InterviewFeedbackDisclosure = memo(function InterviewFeedbackDisclosure({ finding }: { finding: LearnerFinding | undefined }) {
   const summary = feedbackSummary(finding)
   if (!finding || !summary) return null
+  if (['NOT_ENABLED', 'SKIPPED'].includes(finding.status)) return <InterviewFeedbackPlaceholder text={summary} />
   const result = finding.status === 'COMPLETED' ? finding.result : null
   return <details className="group mt-1.5 w-full max-w-xl rounded-lg border bg-background/80 text-left text-sm text-foreground" data-attempt-id={finding.attemptId}>
     <summary className="cursor-pointer select-none rounded-lg px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">

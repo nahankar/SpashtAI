@@ -8,6 +8,10 @@ export function feedbackSummary(finding: LearnerFinding | undefined): string | n
   if (PENDING_FINDING.includes(finding.status)) return 'Technical feedback · Evaluating…'
   if (['FAILED', 'CANCELLED'].includes(finding.status)) return 'Technical feedback · Unavailable'
   if (finding.status === 'INCOMPLETE') return 'Incomplete answer · not evaluated'
+  // Speech saved before a Skip stays in the transcript; it is never graded.
+  if (finding.status === 'SKIPPED') return 'Skipped · not evaluated'
+  // Kept as a line (not removed) so the reserved space below each answer never collapses after loading.
+  if (finding.status === 'NOT_ENABLED') return 'Technical feedback · Not enabled for this practice'
   return null
 }
 

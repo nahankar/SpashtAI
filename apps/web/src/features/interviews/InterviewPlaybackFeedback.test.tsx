@@ -5,7 +5,7 @@ import { ConversationPanel } from '@/features/live-session/components/Conversati
 import type { ChatMessage } from '@/features/live-session/types'
 import { applyRetain, filterPractices, practiceCounts } from '@/lib/interview-history'
 import type { InterviewHistory } from '@/lib/interview-practice'
-import { InterviewFeedbackDisclosure } from './InterviewFeedbackDisclosure'
+import { InterviewFeedbackDisclosure, InterviewFeedbackPlaceholder } from './InterviewFeedbackDisclosure'
 import { feedbackSummary } from './feedback-summary'
 import { InterviewHistoryList } from './InterviewHistoryList'
 import type { LearnerFinding } from './useInterviewFindings'
@@ -36,6 +36,14 @@ describe('interview playback feedback', () => {
     expect(html).toContain('Technical feedback · Partially correct')
     expect(html).toMatch(/strength 3/); expect(html).not.toMatch(/strength 1/)
   })
+  it('reserves the same one-line space while loading and when evaluation is not enabled', () => {
+    const line = (html: string) => /<span class="([^"]+)">/.exec(html)?.[1]
+    const loading = renderToStaticMarkup(<InterviewFeedbackPlaceholder />)
+    const notEnabled = renderToStaticMarkup(<InterviewFeedbackDisclosure finding={finding('z', 1, { status: 'NOT_ENABLED', result: null })} />)
+    expect(loading).toContain('Technical feedback · Loading…'); expect(notEnabled).toContain('Not enabled for this practice')
+    expect(line(loading)).toBe(line(notEnabled))
+    expect(loading).toContain('aria-hidden="true"')
+  })
   it('keeps a skipped question in place with its badge and no grade', () => {
     expect(html).toContain('Skipped'); expect(html).not.toContain('data-attempt-id="a2"')
   })
@@ -52,7 +60,8 @@ describe('interview playback feedback', () => {
     expect(feedbackSummary({ ...base, result: { ...base.result!, classification: 'NOT_ANSWERED' } })).toBe('Technical feedback · No technical answer')
     expect(feedbackSummary({ ...base, status: 'INCOMPLETE', result: null })).toBe('Incomplete answer · not evaluated')
     expect(renderToStaticMarkup(<InterviewFeedbackDisclosure finding={{ ...base, status: 'FAILED', result: null }} />)).toContain('No grade was invented')
-    expect(feedbackSummary({ ...base, status: 'NOT_ENABLED', result: null })).toBeNull()
+    expect(feedbackSummary({ ...base, status: 'NOT_ENABLED', result: null })).toBe('Technical feedback · Not enabled for this practice')
+    expect(feedbackSummary({ ...base, status: 'SKIPPED', result: null })).toBe('Skipped · not evaluated')
     expect(feedbackSummary(undefined)).toBeNull()
   })
 })
