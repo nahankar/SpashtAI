@@ -3,7 +3,7 @@ import { useRoomContext } from '@livekit/components-react'
 import { ParticipantEvent, RoomEvent, Track } from 'livekit-client'
 import { Button } from '@/components/ui/button'
 import { apiClient } from '@/lib/api-client'
-import { CaptureError, captureFailure, confirmedInterviewDrain, conversationStatus, CONVERSATION_STOP_REASONS, interviewCompletionMessage, INTERVIEWS_API, interviewWrite,
+import { CaptureError, captureFailure, confirmedInterviewDrain, conversationStatus, CONVERSATION_STOP_REASONS, interviewCompletionMessage, recognitionNotice, INTERVIEWS_API, interviewWrite,
   NO_SPEECH_HELP, UNCONFIRMED_SPEECH_HELP, type CaptureAction, type CaptureReceipt, type ConversationState, type InterviewOperation } from '@/lib/interview-practice'
 import type { SessionRecorderHandle } from '@/components/session/SessionRecorder'
 
@@ -32,6 +32,8 @@ export function InterviewControls({ runId, attemptId, segmentId, status, ready, 
   const [error,setError]=useState('')
   const [errorCode,setErrorCode]=useState<string|undefined>(undefined)
   const [notice,setNotice]=useState('')
+  // Speech-recognition trouble the interviewer reported for the open answer (cleared when it recovers or the answer changes).
+  const [recognition,setRecognition]=useState<{ attemptId: string; text: string }|null>(null)
   const [confirmIncomplete,setConfirmIncomplete]=useState(false); const [confirmDiscard,setConfirmDiscard]=useState(false)
   const [timeUp,setTimeUp]=useState(false)
   const [questionReady,setQuestionReady]=useState(false)
@@ -90,6 +92,7 @@ export function InterviewControls({ runId, attemptId, segmentId, status, ready, 
         if (data.type==='interview_error') setError('Interview speech capture is unavailable. Retry saving or end with an incomplete answer.')
         if (data.type==='interview_voice_closed') { setQuestionReady(false); setError(captureFailure('VOICE_DISCONNECTED')) }
         if (data.type==='interview_state') setAgent(agentState(data))
+        if (data.type==='interview_recognition') setRecognition(current => recognitionNotice(data, current))
       } catch { /* unrelated control message */ }
     }
     room.on(RoomEvent.DataReceived,control)
@@ -283,6 +286,7 @@ export function InterviewControls({ runId, attemptId, segmentId, status, ready, 
     </div>
     {completionMessage && <p role="status" className="rounded-lg border p-3 text-sm">{completionMessage}</p>}
     {notice && !error && <p role="status" className="rounded-lg border p-3 text-sm">{notice}</p>}
+    {recognition && recognition.attemptId===(agent.attemptId || attemptId) && <p role="status" className="rounded-lg border p-3 text-sm">{recognition.text}</p>}
     {error && <div role="alert" className="rounded-lg border border-amber-400/40 p-3 space-y-3"><p>{error}</p>
       {unconfirmed && <p className="text-sm text-muted-foreground">{UNCONFIRMED_SPEECH_HELP}</p>}
       <div className="flex flex-wrap gap-2">{retryable && <Button disabled={busy} onClick={() => retry()}>Retry saving speech</Button>}

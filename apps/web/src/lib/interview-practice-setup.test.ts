@@ -33,3 +33,17 @@ describe('recording acknowledgment gate', () => {
     expect(card).toContain(current.text); expect(card).toContain('I agree'); expect(card).toContain('href="/privacy"')
   })
 })
+
+import { recognitionNotice } from './interview-practice'
+describe('speech recognition notices', () => {
+  it('states repeated failure and untranscribed audio plainly, and clears failure on recovery', () => {
+    const failing = recognitionNotice({ state: 'unavailable', attemptId: 'a1' }, null)
+    expect(failing?.text).toContain('Speech recognition is not responding')
+    expect(failing?.text).not.toMatch(/Amazon|Transcribe|AWS/)
+    expect(recognitionNotice({ state: 'recovered', attemptId: 'a1' }, failing)).toBeNull()
+    const gap = recognitionNotice({ state: 'gap', attemptId: 'a1', lostSeconds: 12.4 }, null)
+    expect(gap?.text).toContain('about 12 seconds of this answer could not be transcribed')
+    // A recovery does not hide a reported gap, which stays true for that answer.
+    expect(recognitionNotice({ state: 'recovered', attemptId: 'a1' }, gap)).toBe(gap)
+  })
+})

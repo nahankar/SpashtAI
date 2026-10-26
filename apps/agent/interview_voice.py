@@ -110,6 +110,16 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
 
         recognizer_watch = RecognizerWatch()
 
+        def recognition_issue(kind: str, detail: dict):
+            # Tell the learner when recognition is not recovering, or when audio beyond the replay bound was not
+            # transcribed; a successful silent restart needs no notice.
+            if kind == "restarted" and not detail.get("lostSeconds"):
+                return
+            payload = {"type": "interview_recognition", "state": "gap" if kind == "restarted" else kind,
+                       "attemptId": capture.state["attempt"]["id"], **detail}
+            task = asyncio.create_task(ctx.room.local_participant.publish_data(json.dumps(payload).encode(), topic="lk.control"))
+            task.add_done_callback(lambda t: t.exception() and logger.warning("Recognition notice could not be published"))
+
         @session.on("user_state_changed")
         def speech_started(event):
             if event.new_state == "speaking":
@@ -117,6 +127,7 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
                 recognizer_watch.speech_started(event.created_at)
             elif event.old_state == "speaking":
                 capture.observe_speech_end(event.created_at)
+                recognizer_watch.speech_ended(event.created_at)
             if conversing() and (event.new_state == "speaking" or event.old_state == "speaking"):
                 coordinator.on_vad(event.new_state == "speaking")
 
@@ -133,20 +144,23 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
                     nonlocal clock
                     clock = ProviderClock(at)
 
-                recognizer_watch.reset()
+                recognizer_watch.new_stream()
                 async for event in supervise_recognizer(keep_interview_audio_alive(audio),
-                        lambda frames: Agent.default.stt_node(self, frames, model_settings), recognizer_watch, opened):
-                    if isinstance(event, stt.SpeechEvent) and event.type in {stt.SpeechEventType.FINAL_TRANSCRIPT, stt.SpeechEventType.INTERIM_TRANSCRIPT}:
-                        recognizer_watch.result()
+                        lambda frames: Agent.default.stt_node(self, frames, model_settings), recognizer_watch, opened,
+                        on_issue=recognition_issue):
                     if isinstance(event, stt.SpeechEvent) and event.alternatives:
                         alternative = event.alternatives[0]
                         has_words = bool(alternative.text and alternative.text.strip())
+                        timing = clock.timing(alternative)
+                        final = event.type == stt.SpeechEventType.FINAL_TRANSCRIPT
+                        if final or (event.type == stt.SpeechEventType.INTERIM_TRANSCRIPT and has_words):
+                            recognizer_watch.result(final, timing.get("word_end") or timing.get("end"))
                         if event.type == stt.SpeechEventType.FINAL_TRANSCRIPT:
-                            capture.observe_provider_transcript(alternative.text, True, **clock.timing(alternative))
+                            capture.observe_provider_transcript(alternative.text, True, **timing)
                             if conversing():
                                 coordinator.on_transcript(True, has_words)
                         elif event.type == stt.SpeechEventType.INTERIM_TRANSCRIPT:
-                            capture.observe_provider_transcript(alternative.text, False, **clock.timing(alternative))
+                            capture.observe_provider_transcript(alternative.text, False, **timing)
                             if conversing() and has_words:
                                 coordinator.on_transcript(False)
                     yield event

@@ -126,3 +126,18 @@ export async function confirmedInterviewDrain(port: {
 
 /** The Show conversation preference applies while practising; a finished practice always shows its conversation. */
 export const conversationHidden = (show: boolean, ended: boolean) => !show && !ended
+
+/**
+ * Learner notice for the interviewer's speech-recognition reports. A silent, successful restart shows nothing;
+ * repeated failure and audio beyond the replay bound are stated plainly. The recording is unaffected either way.
+ */
+export function recognitionNotice(data: { state?: string; attemptId?: string; lostSeconds?: number }, current: { attemptId: string; text: string } | null) {
+  const attemptId = data.attemptId ?? ''
+  if (data.state === 'recovered') return current?.attemptId === attemptId && current.text.startsWith('Speech recognition is not responding') ? null : current
+  if (data.state === 'unavailable') return { attemptId, text: 'Speech recognition is not responding. Your audio is still recorded. Keep answering while it reconnects, or choose Finish answer to save what was transcribed. Pause and Resume also reconnects.' }
+  if (data.state === 'gap') {
+    const seconds = Math.max(1, Math.round(data.lostSeconds ?? 0))
+    return { attemptId, text: `Speech recognition reconnected, but about ${seconds} second${seconds === 1 ? '' : 's'} of this answer could not be transcribed. The recording keeps it; repeat anything important.` }
+  }
+  return current
+}
