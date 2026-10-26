@@ -1,0 +1,2208 @@
+{
+ "generated": "2026-10-26",
+ "path": "Accounted Admin preview path, real Bedrock us-east-1; local Admin cap raised for this batch only and restored, never committed.",
+ "note": "Frozen pre-registered cases; small development sample, not a calibration claim. Pinned policies, historical assessments and the default model unchanged.",
+ "configs": {
+  "learner-evaluation-5": {
+   "label": "v5 on Nova 2 Lite (current)",
+   "fixtures": {
+    "pilot-2": {
+     "summary": {
+      "cases": 5,
+      "completed": 5,
+      "agreement": 4,
+      "invalidOutputJobs": 0,
+      "providerFailureJobs": 0,
+      "modelLatencyMs": {
+       "p50": 2309,
+       "p95": 2633,
+       "max": 2633
+      },
+      "tokens": {
+       "input": 9423,
+       "output": 1359,
+       "invocationsWithUnknownUsage": 0
+      }
+     },
+     "cases": [
+      {
+       "id": "P2-06",
+       "category": "mixed-correct-and-false",
+       "expected": "PARTIAL",
+       "actual": "INCORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "misconceptionReported": true,
+        "unexpectedMisconception": false,
+        "forbiddenWording": false,
+        "strengthAcknowledged": false
+       }
+      },
+      {
+       "id": "P2-07",
+       "category": "fragmented-implicit-reasoning",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "forbiddenWording": true,
+        "reasoningCredited": false
+       }
+      },
+      {
+       "id": "P2-08",
+       "category": "vague-substantive-fragments",
+       "expected": "PARTIAL",
+       "actual": "NOT_ANSWERED",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": false,
+        "forbidden": true,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "P2-01",
+       "category": "control-guidance-echo",
+       "expected": "NOT_ANSWERED",
+       "actual": "NOT_ANSWERED",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "P2-02",
+       "category": "control-empty-because",
+       "expected": "NOT_ANSWERED",
+       "actual": "NOT_ANSWERED",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "reasoningNotOverCredited": true
+       }
+      }
+     ]
+    },
+    "reasoning-1": {
+     "summary": {
+      "cases": 6,
+      "completed": 5,
+      "agreement": 5,
+      "invalidOutputJobs": 1,
+      "providerFailureJobs": 0,
+      "modelLatencyMs": {
+       "p50": 2336,
+       "p95": 2964,
+       "max": 2964
+      },
+      "tokens": {
+       "input": 11261,
+       "output": 1923,
+       "invocationsWithUnknownUsage": 0
+      }
+     },
+     "cases": [
+      {
+       "id": "RS-01",
+       "category": "incorrect-causality",
+       "expected": "INCORRECT",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "MET",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "reasoningNotOverCredited": false
+       }
+      },
+      {
+       "id": "RS-02",
+       "category": "empty-because",
+       "expected": "NOT_ANSWERED",
+       "actual": "NOT_ANSWERED",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "reasoningNotOverCredited": true
+       }
+      },
+      {
+       "id": "RS-03",
+       "category": "implicit-valid-reasoning",
+       "expected": "CORRECT",
+       "actual": "CORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "forbiddenWording": false,
+        "reasoningCredited": false
+       }
+      },
+      {
+       "id": "RS-04",
+       "category": "incorrect-causality",
+       "expected": "INCORRECT",
+       "actual": "INCORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "misconceptionReported": true,
+        "unexpectedMisconception": false,
+        "reasoningNotOverCredited": true
+       }
+      },
+      {
+       "id": "RS-05",
+       "category": "implicit-valid-reasoning",
+       "expected": "CORRECT",
+       "actual": "CORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "forbiddenWording": false,
+        "reasoningCredited": false
+       }
+      },
+      {
+       "id": "RS-06",
+       "category": "empty-because",
+       "expected": "NOT_ANSWERED",
+       "actual": null,
+       "errorCode": "INVALID_OUTPUT_INCONSISTENT",
+       "reasoningFinding": null,
+       "responseKind": null,
+       "checks": {}
+      }
+     ]
+    },
+    "pilot-1": {
+     "summary": {
+      "cases": 8,
+      "completed": 8,
+      "agreement": 8,
+      "invalidOutputJobs": 0,
+      "providerFailureJobs": 0,
+      "modelLatencyMs": {
+       "p50": 2641,
+       "p95": 2816,
+       "max": 2816
+      },
+      "tokens": {
+       "input": 9476,
+       "output": 1845,
+       "invocationsWithUnknownUsage": 0
+      }
+     },
+     "cases": [
+      {
+       "id": "P1-01",
+       "category": "terse-reason",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "MET",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "forbiddenWording": false,
+        "reasoningCredited": true
+       }
+      },
+      {
+       "id": "P1-02",
+       "category": "fragmented-transcript",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "forbiddenWording": false,
+        "acknowledged": true
+       }
+      },
+      {
+       "id": "P1-03",
+       "category": "request-repeat",
+       "expected": "NOT_ANSWERED",
+       "actual": "NOT_ANSWERED",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": "REQUEST_ONLY",
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "responseKindMatches": true
+       }
+      },
+      {
+       "id": "P1-04",
+       "category": "request-skip",
+       "expected": "NOT_ANSWERED",
+       "actual": "NOT_ANSWERED",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": "REQUEST_ONLY",
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "responseKindMatches": true
+       }
+      },
+      {
+       "id": "P1-05",
+       "category": "explicit-dont-know",
+       "expected": "NOT_ANSWERED",
+       "actual": "NOT_ANSWERED",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": "DONT_KNOW",
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "responseKindMatches": true
+       }
+      },
+      {
+       "id": "P1-06",
+       "category": "embedded-request-correct",
+       "expected": "CORRECT",
+       "actual": "CORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "P1-07",
+       "category": "embedded-skip-word",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "P1-08",
+       "category": "fragmented-transcript",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "forbiddenWording": false
+       }
+      }
+     ]
+    },
+    "asr-1": {
+     "summary": {
+      "cases": 5,
+      "completed": 5,
+      "agreement": 5,
+      "invalidOutputJobs": 0,
+      "providerFailureJobs": 0,
+      "modelLatencyMs": {
+       "p50": 2430,
+       "p95": 2714,
+       "max": 2714
+      },
+      "tokens": {
+       "input": 9459,
+       "output": 1906,
+       "invocationsWithUnknownUsage": 0
+      }
+     },
+     "cases": [
+      {
+       "id": "A1-01",
+       "category": "misheard-term-correct",
+       "expected": "CORRECT",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "forbiddenGap": false
+       }
+      },
+      {
+       "id": "A1-02",
+       "category": "misheard-term-correct",
+       "expected": "CORRECT",
+       "actual": "CORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "forbiddenGap": false
+       }
+      },
+      {
+       "id": "A1-03",
+       "category": "misheard-term-correct",
+       "expected": "CORRECT",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "forbiddenGap": false
+       }
+      },
+      {
+       "id": "A1-04",
+       "category": "misheard-term-correct",
+       "expected": "CORRECT",
+       "actual": "CORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "forbiddenGap": false
+       }
+      },
+      {
+       "id": "A1-05",
+       "category": "misheard-term-incorrect",
+       "expected": "INCORRECT",
+       "actual": "INCORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "misconceptionReported": true,
+        "unexpectedMisconception": false
+       }
+      }
+     ]
+    },
+    "reviewed-1": {
+     "summary": {
+      "cases": 7,
+      "completed": 7,
+      "agreement": 7,
+      "invalidOutputJobs": 0,
+      "providerFailureJobs": 0,
+      "modelLatencyMs": {
+       "p50": 2379,
+       "p95": 2744,
+       "max": 2744
+      },
+      "tokens": {
+       "input": 13126,
+       "output": 2666,
+       "invocationsWithUnknownUsage": 0
+      }
+     },
+     "cases": [
+      {
+       "id": "R1-04",
+       "category": "concise-correct",
+       "expected": "CORRECT",
+       "actual": "CORRECT",
+       "errorCode": null,
+       "reasoningFinding": "MET",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "R1-05",
+       "category": "partial",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "expectedGapReported": true
+       }
+      },
+      {
+       "id": "R1-06",
+       "category": "prompt-injection",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "R1-08",
+       "category": "central-error",
+       "expected": "INCORRECT",
+       "actual": "INCORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "misconceptionReported": true,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "R1-13",
+       "category": "fluent-incorrect",
+       "expected": "INCORRECT",
+       "actual": "INCORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "misconceptionReported": true,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "R1-14",
+       "category": "optional-depth-omitted",
+       "expected": "CORRECT",
+       "actual": "CORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "R1-16",
+       "category": "partial",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      }
+     ]
+    },
+    "heldout-1": {
+     "summary": {
+      "cases": 5,
+      "completed": 5,
+      "agreement": 5,
+      "invalidOutputJobs": 0,
+      "providerFailureJobs": 0,
+      "modelLatencyMs": {
+       "p50": 2384,
+       "p95": 2586,
+       "max": 2586
+      },
+      "tokens": {
+       "input": 9306,
+       "output": 1680,
+       "invocationsWithUnknownUsage": 0
+      }
+     },
+     "cases": [
+      {
+       "id": "H1-02",
+       "category": "fluent-incorrect",
+       "expected": "INCORRECT",
+       "actual": "INCORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "misconceptionReported": true,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "H1-03",
+       "category": "spelling-grammar-partial",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "H1-05",
+       "category": "prompt-injection-correct",
+       "expected": "CORRECT",
+       "actual": "CORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "H1-09",
+       "category": "near-abstention-with-idea",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "H1-10",
+       "category": "mixed-secondary-error",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "misconceptionReported": false,
+        "unexpectedMisconception": false
+       }
+      }
+     ]
+    }
+   }
+  },
+  "learner-evaluation-5-nova-pro": {
+   "label": "v5 prompt on Nova Pro (model-only change)",
+   "fixtures": {
+    "pilot-2": {
+     "summary": {
+      "cases": 5,
+      "completed": 2,
+      "agreement": 0,
+      "invalidOutputJobs": 3,
+      "providerFailureJobs": 0,
+      "modelLatencyMs": {
+       "p50": 3324,
+       "p95": 3687,
+       "max": 3687
+      },
+      "tokens": {
+       "input": 9425,
+       "output": 1635,
+       "invocationsWithUnknownUsage": 0
+      }
+     },
+     "cases": [
+      {
+       "id": "P2-06",
+       "category": "mixed-correct-and-false",
+       "expected": "PARTIAL",
+       "actual": null,
+       "errorCode": "INVALID_OUTPUT_UNSUPPORTED_EVIDENCE",
+       "reasoningFinding": null,
+       "responseKind": null,
+       "checks": {}
+      },
+      {
+       "id": "P2-07",
+       "category": "fragmented-implicit-reasoning",
+       "expected": "PARTIAL",
+       "actual": null,
+       "errorCode": "INVALID_OUTPUT_UNSUPPORTED_EVIDENCE",
+       "reasoningFinding": null,
+       "responseKind": null,
+       "checks": {}
+      },
+      {
+       "id": "P2-08",
+       "category": "vague-substantive-fragments",
+       "expected": "PARTIAL",
+       "actual": null,
+       "errorCode": "INVALID_OUTPUT_UNSUPPORTED_EVIDENCE",
+       "reasoningFinding": null,
+       "responseKind": null,
+       "checks": {}
+      },
+      {
+       "id": "P2-01",
+       "category": "control-guidance-echo",
+       "expected": "NOT_ANSWERED",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": false,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "P2-02",
+       "category": "control-empty-because",
+       "expected": "NOT_ANSWERED",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "PARTIAL",
+       "responseKind": null,
+       "checks": {
+        "acceptable": false,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "reasoningNotOverCredited": true
+       }
+      }
+     ]
+    },
+    "reasoning-1": {
+     "summary": {
+      "cases": 6,
+      "completed": 6,
+      "agreement": 6,
+      "invalidOutputJobs": 0,
+      "providerFailureJobs": 0,
+      "modelLatencyMs": {
+       "p50": 3682,
+       "p95": 3809,
+       "max": 3809
+      },
+      "tokens": {
+       "input": 11257,
+       "output": 2228,
+       "invocationsWithUnknownUsage": 0
+      }
+     },
+     "cases": [
+      {
+       "id": "RS-01",
+       "category": "incorrect-causality",
+       "expected": "INCORRECT",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "PARTIAL",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": true,
+        "reasoningNotOverCredited": true
+       }
+      },
+      {
+       "id": "RS-02",
+       "category": "empty-because",
+       "expected": "NOT_ANSWERED",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "PARTIAL",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "reasoningNotOverCredited": true
+       }
+      },
+      {
+       "id": "RS-03",
+       "category": "implicit-valid-reasoning",
+       "expected": "CORRECT",
+       "actual": "CORRECT",
+       "errorCode": null,
+       "reasoningFinding": "MET",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "forbiddenWording": false,
+        "reasoningCredited": true
+       }
+      },
+      {
+       "id": "RS-04",
+       "category": "incorrect-causality",
+       "expected": "INCORRECT",
+       "actual": "INCORRECT",
+       "errorCode": null,
+       "reasoningFinding": "PARTIAL",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "misconceptionReported": true,
+        "unexpectedMisconception": false,
+        "reasoningNotOverCredited": true
+       }
+      },
+      {
+       "id": "RS-05",
+       "category": "implicit-valid-reasoning",
+       "expected": "CORRECT",
+       "actual": "CORRECT",
+       "errorCode": null,
+       "reasoningFinding": "MET",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "forbiddenWording": false,
+        "reasoningCredited": true
+       }
+      },
+      {
+       "id": "RS-06",
+       "category": "empty-because",
+       "expected": "NOT_ANSWERED",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "PARTIAL",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "reasoningNotOverCredited": true
+       }
+      }
+     ]
+    },
+    "pilot-1": {
+     "summary": {
+      "cases": 8,
+      "completed": 8,
+      "agreement": 8,
+      "invalidOutputJobs": 0,
+      "providerFailureJobs": 0,
+      "modelLatencyMs": {
+       "p50": 3338,
+       "p95": 3608,
+       "max": 3608
+      },
+      "tokens": {
+       "input": 9476,
+       "output": 1742,
+       "invocationsWithUnknownUsage": 0
+      }
+     },
+     "cases": [
+      {
+       "id": "P1-01",
+       "category": "terse-reason",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "MET",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "forbiddenWording": false,
+        "reasoningCredited": true
+       }
+      },
+      {
+       "id": "P1-02",
+       "category": "fragmented-transcript",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "forbiddenWording": false,
+        "acknowledged": true
+       }
+      },
+      {
+       "id": "P1-03",
+       "category": "request-repeat",
+       "expected": "NOT_ANSWERED",
+       "actual": "NOT_ANSWERED",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": "REQUEST_ONLY",
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "responseKindMatches": true
+       }
+      },
+      {
+       "id": "P1-04",
+       "category": "request-skip",
+       "expected": "NOT_ANSWERED",
+       "actual": "NOT_ANSWERED",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": "REQUEST_ONLY",
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "responseKindMatches": true
+       }
+      },
+      {
+       "id": "P1-05",
+       "category": "explicit-dont-know",
+       "expected": "NOT_ANSWERED",
+       "actual": "NOT_ANSWERED",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": "DONT_KNOW",
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "responseKindMatches": true
+       }
+      },
+      {
+       "id": "P1-06",
+       "category": "embedded-request-correct",
+       "expected": "CORRECT",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "MET",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "P1-07",
+       "category": "embedded-skip-word",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "MET",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "P1-08",
+       "category": "fragmented-transcript",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "forbiddenWording": false
+       }
+      }
+     ]
+    },
+    "asr-1": {
+     "summary": {
+      "cases": 5,
+      "completed": 5,
+      "agreement": 5,
+      "invalidOutputJobs": 0,
+      "providerFailureJobs": 0,
+      "modelLatencyMs": {
+       "p50": 2941,
+       "p95": 3503,
+       "max": 3503
+      },
+      "tokens": {
+       "input": 9435,
+       "output": 1777,
+       "invocationsWithUnknownUsage": 0
+      }
+     },
+     "cases": [
+      {
+       "id": "A1-01",
+       "category": "misheard-term-correct",
+       "expected": "CORRECT",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": true,
+        "forbiddenGap": true
+       }
+      },
+      {
+       "id": "A1-02",
+       "category": "misheard-term-correct",
+       "expected": "CORRECT",
+       "actual": "CORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "forbiddenGap": false
+       }
+      },
+      {
+       "id": "A1-03",
+       "category": "misheard-term-correct",
+       "expected": "CORRECT",
+       "actual": "CORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "forbiddenGap": false
+       }
+      },
+      {
+       "id": "A1-04",
+       "category": "misheard-term-correct",
+       "expected": "CORRECT",
+       "actual": "CORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "forbiddenGap": false
+       }
+      },
+      {
+       "id": "A1-05",
+       "category": "misheard-term-incorrect",
+       "expected": "INCORRECT",
+       "actual": "INCORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_MET",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "misconceptionReported": true,
+        "unexpectedMisconception": false
+       }
+      }
+     ]
+    },
+    "reviewed-1": {
+     "summary": {
+      "cases": 7,
+      "completed": 7,
+      "agreement": 7,
+      "invalidOutputJobs": 0,
+      "providerFailureJobs": 0,
+      "modelLatencyMs": {
+       "p50": 3249,
+       "p95": 3776,
+       "max": 3776
+      },
+      "tokens": {
+       "input": 13092,
+       "output": 2391,
+       "invocationsWithUnknownUsage": 0
+      }
+     },
+     "cases": [
+      {
+       "id": "R1-04",
+       "category": "concise-correct",
+       "expected": "CORRECT",
+       "actual": "CORRECT",
+       "errorCode": null,
+       "reasoningFinding": "MET",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "R1-05",
+       "category": "partial",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "expectedGapReported": true
+       }
+      },
+      {
+       "id": "R1-06",
+       "category": "prompt-injection",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "R1-08",
+       "category": "central-error",
+       "expected": "INCORRECT",
+       "actual": "INCORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "misconceptionReported": true,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "R1-13",
+       "category": "fluent-incorrect",
+       "expected": "INCORRECT",
+       "actual": "INCORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_MET",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "misconceptionReported": true,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "R1-14",
+       "category": "optional-depth-omitted",
+       "expected": "CORRECT",
+       "actual": "CORRECT",
+       "errorCode": null,
+       "reasoningFinding": "MET",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "R1-16",
+       "category": "partial",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      }
+     ]
+    },
+    "heldout-1": {
+     "summary": {
+      "cases": 5,
+      "completed": 5,
+      "agreement": 5,
+      "invalidOutputJobs": 0,
+      "providerFailureJobs": 0,
+      "modelLatencyMs": {
+       "p50": 3051,
+       "p95": 3895,
+       "max": 3895
+      },
+      "tokens": {
+       "input": 9293,
+       "output": 1664,
+       "invocationsWithUnknownUsage": 0
+      }
+     },
+     "cases": [
+      {
+       "id": "H1-02",
+       "category": "fluent-incorrect",
+       "expected": "INCORRECT",
+       "actual": "INCORRECT",
+       "errorCode": null,
+       "reasoningFinding": "MET",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "misconceptionReported": true,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "H1-03",
+       "category": "spelling-grammar-partial",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "H1-05",
+       "category": "prompt-injection-correct",
+       "expected": "CORRECT",
+       "actual": "CORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "H1-09",
+       "category": "near-abstention-with-idea",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "H1-10",
+       "category": "mixed-secondary-error",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "misconceptionReported": true,
+        "unexpectedMisconception": false
+       }
+      }
+     ]
+    }
+   }
+  },
+  "nova_pro": {
+   "label": "nova_pro as configured (Admin prompt interview-answer-4)",
+   "fixtures": {
+    "pilot-2": {
+     "summary": {
+      "cases": 5,
+      "completed": 2,
+      "agreement": 1,
+      "invalidOutputJobs": 3,
+      "providerFailureJobs": 0,
+      "modelLatencyMs": {
+       "p50": 3433,
+       "p95": 5186,
+       "max": 5186
+      },
+      "tokens": {
+       "input": 7205,
+       "output": 1996,
+       "invocationsWithUnknownUsage": 0
+      }
+     },
+     "cases": [
+      {
+       "id": "P2-06",
+       "category": "mixed-correct-and-false",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "misconceptionReported": true,
+        "unexpectedMisconception": false,
+        "forbiddenWording": false,
+        "strengthAcknowledged": true
+       }
+      },
+      {
+       "id": "P2-07",
+       "category": "fragmented-implicit-reasoning",
+       "expected": "PARTIAL",
+       "actual": null,
+       "errorCode": "INVALID_OUTPUT_UNSUPPORTED_EVIDENCE",
+       "reasoningFinding": null,
+       "responseKind": null,
+       "checks": {}
+      },
+      {
+       "id": "P2-08",
+       "category": "vague-substantive-fragments",
+       "expected": "PARTIAL",
+       "actual": null,
+       "errorCode": "INVALID_OUTPUT_UNSUPPORTED_EVIDENCE",
+       "reasoningFinding": null,
+       "responseKind": null,
+       "checks": {}
+      },
+      {
+       "id": "P2-01",
+       "category": "control-guidance-echo",
+       "expected": "NOT_ANSWERED",
+       "actual": null,
+       "errorCode": "INVALID_OUTPUT_JSON",
+       "reasoningFinding": null,
+       "responseKind": null,
+       "checks": {}
+      },
+      {
+       "id": "P2-02",
+       "category": "control-empty-because",
+       "expected": "NOT_ANSWERED",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": false,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "reasoningNotOverCredited": true
+       }
+      }
+     ]
+    },
+    "reasoning-1": {
+     "summary": {
+      "cases": 6,
+      "completed": 6,
+      "agreement": 6,
+      "invalidOutputJobs": 0,
+      "providerFailureJobs": 0,
+      "modelLatencyMs": {
+       "p50": 3272,
+       "p95": 3682,
+       "max": 3682
+      },
+      "tokens": {
+       "input": 8578,
+       "output": 2040,
+       "invocationsWithUnknownUsage": 0
+      }
+     },
+     "cases": [
+      {
+       "id": "RS-01",
+       "category": "incorrect-causality",
+       "expected": "INCORRECT",
+       "actual": "INCORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": true,
+        "reasoningNotOverCredited": true
+       }
+      },
+      {
+       "id": "RS-02",
+       "category": "empty-because",
+       "expected": "NOT_ANSWERED",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "reasoningNotOverCredited": true
+       }
+      },
+      {
+       "id": "RS-03",
+       "category": "implicit-valid-reasoning",
+       "expected": "CORRECT",
+       "actual": "CORRECT",
+       "errorCode": null,
+       "reasoningFinding": "MET",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "forbiddenWording": false,
+        "reasoningCredited": true
+       }
+      },
+      {
+       "id": "RS-04",
+       "category": "incorrect-causality",
+       "expected": "INCORRECT",
+       "actual": "INCORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "misconceptionReported": true,
+        "unexpectedMisconception": false,
+        "reasoningNotOverCredited": true
+       }
+      },
+      {
+       "id": "RS-05",
+       "category": "implicit-valid-reasoning",
+       "expected": "CORRECT",
+       "actual": "CORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "forbiddenWording": false,
+        "reasoningCredited": false
+       }
+      },
+      {
+       "id": "RS-06",
+       "category": "empty-because",
+       "expected": "NOT_ANSWERED",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "reasoningNotOverCredited": true
+       }
+      }
+     ]
+    },
+    "pilot-1": {
+     "summary": {
+      "cases": 8,
+      "completed": 7,
+      "agreement": 7,
+      "invalidOutputJobs": 1,
+      "providerFailureJobs": 0,
+      "modelLatencyMs": {
+       "p50": 2774,
+       "p95": 4926,
+       "max": 4926
+      },
+      "tokens": {
+       "input": 11595,
+       "output": 2171,
+       "invocationsWithUnknownUsage": 0
+      }
+     },
+     "cases": [
+      {
+       "id": "P1-01",
+       "category": "terse-reason",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "forbiddenWording": true,
+        "reasoningCredited": false
+       }
+      },
+      {
+       "id": "P1-02",
+       "category": "fragmented-transcript",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "forbiddenWording": false,
+        "acknowledged": false
+       }
+      },
+      {
+       "id": "P1-03",
+       "category": "request-repeat",
+       "expected": "NOT_ANSWERED",
+       "actual": "NOT_ANSWERED",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "responseKindMatches": false
+       }
+      },
+      {
+       "id": "P1-04",
+       "category": "request-skip",
+       "expected": "NOT_ANSWERED",
+       "actual": "NOT_ANSWERED",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "responseKindMatches": false
+       }
+      },
+      {
+       "id": "P1-05",
+       "category": "explicit-dont-know",
+       "expected": "NOT_ANSWERED",
+       "actual": "NOT_ANSWERED",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "responseKindMatches": false
+       }
+      },
+      {
+       "id": "P1-06",
+       "category": "embedded-request-correct",
+       "expected": "CORRECT",
+       "actual": "CORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "P1-07",
+       "category": "embedded-skip-word",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "P1-08",
+       "category": "fragmented-transcript",
+       "expected": "PARTIAL",
+       "actual": null,
+       "errorCode": "INVALID_OUTPUT_SCHEMA_criteria_evidence_too_big",
+       "reasoningFinding": null,
+       "responseKind": null,
+       "checks": {}
+      }
+     ]
+    },
+    "asr-1": {
+     "summary": {
+      "cases": 5,
+      "completed": 4,
+      "agreement": 3,
+      "invalidOutputJobs": 1,
+      "providerFailureJobs": 0,
+      "modelLatencyMs": {
+       "p50": 3536,
+       "p95": 4426,
+       "max": 4426
+      },
+      "tokens": {
+       "input": 7214,
+       "output": 1887,
+       "invocationsWithUnknownUsage": 0
+      }
+     },
+     "cases": [
+      {
+       "id": "A1-01",
+       "category": "misheard-term-correct",
+       "expected": "CORRECT",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": true,
+        "forbiddenGap": true
+       }
+      },
+      {
+       "id": "A1-02",
+       "category": "misheard-term-correct",
+       "expected": "CORRECT",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": false,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "forbiddenGap": false
+       }
+      },
+      {
+       "id": "A1-03",
+       "category": "misheard-term-correct",
+       "expected": "CORRECT",
+       "actual": null,
+       "errorCode": "INVALID_OUTPUT_SCHEMA_criteria_evidence_too_big",
+       "reasoningFinding": null,
+       "responseKind": null,
+       "checks": {}
+      },
+      {
+       "id": "A1-04",
+       "category": "misheard-term-correct",
+       "expected": "CORRECT",
+       "actual": "CORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "forbiddenGap": false
+       }
+      },
+      {
+       "id": "A1-05",
+       "category": "misheard-term-incorrect",
+       "expected": "INCORRECT",
+       "actual": "INCORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_MET",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "misconceptionReported": true,
+        "unexpectedMisconception": false
+       }
+      }
+     ]
+    },
+    "reviewed-1": {
+     "summary": {
+      "cases": 7,
+      "completed": 7,
+      "agreement": 5,
+      "invalidOutputJobs": 0,
+      "providerFailureJobs": 0,
+      "modelLatencyMs": {
+       "p50": 3372,
+       "p95": 3639,
+       "max": 3639
+      },
+      "tokens": {
+       "input": 10059,
+       "output": 2486,
+       "invocationsWithUnknownUsage": 0
+      }
+     },
+     "cases": [
+      {
+       "id": "R1-04",
+       "category": "concise-correct",
+       "expected": "CORRECT",
+       "actual": "CORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "R1-05",
+       "category": "partial",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false,
+        "expectedGapReported": true
+       }
+      },
+      {
+       "id": "R1-06",
+       "category": "prompt-injection",
+       "expected": "PARTIAL",
+       "actual": "INCORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": false,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": true
+       }
+      },
+      {
+       "id": "R1-08",
+       "category": "central-error",
+       "expected": "INCORRECT",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": false,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "misconceptionReported": true,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "R1-13",
+       "category": "fluent-incorrect",
+       "expected": "INCORRECT",
+       "actual": "INCORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_MET",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "misconceptionReported": true,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "R1-14",
+       "category": "optional-depth-omitted",
+       "expected": "CORRECT",
+       "actual": "CORRECT",
+       "errorCode": null,
+       "reasoningFinding": "MET",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "R1-16",
+       "category": "partial",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      }
+     ]
+    },
+    "heldout-1": {
+     "summary": {
+      "cases": 5,
+      "completed": 4,
+      "agreement": 4,
+      "invalidOutputJobs": 1,
+      "providerFailureJobs": 0,
+      "modelLatencyMs": {
+       "p50": 2904,
+       "p95": 4114,
+       "max": 4114
+      },
+      "tokens": {
+       "input": 6974,
+       "output": 1689,
+       "invocationsWithUnknownUsage": 0
+      }
+     },
+     "cases": [
+      {
+       "id": "H1-02",
+       "category": "fluent-incorrect",
+       "expected": "INCORRECT",
+       "actual": "INCORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_MET",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "misconceptionReported": true,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "H1-03",
+       "category": "spelling-grammar-partial",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "H1-05",
+       "category": "prompt-injection-correct",
+       "expected": "CORRECT",
+       "actual": "CORRECT",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "H1-09",
+       "category": "near-abstention-with-idea",
+       "expected": "PARTIAL",
+       "actual": "PARTIAL",
+       "errorCode": null,
+       "reasoningFinding": "NOT_ASSESSED",
+       "responseKind": null,
+       "checks": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "forbiddenQuote": false,
+        "unexpectedMisconception": false
+       }
+      },
+      {
+       "id": "H1-10",
+       "category": "mixed-secondary-error",
+       "expected": "PARTIAL",
+       "actual": null,
+       "errorCode": "INVALID_OUTPUT_SCHEMA_criteria_evidence_too_big",
+       "reasoningFinding": null,
+       "responseKind": null,
+       "checks": {}
+      }
+     ]
+    }
+   }
+  }
+ }
+}

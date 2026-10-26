@@ -118,6 +118,7 @@ describe('learner policy registry and learner-evaluation-2 contract', () => {
     expect(hash(LEARNER_POLICIES['learner-evaluation-5'].config)).toBe('9f458e3dfb7edbe289843abac286d1bf9cd0fdfd28310b7c9ca91c2f3f4dd7be')
     expect(hash(LEARNER_POLICIES['learner-evaluation-6'].config)).toBe('8b5fd1f3ea69d68f270e9fb7a10352b2d41393e5505ffdf6b33b33c3e472054c')
     expect(hash(LEARNER_POLICIES['learner-evaluation-7'].config)).toBe('eeb0969651955bd4b045b66689901c9f95a084246514603ccba2afeb5d4498b3')
+    expect(hash(LEARNER_POLICIES['learner-evaluation-5-nova-pro'].config)).toBe('a6f8408344933fe15f8e14e3d00c453b8ce8e2f8245c1012518e875ff40bc7ee')
     const sha = (text: string) => createHash('sha256').update(text).digest('hex')
     expect(Object.fromEntries(Object.entries(PROMPTS).map(([id, text]) => [id, sha(text)]))).toEqual({
       'interview-answer-4': '6529a9f6cf7ebbc99016081a3dea4da01ee82207681cbbf630f513136798602a',
@@ -219,7 +220,7 @@ describe('learner policy registry and learner-evaluation-2 contract', () => {
     expect(explicitAbstention(`Sorry, ${'um, '.repeat(10)}I don't know.`)).toBe(true)
   })
   it('offers only learner policies with their own configuration as Admin previews', () => {
-    expect(PREVIEW_POLICIES).toEqual(['learner-evaluation-2', 'learner-evaluation-3', 'learner-evaluation-4', 'learner-evaluation-5', 'learner-evaluation-6', 'learner-evaluation-7'])
+    expect(PREVIEW_POLICIES).toEqual(['learner-evaluation-2', 'learner-evaluation-3', 'learner-evaluation-4', 'learner-evaluation-5', 'learner-evaluation-6', 'learner-evaluation-7', 'learner-evaluation-5-nova-pro'])
     expect(adminConfig('learner-evaluation-2')).toEqual(learner2); expect(previewPolicy(learner2)?.key).toBe('learner-evaluation-2')
     expect(previewPolicy(configFor('nova2_lite'))).toBeNull()
     expect(() => submitSchema.parse({ questionId: 'q', revision: 1, answer: testAnswer, model: 'learner-evaluation-1' })).toThrow()

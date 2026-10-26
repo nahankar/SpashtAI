@@ -158,3 +158,34 @@ mixed answers (Q6); vague-but-substantive vs no technical answer (Q8). Options, 
 stronger model (the registered Nova Pro comparison configuration) on the same 31 cases; or stop surfacing
 REASONING findings and gap text about reasoning to learners until the sets pass. Recording loss on refresh
 (D-1) remains open.
+
+## Model benchmark: Nova Pro vs Nova 2 Lite (26 Oct 2026)
+
+Same frozen, pre-registered cases (pilot-2 incl. human Q6/Q7/Q8 and controls, reasoning-1, pilot-1, asr-1,
+reviewed-1 and heldout-1 subsets: 36 cases) through the accounted Admin path. Three configurations: current
+v5 on Nova 2 Lite; v5's exact prompt/schema/rubric on Nova Pro (`learner-evaluation-5-nova-pro`, preview only,
+isolates the model); and the existing `nova_pro` comparison, which uses the older Admin prompt. Evidence:
+`docs/prepare/calibration/3.3b-followup-model-benchmark.json`.
+
+| Measure | v5 · Nova 2 Lite | v5 prompt · Nova Pro | nova_pro (Admin prompt) |
+| --- | --- | --- | --- |
+| Invalid outputs | 1 | 3 (human Q6, Q7, Q8: inexact evidence quotes) | 6 |
+| Pre-registered outcome met | 34/35 | 31/33 | 26/30 |
+| Implicit reasoning credited (where expected) | 1/4 | 3/3 of those completed | 1/3 |
+| False/empty reason not credited as MET | 3/4 | 5/5, but credits empty "because" as PARTIAL (RS-02, RS-06, P2-02) | 5/5 |
+| Controls stay "no technical answer" (P2-01, P2-02) | 2/2 | 0/2 (both PARTIAL) | 0/1 (+1 invalid) |
+| Correct concept beside a false claim (Q6) | not acknowledged | invalid output | acknowledged |
+| Request-only / don't-know kinds | 3/3 | 3/3 | 0/3 (no deterministic path) |
+| Misheard-term tolerance (asr-1, no misheard gap) | 4/4 | 3/4 | 2/3 |
+| Unexpected misconceptions | 0 | 2 | 3 |
+| Model latency p50 / p95 | 2.38 / 2.82 s | 3.31 / 3.80 s | 3.31 / 4.83 s |
+| Tokens in / out (whole batch) | 62.1k / 11.4k | 62.0k / 11.4k | 51.6k / 12.3k |
+
+Reading: Nova Pro credits implicit reasoning better, but on the human fragmented answers it fails to return
+valid evidence quotes, it upgrades instruction echoes and empty justifications to PARTIAL, it is less tolerant
+of misheard terms and ~40% slower. The configured `nova_pro` is worse still and lacks the learner rules. The
+comparison **does not support a model change**. It supports keeping technical grading **experimental** (pilot
+flag, clearly labelled) while targeted work continues; the next candidate fixes are structural rather than
+prompt rewrites (for example, investigating why multi-line answers produce inexact quotes, which affects Nova
+Pro most, and an explicit model-free check for instruction-echo/empty-justification answers). Hiding the
+REASONING finding would only be a presentation safeguard: it would not fix Q6 or Q8 and is not acceptance.
