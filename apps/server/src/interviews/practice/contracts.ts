@@ -32,21 +32,33 @@ export const receiptSchema = z.object({
 export const VOICE_CONSENT_VERSION = 'interview-recording-1'
 /**
  * One-time, account-level Interviews recording and AI-processing acknowledgment (replaces the per-practice
- * checkbox once accepted). The version, scope and exact text are stored with each acceptance; changing the
- * text requires a new version, and nothing is inferred for accounts that never accepted it.
- * Text approved 26 Oct 2026 (docs/prepare/POLICY-INTERVIEWS-RECORDING.md); do not edit without a new version.
+ * checkbox once accepted). The version, scope and a hash of the exact text are stored with each acceptance;
+ * changing the text requires a new version, and nothing is inferred for accounts that never accepted it.
+ * Learner-facing text names no service provider (docs/prepare/POLICY-INTERVIEWS-RECORDING.md).
  */
-export const RECORDING_ACKNOWLEDGMENT = {
-  version: 'interview-recording-ai-1',
-  scope: ['interview-audio-recording', 'speech-transcription', 'ai-technical-evaluation', 'storage-and-deletion'],
-  text: 'Interview practice records your microphone audio during each practice and transcribes it automatically (Amazon Transcribe). '
-    + 'Your saved answers may be evaluated by AI (Amazon Bedrock) to give technical feedback; this feedback is experimental and can be wrong. '
-    + 'Recordings, transcripts and feedback are stored with your account so you can review them, and an unfinished practice is completed automatically after 24 hours without activity. '
-    + 'You can delete any practice, with its recording, transcript and feedback, from Interview history at any time. '
-    + 'Do not share confidential company or personal information in your answers.',
+const ACKNOWLEDGMENT_SCOPE = ['interview-audio-recording', 'speech-transcription', 'ai-technical-evaluation', 'storage-and-deletion'] as const
+/** Every acknowledgment version ever shown, with its exact text, so historical acceptances stay verifiable. Never edit. */
+export const RECORDING_ACKNOWLEDGMENT_VERSIONS = {
+  'interview-recording-ai-1': { scope: ACKNOWLEDGMENT_SCOPE,
+    text: 'Interview practice records your microphone audio during each practice and transcribes it automatically (Amazon Transcribe). '
+      + 'Your saved answers may be evaluated by AI (Amazon Bedrock) to give technical feedback; this feedback is experimental and can be wrong. '
+      + 'Recordings, transcripts and feedback are stored with your account so you can review them, and an unfinished practice is completed automatically after 24 hours without activity. '
+      + 'You can delete any practice, with its recording, transcript and feedback, from Interview history at any time. '
+      + 'Do not share confidential company or personal information in your answers.' },
+  'interview-recording-ai-2': { scope: ACKNOWLEDGMENT_SCOPE,
+    text: 'Interview practice records your microphone audio during each practice and converts it to text with automatic speech recognition. '
+      + 'Your saved answers may be evaluated by AI to give technical feedback; AI technical feedback is experimental and can be wrong. '
+      + 'Speech recognition and AI technical feedback run on third-party cloud services that process this content on our behalf. '
+      + 'Recordings, transcripts and feedback are stored with your account so you can review them, and an unfinished practice is completed automatically after 24 hours without activity. '
+      + 'You can delete any practice, with its recording, transcript and feedback, from Interview history at any time. '
+      + 'Do not share confidential company or personal information in your answers.' },
 } as const
-/** Practice-level consent versions a run may carry: the legacy per-practice checkbox, or the account acknowledgment. */
-export const RECORDING_CONSENT_VERSIONS: readonly string[] = [VOICE_CONSENT_VERSION, RECORDING_ACKNOWLEDGMENT.version]
+export const RECORDING_ACKNOWLEDGMENT = { version: 'interview-recording-ai-2', ...RECORDING_ACKNOWLEDGMENT_VERSIONS['interview-recording-ai-2'] } as const
+/**
+ * Practice-level consent versions a run may carry: the legacy per-practice checkbox, or any acknowledgment version
+ * (practices started under an earlier acknowledgment stay valid; new practices need the current one).
+ */
+export const RECORDING_CONSENT_VERSIONS: readonly string[] = [VOICE_CONSENT_VERSION, ...Object.keys(RECORDING_ACKNOWLEDGMENT_VERSIONS)]
 export const acknowledgmentSchema = z.object({ version: z.string().min(1).max(80) }).strict()
 // Pinned on new runs with Interview conversation access; NULL keeps today's manual mode. Frozen once
 // pinned: changing timings needs a new version so earlier runs keep their behaviour.

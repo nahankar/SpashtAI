@@ -28,7 +28,7 @@ We use your information to:
 3. AI processing
 Your voice and text may be processed by automated systems—including speech recognition, language models, and analytics—to generate coaching feedback. We do not use your session content to train public third-party models without appropriate contractual safeguards, but processing may occur on infrastructure operated by our subprocessors.
 
-In Interviews, your audio is transcribed by Amazon Transcribe and your saved answers may be evaluated by AI models on Amazon Bedrock to produce technical feedback. This feedback is experimental. Interviews is separate from Progress Pulse.
+In Interviews, your audio is converted to text by automatic speech recognition, and your saved answers may be evaluated by AI models to produce AI technical feedback. These services are provided by third-party cloud service providers that process this content on our behalf, as described in Section 5. AI technical feedback is experimental. Interviews is separate from Progress Pulse.
 
 4. Legal bases (where applicable)
 Depending on your region, we rely on contractual necessity, legitimate interests (security, improvement), and consent where required (e.g., optional marketing, if offered).

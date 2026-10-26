@@ -53,6 +53,6 @@ export async function currentInterviewVoiceProfile(tx: Prisma.TransactionClient 
   await tx.$queryRaw`SELECT id FROM "VoiceConfig" WHERE id=${voice.id} FOR SHARE`
   const current = await tx.voiceConfig.findFirst({ where: { id: voice.id, isActive: true } })
   const profile = voiceProfileSchema.safeParse(current && Object.fromEntries(Object.keys(voiceProfileSchema.shape).map(k => [k, current[k as keyof typeof current]])))
-  if (!profile.success) throw new BankError(409, 'This pilot requires the Transcribe and Polly voice pipeline. Ask your administrator to check Voice Backend settings.')
+  if (!profile.success) throw new BankError(409, 'Interview practice is not available right now because its speech recognition and voice settings are not ready. Ask your administrator to check the voice settings.')
   return profile.data
 }

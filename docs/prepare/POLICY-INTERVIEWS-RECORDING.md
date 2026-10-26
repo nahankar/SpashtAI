@@ -1,10 +1,13 @@
 # Interviews recording, transcription, AI evaluation, storage and deletion — policy wording
 
-**Status: wording approved as drafted (26 Oct 2026); not yet published.** The live Terms and Privacy Policy are
-Admin-managed `LegalDocument` rows (both last updated 2026-06-23 in production). Nothing here changes them;
-publishing §4–§5 is a separate Admin action. As approved, providers are named, feedback is described as
+**Status: wording approved 26 Oct 2026, then revised 27 Oct 2026 at the user's request to remove provider names
+from learner-facing text; not yet published.** The live Terms and Privacy Policy are Admin-managed
+`LegalDocument` rows (both last updated 2026-06-23 in production). Nothing here changes them; publishing §4–§5 is
+a separate Admin action. Learner-facing wording says "speech recognition", "automatic transcription" and "AI
+technical feedback" and discloses that third-party cloud service providers process this content; the specific
+services stay in internal configuration and technical documentation (below and in §1). Feedback is described as
 experimental, and the model-training sentence in §4 is **not** adopted unless it is confirmed true for every
-provider and contract.
+provider and contract. Only the Privacy §3 sentence and the acknowledgment text changed in the revision.
 
 ## 1. What the published documents say today (production, reviewed 26 Oct 2026)
 
@@ -15,8 +18,8 @@ provider and contract.
 - Privacy §1 "Session data" and §3 "AI processing" cover Elevate/Replay coaching. **No mention** of Interviews,
   technical (subject-knowledge) evaluation, the 24-hour auto-completion of unfinished practice, or per-practice
   deletion. §7 Retention is generic ("while your account is active").
-- Neither document names AWS. The code uses Amazon Transcribe (speech recognition), Amazon Polly (interviewer
-  voice) and Amazon Bedrock (technical evaluation, coaching).
+- Neither document names AWS. Internally (not in learner-facing text) the code uses Amazon Transcribe (speech
+  recognition), Amazon Polly (interviewer voice) and Amazon Bedrock (technical evaluation, coaching).
 
 ## 2. Signup routes reviewed
 
@@ -33,29 +36,37 @@ stored per run as `recordingConsentAt` + `recordingConsentVersion = interview-re
 
 Shown once before a learner's first practice (every signup path reaches it the same way) and again only when the
 version changes. Stored server-side as an append-only `RecordingAcknowledgment` row: version
-`interview-recording-ai-1`, scope (`interview-audio-recording`, `speech-transcription`, `ai-technical-evaluation`,
+(current `interview-recording-ai-2`), scope (`interview-audio-recording`, `speech-transcription`, `ai-technical-evaluation`,
 `storage-and-deletion`), SHA-256 of the exact text shown, source, and acceptance time. Existing accounts are
 **not** given an acknowledgment; they see the same one-time card. Each new practice records
 `recordingConsentSource` (`ACCOUNT_ACKNOWLEDGMENT` or `PRACTICE_CHECKBOX`) and the acknowledgment id, and the
 database refuses a run that claims an acknowledgment the owner does not have. If the acknowledgment status cannot
 be loaded, the per-practice checkbox remains the gate.
 
-**Exact text (approved):**
+**Exact text, version `interview-recording-ai-2` (current):**
 
-> Interview practice records your microphone audio during each practice and transcribes it automatically (Amazon
-> Transcribe). Your saved answers may be evaluated by AI (Amazon Bedrock) to give technical feedback; this
-> feedback is experimental and can be wrong. Recordings, transcripts and feedback are stored with your account so
+> Interview practice records your microphone audio during each practice and converts it to text with automatic
+> speech recognition. Your saved answers may be evaluated by AI to give technical feedback; AI technical feedback
+> is experimental and can be wrong. Speech recognition and AI technical feedback run on third-party cloud services
+> that process this content on our behalf. Recordings, transcripts and feedback are stored with your account so
 > you can review them, and an unfinished practice is completed automatically after 24 hours without activity. You
 > can delete any practice, with its recording, transcript and feedback, from Interview history at any time. Do
 > not share confidential company or personal information in your answers.
 
+Version `interview-recording-ai-1` (approved 26 Oct 2026, named Amazon Transcribe and Amazon Bedrock) is kept
+verbatim in `RECORDING_ACKNOWLEDGMENT_VERSIONS` so any acceptance of it stays verifiable by its stored text hash.
+Such an acceptance is never rewritten; it no longer authorises new practices, so the learner sees the card once
+more for the new version. Practices already started under it remain valid. The database accepts a run's consent
+version only if it is the legacy checkbox version or a version the owner has an acceptance row for
+(migration `20261027120000_recording_acknowledgment_versions`).
+
 Button: **I agree**. After acceptance nothing is repeated near Start (removed at the user's request, 26 Oct
 2026); the acceptance stays on record and each practice records its consent source.
 
-Approved as drafted: providers named; "experimental" stays while grading is not accepted; no model-training
+Approved: "experimental" stays while grading is not accepted; no model-training
 statement unless confirmed (see §4).
 
-## 4. Terms changes (exact wording, approved; not published)
+## 4. Terms changes (exact wording, approved; unchanged by the revision; not published)
 
 Replace §4 heading and first paragraph with:
 
@@ -73,14 +84,15 @@ are not used to train AI models." **Only adopt this sentence if it is true for e
 
 Add to §3: "Technical feedback in Interviews is generated automatically, is experimental and may be inaccurate."
 
-## 5. Privacy changes (exact wording, approved; not published)
+## 5. Privacy changes (exact wording; §3 revised 27 Oct; not published)
 
 §1 add: "**Interview data:** audio recordings of your interview practice, automatic transcripts, your saved
 answers, the questions asked, practice settings, and technical feedback generated from your answers."
 
-§3 add: "In Interviews, your audio is transcribed by Amazon Transcribe and your saved answers may be evaluated by
-AI models on Amazon Bedrock to produce technical feedback. This feedback is experimental. Interviews is separate
-from Progress Pulse."
+§3 add (revised 27 Oct): "In Interviews, your audio is converted to text by automatic speech recognition, and your
+saved answers may be evaluated by AI models to produce AI technical feedback. These services are provided by
+third-party cloud service providers that process this content on our behalf, as described in Section 5. AI
+technical feedback is experimental. Interviews is separate from Progress Pulse."
 
 §7 add: "**Interviews:** recordings, transcripts and feedback are kept with your account until you delete the
 practice or your account. An unfinished practice is completed automatically after 24 hours without activity.

@@ -18,7 +18,7 @@ import { createQuestion, confirmProvenance, editQuestion, questionAction } from 
 import { readyDraft } from './fixtures/bank-draft'
 import { readInterviewPlaybackConversation } from '../src/interviews/practice/projection'
 import { practiceDurations } from '../src/interviews/practice/access'
-import { RECORDING_ACKNOWLEDGMENT } from '../src/interviews/practice/contracts'
+import { RECORDING_ACKNOWLEDGMENT, RECORDING_ACKNOWLEDGMENT_VERSIONS } from '../src/interviews/practice/contracts'
 import { captureCommittedTurn, endPractice, finishAnswer, markQuestionAsked, practiceDetail, prepareBankAttempt, recordAssistance, startPractice, saveCaptureReceipt, voiceState, practiceHistory } from '../src/interviews/practice/service'
 import { LEARNER_POLICIES, hash } from '../src/interviews/evaluator/contracts'
 import { assessmentDetail, claimAssessment } from '../src/interviews/evaluator/service'
@@ -464,6 +464,17 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
       const refused = await auth(request(app).post('/practice/runs')).send(noCheckbox)
       expect(refused.status).toBe(409); expect(refused.body.code).toBe('RECORDING_ACKNOWLEDGMENT_REQUIRED')
       expect((await auth(request(app).post('/practice/recording-acknowledgment')).send({ version: 'interview-recording-ai-0' })).status).toBe(409)
+      // An acceptance of the earlier wording is kept as it was but does not authorise new practices.
+      const earlier = RECORDING_ACKNOWLEDGMENT_VERSIONS['interview-recording-ai-1']
+      await prisma.recordingAcknowledgment.create({ data: { userId: owner, version: 'interview-recording-ai-1', scope: [...earlier.scope],
+        textHash: hash(earlier.text), source: 'INTERVIEWS_PAGE' } })
+      expect((await auth(request(app).get('/practice/recording-acknowledgment'))).body.accepted).toBeNull()
+      expect((await auth(request(app).post('/practice/runs')).send(noCheckbox)).body.code).toBe('RECORDING_ACKNOWLEDGMENT_REQUIRED')
+      expect((await auth(request(app).post('/practice/recording-acknowledgment')).send({ version: 'interview-recording-ai-1' })).status).toBe(409)
+      // The current wording names no service provider.
+      expect(RECORDING_ACKNOWLEDGMENT.version).toBe('interview-recording-ai-2')
+      expect(RECORDING_ACKNOWLEDGMENT.text).not.toMatch(/Amazon|AWS|Bedrock|Transcribe|Polly|Nova/)
+      expect(RECORDING_ACKNOWLEDGMENT.text).toContain('third-party cloud services')
       const accepted = await auth(request(app).post('/practice/recording-acknowledgment')).send({ version: RECORDING_ACKNOWLEDGMENT.version })
       expect(accepted.body).toMatchObject({ version: RECORDING_ACKNOWLEDGMENT.version, reused: false })
       const again = await auth(request(app).post('/practice/recording-acknowledgment')).send({ version: RECORDING_ACKNOWLEDGMENT.version })
