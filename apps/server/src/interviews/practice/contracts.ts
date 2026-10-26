@@ -17,7 +17,8 @@ export const startSchema = z.object({
   startingDifficulty: selection(z.enum(['Simple', 'Medium', 'Complex', 'Very Complex']), 4),
   // Minutes, or null for no time limit. Omitted means the learner's plan default; the plan decides what is allowed.
   durationMinutes: z.union([z.literal(5), z.literal(10), z.literal(15), z.literal(30), z.null()]).optional(),
-  recordingConsent: z.literal(true),
+  // The per-practice checkbox. Optional once the account holds the current recording acknowledgment.
+  recordingConsent: z.literal(true).optional(),
 }).strict()
 export const askedSchema = z.object({ segmentId: id, questionText: z.string().min(1).max(8000) }).strict()
 export const chunkSchema = z.object({
@@ -30,6 +31,24 @@ export const receiptSchema = z.object({
   lastTurnIndex: z.number().int().min(-1),
 }).strict()
 export const VOICE_CONSENT_VERSION = 'interview-recording-1'
+/**
+ * One-time, account-level Interviews recording and AI-processing acknowledgment (replaces the per-practice
+ * checkbox once accepted). The version, scope and exact text are stored with each acceptance; changing the
+ * text requires a new version, and nothing is inferred for accounts that never accepted it.
+ * DRAFT TEXT pending policy review before release.
+ */
+export const RECORDING_ACKNOWLEDGMENT = {
+  version: 'interview-recording-ai-1',
+  scope: ['interview-audio-recording', 'speech-transcription', 'ai-technical-evaluation', 'storage-and-deletion'],
+  text: 'Interview practice records your microphone audio during each practice and transcribes it automatically (Amazon Transcribe). '
+    + 'Your saved answers may be evaluated by AI (Amazon Bedrock) to give technical feedback; this feedback is experimental and can be wrong. '
+    + 'Recordings, transcripts and feedback are stored with your account so you can review them, and an unfinished practice is completed automatically after 24 hours without activity. '
+    + 'You can delete any practice, with its recording, transcript and feedback, from Interview history at any time. '
+    + 'Do not share confidential company or personal information in your answers.',
+} as const
+/** Practice-level consent versions a run may carry: the legacy per-practice checkbox, or the account acknowledgment. */
+export const RECORDING_CONSENT_VERSIONS: readonly string[] = [VOICE_CONSENT_VERSION, RECORDING_ACKNOWLEDGMENT.version]
+export const acknowledgmentSchema = z.object({ version: z.string().min(1).max(80) }).strict()
 // Pinned on new runs with Interview conversation access; NULL keeps today's manual mode. Frozen once
 // pinned: changing timings needs a new version so earlier runs keep their behaviour.
 export const CONVERSATION_POLICY = { version: 'conversation-1', handoffSilenceMs: 5000, settleMs: 1200, maxBarrierMs: 8000 } as const

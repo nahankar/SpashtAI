@@ -8,7 +8,7 @@ import { activeSegmentDurationSec } from '../../analytics/sessionSegments'
 import { BankError } from '../bank/csv'
 import { learnerEligibleWhere } from '../bank/schemas'
 import { hash, questionSnapshotSchema } from '../evaluator/contracts'
-import { joinSelection, splitSelection, askedSchema, assistanceSchema, chunkSchema, MAX_ANSWER_LENGTH, MAX_QUESTIONS, PRACTICE_NAMESPACE, receiptSchema, startSchema, VOICE_CONSENT_VERSION,
+import { RECORDING_ACKNOWLEDGMENT, RECORDING_CONSENT_VERSIONS, acknowledgmentSchema, joinSelection, splitSelection, askedSchema, assistanceSchema, chunkSchema, MAX_ANSWER_LENGTH, MAX_QUESTIONS, PRACTICE_NAMESPACE, receiptSchema, startSchema, VOICE_CONSENT_VERSION,
   CONVERSATION_POLICY, conversationPolicySchema, agentFinishSchema, agentNextSchema } from './contracts'
 import { conversationAccess, currentInterviewVoiceProfile, ownerPracticeDurations, practiceExecutionAccess, voiceProfileSchema } from './access'
 import { learnerPolicy, enqueueLearnerAssessment, learnerEvaluationAccess } from '../evaluator/learner'
@@ -29,7 +29,7 @@ async function writableRun(tx: Tx, runId: string, ownerId: string) {
   await practiceExecutionAccess(ownerId, tx)
   const session = await tx.session.findUniqueOrThrow({ where: { id: run.sessionId } })
   if (session.endedAt) throw new BankError(409, 'Interview has ended')
-  if (!run.recordingConsentAt || run.recordingConsentVersion !== VOICE_CONSENT_VERSION) throw new BankError(409, 'Recording consent is required')
+  if (!run.recordingConsentAt || !RECORDING_CONSENT_VERSIONS.includes(run.recordingConsentVersion ?? '')) throw new BankError(409, 'Recording consent is required')
   return run
 }
 async function agentAttempt(tx: Tx, attemptId: string) {
@@ -82,12 +82,18 @@ export async function startPractice(input: unknown, ownerId: string) {
     const session = await tx.session.create({ data: { id: body.sessionId, userId: ownerId, module: 'elevate',
       purpose: 'INTERVIEW', contextScope: 'SESSION_ONLY', sessionName: `${body.track.join(', ')} interview practice`,
       configurationSnapshot: { capturePolicy: 'committed-turns-1', answerCompletion: 'explicit', technicalFeedback: 'pending' } } })
+    // Recording provenance: the per-practice checkbox, or the account's current acknowledgment (never inferred).
+    const acknowledgment = body.recordingConsent ? null : await tx.recordingAcknowledgment.findUnique({
+      where: { userId_version: { userId: ownerId, version: RECORDING_ACKNOWLEDGMENT.version } } })
+    if (!body.recordingConsent && !acknowledgment) throw new BankError(409, 'Review and accept the Interviews recording notice before starting', 'RECORDING_ACKNOWLEDGMENT_REQUIRED')
     const evaluationPolicy = await learnerPolicy(ownerId, tx)
     const conversation = await conversationAccess(ownerId, tx)
     const run = await tx.interviewRun.create({ data: { sessionId: session.id, ownerId, namespace: PRACTICE_NAMESPACE,
       track: joinSelection(body.track), experienceBand: joinSelection(body.experienceBand), startingDifficulty: joinSelection(body.startingDifficulty),
       durationMinutes, maxQuestions: MAX_QUESTIONS,
-      recordingConsentAt: new Date(), recordingConsentVersion: VOICE_CONSENT_VERSION, voiceConfigSnapshot: json(voice),
+      recordingConsentAt: new Date(), recordingConsentVersion: acknowledgment ? acknowledgment.version : VOICE_CONSENT_VERSION,
+      recordingConsentSource: acknowledgment ? 'ACCOUNT_ACKNOWLEDGMENT' : 'PRACTICE_CHECKBOX', recordingAcknowledgmentId: acknowledgment?.id ?? null,
+      voiceConfigSnapshot: json(voice),
       evaluationPolicySnapshot: evaluationPolicy ? json(evaluationPolicy) : undefined,
       conversationPolicySnapshot: conversation ? json(CONVERSATION_POLICY) : undefined } })
     return { id: run.id, sessionId: session.id, reused: false }
@@ -283,6 +289,23 @@ export const historyQuerySchema = z.object({
   sort: z.enum(['date', 'name', 'status']).default('date'), dir: z.enum(['asc', 'desc']).default('desc'),
 }).strict()
 /** One page of the owner's practices. Search, status and sort apply to the whole history, not just the page. */
+/** The current Interviews recording acknowledgment and whether this account accepted it (never inferred). */
+export async function recordingAcknowledgment(ownerId: string) {
+  const accepted = await prisma.recordingAcknowledgment.findUnique({ where: { userId_version: { userId: ownerId, version: RECORDING_ACKNOWLEDGMENT.version } },
+    select: { version: true, acceptedAt: true } })
+  return { current: { version: RECORDING_ACKNOWLEDGMENT.version, scope: RECORDING_ACKNOWLEDGMENT.scope, text: RECORDING_ACKNOWLEDGMENT.text }, accepted }
+}
+/** Record the learner's explicit acceptance of exactly the current text; repeating it keeps the first record. */
+export async function acceptRecordingAcknowledgment(ownerId: string, input: unknown) {
+  const body = acknowledgmentSchema.parse(input)
+  if (body.version !== RECORDING_ACKNOWLEDGMENT.version) throw new BankError(409, 'The recording notice changed. Review the current version', 'ACKNOWLEDGMENT_VERSION_CHANGED')
+  await practiceExecutionAccess(ownerId)
+  const key = { userId_version: { userId: ownerId, version: RECORDING_ACKNOWLEDGMENT.version } }
+  const existing = await prisma.recordingAcknowledgment.findUnique({ where: key })
+  const row = existing ?? await prisma.recordingAcknowledgment.create({ data: { userId: ownerId, version: RECORDING_ACKNOWLEDGMENT.version,
+    scope: [...RECORDING_ACKNOWLEDGMENT.scope], textHash: hash(RECORDING_ACKNOWLEDGMENT.text), source: 'INTERVIEWS_PAGE' } })
+  return { version: row.version, acceptedAt: row.acceptedAt, reused: Boolean(existing) }
+}
 export async function practiceHistory(ownerId: string, input: unknown = {}) {
   const query = historyQuerySchema.parse(input)
   const owned: Prisma.InterviewRunWhereInput = { ownerId, session: { discardedAt: null } }
@@ -314,7 +337,7 @@ export async function voiceState(sessionId: string, segmentId: string, room: str
     await activeSegment(tx, sessionId, segmentId)
     const segment = await tx.sessionSegment.findUniqueOrThrow({ where: { id: segmentId } })
     if (segment.roomName !== room) throw new BankError(409, 'Room does not own this speech segment')
-    if (!run.recordingConsentAt || run.recordingConsentVersion !== VOICE_CONSENT_VERSION) throw new BankError(409, 'Recording consent is required for this interview')
+    if (!run.recordingConsentAt || !RECORDING_CONSENT_VERSIONS.includes(run.recordingConsentVersion ?? '')) throw new BankError(409, 'Recording consent is required for this interview')
     const attempt = await tx.interviewAttempt.findFirst({ where: { runId: run.id }, orderBy: { index: 'desc' } })
     if (!attempt) throw new BankError(409, 'Prepare the first question before joining')
     const max = await tx.interviewAnswerChunk.aggregate({ where: { segmentId }, _max: { localTurnIndex: true } })

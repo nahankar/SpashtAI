@@ -18,6 +18,7 @@ import { createQuestion, confirmProvenance, editQuestion, questionAction } from 
 import { readyDraft } from './fixtures/bank-draft'
 import { readInterviewPlaybackConversation } from '../src/interviews/practice/projection'
 import { practiceDurations } from '../src/interviews/practice/access'
+import { RECORDING_ACKNOWLEDGMENT } from '../src/interviews/practice/contracts'
 import { captureCommittedTurn, endPractice, finishAnswer, markQuestionAsked, practiceDetail, prepareBankAttempt, recordAssistance, startPractice, saveCaptureReceipt, voiceState, practiceHistory } from '../src/interviews/practice/service'
 import { LEARNER_POLICIES, hash } from '../src/interviews/evaluator/contracts'
 import { assessmentDetail, claimAssessment } from '../src/interviews/evaluator/service'
@@ -69,6 +70,7 @@ async function enableConversation() {
 async function learnerClaim() { const job = await claimLearnerAssessment(); expect(job).not.toBeNull(); learnerUsage.push(job!.leaseToken); return job! }
 const setup = () => ({ sessionId: randomUUID(), track: fixture, experienceBand: '2-5', startingDifficulty: 'Medium', durationMinutes: 10, recordingConsent: true })
 async function run() { return startPractice(setup(), owner) }
+const run_ = run
 async function segment(sessionId: string, index = 0) {
   return prisma.sessionSegment.create({ data: { id: randomUUID(), sessionId, segmentIndex: index, roomName: randomUUID(), startedAt: new Date() } })
 }
@@ -398,6 +400,43 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
     // No time limit is not unlimited questions: the stored cap stays 8 (also enforced by a database check).
     expect((await prisma.interviewRun.findUniqueOrThrow({ where: { id: r.id } })).maxQuestions).toBe(8)
     expect((await practiceDetail(r.id, owner)).durationMinutes).toBeNull()
+  })
+  it('replaces the per-practice checkbox only after an explicit, versioned, append-only acknowledgment', async () => {
+    const auth = (r: request.Test) => r.auth(token(owner), { type: 'bearer' })
+    await prisma.recordingAcknowledgment.deleteMany({ where: { userId: owner } })
+    try {
+      expect((await auth(request(app).get('/practice/recording-acknowledgment'))).body).toMatchObject({ current: { version: RECORDING_ACKNOWLEDGMENT.version }, accepted: null })
+      const { recordingConsent: _c, ...noCheckbox } = setup()
+      const refused = await auth(request(app).post('/practice/runs')).send(noCheckbox)
+      expect(refused.status).toBe(409); expect(refused.body.code).toBe('RECORDING_ACKNOWLEDGMENT_REQUIRED')
+      expect((await auth(request(app).post('/practice/recording-acknowledgment')).send({ version: 'interview-recording-ai-0' })).status).toBe(409)
+      const accepted = await auth(request(app).post('/practice/recording-acknowledgment')).send({ version: RECORDING_ACKNOWLEDGMENT.version })
+      expect(accepted.body).toMatchObject({ version: RECORDING_ACKNOWLEDGMENT.version, reused: false })
+      const again = await auth(request(app).post('/practice/recording-acknowledgment')).send({ version: RECORDING_ACKNOWLEDGMENT.version })
+      expect(again.body).toMatchObject({ reused: true, acceptedAt: accepted.body.acceptedAt })
+      const row = await prisma.recordingAcknowledgment.findUniqueOrThrow({ where: { userId_version: { userId: owner, version: RECORDING_ACKNOWLEDGMENT.version } } })
+      expect(row).toMatchObject({ scope: [...RECORDING_ACKNOWLEDGMENT.scope], textHash: hash(RECORDING_ACKNOWLEDGMENT.text), source: 'INTERVIEWS_PAGE' })
+      await expect(prisma.recordingAcknowledgment.update({ where: { id: row.id }, data: { source: 'EDITED' } })).rejects.toThrow()
+      // With a valid acknowledgment the practice starts without the checkbox and records where consent came from.
+      const started = await auth(request(app).post('/practice/runs')).send(noCheckbox)
+      expect(started.status).toBe(201)
+      const run = await prisma.interviewRun.findUniqueOrThrow({ where: { id: started.body.id } })
+      expect(run).toMatchObject({ recordingConsentVersion: RECORDING_ACKNOWLEDGMENT.version, recordingConsentSource: 'ACCOUNT_ACKNOWLEDGMENT', recordingAcknowledgmentId: row.id })
+      const a = await prepareBankAttempt(run.id, owner); const s = await segment(run.sessionId)
+      await markQuestionAsked(a.id, { segmentId: s.id, questionText: a.question.text })
+      expect((await voiceState(run.sessionId, s.id, s.roomName, `user_${owner}`)).attempt.id).toBe(a.id)
+      await endPractice(run.id, owner)
+      // The legacy checkbox still works and is labelled as such.
+      const legacy = await run_()
+      expect(await prisma.interviewRun.findUniqueOrThrow({ where: { id: legacy.id } })).toMatchObject({ recordingConsentVersion: 'interview-recording-1', recordingConsentSource: 'PRACTICE_CHECKBOX', recordingAcknowledgmentId: null })
+      await endPractice(legacy.id, owner)
+      // The database refuses acknowledgment provenance that does not exist.
+      const session = await prisma.session.create({ data: { id: randomUUID(), userId: owner, module: 'elevate', purpose: 'INTERVIEW', contextScope: 'SESSION_ONLY' } })
+      await expect(prisma.interviewRun.create({ data: { sessionId: session.id, ownerId: owner, namespace: 'automation-pilot', track: fixture, experienceBand: '2-5',
+        startingDifficulty: 'Medium', durationMinutes: 10, maxQuestions: 8, recordingConsentAt: new Date(), recordingConsentVersion: RECORDING_ACKNOWLEDGMENT.version,
+        recordingConsentSource: 'ACCOUNT_ACKNOWLEDGMENT', recordingAcknowledgmentId: 'not-an-acknowledgment', voiceConfigSnapshot: run.voiceConfigSnapshot as never } })).rejects.toThrow()
+      await prisma.session.delete({ where: { id: session.id } })
+    } finally { await prisma.recordingAcknowledgment.deleteMany({ where: { userId: owner } }) }
   })
   it('pages history with honest totals and applies search and status to the whole owned history', async () => {
     const ids: string[] = []

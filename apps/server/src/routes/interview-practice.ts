@@ -9,7 +9,7 @@ import { deleteSession } from './sessions'
 import { recordFeatureUsage, recordUserFeatureUsage } from '../middleware/tracking'
 import { learnerFindings, wakeLearnerEvaluator } from '../interviews/evaluator/learner'
 import { nextSchema } from '../interviews/practice/contracts'
-import { agentFinishAnswer, agentPrepareNext, captureCommittedTurn, endPractice, finishAnswer, markQuestionAsked, ownedCaptureReceipt, practiceDetail, practiceHistory, practiceOptions, prepareBankAttempt, recordAssistance, saveCaptureReceipt, startPractice, voiceState } from '../interviews/practice/service'
+import { acceptRecordingAcknowledgment, recordingAcknowledgment, agentFinishAnswer, agentPrepareNext, captureCommittedTurn, endPractice, finishAnswer, markQuestionAsked, ownedCaptureReceipt, practiceDetail, practiceHistory, practiceOptions, prepareBankAttempt, recordAssistance, saveCaptureReceipt, startPractice, voiceState } from '../interviews/practice/service'
 
 const route = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => { void fn(req, res).catch(next) }
 const empty = z.object({}).strict()
@@ -27,6 +27,8 @@ function errors(error: unknown, req: Request, res: Response, _next: NextFunction
 export const practiceRouter = Router()
 practiceRouter.use(requireAuth)
 practiceRouter.get('/options', route(async (req, res) => { res.json(await practiceOptions(req.user!.userId)) }))
+practiceRouter.get('/recording-acknowledgment', route(async (req, res) => { res.json(await recordingAcknowledgment(req.user!.userId)) }))
+practiceRouter.post('/recording-acknowledgment', route(async (req, res) => { res.json(await acceptRecordingAcknowledgment(req.user!.userId, req.body)) }))
 practiceRouter.get('/runs', route(async (req, res) => { res.json(await practiceHistory(req.user!.userId, req.query)) }))
 practiceRouter.post('/runs', route(async (req, res) => {
   const run = await startPractice(req.body, req.user!.userId)

@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { MultiSelect } from '@/components/ui/multi-select'
 import type { SessionRecorderHandle } from '@/components/session/SessionRecorder'
 import { apiClient } from '@/lib/api-client'
-import { PRACTICE_DIFFICULTIES, STANDARD_DURATIONS, durationLabel, getInterview, interviewWrite, interviewPlaybackPath, INTERVIEWS_API, type InterviewHistory, type InterviewOptions, type InterviewRun, type InterviewSetup, type InterviewOperation } from '@/lib/interview-practice'
+import { PRACTICE_DIFFICULTIES, STANDARD_DURATIONS, durationLabel, recordingGate, type RecordingAcknowledgment, getInterview, interviewWrite, interviewPlaybackPath, INTERVIEWS_API, type InterviewHistory, type InterviewOptions, type InterviewRun, type InterviewSetup, type InterviewOperation } from '@/lib/interview-practice'
 import { useLiveSession } from '@/features/live-session/useLiveSession'
 import { liveSessionApi } from '@/features/live-session/browser'
 import { interviewsAdapter } from '@/features/live-session/adapters/interviews'
@@ -17,6 +17,7 @@ import { useInterviewFindings } from '@/features/interviews/useInterviewFindings
 import { inlineFeedback } from '@/features/interviews/InlineFeedback'
 import { InterviewControls } from '@/features/interviews/InterviewControls'
 import { InterviewHistoryList } from '@/features/interviews/InterviewHistoryList'
+import { RecordingAcknowledgmentCard, RecordingNotice } from '@/features/interviews/RecordingAcknowledgmentCard'
 import { applyRetain, deletePractices, historyNavigationBlocked } from '@/lib/interview-history'
 import { useConfirm } from '@/hooks/useConfirm'
 import { PracticeTitle } from '@/features/interviews/PracticeTitle'
@@ -29,7 +30,12 @@ export function Interviews() {
   const [options,setOptions]=useState<InterviewOptions|null>(null); const [optionsLoaded,setOptionsLoaded]=useState(false)
   const [history,setHistory]=useState<InterviewHistory[]>([]); const [historyTotal,setHistoryTotal]=useState(0); const [detail,setDetail]=useState<InterviewRun|null>(null)
   const [setup,setSetup]=useState<{track:string[];experienceBand:string[];startingDifficulty:string[];durationMinutes:number|null}>({track:['Automation Testing'],experienceBand:['2-5'],startingDifficulty:[...PRACTICE_DIFFICULTIES],durationMinutes:10})
-  const [consent,setConsent]=useState(false); const [error,setError]=useState(''); const [accessError,setAccessError]=useState('')
+  const [consent,setConsent]=useState(false)
+  const [acknowledgment,setAcknowledgment]=useState<{status:'loading'|'ready'|'error';value?:RecordingAcknowledgment}>({status:'loading'})
+  const [acknowledging,setAcknowledging]=useState(false); const [acknowledgeError,setAcknowledgeError]=useState('')
+  const gate=recordingGate(acknowledgment)
+  // The per-practice checkbox stays the gate whenever the one-time acknowledgment is not known to be on record.
+  const recordingReady=gate==='accepted' || (gate==='checkbox' && consent); const [error,setError]=useState(''); const [accessError,setAccessError]=useState('')
   const [loading,setLoading]=useState(false); const [messages,setMessages]=useState<ChatMessage[]>([])
   const [observedId,setObservedId]=useState<string|null>(null)
   const [operation,setOperation]=useState<InterviewOperation>(null)
@@ -49,6 +55,15 @@ export function Interviews() {
     if (failed.length) toast.error('The practice could not be deleted. Try again.')
     else toast.success('Practice deleted')
     await refreshHistory().catch(()=>undefined)
+  }
+  async function acceptRecording() {
+    if (!acknowledgment.value) return
+    setAcknowledging(true); setAcknowledgeError('')
+    try {
+      const accepted=await interviewWrite<{version:string;acceptedAt:string}>('/recording-acknowledgment',{version:acknowledgment.value.current.version})
+      setAcknowledgment(a=>a.value ? {status:'ready',value:{...a.value,accepted:{version:accepted.version,acceptedAt:accepted.acceptedAt}}} : a)
+    } catch (e) { setAcknowledgeError(e instanceof Error ? e.message : 'Your acknowledgment could not be saved. Try again.') }
+    finally { setAcknowledging(false) }
   }
   async function refreshHistory() {
     const result=await apiClient<{runs:InterviewHistory[];total:number}>(`${INTERVIEWS_API}/runs`); setHistory(result.runs); setHistoryTotal(result.total)
@@ -74,13 +89,14 @@ export function Interviews() {
     discarded:()=>{ activeRun.current=null; setDetail(null); setParams({}); void refreshHistory() },discardFinished:()=>undefined,
   },observedId)
   const controller=live.controller
-  const adapter=interviewsAdapter(liveSessionApi,{...setup,recordingConsent:true} as InterviewSetup,()=>activeRun.current,run=> {
+  const adapter=interviewsAdapter(liveSessionApi,(gate==='accepted' ? { ...setup } : { ...setup, recordingConsent:true }) as InterviewSetup,()=>activeRun.current,run=> {
     activeRun.current=run.id; justStarted.current=run.id; setParams({run:run.id})
   })
   useEffect(() => {
     const abort=new AbortController()
     void Promise.allSettled([
       apiClient<InterviewOptions>(`${INTERVIEWS_API}/options`,{signal:abort.signal}),
+      apiClient<RecordingAcknowledgment>(`${INTERVIEWS_API}/recording-acknowledgment`,{signal:abort.signal}),
       apiClient<{runs:InterviewHistory[];total:number}>(`${INTERVIEWS_API}/runs`,{signal:abort.signal}),
     ]).then(results=> {
       if (abort.signal.aborted) return
@@ -93,7 +109,8 @@ export function Interviews() {
         if (initial) setSetup(s=>({...s,track:[initial.track],experienceBand:[initial.experienceBand],startingDifficulty:[...PRACTICE_DIFFICULTIES],durationMinutes:planDefault}))
         else setSetup(s=>({...s,durationMinutes:planDefault}))
       } else setAccessError(results[0].reason instanceof Error ? results[0].reason.message : 'Interview practice is unavailable')
-      if (results[1].status==='fulfilled') { setHistory(results[1].value.runs); setHistoryTotal(results[1].value.total) }
+      setAcknowledgment(results[1].status==='fulfilled' ? {status:'ready',value:results[1].value} : {status:'error'})
+      if (results[2].status==='fulfilled') { setHistory(results[2].value.runs); setHistoryTotal(results[2].value.total) }
       setOptionsLoaded(true)
     })
     return ()=>abort.abort()
@@ -133,7 +150,7 @@ export function Interviews() {
   // Keep the shared panel stable when polling returns identical saved speech.
   const conversation=useMemo(()=>JSON.parse(conversationJson) as ChatMessage[],[conversationJson])
   async function start() {
-    if (!consent) return
+    if (!recordingReady) return
     setError(''); setMessages([])
     await controller.start({sessionName:'Interview practice',focusArea:'',focusContext:'',boothDemo:false},adapter)
     await refreshDetail().catch(()=>undefined); await refreshHistory().catch(()=>undefined)
@@ -185,8 +202,11 @@ export function Interviews() {
         <label className="space-y-1 text-sm">Practice time<select className={selectClass} value={setup.durationMinutes ?? 'none'} onChange={e=>setSetup(s=>({...s,durationMinutes:e.target.value==='none' ? null : Number(e.target.value)}))}>{durations.allowed.map(n=><option key={n ?? 'none'} value={n ?? 'none'}>{durationLabel(n,options?.maxQuestions ?? 8)}</option>)}</select></label>
       </div>
       {setupMessage && <p role="status" className="text-sm text-muted-foreground">{setupMessage}</p>}
-      <label className="flex items-start gap-3 text-sm"><input type="checkbox" className="mt-1" checked={consent} onChange={e=>setConsent(e.target.checked)} /><span>I agree to my answers being recorded and transcribed for review. I will avoid sharing confidential company or personal information.</span></label>
-      <Button disabled={!consent || !matching || live.isJoining || history.some(h=>!h.endedAt)} onClick={()=>void start()}>{live.isJoining?'Starting…':'Start practice'}</Button>
+      {gate==='loading' && <p role="status" className="text-sm text-muted-foreground">Checking your recording notice…</p>}
+      {gate==='acknowledge' && acknowledgment.value && <RecordingAcknowledgmentCard value={acknowledgment.value} busy={acknowledging} error={acknowledgeError} onAccept={()=>void acceptRecording()} />}
+      {gate==='accepted' && acknowledgment.value?.accepted && <RecordingNotice acceptedAt={acknowledgment.value.accepted.acceptedAt} />}
+      {gate==='checkbox' && <label className="flex items-start gap-3 text-sm"><input type="checkbox" className="mt-1" checked={consent} onChange={e=>setConsent(e.target.checked)} /><span>I agree to my answers being recorded and transcribed for review. I will avoid sharing confidential company or personal information.</span></label>}
+      <Button disabled={!recordingReady || !matching || live.isJoining || history.some(h=>!h.endedAt)} onClick={()=>void start()}>{live.isJoining?'Starting…':'Start practice'}</Button>
       {history.some(h=>!h.endedAt) && <p className="text-sm text-muted-foreground">Resume or end your unfinished interview below before starting another.</p>}
     </section>}
     {detail && <section className="space-y-4">

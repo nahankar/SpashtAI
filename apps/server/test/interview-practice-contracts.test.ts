@@ -25,7 +25,8 @@ describe('interview practice input boundaries', () => {
     expect(startSchema.safeParse({ ...setup, experienceBand: 'Unknown' }).success).toBe(false)
     expect(startSchema.safeParse({ ...setup, recordingConsent: false }).success).toBe(false)
     const { recordingConsent: _consent, ...withoutConsent } = setup
-    expect(startSchema.safeParse(withoutConsent).success).toBe(false)
+    // Without the checkbox the server requires a stored account acknowledgment instead (see the database tests).
+    expect(startSchema.safeParse(withoutConsent).success).toBe(true)
   })
   it('preserves committed speech and excludes partial or assistant transcripts', () => {
     const turn = { segmentId: 'segment-1', sourceTurnId: 'user_turn_1', localTurnIndex: 1, role: 'user', text: '  Original wording, with spelling.  ' }

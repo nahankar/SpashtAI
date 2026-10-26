@@ -2,7 +2,7 @@ import type { Request } from 'express'
 import { prisma } from './prisma'
 import { BankError } from '../interviews/bank/csv'
 import { practiceExecutionAccess } from '../interviews/practice/access'
-import { VOICE_CONSENT_VERSION } from '../interviews/practice/contracts'
+import { RECORDING_CONSENT_VERSIONS } from '../interviews/practice/contracts'
 
 // Room membership is bound to a persisted segment, not client metadata.
 export async function resolveLivekitAccess(req: Request, input: { sessionId?: string; segmentId?: string; room?: string }) {
@@ -22,7 +22,7 @@ export async function resolveLivekitAccess(req: Request, input: { sessionId?: st
       if (e instanceof BankError) return { error: e.message, status: e.status } as const
       throw e
     }
-    if (!session.interviewRun.recordingConsentAt || session.interviewRun.recordingConsentVersion !== VOICE_CONSENT_VERSION) {
+    if (!session.interviewRun.recordingConsentAt || !RECORDING_CONSENT_VERSIONS.includes(session.interviewRun.recordingConsentVersion ?? '')) {
       return { error: 'Recording consent is required', status: 409 } as const
     }
   }

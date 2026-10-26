@@ -4,7 +4,7 @@ import { requireFeature } from '../lib/featureFlags'
 import { isValidInternalAgentRequest, requireAuth } from './auth'
 import { BankError } from '../interviews/bank/csv'
 import { practiceExecutionAccess } from '../interviews/practice/access'
-import { VOICE_CONSENT_VERSION } from '../interviews/practice/contracts'
+import { RECORDING_CONSENT_VERSIONS } from '../interviews/practice/contracts'
 
 async function checkInterview(req: Request, res: Response, id: string, execution: boolean): Promise<boolean> {
   const run = await prisma.interviewRun.findUnique({ where: { sessionId: id }, select: { ownerId: true, recordingConsentAt: true,
@@ -18,7 +18,7 @@ async function checkInterview(req: Request, res: Response, id: string, execution
   if (run.session.discardedAt && req.method !== 'DELETE') { res.status(410).json({ error: 'Session discarded' }); return true }
   if (execution) {
     await practiceExecutionAccess(run.ownerId)
-    if (!run.recordingConsentAt || run.recordingConsentVersion !== VOICE_CONSENT_VERSION) throw new BankError(409, 'Recording consent is required')
+    if (!run.recordingConsentAt || !RECORDING_CONSENT_VERSIONS.includes(run.recordingConsentVersion ?? '')) throw new BankError(409, 'Recording consent is required')
   }
   res.locals.interviewSession = true
   return true

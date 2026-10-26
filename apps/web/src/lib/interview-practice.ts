@@ -11,7 +11,7 @@ export function practiceTitle(stored: string) {
   const title = tracks.length === 1 ? tracks[0] : tracks.length === 2 ? `${tracks[0]} & ${tracks[1]}` : `Mixed practice · ${tracks.length} tracks`
   return { title, tracks }
 }
-export type InterviewSetup = { track: string[]; experienceBand: string[]; startingDifficulty: string[]; durationMinutes: number | null; recordingConsent: true }
+export type InterviewSetup = { track: string[]; experienceBand: string[]; startingDifficulty: string[]; durationMinutes: number | null; recordingConsent?: true }
 export type InterviewAttempt = {
   id: string; index: number; status: 'PREPARED'|'ASKED'|'ANSWERED'|'SKIPPED'|'INCOMPLETE'; assistance: string;
   question: { text: string; track: string; topic: string; difficulty: string };
@@ -37,6 +37,17 @@ export type InterviewOptions = { coverage: Array<{ track: string; experienceBand
   durations?: PracticeDurations }
 /** "No time limit" never means unlimited questions: the question cap still ends the practice. */
 export const durationLabel = (minutes: number | null, maxQuestions: number) => minutes === null ? `No time limit (up to ${maxQuestions} questions)` : `${minutes} minutes`
+/** The one-time Interviews recording and AI-processing acknowledgment (server-owned text and version). */
+export type RecordingAcknowledgment = { current: { version: string; scope: string[]; text: string }; accepted: { version: string; acceptedAt: string } | null }
+/**
+ * Which recording gate the setup shows: 'accepted' (notice only), 'acknowledge' (one-time card), or 'checkbox' (the
+ * per-practice consent, kept as the fallback whenever the acknowledgment status is unknown).
+ */
+export function recordingGate(state: { status: 'loading' | 'ready' | 'error'; value?: RecordingAcknowledgment }) {
+  if (state.status === 'loading') return 'loading'
+  if (state.status === 'error' || !state.value) return 'checkbox'
+  return state.value.accepted?.version === state.value.current.version ? 'accepted' : 'acknowledge'
+}
 export const STANDARD_DURATIONS: PracticeDurations = { plan: 'standard', allowed: [5, 10, 15], default: 10 }
 /** Coordinator states published by the interviewer agent in conversation practices. */
 export type ConversationState = 'asking'|'listening'|'candidate_end'|'confirming'|'saving'|'preparing'|'waiting'|''
