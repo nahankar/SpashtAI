@@ -15,7 +15,8 @@ export const startSchema = z.object({
   sessionId: id.regex(/^[a-zA-Z0-9_-]+$/), track: selection(z.string().trim().min(1).max(160).regex(/^[^|]+$/)),
   experienceBand: selection(z.enum(['0-2', '2-5', '5-8', '8+']), 4),
   startingDifficulty: selection(z.enum(['Simple', 'Medium', 'Complex', 'Very Complex']), 4),
-  durationMinutes: z.union([z.literal(5), z.literal(10), z.literal(15)]).default(10),
+  // Minutes, or null for no time limit. Omitted means the learner's plan default; the plan decides what is allowed.
+  durationMinutes: z.union([z.literal(5), z.literal(10), z.literal(15), z.literal(30), z.null()]).optional(),
   recordingConsent: z.literal(true),
 }).strict()
 export const askedSchema = z.object({ segmentId: id, questionText: z.string().min(1).max(8000) }).strict()

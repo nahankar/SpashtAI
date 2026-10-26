@@ -246,7 +246,8 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
             # starts with zero time remaining. New questions are server-fenced.
             await ctx.room.local_participant.publish_data(json.dumps({"type":"interview_time_up",
                 "text":"Practice time is up. Finish your current answer or end practice."}).encode(), topic="lk.control")
-        duration_task = asyncio.create_task(duration_limit())
+        # No time limit (Ultra): the server sends secondsRemaining null, so no timer runs. The question cap still applies.
+        duration_task = asyncio.create_task(duration_limit()) if state.get("secondsRemaining") is not None else None
         @ctx.room.on("participant_disconnected")
         def disconnected(remote):
             if remote.identity != participant.identity:
@@ -267,6 +268,7 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
             asyncio.create_task(notify_closed())
         await session.start(room=ctx.room, agent=InterviewAgent(), room_options=room_options)
         await closed.wait()
-        duration_task.cancel()
+        if duration_task is not None:
+            duration_task.cancel()
         if question_task is not None and not question_task.done():
             question_task.cancel()

@@ -106,6 +106,42 @@ class InterviewTimeLimitTests(unittest.IsolatedAsyncioTestCase):
             await run_interview_voice(ctx, SimpleNamespace(identity="learner"), "session", "segment")
 
 
+class UnlimitedPracticeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_no_time_limit_starts_no_timer_and_keeps_the_answer_open(self):
+        state = {"runId": "run", "identity": "learner", "segmentId": "segment", "nextTurnIndex": 0, "secondsRemaining": None,
+                 "voiceProfile": {"backend": "pipeline-bedrock", "sttProvider": "transcribe", "ttsProvider": "polly"},
+                 "attempt": {"id": "attempt", "status": "ASKED", "question": {"text": "Explain retries."}}}
+        published, handlers = [], {}
+        session = Mock(); session.say = AsyncMock()
+        session.on.side_effect = lambda event: lambda handler: handlers.setdefault(event, handler)
+        local = Mock(); local.set_name = AsyncMock(); local.set_metadata = AsyncMock()
+        local.publish_data = AsyncMock(side_effect=lambda payload, **_k: published.append(json.loads(payload).get("type")))
+        local.register_rpc_method.side_effect = lambda name: lambda handler: handler
+        room = Mock(name="room"); room.name = "room"; room.metadata = '{"interviewRunId":"run"}'; room.local_participant = local
+        room.on.side_effect = lambda _event: lambda handler: handler
+        ctx = SimpleNamespace(room=room, add_shutdown_callback=Mock())
+
+        class Response:
+            status = 200
+            def __init__(self, path): self.path = path
+            async def __aenter__(self): return self
+            async def __aexit__(self, *_a): pass
+            async def json(self): return state if "/sessions/" in self.path else state["attempt"]
+        http = Mock(); http.request.side_effect = lambda _m, path, **_k: Response(path)
+        client = AsyncMock(); client.__aenter__.return_value = http
+
+        async def start(**kwargs):
+            await kwargs["agent"].on_enter()
+            await asyncio.sleep(0.2)
+            session.input.set_audio_enabled.assert_called_with(True)
+            handlers["close"](None)
+        session.start = AsyncMock(side_effect=start)
+        with patch("interview_voice.aiohttp.ClientSession", return_value=client), \
+             patch("interview_voice.build_interview_session", AsyncMock(return_value=SimpleNamespace(session=session))):
+            await run_interview_voice(ctx, SimpleNamespace(identity="learner"), "session", "segment")
+        self.assertNotIn("interview_time_up", published)
+
+
 class InterviewConversationTests(unittest.IsolatedAsyncioTestCase):
     async def test_conversation_run_saves_after_silence_and_reads_the_next_question(self):
         first = {"runId": "run", "identity": "learner", "segmentId": "segment", "nextTurnIndex": 0, "secondsRemaining": 600,

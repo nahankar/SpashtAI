@@ -10,7 +10,7 @@ import { learnerEligibleWhere } from '../bank/schemas'
 import { hash, questionSnapshotSchema } from '../evaluator/contracts'
 import { joinSelection, splitSelection, askedSchema, assistanceSchema, chunkSchema, MAX_ANSWER_LENGTH, MAX_QUESTIONS, PRACTICE_NAMESPACE, receiptSchema, startSchema, VOICE_CONSENT_VERSION,
   CONVERSATION_POLICY, conversationPolicySchema, agentFinishSchema, agentNextSchema } from './contracts'
-import { conversationAccess, currentInterviewVoiceProfile, practiceExecutionAccess, voiceProfileSchema } from './access'
+import { conversationAccess, currentInterviewVoiceProfile, ownerPracticeDurations, practiceExecutionAccess, voiceProfileSchema } from './access'
 import { learnerPolicy, enqueueLearnerAssessment, learnerEvaluationAccess } from '../evaluator/learner'
 
 type Tx = Prisma.TransactionClient
@@ -57,6 +57,10 @@ export async function startPractice(input: unknown, ownerId: string) {
   const body = startSchema.parse(input)
   return prisma.$transaction(async tx => {
     await practiceExecutionAccess(ownerId, tx)
+    const durations = await ownerPracticeDurations(ownerId, tx)
+    const durationMinutes = body.durationMinutes === undefined ? durations.default : body.durationMinutes
+    if (!durations.allowed.includes(durationMinutes)) throw new BankError(403, durationMinutes === null
+      ? 'Practice without a time limit is not included in your plan' : 'This practice time is not included in your plan', 'DURATION_NOT_ALLOWED')
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`interview-start:${ownerId}`},0))`
     const existing = await tx.session.findUnique({ where: { id: body.sessionId }, include: { interviewRun: true } })
     if (existing) {
@@ -64,7 +68,7 @@ export async function startPractice(input: unknown, ownerId: string) {
       await lockWritableSession(tx, existing.id)
       const run = existing.interviewRun
       if (!run || existing.endedAt || run.track !== joinSelection(body.track) || run.experienceBand !== joinSelection(body.experienceBand)
-        || run.startingDifficulty !== joinSelection(body.startingDifficulty) || run.durationMinutes !== body.durationMinutes) {
+        || run.startingDifficulty !== joinSelection(body.startingDifficulty) || run.durationMinutes !== durationMinutes) {
         throw new BankError(409, 'Session ID already belongs to another setup or completed interview')
       }
       return { id: run.id, sessionId: run.sessionId, reused: true }
@@ -82,7 +86,7 @@ export async function startPractice(input: unknown, ownerId: string) {
     const conversation = await conversationAccess(ownerId, tx)
     const run = await tx.interviewRun.create({ data: { sessionId: session.id, ownerId, namespace: PRACTICE_NAMESPACE,
       track: joinSelection(body.track), experienceBand: joinSelection(body.experienceBand), startingDifficulty: joinSelection(body.startingDifficulty),
-      durationMinutes: body.durationMinutes, maxQuestions: MAX_QUESTIONS,
+      durationMinutes, maxQuestions: MAX_QUESTIONS,
       recordingConsentAt: new Date(), recordingConsentVersion: VOICE_CONSENT_VERSION, voiceConfigSnapshot: json(voice),
       evaluationPolicySnapshot: evaluationPolicy ? json(evaluationPolicy) : undefined,
       conversationPolicySnapshot: conversation ? json(CONVERSATION_POLICY) : undefined } })
@@ -107,7 +111,8 @@ export async function prepareBankAttempt(runId: string, ownerId: string, afterAt
     if (open) return learnerAttempt(open)
     const segments = await tx.sessionSegment.findMany({ where: { sessionId: run.sessionId }, select: { startedAt: true, endedAt: true, activeDurationSec: true } })
     const activeSeconds = segments.reduce((sum, s) => sum + (s.activeDurationSec ?? Math.max(0, ((s.endedAt?.getTime() ?? Date.now())-s.startedAt.getTime())/1000)), 0)
-    if (activeSeconds >= run.durationMinutes * 60) {
+    // No time limit (null) never ends a practice by time; the question cap still applies.
+    if (run.durationMinutes !== null && activeSeconds >= run.durationMinutes * 60) {
       throw new BankError(409, 'Practice duration reached. Your saved answers are ready for review.', 'PRACTICE_DURATION_REACHED')
     }
     const count = await tx.interviewAttempt.count({ where: { runId } })
@@ -268,7 +273,7 @@ export async function practiceOptions(ownerId: string) {
     const coverage = await tx.questionBankQuestion.groupBy({ by: ['track','experienceBand','difficulty'],
       where: { ...learnerEligibleWhere, namespace: PRACTICE_NAMESPACE }, _count: { _all: true } })
     return { coverage: coverage.map(c => ({ track: c.track, experienceBand: c.experienceBand, difficulty: c.difficulty, count: c._count._all })),
-      consentVersion: VOICE_CONSENT_VERSION, maxQuestions: MAX_QUESTIONS, evaluationAvailable: await learnerEvaluationAccess(ownerId, tx),
+      consentVersion: VOICE_CONSENT_VERSION, maxQuestions: MAX_QUESTIONS, durations: await ownerPracticeDurations(ownerId, tx), evaluationAvailable: await learnerEvaluationAccess(ownerId, tx),
       conversationAvailable: await conversationAccess(ownerId, tx) }
   })
 }
@@ -319,7 +324,7 @@ export async function voiceState(sessionId: string, segmentId: string, room: str
     const policy = conversationPolicySchema.safeParse(run.conversationPolicySnapshot)
     const open = attempt.status === 'ASKED'
     return { runId: run.id, sessionId, segmentId, identity, attempt: learnerAttempt(attempt),
-      nextTurnIndex: (max._max.localTurnIndex ?? -1) + 1, secondsRemaining: Math.max(0,run.durationMinutes*60-activeSeconds),
+      nextTurnIndex: (max._max.localTurnIndex ?? -1) + 1, secondsRemaining: run.durationMinutes === null ? null : Math.max(0,run.durationMinutes*60-activeSeconds),
       voiceProfile: voiceProfileSchema.parse(run.voiceConfigSnapshot),
       conversation: { enabled: policy.success && await conversationAccess(run.ownerId, tx), policy: policy.success ? policy.data : null },
       // Speech saved for this answer in earlier segments, and a completion receipt the server has not applied yet.

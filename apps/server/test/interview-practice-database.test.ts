@@ -17,6 +17,7 @@ import { prisma } from '../src/lib/prisma'
 import { createQuestion, confirmProvenance, editQuestion, questionAction } from '../src/interviews/bank/service'
 import { readyDraft } from './fixtures/bank-draft'
 import { readInterviewPlaybackConversation } from '../src/interviews/practice/projection'
+import { practiceDurations } from '../src/interviews/practice/access'
 import { captureCommittedTurn, endPractice, finishAnswer, markQuestionAsked, practiceDetail, prepareBankAttempt, recordAssistance, startPractice, saveCaptureReceipt, voiceState, practiceHistory } from '../src/interviews/practice/service'
 import { LEARNER_POLICIES, hash } from '../src/interviews/evaluator/contracts'
 import { assessmentDetail, claimAssessment } from '../src/interviews/evaluator/service'
@@ -354,6 +355,49 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
     const job = await learnerClaim()
     expect(job.policy.config).toEqual(LEARNER_POLICIES['learner-evaluation-5'].config)
     expect(job.policy.config.schema).toBe('interview-result-3')
+  })
+  it('verifies plan practice times server-side: Ultra no limit, Pro 30 minutes, others 5-15', async () => {
+    const plan = (data: { enablePro: boolean; enableUltra: boolean }) => prisma.user.update({ where: { id: owner }, data })
+    const start = async (durationMinutes?: number | null) => {
+      const body = { ...setup(), durationMinutes }; if (durationMinutes === undefined) delete (body as { durationMinutes?: unknown }).durationMinutes
+      return request(app).post('/practice/runs').auth(token(owner), { type: 'bearer' }).send(body)
+    }
+    const durationOf = async (id: string) => (await prisma.interviewRun.findUniqueOrThrow({ where: { id } })).durationMinutes
+    try {
+      await plan({ enablePro: true, enableUltra: true })   // both on (the default for new accounts): Ultra wins
+      let res = await start(); expect(res.status).toBe(201); expect(await durationOf(res.body.id)).toBeNull(); await endPractice(res.body.id, owner)
+      res = await start(15); expect(await durationOf(res.body.id)).toBe(15); await endPractice(res.body.id, owner)
+      await plan({ enablePro: true, enableUltra: false })
+      res = await start(); expect(await durationOf(res.body.id)).toBe(30); await endPractice(res.body.id, owner)
+      res = await start(null); expect(res.status).toBe(403); expect(res.body.code ?? res.body.error).toBeTruthy()
+      await plan({ enablePro: false, enableUltra: false })
+      res = await start(); expect(await durationOf(res.body.id)).toBe(10); await endPractice(res.body.id, owner)
+      expect((await start(30)).status).toBe(403)
+      expect((await start(45 as never)).status).toBe(400)
+      // The plan comes from the stored account, never from a role claimed in the token.
+      const forged = await request(app).get('/practice/options').auth(token(owner, 'SUPER_ADMIN'), { type: 'bearer' })
+      if (forged.status === 200) expect(forged.body.durations.plan).toBe('standard')
+      // An Admin account has every plan feature, including no time limit.
+      expect(practiceDurations({ role: 'SUPER_ADMIN', enablePro: false, enableUltra: false })).toMatchObject({ plan: 'ultra', default: null })
+      const learnerOptions = await request(app).get('/practice/options').auth(token(owner), { type: 'bearer' })
+      expect(learnerOptions.body.durations).toEqual({ plan: 'standard', allowed: [5, 10, 15], default: 10 })
+    } finally { await plan({ enablePro: true, enableUltra: true }) }
+  })
+  it('never ends a no-time-limit practice by time, keeps the question cap, and leaves older durations alone', async () => {
+    const older = await asked(); expect((await prisma.interviewRun.findUniqueOrThrow({ where: { id: older.r.id } })).durationMinutes).toBe(10)
+    await endPractice(older.r.id, owner)
+    const r = await startPractice({ ...setup(), durationMinutes: null }, owner)
+    const a = await prepareBankAttempt(r.id, owner)
+    // Hours of active time would end any timed practice.
+    const s = await prisma.sessionSegment.create({ data: { id: randomUUID(), sessionId: r.sessionId, segmentIndex: 0, roomName: randomUUID(), startedAt: new Date(Date.now() - 5 * 3600_000) } })
+    await markQuestionAsked(a.id, { segmentId: s.id, questionText: a.question.text })
+    expect((await voiceState(r.sessionId, s.id, s.roomName, `user_${owner}`)).secondsRemaining).toBeNull()
+    await captureCommittedTurn(a.id, turn(s.id, testAnswer)); await finish(r.id, a.id)
+    const next = await prepareBankAttempt(r.id, owner, a.id)
+    expect(next.index).toBe(2)
+    // No time limit is not unlimited questions: the stored cap stays 8 (also enforced by a database check).
+    expect((await prisma.interviewRun.findUniqueOrThrow({ where: { id: r.id } })).maxQuestions).toBe(8)
+    expect((await practiceDetail(r.id, owner)).durationMinutes).toBeNull()
   })
   it('pages history with honest totals and applies search and status to the whole owned history', async () => {
     const ids: string[] = []

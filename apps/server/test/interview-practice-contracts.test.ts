@@ -12,7 +12,12 @@ describe('interview practice input boundaries', () => {
     expect(startSchema.safeParse({ ...setup, experienceBand: ['0-2', 'Unknown'] }).success).toBe(false)
   })
   it('accepts the existing shared controller session ID and rejects caller-owned policy fields', () => {
-    expect(startSchema.parse(setup).durationMinutes).toBe(10)
+    // Omitted means the plan default (resolved server-side); 30 and null (no time limit) are valid shapes.
+    const { durationMinutes: _d, ...noDuration } = setup as typeof setup & { durationMinutes?: number }
+    expect(startSchema.parse(noDuration).durationMinutes).toBeUndefined()
+    expect(startSchema.parse({ ...setup, durationMinutes: 30 }).durationMinutes).toBe(30)
+    expect(startSchema.parse({ ...setup, durationMinutes: null }).durationMinutes).toBeNull()
+    expect(startSchema.safeParse({ ...setup, durationMinutes: 45 }).success).toBe(false)
     for (const extra of [{ ownerId: 'someone' }, { namespace: 'other-bank' }, { purpose: 'COMMUNICATION' }, { contextScope: 'COMMUNICATION_PROFILE' }]) {
       expect(startSchema.safeParse({ ...setup, ...extra }).success).toBe(false)
     }

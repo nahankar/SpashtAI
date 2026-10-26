@@ -11,7 +11,7 @@ export function practiceTitle(stored: string) {
   const title = tracks.length === 1 ? tracks[0] : tracks.length === 2 ? `${tracks[0]} & ${tracks[1]}` : `Mixed practice · ${tracks.length} tracks`
   return { title, tracks }
 }
-export type InterviewSetup = { track: string[]; experienceBand: string[]; startingDifficulty: string[]; durationMinutes: number; recordingConsent: true }
+export type InterviewSetup = { track: string[]; experienceBand: string[]; startingDifficulty: string[]; durationMinutes: number | null; recordingConsent: true }
 export type InterviewAttempt = {
   id: string; index: number; status: 'PREPARED'|'ASKED'|'ANSWERED'|'SKIPPED'|'INCOMPLETE'; assistance: string;
   question: { text: string; track: string; topic: string; difficulty: string };
@@ -21,7 +21,7 @@ export type InterviewAttempt = {
   answer: { answerText: string; textSource: string; textRevision: number; assistance: string }|null;
 }
 export type InterviewRun = {
-  id: string; sessionId: string; track: string; experienceBand: string; startingDifficulty: string; durationMinutes: number;
+  id: string; sessionId: string; track: string; experienceBand: string; startingDifficulty: string; durationMinutes: number | null;
   startedAt: string; endedAt: string|null; retainedAt: string|null; recordingConsentAt: string|null; recordingConsentVersion: string|null;
   attempts: InterviewAttempt[];
   evaluationEnabled?: boolean;
@@ -31,7 +31,13 @@ export type InterviewRun = {
 export type InterviewHistory = { id: string; sessionId: string; track: string; experienceBand: string; startingDifficulty: string;
   startedAt: string; endedAt: string|null; retainedAt: string|null; questionCount: number
   answeredCount?: number; skippedCount?: number; incompleteCount?: number }
-export type InterviewOptions = { coverage: Array<{ track: string; experienceBand: string; difficulty: string; count: number }>; maxQuestions: number; consentVersion: string; evaluationAvailable?: boolean; conversationAvailable?: boolean }
+/** Practice times the learner's plan allows (server-verified); null is no time limit. */
+export type PracticeDurations = { plan: 'ultra' | 'pro' | 'standard'; allowed: (number | null)[]; default: number | null }
+export type InterviewOptions = { coverage: Array<{ track: string; experienceBand: string; difficulty: string; count: number }>; maxQuestions: number; consentVersion: string; evaluationAvailable?: boolean; conversationAvailable?: boolean
+  durations?: PracticeDurations }
+/** "No time limit" never means unlimited questions: the question cap still ends the practice. */
+export const durationLabel = (minutes: number | null, maxQuestions: number) => minutes === null ? `No time limit (up to ${maxQuestions} questions)` : `${minutes} minutes`
+export const STANDARD_DURATIONS: PracticeDurations = { plan: 'standard', allowed: [5, 10, 15], default: 10 }
 /** Coordinator states published by the interviewer agent in conversation practices. */
 export type ConversationState = 'asking'|'listening'|'candidate_end'|'confirming'|'saving'|'preparing'|'waiting'|''
 export const CONVERSATION_STOP_REASONS = ['PRACTICE_DURATION_REACHED', 'PRACTICE_QUESTION_LIMIT', 'QUESTION_BANK_EXHAUSTED']

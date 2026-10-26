@@ -1161,7 +1161,8 @@ model InterviewRun {
   track           String
   experienceBand  String
   startingDifficulty String
-  durationMinutes Int @default(10)
+  // Minutes; NULL = no time limit (Ultra). The question cap (maxQuestions) is independent.
+  durationMinutes Int? @default(10)
   maxQuestions    Int @default(8)
   recordingConsentAt DateTime?
   recordingConsentVersion String?
