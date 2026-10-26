@@ -8,7 +8,7 @@ import { PracticeTitle } from './PracticeTitle'
 
 const api = vi.hoisted(() => ({ apiClient: vi.fn() }))
 vi.mock('@/lib/api-client', async original => ({ ...await original<typeof import('@/lib/api-client')>(), apiClient: api.apiClient }))
-const { deletePractices, toggleVisible } = await import('@/lib/interview-history')
+const { deletePractices, historyNavigationBlocked, toggleVisible } = await import('@/lib/interview-history')
 
 const many = ['Agentic AI', 'Automation Testing', 'Business Analysis', 'Data Engineering', 'Data Science', 'Database Engineering', 'DevOps / Platform Engineering',
   'Engineering Leadership', 'Java', 'Manual Testing', 'Mobile Development', 'Python', 'Scrum Master / Agile Coaching', 'Web / Frontend'].join('|')
@@ -62,5 +62,13 @@ describe('interview conversation timestamps', () => {
   it('leaves the default layout for Elevate and Replay unchanged', () => {
     const html = renderToStaticMarkup(<ConversationPanel messages={messages} autoScroll={false} />)
     expect(html).not.toContain('sm:flex-row'); expect(html).toContain('class="contents"'); expect(html).toContain('text-[10px] px-1 text-muted-foreground mt-1')
+  })
+})
+
+describe('history navigation during a practice', () => {
+  it('is blocked while a practice is connected, connecting, pausing or ending, and open afterwards', () => {
+    for (const state of [{ token: 't' }, { isJoining: true }, { isResuming: true }, { isPausing: true }, { isLeaving: true }])
+      expect(historyNavigationBlocked(state)).toBe(true)
+    expect(historyNavigationBlocked({ token: null })).toBe(false)
   })
 })

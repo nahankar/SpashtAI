@@ -38,3 +38,8 @@ export function toggleVisible(selected: Set<string>, visible: InterviewHistory[]
   for (const run of visible) { if (all) next.delete(run.id); else next.add(run.id) }
   return next
 }
+
+/** History may open only once no practice is connected or in the middle of connecting, pausing or ending. */
+export function historyNavigationBlocked(live: { token?: string | null; isJoining?: boolean; isResuming?: boolean; isPausing?: boolean; isLeaving?: boolean }) {
+  return Boolean(live.token || live.isJoining || live.isResuming || live.isPausing || live.isLeaving)
+}

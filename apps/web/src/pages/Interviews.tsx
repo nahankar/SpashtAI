@@ -17,7 +17,7 @@ import { useInterviewFindings } from '@/features/interviews/useInterviewFindings
 import { inlineFeedback } from '@/features/interviews/InlineFeedback'
 import { InterviewControls } from '@/features/interviews/InterviewControls'
 import { InterviewHistoryList } from '@/features/interviews/InterviewHistoryList'
-import { applyRetain, deletePractices } from '@/lib/interview-history'
+import { applyRetain, deletePractices, historyNavigationBlocked } from '@/lib/interview-history'
 import { useConfirm } from '@/hooks/useConfirm'
 import { PracticeTitle } from '@/features/interviews/PracticeTitle'
 
@@ -36,6 +36,12 @@ export function Interviews() {
   const recorderRef=useRef<SessionRecorderHandle|null>(null); const activeRun=useRef<string|null>(selected)
   const justStarted=useRef<string|null>(null); const messageRef=useRef(messages); messageRef.current=messages
   const confirmDialog=useConfirm()
+  // Every History link waits for a completed pause or end: leaving a connected (or connecting, pausing or
+  // ending) practice by navigation would depend on asynchronous unmount cleanup to save the open answer.
+  function guardHistory(e: { preventDefault: () => void }) {
+    if (!historyNavigationBlocked(live)) return
+    e.preventDefault(); toast.info('Pause or end this practice before opening history.')
+  }
   async function removePractice(run:InterviewHistory) {
     const ok=await confirmDialog({title:'Delete practice',description:'Delete this practice, its recording, transcript and technical feedback? This cannot be undone.',confirmLabel:'Delete',variant:'destructive'})
     if (!ok) return
@@ -158,7 +164,7 @@ export function Interviews() {
   const tracks=[...new Set(coverage.map(c=>c.track))].sort()
   const matching=coverage.filter(c=>setup.track.includes(c.track) && setup.experienceBand.includes(c.experienceBand) && setup.startingDifficulty.includes(c.difficulty)).reduce((n,c)=>n+c.count,0)
   return <div className="mx-auto max-w-5xl space-y-6">
-    <header className="space-y-2"><div className="flex flex-wrap items-center justify-between gap-2"><h1 className="text-3xl font-semibold">Interviews</h1><Button asChild variant="ghost" size="sm"><Link to="/interviews/history">Interview history</Link></Button></div><p className="text-muted-foreground">Practice technical questions aloud, at your own pace.</p>
+    <header className="space-y-2"><div className="flex flex-wrap items-center justify-between gap-2"><h1 className="text-3xl font-semibold">Interviews</h1><Button asChild variant="ghost" size="sm"><Link to="/interviews/history" onClick={guardHistory}>Interview history</Link></Button></div><p className="text-muted-foreground">Practice technical questions aloud, at your own pace.</p>
       <p className="text-sm text-muted-foreground">This preview saves questions, answers and recordings for review. {(detail ? detail.evaluationEnabled : options?.evaluationAvailable) ? 'Technical feedback is prepared from saved answers.' : 'Technical evaluation is not enabled for this practice.'} Interview activity stays outside Progress Pulse.</p></header>
     {accessError && <p role="alert" className="rounded-lg border p-4">{accessError} Your saved interview history is still available below.</p>}
     {error && <p role="alert" className="text-destructive">{error}</p>}
@@ -177,7 +183,7 @@ export function Interviews() {
       {history.some(h=>!h.endedAt) && <p className="text-sm text-muted-foreground">Resume or end your unfinished interview below before starting another.</p>}
     </section>}
     {detail && <section className="space-y-4">
-      <div className="flex min-w-0 flex-wrap justify-between gap-3"><PracticeTitle as="h2" track={detail.track} suffix=" practice" className="text-xl font-semibold" /><Link className="text-sm underline" to="/interviews" onClick={e=> { if (live.token) { e.preventDefault(); toast.info('Pause or end this practice before opening history.') } }}>Interview history</Link></div>
+      <div className="flex min-w-0 flex-wrap justify-between gap-3"><PracticeTitle as="h2" track={detail.track} suffix=" practice" className="text-xl font-semibold" /><Link className="text-sm underline" to="/interviews/history" onClick={guardHistory}>Interview history</Link></div>
       {detail.conversationMode && !detail.endedAt && <p className="text-sm text-muted-foreground">Automatic conversation: after you finish, stay quiet for about 5 seconds and the interviewer moves on. Finish answer, Skip and More time are always available.</p>}
       {current && !detail.endedAt && <p className="text-sm text-muted-foreground">Spoken requests such as “repeat the question” or “skip this one” are not supported yet; use the buttons below. A spoken request is never graded as not knowing the answer.</p>}
       {current && !detail.endedAt && <div className="rounded-xl border p-5 space-y-2"><p className="text-sm text-muted-foreground">Question {current.index} · {current.question.difficulty} · {current.question.topic}</p><p className="text-lg font-medium whitespace-pre-wrap">{current.question.text}</p><p className="text-sm text-muted-foreground">Answer aloud in your own words. Explain how or why where you can; an example helps.</p></div>}
@@ -204,11 +210,11 @@ export function Interviews() {
     </section>}
     {!selected && <section className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-xl font-semibold">Recent practice</h2>
-        <Button asChild variant="outline" size="sm"><Link to="/interviews/history">Interview history</Link></Button></div>
+        <Button asChild variant="outline" size="sm"><Link to="/interviews/history" onClick={guardHistory}>Interview history</Link></Button></div>
       <p className="text-sm text-muted-foreground">Unfinished practice closes after 24 hours without activity. Retain one interview to keep it open.</p>
       {!history.length && <p className="text-sm text-muted-foreground">Your interviews will appear here.</p>}
       <InterviewHistoryList runs={history.slice(0,3)} onRetain={(run,result)=>setHistory(rows=>applyRetain(rows,run,result))} onDelete={run=>void removePractice(run)} />
-      {history.length>3 && <Link className="text-sm underline" to="/interviews/history">View all {history.length} practices</Link>}
+      {history.length>3 && <Link className="text-sm underline" to="/interviews/history" onClick={guardHistory}>View all {history.length} practices</Link>}
     </section>}
   </div>
 }
