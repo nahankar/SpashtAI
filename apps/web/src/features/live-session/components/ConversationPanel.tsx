@@ -164,6 +164,7 @@ export function ConversationPanel({
   scrollable = true,
   renderMessage,
   renderAfterMessage,
+  timestampPlacement = 'below',
 }: {
   messages: ChatMessage[]
   turnMetricsByIndex?: Record<number, TurnMetrics>
@@ -185,6 +186,8 @@ export function ConversationPanel({
   renderMessage?: (message: ChatMessage) => ReactNode
   /** Rendered below a message bubble, inside its column (for example interview feedback under an answer). */
   renderAfterMessage?: (message: ChatMessage) => ReactNode
+  /** 'side' (Interviews) puts the time beside the bubble near its bottom edge on wider screens, beneath it on narrow ones. */
+  timestampPlacement?: 'below' | 'side'
 }) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [collapsed, setCollapsed] = useState(collapsible && defaultCollapsed)
@@ -338,9 +341,12 @@ export function ConversationPanel({
                 key={g.id || i} 
                 className={`flex ${g.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}
               >
-                <div className={`flex flex-col max-w-[80%] ${g.role === 'user' ? 'items-end' : 'items-start'}`}>
+                <div className={`flex min-w-0 flex-col max-w-[80%] ${g.role === 'user' ? 'items-end' : 'items-start'}`}>
+                  <div className={timestampPlacement === 'side'
+                    ? `flex min-w-0 max-w-full flex-col gap-0.5 sm:items-end sm:gap-2 ${g.role === 'user' ? 'items-end sm:flex-row-reverse' : 'items-start sm:flex-row'}`
+                    : 'contents'}>
                   <div 
-                    className={`rounded-2xl px-4 py-2.5 shadow-sm ${
+                    className={`min-w-0 max-w-full rounded-2xl px-4 py-2.5 shadow-sm ${
                       g.role === 'user' 
                         ? `${USER_BUBBLE} rounded-tr-sm`
                         : `${COACH_BUBBLE} rounded-tl-sm`
@@ -364,8 +370,9 @@ export function ConversationPanel({
                     ))}
                   </div>
                   
-                  <div className="text-[10px] mt-1 px-1 text-muted-foreground">
+                  <div className={`text-[10px] px-1 text-muted-foreground ${timestampPlacement === 'side' ? 'shrink-0 whitespace-nowrap sm:mb-1' : 'mt-1'}`}>
                     {formatTime(g.timestamp)}
+                  </div>
                   </div>
                   {renderAfterMessage?.(g)}
                 </div>

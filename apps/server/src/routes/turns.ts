@@ -102,7 +102,7 @@ export async function getSessionTurns(req: Request, res: Response) {
         recordingStartedAt: true,
         module: true,
         purpose: true,
-        interviewRun: { select: { id: true } },
+        interviewRun: { select: { id: true, track: true } },
         sessionName: true,
         focusArea: true,
         startedAt: true,
@@ -265,6 +265,8 @@ export async function getSessionTurns(req: Request, res: Response) {
             module: session.module,
             purpose: session.purpose,
             sessionName: session.sessionName,
+            // Interview playback titles practices from their tracks (compact when several were chosen).
+            interviewTrack: session.interviewRun?.track ?? null,
             focusArea: session.focusArea,
             startedAt: session.startedAt,
             endedAt: session.endedAt,

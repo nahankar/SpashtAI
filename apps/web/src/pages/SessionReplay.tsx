@@ -30,6 +30,7 @@ import { KaraokeText, type PlaybackWord as TurnWord } from '@/components/session
 import { interviewPlaybackWords } from '@/lib/interview-playback-words'
 import { fallbackSpeechRegions, partialPlaybackEnd, verifiedPlaybackWords, verifiedWordRegions, nextSpeechTime } from '@/lib/playback-regions'
 import { inlineFeedback } from '@/features/interviews/InlineFeedback'
+import { PracticeTitle } from '@/features/interviews/PracticeTitle'
 import { useInterviewFindings } from '@/features/interviews/useInterviewFindings'
 import { ConversationPanel } from '@/features/live-session/components/ConversationPanel'
 import type { ChatMessage } from '@/features/live-session/types'
@@ -87,6 +88,7 @@ interface SessionInfo {
   startedAt?: string | null
   endedAt?: string | null
   durationSec?: number | null
+  interviewTrack?: string | null
 }
 
 interface ReplaySegment {
@@ -1291,7 +1293,9 @@ export function SessionReplay({
               Playback
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-2xl font-bold">{sessionTitle(sessionInfo)}</h1>
+              {isInterview && sessionInfo?.interviewTrack
+                ? <PracticeTitle as="h1" track={sessionInfo.interviewTrack} suffix=" practice" className="text-2xl font-bold" />
+                : <h1 className="text-2xl font-bold">{sessionTitle(sessionInfo)}</h1>}
               {sessionInfo?.module && (
                 <Badge variant="secondary" className="capitalize">
                   {isInterview ? 'Interviews' : MODULE_LABELS[(sessionInfo.module || '').toLowerCase()] || sessionInfo.module}
@@ -1468,7 +1472,7 @@ export function SessionReplay({
 
       {/* Transcript */}
       {isInterview && interviewMessages && !transcriptHidden && effectiveChips.size === 0 ? (
-        <ConversationPanel autoScroll={false} scrollable={false} stitchAdjacentUserMessages={false} messages={visibleInterviewMessages}
+        <ConversationPanel autoScroll={false} scrollable={false} stitchAdjacentUserMessages={false} timestampPlacement="side" messages={visibleInterviewMessages}
           renderMessage={message => {
             const words = message.id ? interviewWords.get(message.id) : undefined
             return words?.length ? <KaraokeText text={message.content} words={words} currentTime={currentTime}

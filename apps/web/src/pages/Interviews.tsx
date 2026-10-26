@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { MultiSelect } from '@/components/ui/multi-select'
 import type { SessionRecorderHandle } from '@/components/session/SessionRecorder'
 import { apiClient } from '@/lib/api-client'
-import { getInterview, interviewWrite, interviewPlaybackPath, INTERVIEWS_API, selectionLabel, type InterviewHistory, type InterviewOptions, type InterviewRun, type InterviewSetup, type InterviewOperation } from '@/lib/interview-practice'
+import { getInterview, interviewWrite, interviewPlaybackPath, INTERVIEWS_API, type InterviewHistory, type InterviewOptions, type InterviewRun, type InterviewSetup, type InterviewOperation } from '@/lib/interview-practice'
 import { useLiveSession } from '@/features/live-session/useLiveSession'
 import { liveSessionApi } from '@/features/live-session/browser'
 import { interviewsAdapter } from '@/features/live-session/adapters/interviews'
@@ -17,7 +17,9 @@ import { useInterviewFindings } from '@/features/interviews/useInterviewFindings
 import { inlineFeedback } from '@/features/interviews/InlineFeedback'
 import { InterviewControls } from '@/features/interviews/InterviewControls'
 import { InterviewHistoryList } from '@/features/interviews/InterviewHistoryList'
-import { applyRetain } from '@/lib/interview-history'
+import { applyRetain, deletePractices } from '@/lib/interview-history'
+import { useConfirm } from '@/hooks/useConfirm'
+import { PracticeTitle } from '@/features/interviews/PracticeTitle'
 
 const difficulties=['Simple','Medium','Complex','Very Complex']
 const bands=['0-2','2-5','5-8','8+']
@@ -33,6 +35,15 @@ export function Interviews() {
   const [operation,setOperation]=useState<InterviewOperation>(null)
   const recorderRef=useRef<SessionRecorderHandle|null>(null); const activeRun=useRef<string|null>(selected)
   const justStarted=useRef<string|null>(null); const messageRef=useRef(messages); messageRef.current=messages
+  const confirmDialog=useConfirm()
+  async function removePractice(run:InterviewHistory) {
+    const ok=await confirmDialog({title:'Delete practice',description:'Delete this practice, its recording, transcript and technical feedback? This cannot be undone.',confirmLabel:'Delete',variant:'destructive'})
+    if (!ok) return
+    const {failed}=await deletePractices([run])
+    if (failed.length) toast.error('The practice could not be deleted. Try again.')
+    else toast.success('Practice deleted')
+    await refreshHistory().catch(()=>undefined)
+  }
   async function refreshHistory() {
     const result=await apiClient<{runs:InterviewHistory[]}>(`${INTERVIEWS_API}/runs`); setHistory(result.runs)
   }
@@ -166,7 +177,7 @@ export function Interviews() {
       {history.some(h=>!h.endedAt) && <p className="text-sm text-muted-foreground">Resume or end your unfinished interview below before starting another.</p>}
     </section>}
     {detail && <section className="space-y-4">
-      <div className="flex flex-wrap justify-between gap-3"><h2 className="text-xl font-semibold">{selectionLabel(detail.track)} practice</h2><Link className="text-sm underline" to="/interviews" onClick={e=> { if (live.token) { e.preventDefault(); toast.info('Pause or end this practice before opening history.') } }}>Interview history</Link></div>
+      <div className="flex min-w-0 flex-wrap justify-between gap-3"><PracticeTitle as="h2" track={detail.track} suffix=" practice" className="text-xl font-semibold" /><Link className="text-sm underline" to="/interviews" onClick={e=> { if (live.token) { e.preventDefault(); toast.info('Pause or end this practice before opening history.') } }}>Interview history</Link></div>
       {detail.conversationMode && !detail.endedAt && <p className="text-sm text-muted-foreground">Automatic conversation: after you finish, stay quiet for about 5 seconds and the interviewer moves on. Finish answer, Skip and More time are always available.</p>}
       {current && !detail.endedAt && <p className="text-sm text-muted-foreground">Spoken requests such as “repeat the question” or “skip this one” are not supported yet; use the buttons below. A spoken request is never graded as not knowing the answer.</p>}
       {current && !detail.endedAt && <div className="rounded-xl border p-5 space-y-2"><p className="text-sm text-muted-foreground">Question {current.index} · {current.question.difficulty} · {current.question.topic}</p><p className="text-lg font-medium whitespace-pre-wrap">{current.question.text}</p><p className="text-sm text-muted-foreground">Answer aloud in your own words. Explain how or why where you can; an example helps.</p></div>}
@@ -187,7 +198,7 @@ export function Interviews() {
           conversation={!!detail.conversationMode} />} />}
       {!live.token && !detail.endedAt && <div className="rounded-xl border p-5 space-y-3"><p>Your interview is paused. Confirmed answers are saved.</p><div className="flex gap-2"><Button disabled={!options || live.isResuming || loading} onClick={()=>void resume()}>{live.isResuming?'Reconnecting…':'Resume practice'}</Button><Button variant="outline" disabled={live.isLeaving} onClick={()=>void leave()}>End practice</Button></div></div>}
       {findings.error && <p role="status" className="text-xs text-muted-foreground">Technical feedback could not be loaded; your saved answers are safe. <button type="button" className="underline hover:text-foreground" onClick={findings.retry}>Retry</button></p>}
-      {conversation.length>0 && <ConversationPanel messages={conversation} stitchAdjacentUserMessages={false}
+      {conversation.length>0 && <ConversationPanel messages={conversation} stitchAdjacentUserMessages={false} timestampPlacement="side"
         renderAfterMessage={message=>inlineFeedback(message,findings)} />}
       {detail.endedAt && <Link className="text-sm underline" to={interviewPlaybackPath(detail.sessionId)}>Review answer recordings and communication feedback</Link>}
     </section>}
@@ -196,7 +207,7 @@ export function Interviews() {
         <Button asChild variant="outline" size="sm"><Link to="/interviews/history">Interview history</Link></Button></div>
       <p className="text-sm text-muted-foreground">Unfinished practice closes after 24 hours without activity. Retain one interview to keep it open.</p>
       {!history.length && <p className="text-sm text-muted-foreground">Your interviews will appear here.</p>}
-      <InterviewHistoryList runs={history.slice(0,3)} onRetain={(run,result)=>setHistory(rows=>applyRetain(rows,run,result))} />
+      <InterviewHistoryList runs={history.slice(0,3)} onRetain={(run,result)=>setHistory(rows=>applyRetain(rows,run,result))} onDelete={run=>void removePractice(run)} />
       {history.length>3 && <Link className="text-sm underline" to="/interviews/history">View all {history.length} practices</Link>}
     </section>}
   </div>

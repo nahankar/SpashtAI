@@ -85,7 +85,7 @@ describe('interview history', () => {
     const html = renderToStaticMarkup(<MemoryRouter><InterviewHistoryList runs={runs} onRetain={() => undefined} /></MemoryRouter>)
     expect(html).toContain('href="/interviews?run=b"'); expect(html).toContain('>Resume<')
     expect(html).toContain('href="/interviews/playback/s-a"'); expect(html).toContain('>Review<')
-    expect(html).toContain('Web Development, Automation Testing')
+    expect(html).toContain('Web Development &amp; Automation Testing')
   })
   it('retaining one practice releases the others', () => {
     const next = applyRetain(runs.map(r => ({ ...r, retainedAt: r.id === 'b' ? at(50) : null })), runs[2], { sessionId: 's-c', retainedAt: at(60), releasedSessionIds: ['s-b'] })

@@ -3,6 +3,12 @@ export const INTERVIEWS_API = '/api/interviews'
 // Runs store multi-select choices '|'-joined; single values from older runs read the same.
 export const selectionList = (stored: string) => stored.split('|').filter(Boolean)
 export const selectionLabel = (stored: string, suffix = '') => selectionList(stored).map(v => v + suffix).join(', ')
+/** A compact practice title: one or two track names, or a count for a mixed practice (full list shown on demand). */
+export function practiceTitle(stored: string) {
+  const tracks = selectionList(stored)
+  const title = tracks.length === 1 ? tracks[0] : tracks.length === 2 ? `${tracks[0]} & ${tracks[1]}` : `Mixed practice · ${tracks.length} tracks`
+  return { title, tracks }
+}
 export type InterviewSetup = { track: string[]; experienceBand: string[]; startingDifficulty: string[]; durationMinutes: number; recordingConsent: true }
 export type InterviewAttempt = {
   id: string; index: number; status: 'PREPARED'|'ASKED'|'ANSWERED'|'SKIPPED'|'INCOMPLETE'; assistance: string;

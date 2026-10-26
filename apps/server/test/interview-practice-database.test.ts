@@ -7,6 +7,8 @@ const db = vi.hoisted(() => {
   if (url && url !== 'postgresql://postgres@127.0.0.1:55441/simple_bank') throw new Error('Practice integration tests require the isolated simple_bank database')
   return { url }
 })
+// History deletion uses the real tombstone route; the background purge is driven explicitly below.
+vi.mock('../src/lib/sessionDeletionWorker', () => ({ enqueueSessionDeletion: vi.fn() }))
 vi.mock('../src/lib/prisma', async () => {
   const { PrismaClient } = await import('@prisma/client')
   return { prisma: new PrismaClient({ datasourceUrl: db.url || 'postgresql://postgres@127.0.0.1:55441/simple_bank' }) }
@@ -26,7 +28,7 @@ import { guardInterviewSession, requireSessionFeature } from '../src/middleware/
 import { resolveLivekitAccess } from '../src/lib/livekitAccess'
 import { invalidateFeatureFlagCache } from '../src/lib/featureFlags'
 import sessionChatRouter from '../src/routes/session-chat'
-import { retainSession } from '../src/routes/sessions'
+import { deleteSession, retainSession } from '../src/routes/sessions'
 import { getSessionTurns } from '../src/routes/turns'
 import { claimLearnerAssessment, finishLearnerAssessment, sweepLearnerAssessments, LEARNER_LIMITS } from '../src/interviews/evaluator/learner'
 import { EvaluationFailure } from '../src/interviews/evaluator/model'
@@ -39,6 +41,7 @@ app.use('/chat',requireAuth,sessionChatRouter)
 app.put('/retain/:id', requireAuth, retainSession)
 app.use(guardInterviewSession)
 app.get('/sessions/:sessionId/turns', requireAuth, getSessionTurns)
+app.delete('/sessions/:id', requireAuth, requireSessionFeature(), deleteSession)
 app.get('/sessions/:id', requireAuth, requireSessionFeature(), (_req,res)=>res.json({ok:true}))
 app.post('/sessions/:sessionId/segments', requireAuth, (_req,res)=>res.json({ok:true}))
 const token = (id: string, role = 'USER') => signToken({ userId: id, role, email: `${fixture}@example.invalid` })
@@ -339,6 +342,30 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
     const playback = await readInterviewPlaybackConversation(prisma, r.id)
     expect(playback.filter(m => m.role === 'user').map(m => m.attemptId)).toEqual([second.id])
     expect(playback.find(m => m.id === `interview_question_${a.id}`)).toMatchObject({ attemptId: a.id, attemptStatus: 'SKIPPED' })
+  })
+  it('deletes only an owned interview from history, fences a late result and keeps usage accounting', async () => {
+    await enableLearner()
+    const { r, a, s } = await asked(); await captureCommittedTurn(a.id, turn(s.id, testAnswer)); const saved = await finish(r.id, a.id)
+    await endPractice(r.id, owner)
+    const job = await learnerClaim()
+    // Ownership: another learner (and an Admin role) cannot delete it; nothing changes.
+    expect((await request(app).delete(`/sessions/${r.sessionId}`).auth(token(other), { type: 'bearer' })).status).toBe(404)
+    expect((await request(app).delete(`/sessions/${r.sessionId}`).auth(token(other, 'SUPER_ADMIN'), { type: 'bearer' })).status).toBe(404)
+    expect((await prisma.session.findUniqueOrThrow({ where: { id: r.sessionId } })).discardedAt).toBeNull()
+    expect((await request(app).delete(`/sessions/${r.sessionId}`).auth(token(owner), { type: 'bearer' })).status).toBe(202)
+    expect((await request(app).get('/practice/runs').auth(token(owner), { type: 'bearer' })).body.runs.some((h: { id: string }) => h.id === r.id)).toBe(false)
+    // A worker finishing after the delete cannot publish a grade.
+    await finishLearnerAssessment(job, { result: correctEvaluation(), inputTokens: 100, outputTokens: 30, latencyMs: 5 })
+    expect(await prisma.interviewAssessment.findUnique({ where: { snapshotId: saved.id! } })).toMatchObject({ status: 'CANCELLED', errorCode: 'SESSION_DISCARDED', result: null })
+    // The durable worker's final step: the hard delete cascades through every interview row.
+    expect((await prisma.session.deleteMany({ where: { id: r.sessionId, discardedAt: { not: null } } })).count).toBe(1)
+    expect(await prisma.interviewRun.findUnique({ where: { id: r.id } })).toBeNull()
+    expect(await prisma.interviewAttempt.count({ where: { runId: r.id } })).toBe(0)
+    expect(await prisma.interviewAnswerChunk.count({ where: { attemptId: a.id } })).toBe(0)
+    expect(await prisma.interviewAnswerSnapshot.count({ where: { id: saved.id! } })).toBe(0)
+    expect(await prisma.interviewAssessment.count({ where: { snapshotId: saved.id! } })).toBe(0)
+    // Usage accounting survives, detached from the deleted assessment.
+    expect(await prisma.interviewEvaluatorUsage.findUnique({ where: { invocationKey: job.leaseToken } })).toMatchObject({ assessmentId: null })
   })
   it('records a ledger row at claim that survives lease expiry and takes the late actual usage', async () => {
     await enableLearner()
