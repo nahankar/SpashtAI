@@ -120,3 +120,6 @@ export async function confirmedInterviewDrain(port: {
   }
   return receipt
 }
+
+/** The Show conversation preference applies while practising; a finished practice always shows its conversation. */
+export const conversationHidden = (show: boolean, ended: boolean) => !show && !ended

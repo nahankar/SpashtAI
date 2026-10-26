@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { MultiSelect } from '@/components/ui/multi-select'
 import type { SessionRecorderHandle } from '@/components/session/SessionRecorder'
 import { apiClient } from '@/lib/api-client'
-import { PRACTICE_DIFFICULTIES, STANDARD_DURATIONS, durationLabel, recordingGate, type RecordingAcknowledgment, getInterview, interviewWrite, interviewPlaybackPath, INTERVIEWS_API, type InterviewHistory, type InterviewOptions, type InterviewRun, type InterviewSetup, type InterviewOperation } from '@/lib/interview-practice'
+import { PRACTICE_DIFFICULTIES, STANDARD_DURATIONS, conversationHidden, durationLabel, recordingGate, type RecordingAcknowledgment, getInterview, interviewWrite, interviewPlaybackPath, INTERVIEWS_API, type InterviewHistory, type InterviewOptions, type InterviewRun, type InterviewSetup, type InterviewOperation } from '@/lib/interview-practice'
 import { useLiveSession } from '@/features/live-session/useLiveSession'
 import { liveSessionApi } from '@/features/live-session/browser'
 import { interviewsAdapter } from '@/features/live-session/adapters/interviews'
@@ -18,6 +18,7 @@ import { inlineFeedback } from '@/features/interviews/InlineFeedback'
 import { InterviewControls } from '@/features/interviews/InterviewControls'
 import { InterviewHistoryList } from '@/features/interviews/InterviewHistoryList'
 import { RecordingAcknowledgmentCard, RecordingNotice } from '@/features/interviews/RecordingAcknowledgmentCard'
+import { ConversationToggle } from '@/features/interviews/ConversationToggle'
 import { applyRetain, deletePractices, historyNavigationBlocked } from '@/lib/interview-history'
 import { useConfirm } from '@/hooks/useConfirm'
 import { PracticeTitle } from '@/features/interviews/PracticeTitle'
@@ -31,6 +32,8 @@ export function Interviews() {
   const [history,setHistory]=useState<InterviewHistory[]>([]); const [historyTotal,setHistoryTotal]=useState(0); const [detail,setDetail]=useState<InterviewRun|null>(null)
   const [setup,setSetup]=useState<{track:string[];experienceBand:string[];startingDifficulty:string[];durationMinutes:number|null}>({track:['Automation Testing'],experienceBand:['2-5'],startingDifficulty:[...PRACTICE_DIFFICULTIES],durationMinutes:10})
   const [consent,setConsent]=useState(false)
+  // Display preference for this page only; a fresh page starts with the conversation shown.
+  const [showConversation,setShowConversation]=useState(true)
   const [acknowledgment,setAcknowledgment]=useState<{status:'loading'|'ready'|'error';value?:RecordingAcknowledgment}>({status:'loading'})
   const [acknowledging,setAcknowledging]=useState(false); const [acknowledgeError,setAcknowledgeError]=useState('')
   const gate=recordingGate(acknowledgment)
@@ -213,7 +216,6 @@ export function Interviews() {
       <div className="flex min-w-0 flex-wrap justify-between gap-3"><PracticeTitle as="h2" track={detail.track} suffix=" practice" className="text-xl font-semibold" /><Link className="text-sm underline" to="/interviews/history" onClick={guardHistory}>Interview history</Link></div>
       {detail.conversationMode && !detail.endedAt && <p className="text-sm text-muted-foreground">Automatic conversation: after you finish, stay quiet for about 5 seconds and the interviewer moves on. Finish answer, Skip and More time are always available.</p>}
       {current && !detail.endedAt && <p className="text-sm text-muted-foreground">Spoken requests such as “repeat the question” or “skip this one” are not supported yet; use the buttons below. A spoken request is never graded as not knowing the answer.</p>}
-      {current && !detail.endedAt && <div className="rounded-xl border p-5 space-y-2"><p className="text-sm text-muted-foreground">Question {current.index} · {current.question.difficulty} · {current.question.topic}</p><p className="text-lg font-medium whitespace-pre-wrap">{current.question.text}</p><p className="text-sm text-muted-foreground">Answer aloud in your own words. Explain how or why where you can; an example helps.</p></div>}
       {live.token && live.url && current && <LiveSessionRoom {...live} token={live.token} url={live.url} recorderRef={recorderRef}
         handleDisconnected={()=>controller.onDisconnected(recorderRef.current,{sessionId:live.sessionId,segmentId:live.segmentId})}
         handleNewMessage={m=>controller.handleMessage(m)} setAssistantState={live.setAssistantState} handleConversationRestart={()=>live.setAssistantState('recovering')}
@@ -231,8 +233,12 @@ export function Interviews() {
           conversation={!!detail.conversationMode} />} />}
       {!live.token && !detail.endedAt && <div className="rounded-xl border p-5 space-y-3"><p>Your interview is paused. Confirmed answers are saved.</p><div className="flex gap-2"><Button disabled={!options || live.isResuming || loading} onClick={()=>void resume()}>{live.isResuming?'Reconnecting…':'Resume practice'}</Button><Button variant="outline" disabled={live.isLeaving} onClick={()=>void leave()}>End practice</Button></div></div>}
       {findings.error && <p role="status" className="text-xs text-muted-foreground">Technical feedback could not be loaded; your saved answers are safe. <button type="button" className="underline hover:text-foreground" onClick={findings.retry}>Retry</button></p>}
-      {conversation.length>0 && <ConversationPanel messages={conversation} stitchAdjacentUserMessages={false} timestampPlacement="side"
-        renderAfterMessage={message=>inlineFeedback(message,findings)} />}
+      {!detail.endedAt && <ConversationToggle checked={showConversation} onChange={setShowConversation} controls="interview-conversation" />}
+      {/* Hidden, not unmounted: messages keep accumulating and reappear in full when shown again. */}
+      <div id="interview-conversation" hidden={conversationHidden(showConversation,!!detail.endedAt)}>
+        {conversation.length>0 && <ConversationPanel messages={conversation} stitchAdjacentUserMessages={false} timestampPlacement="side"
+          renderAfterMessage={message=>inlineFeedback(message,findings)} />}
+      </div>
       {detail.endedAt && <Link className="text-sm underline" to={interviewPlaybackPath(detail.sessionId)}>Review answer recordings and communication feedback</Link>}
     </section>}
     {!selected && <section className="space-y-3">
