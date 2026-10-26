@@ -338,3 +338,36 @@ class RecognizerTeardownTests(unittest.IsolatedAsyncioTestCase):
             source_done.set()
         await self.run_and_close(Recognizer({3: 'final'}), during=during)
         await self.assert_clean()
+
+
+from types import SimpleNamespace
+from interview_audio import dev_stt_fault, inject_stt_fault
+
+
+class DevSttFaultTests(unittest.IsolatedAsyncioTestCase):
+    def test_honoured_only_for_a_local_development_agent(self):
+        local = {"SPASHTAI_DEV_STT_FAULT": "stall-once", "LIVEKIT_URL": "ws://localhost:7880"}
+        self.assertEqual(dev_stt_fault(local), "stall-once")
+        self.assertIsNone(dev_stt_fault({**local, "ENVIRONMENT": "production"}))
+        self.assertIsNone(dev_stt_fault({**local, "LIVEKIT_URL": "wss://spashtai.livekit.cloud"}))
+        self.assertIsNone(dev_stt_fault({**local, "SPASHTAI_DEV_STT_FAULT": "something-else"}))
+        self.assertIsNone(dev_stt_fault({"LIVEKIT_URL": "ws://localhost:7880"}))
+
+    async def collect(self, mode, streams):
+        def real(frames):
+            async def run():
+                for kind in frames:
+                    yield SimpleNamespace(type=SimpleNamespace(value=kind))
+            return run()
+        open_stream = inject_stt_fault(real, mode)
+        out = []
+        for script in streams:
+            out.append([e.type.value async for e in open_stream(script)])
+        return out
+
+    async def test_modes_withhold_results_like_the_observed_failure(self):
+        script = ["interim_transcript", "final_transcript", "interim_transcript", "final_transcript"]
+        once = await self.collect("stall-once", [script, script])
+        self.assertEqual(once, [script[:2], script])
+        repeated = await self.collect("stall-repeatedly", [script] * 4)
+        self.assertEqual(repeated, [script[:2], [], [], script])

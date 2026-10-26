@@ -11,7 +11,7 @@ from livekit.agents import Agent, stt, room_io
 from livekit import rtc
 from interview_capture import CaptureUnavailable, InterviewCapture, parse_control
 from interview_coordinator import InterviewCoordinator, ServerRefused
-from interview_audio import ProviderClock, RecognizerWatch, keep_interview_audio_alive, supervise_recognizer, INTERVIEW_SAMPLE_RATE
+from interview_audio import ProviderClock, RecognizerWatch, dev_stt_fault, inject_stt_fault, keep_interview_audio_alive, supervise_recognizer, INTERVIEW_SAMPLE_RATE
 from voice_backends import VoiceBackendConfig, build_interview_session
 
 logger = logging.getLogger("spashtai-agent.interview_voice")
@@ -109,6 +109,7 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
             return coordinator is not None and coordinator.active
 
         recognizer_watch = RecognizerWatch()
+        stt_fault = dev_stt_fault()
 
         def recognition_issue(kind: str, detail: dict):
             # Tell the learner when recognition is not recovering, or when audio beyond the replay bound was not
@@ -145,8 +146,10 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
                     clock = ProviderClock(at)
 
                 recognizer_watch.new_stream()
-                async for event in supervise_recognizer(keep_interview_audio_alive(audio),
-                        lambda frames: Agent.default.stt_node(self, frames, model_settings), recognizer_watch, opened,
+                open_stream = lambda frames: Agent.default.stt_node(self, frames, model_settings)
+                if stt_fault:
+                    open_stream = inject_stt_fault(open_stream, stt_fault)
+                async for event in supervise_recognizer(keep_interview_audio_alive(audio), open_stream, recognizer_watch, opened,
                         on_issue=recognition_issue):
                     if isinstance(event, stt.SpeechEvent) and event.alternatives:
                         alternative = event.alternatives[0]

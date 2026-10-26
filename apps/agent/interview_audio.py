@@ -235,6 +235,51 @@ async def supervise_recognizer(audio: AsyncIterable[rtc.AudioFrame], open_stream
                 await events.aclose()
 
 
+STT_FAULT_MODES = ("stall-once", "stall-repeatedly")
+
+
+def dev_stt_fault(environ=None) -> str | None:
+    """Opt-in recognizer fault for local verification only (SPASHTAI_DEV_STT_FAULT). Refused outside a local
+    development agent: ENVIRONMENT must not be production and LiveKit must be on localhost."""
+    import os
+    from urllib.parse import urlparse
+    env = os.environ if environ is None else environ
+    mode = (env.get("SPASHTAI_DEV_STT_FAULT") or "").strip()
+    if not mode:
+        return None
+    host = urlparse(env.get("LIVEKIT_URL", "")).hostname or ""
+    if mode not in STT_FAULT_MODES or env.get("ENVIRONMENT", "development").lower() == "production" or host not in {"localhost", "127.0.0.1", "::1"}:
+        logger.warning("interview_stt fault injection refused mode=%s", mode)
+        return None
+    logger.warning("interview_stt fault injection ACTIVE mode=%s (local development only)", mode)
+    return mode
+
+
+def inject_stt_fault(open_stream, mode: str):
+    """Make recognizer streams silently stop returning results, as the observed provider failure did.
+
+    stall-once: the first stream of each answer stops after its first final; replacements are healthy.
+    stall-repeatedly: the first three streams stop (the first after its first final, the next two at once); the
+    fourth is healthy. Audio keeps flowing to the real recognizer underneath; only its results are withheld.
+    """
+    opened = {"count": 0}
+
+    def open_faulty(frames):
+        opened["count"] += 1
+        index = opened["count"]
+        faulty = index == 1 or (mode == "stall-repeatedly" and index <= 3)
+
+        async def stream():
+            stalled = faulty and index > 1
+            async for event in open_stream(frames):
+                if not stalled:
+                    yield event
+                if faulty and getattr(event, "type", None) is not None and str(getattr(event.type, "value", event.type)).endswith("final_transcript"):
+                    stalled = True
+        return stream()
+    return open_faulty
+
+
 class ProviderClock:
     """Maps one recognizer stream's audio timestamps to wall-clock time.
 
