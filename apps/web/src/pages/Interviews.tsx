@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { MultiSelect } from '@/components/ui/multi-select'
 import type { SessionRecorderHandle } from '@/components/session/SessionRecorder'
 import { apiClient } from '@/lib/api-client'
-import { getInterview, interviewWrite, interviewPlaybackPath, INTERVIEWS_API, type InterviewHistory, type InterviewOptions, type InterviewRun, type InterviewSetup, type InterviewOperation } from '@/lib/interview-practice'
+import { PRACTICE_DIFFICULTIES, getInterview, interviewWrite, interviewPlaybackPath, INTERVIEWS_API, type InterviewHistory, type InterviewOptions, type InterviewRun, type InterviewSetup, type InterviewOperation } from '@/lib/interview-practice'
 import { useLiveSession } from '@/features/live-session/useLiveSession'
 import { liveSessionApi } from '@/features/live-session/browser'
 import { interviewsAdapter } from '@/features/live-session/adapters/interviews'
@@ -21,14 +21,14 @@ import { applyRetain, deletePractices, historyNavigationBlocked } from '@/lib/in
 import { useConfirm } from '@/hooks/useConfirm'
 import { PracticeTitle } from '@/features/interviews/PracticeTitle'
 
-const difficulties=['Simple','Medium','Complex','Very Complex']
+const difficulties=PRACTICE_DIFFICULTIES
 const bands=['0-2','2-5','5-8','8+']
 const selectClass='w-full rounded-md border bg-background px-3 py-2'
 export function Interviews() {
   const [params,setParams]=useSearchParams(); const selected=params.get('run')
   const [options,setOptions]=useState<InterviewOptions|null>(null); const [optionsLoaded,setOptionsLoaded]=useState(false)
   const [history,setHistory]=useState<InterviewHistory[]>([]); const [historyTotal,setHistoryTotal]=useState(0); const [detail,setDetail]=useState<InterviewRun|null>(null)
-  const [setup,setSetup]=useState<{track:string[];experienceBand:string[];startingDifficulty:string[];durationMinutes:number}>({track:['Automation Testing'],experienceBand:['2-5'],startingDifficulty:['Simple'],durationMinutes:10})
+  const [setup,setSetup]=useState<{track:string[];experienceBand:string[];startingDifficulty:string[];durationMinutes:number}>({track:['Automation Testing'],experienceBand:['2-5'],startingDifficulty:[...PRACTICE_DIFFICULTIES],durationMinutes:10})
   const [consent,setConsent]=useState(false); const [error,setError]=useState(''); const [accessError,setAccessError]=useState('')
   const [loading,setLoading]=useState(false); const [messages,setMessages]=useState<ChatMessage[]>([])
   const [observedId,setObservedId]=useState<string|null>(null)
@@ -87,7 +87,8 @@ export function Interviews() {
       if (results[0].status==='fulfilled') {
         const result=results[0].value; setOptions(result)
         const initial=result.coverage.find(c=>c.track==='Automation Testing' && c.difficulty==='Simple') ?? result.coverage[0]
-        if (initial) setSetup(s=>({...s,track:[initial.track],experienceBand:[initial.experienceBand],startingDifficulty:[initial.difficulty]}))
+        // Difficulty starts at All; track and experience start from the first available bank coverage.
+        if (initial) setSetup(s=>({...s,track:[initial.track],experienceBand:[initial.experienceBand],startingDifficulty:[...PRACTICE_DIFFICULTIES]}))
       } else setAccessError(results[0].reason instanceof Error ? results[0].reason.message : 'Interview practice is unavailable')
       if (results[1].status==='fulfilled') { setHistory(results[1].value.runs); setHistoryTotal(results[1].value.total) }
       setOptionsLoaded(true)
@@ -163,6 +164,8 @@ export function Interviews() {
   const coverage=options?.coverage ?? []
   const tracks=[...new Set(coverage.map(c=>c.track))].sort()
   const matching=coverage.filter(c=>setup.track.includes(c.track) && setup.experienceBand.includes(c.experienceBand) && setup.startingDifficulty.includes(c.difficulty)).reduce((n,c)=>n+c.count,0)
+  // Only states that need attention are shown: loading, missing access, or no matching questions.
+  const setupMessage=!optionsLoaded ? 'Loading practice options…' : !options ? 'Practice becomes available once your pilot access and voice pipeline are enabled.' : matching ? '' : 'No reviewed questions are ready for this selection. Choose another combination or ask an administrator to confirm a pilot set.'
   return <div className="mx-auto max-w-5xl space-y-6">
     <header className="space-y-2"><div className="flex flex-wrap items-center justify-between gap-2"><h1 className="text-3xl font-semibold">Interviews</h1><Button asChild variant="ghost" size="sm"><Link to="/interviews/history" onClick={guardHistory}>Interview history</Link></Button></div><p className="text-muted-foreground">Practice technical questions aloud, at your own pace.</p>
       <p className="text-sm text-muted-foreground">This preview saves questions, answers and recordings for review. {(detail ? detail.evaluationEnabled : options?.evaluationAvailable) ? 'Technical feedback is prepared from saved answers.' : 'Technical evaluation is not enabled for this practice.'} Interview activity stays outside Progress Pulse.</p></header>
@@ -177,7 +180,7 @@ export function Interviews() {
         <MultiSelect label="Difficulty" disabled={!options} options={difficulties.map(d=>({value:d,label:d}))} value={setup.startingDifficulty} onChange={startingDifficulty=>setSetup(s=>({...s,startingDifficulty}))} />
         <label className="space-y-1 text-sm">Practice time<select className={selectClass} value={setup.durationMinutes} onChange={e=>setSetup(s=>({...s,durationMinutes:Number(e.target.value)}))}>{[5,10,15].map(n=><option key={n} value={n}>{n} minutes</option>)}</select></label>
       </div>
-      <p className="text-sm text-muted-foreground">{!options ? 'Practice becomes available once your pilot access and voice pipeline are enabled.' : matching ? `${matching} eligible questions · up to ${Math.min(matching,options.maxQuestions)} per practice · pauses do not use practice time` : 'No reviewed questions are ready for this selection. Choose another combination or ask an administrator to confirm a pilot set.'}</p>
+      {setupMessage && <p role="status" className="text-sm text-muted-foreground">{setupMessage}</p>}
       <label className="flex items-start gap-3 text-sm"><input type="checkbox" className="mt-1" checked={consent} onChange={e=>setConsent(e.target.checked)} /><span>I agree to my answers being recorded and transcribed for review. I will avoid sharing confidential company or personal information.</span></label>
       <Button disabled={!consent || !matching || live.isJoining || history.some(h=>!h.endedAt)} onClick={()=>void start()}>{live.isJoining?'Starting…':'Start practice'}</Button>
       {history.some(h=>!h.endedAt) && <p className="text-sm text-muted-foreground">Resume or end your unfinished interview below before starting another.</p>}

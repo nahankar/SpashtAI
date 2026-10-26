@@ -76,6 +76,11 @@ describe('Playback delivery moments', () => {
     expect(html).toContain('aria-label="Hear loudness moment at 2:20"')
     expect(html).toContain('<details')
     expect(html).not.toContain('<details open')
+    // Featured voice moments are compact rows: summary label, a collapsed explanation, no Hz/dB in the summary.
+    expect(html).toContain('Pitch:</span> Pitch measurement'); expect(html).toContain('Loudness:</span> Highest recorded level')
+    expect(html).toContain('Hear moment 2:00'); expect(html).toContain('Hear moment 2:20')
+    const featured = html.slice(html.indexOf('aria-label="Voice moments"'), html.indexOf('Experimental recording measurements'))
+    expect(featured).not.toMatch(/\d\s*(Hz|dB)/)
     expect(html).toContain('Experimental recording measurements')
     expect(html).toContain('Measurement confidence: limited')
   })
@@ -97,7 +102,6 @@ describe('Playback delivery moments', () => {
       item: {
         kind: 'pitch',
         label: 'Pitch measurement',
-        value: '184.3 Hz',
         description: 'Verified pitch measurement.',
         moment: pitchMoment,
       },

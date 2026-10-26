@@ -38,7 +38,6 @@ function formatTime(seconds: number) {
 export interface FeaturedVoiceMoment {
   kind: 'pitch' | 'loudness'
   label: string
-  value: string
   description: string
   moment: AcousticDeliveryMoment
 }
@@ -72,7 +71,6 @@ function featuredVoiceMoments(evidence: DeliveryEvidenceState | undefined): Feat
     items.push({
       kind: 'pitch',
       label: spread ? 'Largest measured pitch range' : 'Pitch measurement',
-      value: `${pitch.evidence.measurement.value.toFixed(1)} Hz`,
       description: spread
         ? 'This clip had the widest fundamental-frequency spread in this recording.'
         : 'This clip contains a verified fundamental-frequency measurement.',
@@ -83,7 +81,6 @@ function featuredVoiceMoments(evidence: DeliveryEvidenceState | undefined): Feat
     items.push({
       kind: 'loudness',
       label: 'Highest recorded level',
-      value: `${loudness.evidence.measurement.value.toFixed(1)} dB`,
       description: 'This clip had the highest measured intensity in this recording.',
       moment: loudness,
     })
@@ -91,6 +88,11 @@ function featuredVoiceMoments(evidence: DeliveryEvidenceState | undefined): Feat
   return items
 }
 
+/**
+ * One compact, expandable row per featured voice moment ("Pitch: Largest measured pitch range"). The play
+ * action sits beside the disclosure (not inside its summary), so it works while collapsed; expanding reveals
+ * the explanation and measurement limits. Raw Hz/dB values stay in the underlying evidence, not the summary.
+ */
 export function VoiceMomentCard({
   item,
   onPlayMoment,
@@ -102,30 +104,32 @@ export function VoiceMomentCard({
   const start = item.moment.clip.startSeconds
   const end = start + item.moment.clip.durationSeconds
   const time = formatTime(start)
+  const name = item.kind === 'pitch' ? 'Pitch' : 'Loudness'
   return (
-    <li className="rounded-lg border border-sky-200 bg-sky-50/60 p-3">
-      <div className="flex items-center justify-between gap-2">
-        <Badge className="bg-sky-700">
-          <Icon className="mr-1 h-3.5 w-3.5" aria-hidden="true" />
-          {item.kind === 'pitch' ? 'Pitch' : 'Loudness'}
-        </Badge>
-        <span className="text-xs tabular-nums text-muted-foreground">{time} · {item.value}</span>
-      </div>
-      <p className="mt-2 text-sm font-medium">{item.label}</p>
-      <p className="mt-1 text-sm text-muted-foreground">{item.description}</p>
-      <p className="mt-2 text-xs text-muted-foreground">
-        Experimental recording measurement; microphone processing can affect comparisons.
-      </p>
+    <li className="flex min-w-0 flex-wrap items-start gap-x-2 gap-y-1 rounded-lg border border-sky-200 bg-sky-50/60 px-3 py-2 dark:border-sky-900 dark:bg-sky-950/30">
+      <details className="group min-w-0 flex-1 basis-56">
+        <summary className="flex min-w-0 cursor-pointer list-none items-start gap-1.5 py-1 text-sm">
+          <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-90" aria-hidden="true" />
+          <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-700 dark:text-sky-300" aria-hidden="true" />
+          <span className="min-w-0 break-words"><span className="font-medium">{name}:</span> {item.label}</span>
+        </summary>
+        <div className="space-y-1 pb-1 pl-5 pt-1">
+          <p className="text-sm text-muted-foreground">{item.description}</p>
+          <p className="text-xs text-muted-foreground">
+            Experimental recording measurement; microphone processing can affect comparisons.
+          </p>
+        </div>
+      </details>
       {onPlayMoment && (
         <Button
           variant="outline"
           size="sm"
-          className="mt-3 h-8"
+          className="h-8 shrink-0"
           aria-label={`Hear ${item.kind} moment at ${time}`}
           onClick={() => onPlayMoment(start, end, true)}
         >
           <Play className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-          Hear this moment · {time}
+          Hear moment {time}
         </Button>
       )}
     </li>
@@ -236,10 +240,14 @@ export function DeliveryMomentsPlaybackView({
             </li>
           )
         })}
-        {voiceMoments.map((item) => (
-          <VoiceMomentCard key={`${item.kind}:${item.moment.id}`} item={item} onPlayMoment={onPlayMoment} />
-        ))}
       </ul>
+      {voiceMoments.length > 0 && (
+        <ul className="min-w-0 space-y-1.5" aria-label="Voice moments">
+          {voiceMoments.map((item) => (
+            <VoiceMomentCard key={`${item.kind}:${item.moment.id}`} item={item} onPlayMoment={onPlayMoment} />
+          ))}
+        </ul>
+      )}
       {showObservations && <ExperimentalObservations evidence={evidence} onPlayMoment={onPlayMoment} />}
     </section>
   )

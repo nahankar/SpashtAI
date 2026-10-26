@@ -1,5 +1,7 @@
 import { ApiError, apiClient } from './api-client'
 export const INTERVIEWS_API = '/api/interviews'
+/** Every supported bank difficulty; setup starts with all of them selected. */
+export const PRACTICE_DIFFICULTIES = ['Simple', 'Medium', 'Complex', 'Very Complex']
 // Runs store multi-select choices '|'-joined; single values from older runs read the same.
 export const selectionList = (stored: string) => stored.split('|').filter(Boolean)
 export const selectionLabel = (stored: string, suffix = '') => selectionList(stored).map(v => v + suffix).join(', ')
