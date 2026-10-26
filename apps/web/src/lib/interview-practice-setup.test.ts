@@ -5,9 +5,10 @@ describe('interview practice setup defaults', () => {
   it('starts with every supported difficulty selected', () => {
     expect(PRACTICE_DIFFICULTIES).toEqual(['Simple', 'Medium', 'Complex', 'Very Complex'])
   })
-  it('labels no time limit plainly; new practices have no fixed question count', () => {
-    expect(durationLabel(null)).toBe('No time limit')
-    expect(durationLabel(30)).toBe('30 minutes')
+  it('names the plan beside 30 minutes and no time limit, and keeps shorter times plain', () => {
+    expect(durationLabel(null)).toBe('No time limit · Ultra')
+    expect(durationLabel(30)).toBe('30 minutes · Pro')
+    expect([5, 10, 15].map(durationLabel)).toEqual(['5 minutes', '10 minutes', '15 minutes'])
     expect(STANDARD_DURATIONS).toEqual({ plan: 'standard', allowed: [5, 10, 15], default: 10 })
   })
 })

@@ -37,8 +37,8 @@ export type InterviewOptions = { coverage: Array<{ track: string; experienceBand
   /** Answers per learner per day that receive technical feedback; later answers are saved without it. */
   evaluationDailyLimit?: number; conversationAvailable?: boolean
   durations?: PracticeDurations }
-/** New practices have no fixed question count: they end when time runs out, the learner ends them, or questions run out. */
-export const durationLabel = (minutes: number | null) => minutes === null ? 'No time limit' : `${minutes} minutes`
+/** Practice-time labels name the plan that adds them (Ultra includes Pro); new practices have no fixed question count. */
+export const durationLabel = (minutes: number | null) => minutes === null ? 'No time limit · Ultra' : minutes === 30 ? '30 minutes · Pro' : `${minutes} minutes`
 /** The one-time Interviews recording and AI-processing acknowledgment (server-owned text and version). */
 export type RecordingAcknowledgment = { current: { version: string; scope: string[]; text: string }; accepted: { version: string; acceptedAt: string } | null }
 /**

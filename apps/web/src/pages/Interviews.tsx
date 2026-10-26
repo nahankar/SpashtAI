@@ -191,7 +191,7 @@ export function Interviews() {
   // Only states that need attention are shown: loading, missing access, or no matching questions.
   const setupMessage=!optionsLoaded ? 'Loading practice options…' : !options ? 'Practice becomes available once your pilot access and voice pipeline are enabled.' : matching ? '' : 'No reviewed questions are ready for this selection. Choose another combination or ask an administrator to confirm a pilot set.'
   return <div className="mx-auto max-w-5xl space-y-6">
-    <header className="space-y-2"><div className="flex flex-wrap items-center justify-between gap-2"><h1 className="text-3xl font-semibold">Interviews</h1><Button asChild variant="ghost" size="sm"><Link to="/interviews/history" onClick={guardHistory}>Interview history</Link></Button></div><p className="text-muted-foreground">Practice technical questions aloud, at your own pace.</p>
+    <header className="space-y-2"><div className="flex flex-wrap items-center justify-between gap-2"><h1 className="text-3xl font-semibold">Interviews</h1><Button asChild variant="outline" size="sm"><Link to="/interviews/history" onClick={guardHistory}>Interview history</Link></Button></div><p className="text-muted-foreground">Practice technical questions aloud, at your own pace.</p>
       <p className="text-sm text-muted-foreground">This preview saves questions, answers and recordings for review. {(detail ? detail.evaluationEnabled : options?.evaluationAvailable) ? (options?.evaluationDailyLimit ? `Technical feedback is prepared for up to ${options.evaluationDailyLimit} saved answers a day; later answers are saved without feedback.` : 'Technical feedback is prepared from saved answers.') : 'Technical evaluation is not enabled for this practice.'} Interview activity stays outside Progress Pulse.</p></header>
     {accessError && <p role="alert" className="rounded-lg border p-4">{accessError} Your saved interview history is still available below.</p>}
     {error && <p role="alert" className="text-destructive">{error}</p>}
@@ -242,11 +242,11 @@ export function Interviews() {
     </section>}
     {!selected && <section className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-xl font-semibold">Recent practice</h2>
-        <Button asChild variant="outline" size="sm"><Link to="/interviews/history" onClick={guardHistory}>Interview history</Link></Button></div>
+        {/* Opens full Interview history (pagination, filters, deletion); it does not add rows here. */}
+        {historyTotal>3 && <Button asChild variant="outline" size="sm"><Link to="/interviews/history" onClick={guardHistory}>Load more</Link></Button>}</div>
       <p className="text-sm text-muted-foreground">Unfinished practice closes after 24 hours without activity. Retain one interview to keep it open.</p>
       {!history.length && <p className="text-sm text-muted-foreground">Your interviews will appear here.</p>}
       <InterviewHistoryList runs={history.slice(0,3)} onRetain={(run,result)=>setHistory(rows=>applyRetain(rows,run,result))} onDelete={run=>void removePractice(run)} />
-      {historyTotal>3 && <Link className="text-sm underline" to="/interviews/history" onClick={guardHistory}>View all {historyTotal} practices</Link>}
     </section>}
   </div>
 }
