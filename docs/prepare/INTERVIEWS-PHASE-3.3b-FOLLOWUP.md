@@ -189,3 +189,33 @@ flag, clearly labelled) while targeted work continues; the next candidate fixes 
 prompt rewrites (for example, investigating why multi-line answers produce inexact quotes, which affects Nova
 Pro most, and an explicit model-free check for instruction-echo/empty-justification answers). Hiding the
 REASONING finding would only be a presentation safeguard: it would not fix Q6 or Q8 and is not acceptance.
+
+## Evidence-quote matching (26 Oct 2026)
+
+Diagnosis of the rejected human-practice outputs (captured through accounted retries with a temporary local
+diagnostic, reverted): Q6 changed a word ("And asynchronous" → "An asynchronous") — a genuine alteration,
+correctly rejected. Q7 joined transcript lines **and** changed "Uh" to "uh" — not whitespace-only, still
+rejected. Q8 (both Nova Pro configurations) joined transcript lines with spaces — whitespace only.
+
+Fix: schema `interview-result-4` (`originalPassage`) accepts a quotation only when its exact characters form
+one contiguous passage of the answer with nothing but whitespace differing, and stores that original passage
+(line breaks kept). Changed case, punctuation or words, removed negations, reordered fragments and invented
+text are still rejected; pinned `interview-result-3`/`-2` remain exact. New preview policies
+`learner-evaluation-8` (v5 prompt and rubric + result-4) and `learner-evaluation-8-nova-pro`; **current stays
+learner-evaluation-5**. Evidence: `docs/prepare/calibration/3.3b-followup-evidence-matching.json`.
+
+| Config | Valid evidence | Outcome met | p50 / p95 |
+| --- | --- | --- | --- |
+| v5 · Nova 2 Lite | 32/33 (RS-06 inconsistent grade, not a quote) | 34/35 | 2.38 / 2.82 s |
+| v8 · Nova 2 Lite | 32/33 — outputs identical to v5 | 34/35 | 2.46 / 2.82 s |
+| v5 prompt · Nova Pro | 30/33 (Q6, Q7, Q8) | 31/33 | 3.31 / 3.80 s |
+| v8 · Nova Pro | 31/33 (Q6, Q7 genuinely altered) | 32/34; Q8 now PARTIAL as expected | 3.61 / 4.16 s |
+
+Whitespace explained one of Nova Pro's three human-case failures. Nova Pro still upgrades instruction echoes
+and empty justifications to PARTIAL (P2-01, P2-02, RS-02, RS-06) and gives a false reason partial reasoning
+credit (RS-04), so the **model comparison is unchanged: no model switch**. Nova 2 Lite already keeps both
+controls as no technical answer, so a deterministic instruction-echo check is **not needed for the current
+model** and was not added. v8 is a safe candidate to adopt later (no grading change measured); not adopted here.
+
+Still open (semantic grading): REASONING judgement, mixed-answer strengths (Q6), substantive vs no technical
+answer (Q8 on Nova 2 Lite).

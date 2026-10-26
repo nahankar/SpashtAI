@@ -39,6 +39,13 @@ export const LEARNER_POLICIES: Record<string, LearnerPolicy> = {
   // comparison with v5 isolates the model.
   'learner-evaluation-5-nova-pro': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova-pro-learner-5', modelId: 'amazon.nova-pro-v1:0', region: 'us-east-1', label: 'Nova Pro · learner grading 5 (benchmark)',
     prompt: 'interview-answer-8', schema: 'interview-result-3', rubric: 'bank-guidance-3', policy: 'learner-evaluation-5-nova-pro', temperature: 0, maxTokens: 2000, timeoutMs: 20_000 } },
+  // learner-evaluation-5 with interview-result-4 evidence matching (whitespace-only differences mapped back to
+  // the original passage). Same prompt and rubric: grading semantics are unchanged.
+  'learner-evaluation-8': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova2-lite-learner-8', modelId: 'us.amazon.nova-2-lite-v1:0', region: 'us-east-1', label: 'Nova 2 Lite · learner grading 8',
+    prompt: 'interview-answer-8', schema: 'interview-result-4', rubric: 'bank-guidance-3', policy: 'learner-evaluation-8', temperature: 0, maxTokens: 2000, timeoutMs: 20_000 } },
+  // Benchmark only (never current): learner-evaluation-8 on Nova Pro.
+  'learner-evaluation-8-nova-pro': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova-pro-learner-8', modelId: 'amazon.nova-pro-v1:0', region: 'us-east-1', label: 'Nova Pro · learner grading 8 (benchmark)',
+    prompt: 'interview-answer-8', schema: 'interview-result-4', rubric: 'bank-guidance-3', policy: 'learner-evaluation-8-nova-pro', temperature: 0, maxTokens: 2000, timeoutMs: 20_000 } },
 }
 export const CURRENT_LEARNER_POLICY = 'learner-evaluation-5'
 // Admins can preview a learner policy through the accounted Admin test path. learner-evaluation-1
@@ -96,11 +103,26 @@ export function hash(value: unknown): string {
 export function configFor(model: keyof typeof CONFIGS): EvaluatorConfig {
   return { ...CONFIGS[model], ...VERSIONS, temperature: 0, maxTokens: LIMITS.maxTokens, timeoutMs: LIMITS.timeoutMs }
 }
+/**
+ * interview-result-4 evidence matching: a quotation is accepted only when its exact characters appear as one
+ * contiguous passage of the answer, allowing nothing but whitespace (spaces, line breaks between transcript
+ * fragments) to differ. The stored quote becomes that original passage. Case, punctuation, changed, removed or
+ * reordered words are still rejected. Returns null when there is no such passage.
+ */
+export function originalPassage(answer: string, quote: string): string | null {
+  if (answer.includes(quote)) return quote
+  const tokens = quote.trim().split(/\s+/).filter(Boolean)
+  if (!tokens.length) return null
+  const pattern = new RegExp(tokens.map(token => token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+'))
+  return pattern.exec(answer)?.[0] ?? null
+}
 // interview-result-3 (learner) ignores follow-ups, which the learner path never uses, and rejects
 // grades whose classification contradicts their own criteria instead of publishing them.
+// interview-result-4 is result-3 with whitespace-tolerant evidence matching (originalPassage).
 export function parseResult(output: string, answer: string, schema = 'interview-result-2'): EvaluationResult {
   const raw: unknown = JSON.parse(output.replace(/^\s*```(?:json)?\s*/, '').replace(/\s*```\s*$/, ''))
-  const learner = schema === 'interview-result-3'
+  const tolerant = schema === 'interview-result-4'
+  const learner = schema === 'interview-result-3' || tolerant
   const validationNotes: string[] = []
   const result = resultSchema.parse(learner && raw && typeof raw === 'object' && !Array.isArray(raw) ? { ...trimLists(raw as Record<string, unknown>, validationNotes), followUpQuestion: '' } : raw)
   if (new Set(result.criteria.map(c => c.criterion)).size !== 3) throw new Error('INVALID_CRITERIA')
@@ -117,7 +139,11 @@ export function parseResult(output: string, answer: string, schema = 'interview-
       criterion.explanation = 'The model did not provide supporting evidence for this finding. This criterion is left unassessed.'
       validationNotes.push(`${label}: the model returned Needs improvement without evidence. The finding was changed to Not established; no evidence was invented.`)
     }
-    if (criterion.evidence.some(quote => !answer.includes(quote))) throw new Error('UNSUPPORTED_EVIDENCE')
+    if (tolerant) {
+      const passages = criterion.evidence.map(quote => originalPassage(answer, quote))
+      if (passages.some(passage => passage === null)) throw new Error('UNSUPPORTED_EVIDENCE')
+      criterion.evidence = passages as string[]
+    } else if (criterion.evidence.some(quote => !answer.includes(quote))) throw new Error('UNSUPPORTED_EVIDENCE')
   }
   if (!learner && result.classification !== 'NOT_ANSWERED' && !result.followUpQuestion.endsWith('?')) throw new Error('INVALID_FOLLOW_UP')
   if (learner) {

@@ -1,6 +1,6 @@
 import { createHash } from 'crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { deterministicResult, requestOnly, requestResult, statedReasons } from '../src/interviews/evaluator/contracts'
+import { deterministicResult, originalPassage, requestOnly, requestResult, statedReasons } from '../src/interviews/evaluator/contracts'
 import { LEARNER_PROMPT_7 } from '../src/interviews/evaluator/model'
 import { CONFIGS, CURRENT_LEARNER_POLICY, LEARNER_POLICIES, PREVIEW_POLICIES, abstentionResult, adminConfig, configFor, previewPolicy, explicitAbstention, explicitDontKnow, hash, invalidOutputReason, parseResult, resultSchema, structuredRubric, submitSchema, supportedConfig } from '../src/interviews/evaluator/contracts'
 import { correctEvaluation, testAnswer } from './fixtures/interview-evaluation'
@@ -119,6 +119,8 @@ describe('learner policy registry and learner-evaluation-2 contract', () => {
     expect(hash(LEARNER_POLICIES['learner-evaluation-6'].config)).toBe('8b5fd1f3ea69d68f270e9fb7a10352b2d41393e5505ffdf6b33b33c3e472054c')
     expect(hash(LEARNER_POLICIES['learner-evaluation-7'].config)).toBe('eeb0969651955bd4b045b66689901c9f95a084246514603ccba2afeb5d4498b3')
     expect(hash(LEARNER_POLICIES['learner-evaluation-5-nova-pro'].config)).toBe('a6f8408344933fe15f8e14e3d00c453b8ce8e2f8245c1012518e875ff40bc7ee')
+    expect(hash(LEARNER_POLICIES['learner-evaluation-8'].config)).toBe('c92ff530caf2b0de35dc827e2747cc4f1129f4a26fb7267bd4444a94e49516a7')
+    expect(hash(LEARNER_POLICIES['learner-evaluation-8-nova-pro'].config)).toBe('68217229fbc30b7ffc417d0253254990ea7dc24381dc6cd249b036c5fb638368')
     const sha = (text: string) => createHash('sha256').update(text).digest('hex')
     expect(Object.fromEntries(Object.entries(PROMPTS).map(([id, text]) => [id, sha(text)]))).toEqual({
       'interview-answer-4': '6529a9f6cf7ebbc99016081a3dea4da01ee82207681cbbf630f513136798602a',
@@ -220,7 +222,7 @@ describe('learner policy registry and learner-evaluation-2 contract', () => {
     expect(explicitAbstention(`Sorry, ${'um, '.repeat(10)}I don't know.`)).toBe(true)
   })
   it('offers only learner policies with their own configuration as Admin previews', () => {
-    expect(PREVIEW_POLICIES).toEqual(['learner-evaluation-2', 'learner-evaluation-3', 'learner-evaluation-4', 'learner-evaluation-5', 'learner-evaluation-6', 'learner-evaluation-7', 'learner-evaluation-5-nova-pro'])
+    expect(PREVIEW_POLICIES).toEqual(['learner-evaluation-2', 'learner-evaluation-3', 'learner-evaluation-4', 'learner-evaluation-5', 'learner-evaluation-6', 'learner-evaluation-7', 'learner-evaluation-5-nova-pro', 'learner-evaluation-8', 'learner-evaluation-8-nova-pro'])
     expect(adminConfig('learner-evaluation-2')).toEqual(learner2); expect(previewPolicy(learner2)?.key).toBe('learner-evaluation-2')
     expect(previewPolicy(configFor('nova2_lite'))).toBeNull()
     expect(() => submitSchema.parse({ questionId: 'q', revision: 1, answer: testAnswer, model: 'learner-evaluation-1' })).toThrow()
@@ -288,5 +290,44 @@ describe('learner-evaluation-5 stated reasons', () => {
     expect(CURRENT_LEARNER_POLICY).toBe('learner-evaluation-5')
     expect(LEARNER_POLICIES['learner-evaluation-5']).toMatchObject({ deterministicRequests: true, config: { rubric: 'bank-guidance-3', prompt: 'interview-answer-8' } })
     expect(LEARNER_POLICIES['learner-evaluation-3'].config.rubric).toBe('bank-guidance-2')
+  })
+})
+
+// Human v5 practice: Nova Pro quoted transcript fragments joined by spaces ("Across the data. combination of the
+// data aggregation of the data.") and was rejected. Only whitespace may differ; the original passage is kept.
+describe('interview-result-4 evidence matching', () => {
+  const q7 = "Keyboard order follows semantic controls.\nAnd\nDom position.\nPositive TB index.\nCreates\nUh, competing manual order?"
+  const q8 = 'Packed tables are the real data.\nUm,\nWhich are specific to any artifact dimensions can be\nCreated, derived.\nAcross the data.\ncombination of the data aggregation of the data.'
+  it('maps a quote spanning transcript lines back to the exact original passage', () => {
+    expect(originalPassage(q8, 'Across the data. combination of the data aggregation of the data.')).toBe('Across the data.\ncombination of the data aggregation of the data.')
+    expect(originalPassage(q8, 'Which are specific to any artifact dimensions can be Created, derived.')).toBe('Which are specific to any artifact dimensions can be\nCreated, derived.')
+    expect(originalPassage(q7, 'Positive TB index. Creates Uh, competing manual order?')).toBe('Positive TB index.\nCreates\nUh, competing manual order?')
+    expect(originalPassage('Packed   tables are\tthe real data.', 'Packed tables are the real data.')).toBe('Packed   tables are\tthe real data.')
+  })
+  it('finds a contiguous passage among repeated phrases', () => {
+    const answer = 'It retries.\nIt retries.\nThen it stops.'
+    expect(originalPassage(answer, 'It retries. Then it stops.')).toBe('It retries.\nThen it stops.')
+  })
+  it.each([
+    ['changed case', q7, 'Positive TB index. Creates uh, competing manual order?'],
+    ['changed word', 'And asynchronous dependent call needs composition rather than nested future values.', 'An asynchronous dependent call needs composition rather than nested future values.'],
+    ['removed negation', 'Do not retry a 4xx response.', 'Do retry a 4xx response.'],
+    ['reordered fragments', 'Without mutable.\ncross test.\nLeakage', 'Leakage cross test.'],
+    ['added punctuation', 'Positive TB index\nCreates', 'Positive TB index. Creates'],
+    ['invented text', q8, 'Fact tables store measures at a declared grain.'],
+  ])('still rejects a quote with %s', (_label, answer, quote) => expect(originalPassage(answer, quote)).toBeNull())
+  it('applies only to interview-result-4; pinned interview-result-3 stays exact', () => {
+    const output = learnerOutput({ criteria: [{ criterion: 'ACCURACY', finding: 'PARTIAL', evidence: ['Across the data. combination of the data aggregation of the data.'], explanation: 'x' },
+      { criterion: 'REASONING', finding: 'NOT_ASSESSED', evidence: [], explanation: 'x' }, { criterion: 'DEPTH', finding: 'NOT_ASSESSED', evidence: [], explanation: 'x' }],
+      classification: 'PARTIAL', misconceptions: [] })
+    expect(() => parseResult(output, q8, 'interview-result-3')).toThrow('UNSUPPORTED_EVIDENCE')
+    expect(parseResult(output, q8, 'interview-result-4').criteria[0].evidence).toEqual(['Across the data.\ncombination of the data aggregation of the data.'])
+    expect(LEARNER_POLICIES['learner-evaluation-5'].config.schema).toBe('interview-result-3')
+    expect(CURRENT_LEARNER_POLICY).toBe('learner-evaluation-5')
+  })
+  it('stays linear on adversarial input', () => {
+    const start = performance.now()
+    expect(originalPassage('a '.repeat(4000) + 'b', 'a '.repeat(3000) + 'c')).toBeNull()
+    expect(performance.now() - start).toBeLessThan(500)
   })
 })
