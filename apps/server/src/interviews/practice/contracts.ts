@@ -35,7 +35,7 @@ export const VOICE_CONSENT_VERSION = 'interview-recording-1'
  * One-time, account-level Interviews recording and AI-processing acknowledgment (replaces the per-practice
  * checkbox once accepted). The version, scope and exact text are stored with each acceptance; changing the
  * text requires a new version, and nothing is inferred for accounts that never accepted it.
- * DRAFT TEXT pending policy review before release.
+ * Text approved 26 Oct 2026 (docs/prepare/POLICY-INTERVIEWS-RECORDING.md); do not edit without a new version.
  */
 export const RECORDING_ACKNOWLEDGMENT = {
   version: 'interview-recording-ai-1',

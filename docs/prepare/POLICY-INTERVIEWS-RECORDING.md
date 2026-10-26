@@ -1,7 +1,10 @@
-# DRAFT for review — Interviews recording, transcription, AI evaluation, storage and deletion
+# Interviews recording, transcription, AI evaluation, storage and deletion — policy wording
 
-**Status: not published.** The live Terms and Privacy Policy are Admin-managed `LegalDocument` rows (both last
-updated 2026-06-23 in production). Nothing here changes them. Publishing is an Admin action after review.
+**Status: wording approved as drafted (26 Oct 2026); not yet published.** The live Terms and Privacy Policy are
+Admin-managed `LegalDocument` rows (both last updated 2026-06-23 in production). Nothing here changes them;
+publishing §4–§5 is a separate Admin action. As approved, providers are named, feedback is described as
+experimental, and the model-training sentence in §4 is **not** adopted unless it is confirmed true for every
+provider and contract.
 
 ## 1. What the published documents say today (production, reviewed 26 Oct 2026)
 
@@ -26,7 +29,7 @@ updated 2026-06-23 in production). Nothing here changes them. Publishing is an A
 Interviews has used a **per-practice checkbox** ("I agree to my answers being recorded and transcribed…"),
 stored per run as `recordingConsentAt` + `recordingConsentVersion = interview-recording-1`.
 
-## 3. One-time Interviews acknowledgment (implemented on the branch, text pending this review)
+## 3. One-time Interviews acknowledgment (implemented on the branch, text approved)
 
 Shown once before a learner's first practice (every signup path reaches it the same way) and again only when the
 version changes. Stored server-side as an append-only `RecordingAcknowledgment` row: version
@@ -37,7 +40,7 @@ version changes. Stored server-side as an append-only `RecordingAcknowledgment` 
 database refuses a run that claims an acknowledgment the owner does not have. If the acknowledgment status cannot
 be loaded, the per-practice checkbox remains the gate.
 
-**Exact text (draft):**
+**Exact text (approved):**
 
 > Interview practice records your microphone audio during each practice and transcribes it automatically (Amazon
 > Transcribe). Your saved answers may be evaluated by AI (Amazon Bedrock) to give technical feedback; this
@@ -49,10 +52,10 @@ be loaded, the per-practice checkbox remains the gate.
 Button: **I agree**. Reminder near Start afterwards: "Recording: your answers are recorded, transcribed and may be
 evaluated by AI, as you agreed on {date}. You can delete any practice from Interview history."
 
-Decisions for review: whether to name the providers; whether "experimental" stays while grading is not accepted;
-whether to state a model-training position for Interviews (see §4).
+Approved as drafted: providers named; "experimental" stays while grading is not accepted; no model-training
+statement unless confirmed (see §4).
 
-## 4. Proposed Terms changes (exact wording, draft)
+## 4. Terms changes (exact wording, approved; not published)
 
 Replace §4 heading and first paragraph with:
 
@@ -70,7 +73,7 @@ are not used to train AI models." **Only adopt this sentence if it is true for e
 
 Add to §3: "Technical feedback in Interviews is generated automatically, is experimental and may be inaccurate."
 
-## 5. Proposed Privacy changes (exact wording, draft)
+## 5. Privacy changes (exact wording, approved; not published)
 
 §1 add: "**Interview data:** audio recordings of your interview practice, automatic transcripts, your saved
 answers, the questions asked, practice settings, and technical feedback generated from your answers."
