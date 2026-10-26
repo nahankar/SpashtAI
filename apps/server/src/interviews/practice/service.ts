@@ -48,7 +48,8 @@ async function activeSegment(tx: Tx, sessionId: string, segmentId: string, drain
 function learnerAttempt(row: { id: string; index: number; status: string; assistance: string; askedAt: Date | null; questionSnapshot: Prisma.JsonValue }) {
   const q = questionSnapshotSchema.parse(row.questionSnapshot)
   return { id: row.id, index: row.index, status: row.status, assistance: row.assistance, askedAt: row.askedAt,
-    question: { text: q.questionText, track: q.track, topic: q.topic, difficulty: q.difficulty, expectedDepth: q.expectedDepth } }
+    // expectedDepth and answer guidance are authoring/evaluator material and stay in the snapshot only.
+    question: { text: q.questionText, track: q.track, topic: q.topic, difficulty: q.difficulty } }
 }
 
 export async function startPractice(input: unknown, ownerId: string) {

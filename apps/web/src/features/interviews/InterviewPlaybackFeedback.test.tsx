@@ -8,6 +8,9 @@ import type { InterviewHistory } from '@/lib/interview-practice'
 import { InterviewFeedbackDisclosure, InterviewFeedbackPlaceholder } from './InterviewFeedbackDisclosure'
 import { feedbackSummary } from './feedback-summary'
 import { InterviewHistoryList } from './InterviewHistoryList'
+import { inlineFeedback } from './InlineFeedback'
+import { interviewConversation } from '@/lib/interview-conversation'
+import type { InterviewAttempt } from '@/lib/interview-practice'
 import type { LearnerFinding } from './useInterviewFindings'
 
 const criteria = (['ACCURACY', 'REASONING', 'DEPTH'] as const).map(criterion => ({ criterion, finding: 'NOT_ASSESSED', explanation: '', evidence: [] }))
@@ -87,5 +90,23 @@ describe('interview history', () => {
   it('retaining one practice releases the others', () => {
     const next = applyRetain(runs.map(r => ({ ...r, retainedAt: r.id === 'b' ? at(50) : null })), runs[2], { sessionId: 's-c', retainedAt: at(60), releasedSessionIds: ['s-b'] })
     expect(next.map(r => r.retainedAt)).toEqual([null, null, at(60)])
+  })
+})
+
+describe('practice page feedback', () => {
+  const attempt = (id: string, index: number, status: InterviewAttempt['status'], text = ''): InterviewAttempt => ({ id, index, status, assistance: 'NONE',
+    question: { text: `Question ${index}?`, track: 't', topic: 'x', difficulty: 'Simple' }, capturedText: text, completionReason: null, askedAt: at(index * 2),
+    answer: text ? { answerText: text, textSource: 'AGENT_COMMITTED_TURNS', textRevision: 1, assistance: 'NONE' } : null })
+  it('puts each saved answer\'s feedback below it by attempt id, with skipped questions badged and ungraded', () => {
+    const messages = interviewConversation([attempt('p1', 1, 'ANSWERED', 'First answer'), attempt('p2', 2, 'SKIPPED'), attempt('p3', 3, 'ANSWERED', 'Third answer')], [], at(0))
+    expect(messages.map(m => m.attemptId)).toEqual(['p1', 'p1', 'p2', 'p3', 'p3'])
+    const findings = { rows: [], loaded: true, error: false, retry: () => undefined,
+      byAttempt: new Map([finding('p3', 3), finding('p1', 1, { status: 'PENDING', result: null })].map(f => [f.attemptId, f])) }
+    const html = renderToStaticMarkup(<ConversationPanel messages={messages} stitchAdjacentUserMessages={false} autoScroll={false} renderAfterMessage={m => inlineFeedback(m, findings)} />)
+    const order = [...html.matchAll(/First answer|Third answer|data-attempt-id="(p\d)"|Skipped/g)].map(m => m[1] ?? m[0])
+    expect(order).toEqual(['First answer', 'p1', 'Skipped', 'Third answer', 'p3'])
+    const loading = renderToStaticMarkup(<ConversationPanel messages={messages} stitchAdjacentUserMessages={false} autoScroll={false}
+      renderAfterMessage={m => inlineFeedback(m, { ...findings, loaded: false })} />)
+    expect(loading.match(/Technical feedback · Loading…/g)).toHaveLength(2)
   })
 })

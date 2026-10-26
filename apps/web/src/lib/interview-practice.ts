@@ -6,7 +6,7 @@ export const selectionLabel = (stored: string, suffix = '') => selectionList(sto
 export type InterviewSetup = { track: string[]; experienceBand: string[]; startingDifficulty: string[]; durationMinutes: number; recordingConsent: true }
 export type InterviewAttempt = {
   id: string; index: number; status: 'PREPARED'|'ASKED'|'ANSWERED'|'SKIPPED'|'INCOMPLETE'; assistance: string;
-  question: { text: string; track: string; topic: string; difficulty: string; expectedDepth: string };
+  question: { text: string; track: string; topic: string; difficulty: string };
   capturedText: string; completionReason: string|null;
   askedAt?: string|null;
   capturedParts?: Array<{ segmentId: string; sourceTurnId: string; text: string; createdAt: string }>;

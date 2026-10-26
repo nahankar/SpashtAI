@@ -29,11 +29,12 @@ export function interviewConversation(attempts: InterviewAttempt[], live: ChatMe
       : attempt.capturedText)
     if (!questionSpoken && !answer && attempt.status === 'PREPARED') continue
     const questionTime = attempt.askedAt ?? startedAt
-    messages.push({ id: `interview_question_${attempt.id}`, role: 'assistant', content: attempt.question.text, timestamp: questionTime,
+    // attemptId links each question and answer to that answer's feedback (never position or wording).
+    messages.push({ id: `interview_question_${attempt.id}`, attemptId: attempt.id, role: 'assistant', content: attempt.question.text, timestamp: questionTime,
       ...(['SKIPPED', 'INCOMPLETE'].includes(attempt.status) ? { attemptStatus: attempt.status as 'SKIPPED' | 'INCOMPLETE' } : {}) })
     if (answer?.trim()) {
       const firstPart = parts.values().next().value
-      messages.push({ id: `interview_answer_${attempt.id}`, role: 'user',
+      messages.push({ id: `interview_answer_${attempt.id}`, attemptId: attempt.id, role: 'user',
         content: answer.replace(/\s+/g, ' ').trim(), timestamp: firstPart?.timestamp ?? questionTime })
     }
   }

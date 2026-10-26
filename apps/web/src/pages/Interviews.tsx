@@ -13,7 +13,8 @@ import { LiveSessionRoom } from '@/features/live-session/components/LiveSessionR
 import type { ChatMessage } from '@/features/live-session/types'
 import { ConversationPanel } from '@/features/live-session/components/ConversationPanel'
 import { interviewConversation } from '@/lib/interview-conversation'
-import { InterviewFindings } from '@/features/interviews/InterviewFindings'
+import { useInterviewFindings } from '@/features/interviews/useInterviewFindings'
+import { inlineFeedback } from '@/features/interviews/InlineFeedback'
 import { InterviewControls } from '@/features/interviews/InterviewControls'
 import { InterviewHistoryList } from '@/features/interviews/InterviewHistoryList'
 import { applyRetain } from '@/lib/interview-history'
@@ -105,6 +106,8 @@ export function Interviews() {
     return ()=>clearInterval(timer)
   },[selected,live.token])
   const current=detail?.attempts.at(-1)
+  // Same findings and inline disclosures as playback, refreshed when the current answer changes state.
+  const findings=useInterviewFindings({runId:detail?.id,refreshKey:`${current?.id}:${current?.status}`})
   const conversationJson=JSON.stringify(detail ? interviewConversation(detail.attempts,messages,detail.startedAt) : [])
   // Keep the shared panel stable when polling returns identical saved speech.
   const conversation=useMemo(()=>JSON.parse(conversationJson) as ChatMessage[],[conversationJson])
@@ -166,7 +169,7 @@ export function Interviews() {
       <div className="flex flex-wrap justify-between gap-3"><h2 className="text-xl font-semibold">{selectionLabel(detail.track)} practice</h2><Link className="text-sm underline" to="/interviews" onClick={e=> { if (live.token) { e.preventDefault(); toast.info('Pause or end this practice before opening history.') } }}>Interview history</Link></div>
       {detail.conversationMode && !detail.endedAt && <p className="text-sm text-muted-foreground">Automatic conversation: after you finish, stay quiet for about 5 seconds and the interviewer moves on. Finish answer, Skip and More time are always available.</p>}
       {current && !detail.endedAt && <p className="text-sm text-muted-foreground">Spoken requests such as “repeat the question” or “skip this one” are not supported yet; use the buttons below. A spoken request is never graded as not knowing the answer.</p>}
-      {current && !detail.endedAt && <div className="rounded-xl border p-5 space-y-2"><p className="text-sm text-muted-foreground">Question {current.index} · {current.question.difficulty} · {current.question.topic}</p><p className="text-lg font-medium whitespace-pre-wrap">{current.question.text}</p><p className="text-sm text-muted-foreground">{current.question.expectedDepth}</p></div>}
+      {current && !detail.endedAt && <div className="rounded-xl border p-5 space-y-2"><p className="text-sm text-muted-foreground">Question {current.index} · {current.question.difficulty} · {current.question.topic}</p><p className="text-lg font-medium whitespace-pre-wrap">{current.question.text}</p><p className="text-sm text-muted-foreground">Answer aloud in your own words. Explain how or why where you can; an example helps.</p></div>}
       {live.token && live.url && current && <LiveSessionRoom {...live} token={live.token} url={live.url} recorderRef={recorderRef}
         handleDisconnected={()=>controller.onDisconnected(recorderRef.current,{sessionId:live.sessionId,segmentId:live.segmentId})}
         handleNewMessage={m=>controller.handleMessage(m)} setAssistantState={live.setAssistantState} handleConversationRestart={()=>live.setAssistantState('recovering')}
@@ -183,8 +186,9 @@ export function Interviews() {
           leave={leave} incomplete={leave} reconnect={reconnect} discard={()=>controller.discard(recorderRef.current,adapter)}
           conversation={!!detail.conversationMode} />} />}
       {!live.token && !detail.endedAt && <div className="rounded-xl border p-5 space-y-3"><p>Your interview is paused. Confirmed answers are saved.</p><div className="flex gap-2"><Button disabled={!options || live.isResuming || loading} onClick={()=>void resume()}>{live.isResuming?'Reconnecting…':'Resume practice'}</Button><Button variant="outline" disabled={live.isLeaving} onClick={()=>void leave()}>End practice</Button></div></div>}
-      <InterviewFindings runId={detail.id} refreshKey={`${current?.id}:${current?.status}`} />
-      {conversation.length>0 && <ConversationPanel messages={conversation} stitchAdjacentUserMessages={false} />}
+      {findings.error && <p role="status" className="text-xs text-muted-foreground">Technical feedback could not be loaded; your saved answers are safe. <button type="button" className="underline hover:text-foreground" onClick={findings.retry}>Retry</button></p>}
+      {conversation.length>0 && <ConversationPanel messages={conversation} stitchAdjacentUserMessages={false}
+        renderAfterMessage={message=>inlineFeedback(message,findings)} />}
       {detail.endedAt && <Link className="text-sm underline" to={interviewPlaybackPath(detail.sessionId)}>Review answer recordings and communication feedback</Link>}
     </section>}
     {!selected && <section className="space-y-3">
