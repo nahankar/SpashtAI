@@ -29,7 +29,7 @@ export function InterviewControls({ runId, attemptId, segmentId, status, ready, 
 }) {
   const room = useRoomContext()
   const [operation,setOperation]=useState<InterviewOperation>(null); const busy=operation!==null
-  const [error,setError]=useState(''); const [muted,setMuted]=useState(true)
+  const [error,setError]=useState('')
   const [errorCode,setErrorCode]=useState<string|undefined>(undefined)
   const [notice,setNotice]=useState('')
   const [confirmIncomplete,setConfirmIncomplete]=useState(false); const [confirmDiscard,setConfirmDiscard]=useState(false)
@@ -49,6 +49,9 @@ export function InterviewControls({ runId, attemptId, segmentId, status, ready, 
   // The control that failed: retry repeats that kind (Pause stays Pause) for the answer it failed on.
   const [failure,setFailure]=useState<{ kind: CaptureAction|'NEXT'; attemptId: string; viaInterviewer: boolean }|null>(null)
   const holdBeforeMute=useRef(false)
+  // The learner's own Mute persists until they unmute; interviewer gating (asking, saving, recovery,
+  // reconnect, question changes) only ever closes the microphone on top of it.
+  const [learnerMuted,setLearnerMuted]=useState(false)
   const running=useRef(false)
   const desiredMic=useRef(false)
   function microphone(enabled: boolean) {
@@ -57,7 +60,6 @@ export function InterviewControls({ runId, attemptId, segmentId, status, ready, 
     // Keep the recorder's track alive between questions. Disabling samples is
     // different from stopping/unpublishing the track used by MediaRecorder.
     if (track) track.enabled=enabled
-    setMuted(!enabled)
   }
   useEffect(() => {
     const sync=() => {
@@ -68,15 +70,15 @@ export function InterviewControls({ runId, attemptId, segmentId, status, ready, 
     room.on(RoomEvent.Reconnected,sync)
     return () => { room.localParticipant.off(ParticipantEvent.LocalTrackPublished,sync); room.off(RoomEvent.Reconnected,sync) }
   },[room])
+  const inputAllowed=(conversation ? ready && agentListening : canSpeak && status==='ASKED') && !blocked && !busy && !error
   useEffect(() => {
     // The time limit stops new questions, not speech for the open answer. In conversation
     // practices the microphone also follows the interviewer: open only while it is listening.
     // Conversation practices follow the agent's published state, which leads the saved status by a refresh.
-    desiredMic.current=(conversation ? ready && agentListening : canSpeak && status==='ASKED') && !blocked && !busy && !error
+    desiredMic.current=inputAllowed && !learnerMuted
     const track=room.localParticipant.getTrackPublication(Track.Source.Microphone)?.track?.mediaStreamTrack
     if (track) track.enabled=desiredMic.current
-    setMuted(!desiredMic.current)
-  },[canSpeak,ready,status,blocked,busy,error,room,conversation,agentListening])
+  },[inputAllowed,learnerMuted,room])
   useEffect(() => {
     const control=(bytes: Uint8Array, participant: { isAgent: boolean; metadata?: string }|undefined, _kind: unknown, topic?: string) => {
       if (topic!=='lk.control' || !participant?.isAgent) return
@@ -263,13 +265,18 @@ export function InterviewControls({ runId, attemptId, segmentId, status, ready, 
         <Button variant="outline" disabled={!answerOpen} onClick={() => void interviewerControl('REPEAT')}>Repeat question</Button></>}
       {!conversation && ['ANSWERED','SKIPPED'].includes(status) && !completionMessage && <Button disabled={busy || blocked || timeUp} onClick={() => void next()}>Next question</Button>}
       {conversationNext && <Button disabled={busy || blocked} onClick={() => void converse('NEXT')}>{['ANSWERED','SKIPPED'].includes(status) ? 'Next question' : 'Continue'}</Button>}
-      <Button variant="outline" disabled={busy || blocked || !!error || (conversation ? !agentListening : !canSpeak || status!=='ASKED')} onClick={() => {
+      <Button variant="outline" disabled={learnerMuted ? busy || blocked : !inputAllowed} onClick={() => {
         // A muted microphone is not a finished answer: automatic finish stays off while muted, and unmuting
         // restores whatever the learner chose with More time before muting.
-        if (conversation && !muted) { holdBeforeMute.current=hold; void interviewerControl('HOLD') }
-        if (conversation && muted && !holdBeforeMute.current) void interviewerControl('RESUME_AUTO')
-        microphone(muted)
-      }}>{muted ? 'Unmute' : 'Mute'}</Button>
+        if (!learnerMuted) {
+          if (conversation) { holdBeforeMute.current=hold; void interviewerControl('HOLD') }
+          setLearnerMuted(true); microphone(false)
+        } else {
+          if (conversation && !holdBeforeMute.current) void interviewerControl('RESUME_AUTO')
+          // Unmuting never opens input the interviewer is not currently accepting.
+          setLearnerMuted(false); microphone(inputAllowed)
+        }
+      }}>{learnerMuted ? 'Unmute' : 'Mute'}</Button>
       <Button variant="outline" disabled={!(canSpeak || (conversation && agent.state==='asking')) || busy || blocked || !!error} onClick={() => void action('PAUSE')}>Pause</Button>
       <Button variant="secondary" disabled={!(canSpeak || (conversation && agent.state==='asking')) || busy || blocked || !!error} onClick={() => void action('LEAVE')}>End practice</Button>
       <Button variant="ghost" disabled={busy || blocked} onClick={() => setConfirmDiscard(true)}>Discard</Button>

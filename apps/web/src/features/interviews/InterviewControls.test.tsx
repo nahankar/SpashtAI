@@ -101,7 +101,7 @@ describe('interview time limit and the current answer', () => {
     h.rpc.mockImplementation(() => new Promise(() => {}))
     h.buttons.get('Finish answer')!.onClick(); render(); render()
     expect(h.track.enabled).toBe(false)
-    expect(h.buttons.get('Unmute')?.disabled).toBe(true)
+    expect(h.buttons.get('Mute')?.disabled).toBe(true)
     expect(render()).toContain('Saving and confirming your speech')
   })
 })
@@ -191,6 +191,36 @@ describe('conversation practices', () => {
     const live = /aria-live="polite">([^<]*)</.exec(html)![1]
     expect(live).not.toContain('Pause noticed')
     expect(html).toContain('Pause noticed')
+  })
+  it('keeps an explicit Mute through Repeat and a new question, and Unmute respects interviewer gating', async () => {
+    ready(); control('interview_state', undefined, { state: 'listening', attemptId: 'attempt' }); render('ASKED', true); render('ASKED', true)
+    expect(h.track.enabled).toBe(true)
+    h.rpc.mockResolvedValue(JSON.stringify({ hold: true }))
+    h.buttons.get('Mute')!.onClick(); render('ASKED', true); render('ASKED', true)
+    expect(h.track.enabled).toBe(false)
+    // Repeat: the interviewer reads the question, then returns to listening. The learner's mute stands.
+    control('interview_state', undefined, { state: 'asking', attemptId: 'attempt' }); render('ASKED', true); render('ASKED', true)
+    control('interview_state', undefined, { state: 'listening', attemptId: 'attempt' }); render('ASKED', true); render('ASKED', true)
+    expect(h.track.enabled).toBe(false)
+    expect(h.buttons.has('Unmute')).toBe(true)
+    // A new question and a reconnect-style refresh do not override it either.
+    control('interview_state', undefined, { state: 'listening', attemptId: 'next' }); render('PREPARED', true); render('ASKED', true)
+    expect(h.track.enabled).toBe(false)
+    // Unmute while the interviewer is not listening stays closed until it listens again.
+    control('interview_state', undefined, { state: 'asking', attemptId: 'next' }); render('ASKED', true); render('ASKED', true)
+    h.buttons.get('Unmute')!.onClick(); render('ASKED', true); render('ASKED', true)
+    expect(h.track.enabled).toBe(false)
+    control('interview_state', undefined, { state: 'listening', attemptId: 'next' }); render('ASKED', true); render('ASKED', true)
+    expect(h.track.enabled).toBe(true)
+  })
+  it('keeps an explicit Mute in manual practices after the answer is saved and the next question opens', () => {
+    render(); control('session_state', 'ready'); render(); render()
+    h.buttons.get('Mute')!.onClick(); render(); render()
+    expect(h.track.enabled).toBe(false)
+    render('ANSWERED'); render('ASKED'); render('ASKED')
+    expect(h.track.enabled).toBe(false)
+    h.buttons.get('Unmute')!.onClick(); render(); render()
+    expect(h.track.enabled).toBe(true)
   })
   it('keeps manual practices on their own Next question control', () => {
     render('ANSWERED'); control('session_state', 'ready'); render('ANSWERED')
