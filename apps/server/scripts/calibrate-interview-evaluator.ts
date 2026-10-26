@@ -11,7 +11,7 @@ import { assessmentDetail, enqueueAssessment, retryAssessment, sweepAssessments 
 
 type Case = { id?: string; name?: string; qid: string; category?: string; expected: string; acceptable?: string[]; mustNotBe?: string[]
   answer: string; evidence?: string[]; mustNotQuote?: string[]; mustNotGap?: string[]; expectMisconception?: boolean; expectGap?: string; notes?: string
-  mustNotSay?: string[]; expectReasoning?: boolean; expectedKind?: string; expectAcknowledged?: string[] }
+  mustNotSay?: string[]; expectReasoning?: boolean; reasoningMustNotBeMet?: boolean; expectedKind?: string; expectAcknowledged?: string[] }
 type Fixture = { fixtureVersion: string; reviewer?: string; questions?: Record<string, { revision: number; guidanceIssues: string[] }>; cases: Case[] }
 type Result = { classification?: string; criteria?: { criterion: string; finding: string; evidence: string[] }[]; strengths?: string[]
   gaps?: string[]; misconceptions?: string[]; uncertainty?: string[]; guidance?: string; responseKind?: string; next?: { action: string; topic: string | null; source: string } }
@@ -55,6 +55,8 @@ function review(test: Case, answer: string, result: Result | null) {
     // Human-pilot checks: wording the feedback must not use, credited reasoning, and the server-owned response kind.
     forbiddenWording: test.mustNotSay?.length ? test.mustNotSay.some(t => feedbackText(result).includes(t.toLowerCase())) : null,
     reasoningCredited: test.expectReasoning === undefined ? null : (result.criteria ?? []).some(c => c.criterion === 'REASONING' && c.finding !== 'NOT_ASSESSED'),
+    // A stated reason that is false or empty must never be credited as demonstrated reasoning.
+    reasoningNotOverCredited: test.reasoningMustNotBeMet ? !(result.criteria ?? []).some(c => c.criterion === 'REASONING' && c.finding === 'MET') : null,
     responseKindMatches: test.expectedKind === undefined ? null : result.responseKind === test.expectedKind,
     acknowledged: test.expectAcknowledged?.length ? test.expectAcknowledged.every(t => lower([...(result.strengths ?? []), ...(result.criteria ?? []).map(c => (c as { explanation?: string }).explanation ?? '')]).includes(t.toLowerCase())) : null,
   }

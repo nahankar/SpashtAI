@@ -72,9 +72,15 @@ export const LEARNER_PROMPT_7 = LEARNER_PROMPT_6.replace(REASONING_RULE, REASONI
 // one-sentence "Because ..." answer, so the application now names the passages that state a reason.
 const STATED_REASONS_8 = `statedReasons, when present, lists exact passages of candidateAnswer that state a cause, purpose or consequence. Each one is reasoning the candidate gave: assess REASONING with one of them as evidence (MET or PARTIAL when the reason is technically valid and relevant, NOT_MET with a misconception when it is false). When statedReasons is present, never write that the answer gives no reasoning, no explanation or no "why".`
 export const LEARNER_PROMPT_8 = LEARNER_PROMPT_7.replace('Rubric use:', `${STATED_REASONS_8}\nRubric use:`)
+// learner-evaluation-6: acceptance cases showed v5 crediting a false "because" as demonstrated reasoning,
+// failing on an empty justification and ignoring valid reasoning phrased without causal words.
+const STATED_REASONS_9 = `statedReasons, when present, lists passages of candidateAnswer that use causal wording. They are candidates to check, not credit: judge each by its meaning. REASONING is MET only when a reason is technically correct and explains the point the question asks about; PARTIAL when it is correct but covers only part of that explanation; NOT_MET when it is false or explains the wrong thing (quote it and list the false claim under misconceptions). An empty justification such as "because it is better" or "because it is good practice" is not reasoning: use NOT_ASSESSED for it, and if it is the whole answer, the answer is NOT_ANSWERED with every criterion NOT_ASSESSED and no strengths.
+Reasoning does not need causal words: a correct explanation of how or why something behaves (a mechanism, a contrast, a consequence) is reasoning. Quote it under REASONING even when statedReasons is absent. Never write that the answer gives no reasoning when it explains how or why.`
+if (!LEARNER_PROMPT_8.includes(STATED_REASONS_8)) throw new Error('interview-answer-9 base text changed')
+export const LEARNER_PROMPT_9 = LEARNER_PROMPT_8.replace(STATED_REASONS_8, STATED_REASONS_9)
 // Prompt text is part of its version: editing an entry requires a new ID (sha256 frozen in tests).
 export const PROMPTS: Record<string, string> = { 'interview-answer-4': SYSTEM_PROMPT, 'interview-answer-5': LEARNER_PROMPT_5, 'interview-answer-6': LEARNER_PROMPT_6,
-  'interview-answer-7': LEARNER_PROMPT_7, 'interview-answer-8': LEARNER_PROMPT_8 }
+  'interview-answer-7': LEARNER_PROMPT_7, 'interview-answer-8': LEARNER_PROMPT_8, 'interview-answer-9': LEARNER_PROMPT_9 }
 function userMessage(question: QuestionSnapshot, answer: string, assistance: string, rubric: string) {
   if (rubric !== 'bank-guidance-2' && rubric !== 'bank-guidance-3') return { question, candidateAnswer: answer, assistance }
   const { questionText, track, topic, difficulty, experienceBand } = question

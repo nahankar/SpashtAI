@@ -29,6 +29,9 @@ export const LEARNER_POLICIES: Record<string, LearnerPolicy> = {
   // bank-guidance-3 adds statedReasons: exact passages of the answer that state a cause or purpose.
   'learner-evaluation-5': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova2-lite-learner-5', modelId: 'us.amazon.nova-2-lite-v1:0', region: 'us-east-1', label: 'Nova 2 Lite · learner grading 5',
     prompt: 'interview-answer-8', schema: 'interview-result-3', rubric: 'bank-guidance-3', policy: 'learner-evaluation-5', temperature: 0, maxTokens: 2000, timeoutMs: 20_000 } },
+  // Measured, not adopted: stopped over-crediting false or empty reasons but then credited no reasoning at all.
+  'learner-evaluation-6': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova2-lite-learner-6', modelId: 'us.amazon.nova-2-lite-v1:0', region: 'us-east-1', label: 'Nova 2 Lite · learner grading 6',
+    prompt: 'interview-answer-9', schema: 'interview-result-3', rubric: 'bank-guidance-3', policy: 'learner-evaluation-6', temperature: 0, maxTokens: 2000, timeoutMs: 20_000 } },
 }
 export const CURRENT_LEARNER_POLICY = 'learner-evaluation-5'
 // Admins can preview a learner policy through the accounted Admin test path. learner-evaluation-1

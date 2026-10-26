@@ -1,0 +1,29 @@
+{
+  "fixtureVersion": "reasoning-1",
+  "preRegistered": "Acceptance follow-up to learner-evaluation-5: reasoning must be judged by meaning, not by causal keywords. Labels and checks fixed before any run. Run against learner-evaluation-3 and learner-evaluation-5.",
+  "reviewer": "Claude (AI) against the saved bank guidance. Not an independent human expert review.",
+  "namespace": "automation-pilot",
+  "questions": { "WEB-NEW-033": { "revision": 2, "guidanceIssues": [] }, "AUT-NEW-028": { "revision": 2, "guidanceIssues": [] }, "AUT-NEW-047": { "revision": 2, "guidanceIssues": [] } },
+  "cases": [
+    { "id": "RS-01", "qid": "WEB-NEW-033", "category": "incorrect-causality", "expected": "INCORRECT", "acceptable": ["INCORRECT", "PARTIAL"], "mustNotBe": ["CORRECT"],
+      "answer": "Use ResizeObserver because it is faster than a window resize listener and fires before the browser paints anything.",
+      "reasoningMustNotBeMet": true, "notes": "Keyword present, but the stated cause (speed) is not why ResizeObserver is used; the real reason (element vs viewport size) is absent." },
+    { "id": "RS-02", "qid": "WEB-NEW-033", "category": "empty-because", "expected": "NOT_ANSWERED", "acceptable": ["NOT_ANSWERED", "PARTIAL"], "mustNotBe": ["CORRECT"],
+      "answer": "You should use ResizeObserver because it is better.", "reasoningMustNotBeMet": true,
+      "notes": "A 'because' with no content is not reasoning." },
+    { "id": "RS-03", "qid": "WEB-NEW-033", "category": "implicit-valid-reasoning", "expected": "CORRECT", "acceptable": ["CORRECT", "PARTIAL"], "mustNotBe": ["INCORRECT", "NOT_ANSWERED"],
+      "answer": "A window resize event only fires when the viewport changes. A sidebar collapsing or a web font loading can resize a card while the window stays the same size. ResizeObserver reports that element's own size change.",
+      "expectReasoning": true, "mustNotSay": ["does not provide reasoning", "no reasoning", "does not explain why"],
+      "notes": "Valid reasoning with no causal keyword (statedReasons is empty)." },
+    { "id": "RS-04", "qid": "AUT-NEW-028", "category": "incorrect-causality", "expected": "INCORRECT", "acceptable": ["INCORRECT"], "mustNotBe": ["CORRECT"],
+      "answer": "Put your assertions inside then() because then() retries the whole query chain until the assertion passes.",
+      "reasoningMustNotBeMet": true, "expectMisconception": true, "notes": "The bank's listed misconception, stated as the reason." },
+    { "id": "RS-05", "qid": "AUT-NEW-028", "category": "implicit-valid-reasoning", "expected": "CORRECT", "acceptable": ["CORRECT", "PARTIAL"], "mustNotBe": ["INCORRECT", "NOT_ANSWERED"],
+      "answer": "should() re-runs the query and its assertion until it passes or times out. A then() callback runs one time, and an assertion in it can read the page before it has updated.",
+      "expectReasoning": true, "mustNotSay": ["does not provide reasoning", "no reasoning", "does not explain why"],
+      "notes": "Valid reasoning without causal keywords." },
+    { "id": "RS-06", "qid": "AUT-NEW-047", "category": "empty-because", "expected": "NOT_ANSWERED", "acceptable": ["NOT_ANSWERED", "PARTIAL"], "mustNotBe": ["CORRECT"],
+      "answer": "Use soft assertions because they are good practice.", "reasoningMustNotBeMet": true,
+      "notes": "Empty justification." }
+  ]
+}

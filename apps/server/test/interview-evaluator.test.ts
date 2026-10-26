@@ -116,6 +116,7 @@ describe('learner policy registry and learner-evaluation-2 contract', () => {
     expect(hash(LEARNER_POLICIES['learner-evaluation-3'].config)).toBe('a283a0abdcc8d5bdebe8cc5a37d51a7e276486b660f600dd28eab41909d33d96')
     expect(hash(LEARNER_POLICIES['learner-evaluation-4'].config)).toBe('9e1eb80928ae0dab62cdb0545338477dc960a2f15cdca8a83ed53eb87ec87df3')
     expect(hash(LEARNER_POLICIES['learner-evaluation-5'].config)).toBe('9f458e3dfb7edbe289843abac286d1bf9cd0fdfd28310b7c9ca91c2f3f4dd7be')
+    expect(hash(LEARNER_POLICIES['learner-evaluation-6'].config)).toBe('8b5fd1f3ea69d68f270e9fb7a10352b2d41393e5505ffdf6b33b33c3e472054c')
     const sha = (text: string) => createHash('sha256').update(text).digest('hex')
     expect(Object.fromEntries(Object.entries(PROMPTS).map(([id, text]) => [id, sha(text)]))).toEqual({
       'interview-answer-4': '6529a9f6cf7ebbc99016081a3dea4da01ee82207681cbbf630f513136798602a',
@@ -123,6 +124,7 @@ describe('learner policy registry and learner-evaluation-2 contract', () => {
       'interview-answer-6': 'e2f458693f9f3fa434e4b59155fa073b5e094fd1429a41bccfcaf1be47d24594',
       'interview-answer-7': 'b7d62529d91f20adb4758ac2e7223c1601e22fa048e6540139e3bbe2a31549bf',
       'interview-answer-8': 'cc83e5d41eacc3481b5e34ea0142b7cb2f54fd036607c71e716b79548a677364',
+      'interview-answer-9': 'a940098b73f972a16d844be74ff07a9c9ea7dd82c2a840154c75fe5298687635',
     })
     expect(LEARNER_PROMPT_6).toContain('"get dissect" for git bisect'); expect(LEARNER_PROMPT_6.startsWith(LEARNER_PROMPT_5.slice(0, 400))).toBe(true)
     for (const policy of Object.values(LEARNER_POLICIES)) expect(PROMPTS[policy.config.prompt]).toBeTruthy()
@@ -215,7 +217,7 @@ describe('learner policy registry and learner-evaluation-2 contract', () => {
     expect(explicitAbstention(`Sorry, ${'um, '.repeat(10)}I don't know.`)).toBe(true)
   })
   it('offers only learner policies with their own configuration as Admin previews', () => {
-    expect(PREVIEW_POLICIES).toEqual(['learner-evaluation-2', 'learner-evaluation-3', 'learner-evaluation-4', 'learner-evaluation-5'])
+    expect(PREVIEW_POLICIES).toEqual(['learner-evaluation-2', 'learner-evaluation-3', 'learner-evaluation-4', 'learner-evaluation-5', 'learner-evaluation-6'])
     expect(adminConfig('learner-evaluation-2')).toEqual(learner2); expect(previewPolicy(learner2)?.key).toBe('learner-evaluation-2')
     expect(previewPolicy(configFor('nova2_lite'))).toBeNull()
     expect(() => submitSchema.parse({ questionId: 'q', revision: 1, answer: testAnswer, model: 'learner-evaluation-1' })).toThrow()

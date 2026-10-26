@@ -173,7 +173,7 @@ describe.skipIf(!testDb.url)('durable Admin evaluator PostgreSQL contracts', () 
     for (let i = 0; i < 2; i++) { const job = await claim(); await finish(job) }
     expect(((await assessmentDetail(graded.id, actor)).result as any).next).toBeNull()
     const config = await request(app).get('/eval/config').auth(token(), { type: 'bearer' })
-    expect(config.body.models.map((m: { key: string; id: string }) => `${m.key}:${m.id}`)).toEqual(['nova2_lite:nova2-lite-pilot-1', 'nova_pro:nova-pro-comparison-1', 'learner-evaluation-2:nova2-lite-learner-2', 'learner-evaluation-3:nova2-lite-learner-3', 'learner-evaluation-4:nova2-lite-learner-4', 'learner-evaluation-5:nova2-lite-learner-5'])
+    expect(config.body.models.map((m: { key: string; id: string }) => `${m.key}:${m.id}`)).toEqual(['nova2_lite:nova2-lite-pilot-1', 'nova_pro:nova-pro-comparison-1', 'learner-evaluation-2:nova2-lite-learner-2', 'learner-evaluation-3:nova2-lite-learner-3', 'learner-evaluation-4:nova2-lite-learner-4', 'learner-evaluation-5:nova2-lite-learner-5', 'learner-evaluation-6:nova2-lite-learner-6'])
   })
   it('does not reset daily limits when tests are deleted', async () => {
     await prisma.interviewEvaluatorBudget.create({ data: { scope: hash(actor), day: new Date().toISOString().slice(0,10), used: 19 } })
