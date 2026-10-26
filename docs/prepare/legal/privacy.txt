@@ -1,0 +1,70 @@
+Privacy Policy
+
+Last updated: {RELEASE_DATE}
+
+SpashtAI ("we", "us", "our") respects your privacy. This Privacy Policy explains how we collect, use, store, and protect personal information when you use our platform (the "Service"), including Elevate live coaching, Replay analysis, Progress Pulse, account features, and feedback.
+
+1. Information we collect
+
+Account information: name, email address, phone number, date of birth, gender, and postal pincode provided at registration. City, state, and country may be derived from your pincode for internal administration and are not displayed to other users.
+
+Session data: audio, transcripts, metrics, skill scores, coaching insights, and session metadata when you use Elevate or Replay.
+
+Interview data: audio recordings of your interview practice, automatic transcripts, your saved answers, the questions asked, practice settings, and technical feedback generated from your answers.
+
+Usage data: feature usage, login activity, device/browser type, IP address, and interaction logs for security and product improvement.
+
+Feedback: messages, attachments, and support communications you submit.
+
+2. How we use information
+We use your information to:
+• Provide, maintain, and improve the Service
+• Authenticate you and secure your account
+• Deliver personalized coaching and progress tracking
+• Process feedback and reward points where applicable
+• Comply with legal obligations and enforce our Terms
+• Communicate service-related notices (e.g., password resets)
+
+3. AI processing
+Your voice and text may be processed by automated systems—including speech recognition, language models, and analytics—to generate coaching feedback. We do not use your session content to train public third-party models without appropriate contractual safeguards, but processing may occur on infrastructure operated by our subprocessors.
+
+In Interviews, your audio is transcribed by Amazon Transcribe and your saved answers may be evaluated by AI models on Amazon Bedrock to produce technical feedback. This feedback is experimental. Interviews is separate from Progress Pulse.
+
+4. Legal bases (where applicable)
+Depending on your region, we rely on contractual necessity, legitimate interests (security, improvement), and consent where required (e.g., optional marketing, if offered).
+
+For Interviews recording and AI processing we rely on your acknowledgment, recorded with its version and time, and you may stop using Interviews or delete practices at any time.
+
+5. Data sharing
+We do not sell your personal information. We may share data with:
+• Cloud hosting, communication, and AI service providers under data-processing agreements
+• Authorities when required by law or to protect rights and safety
+• Successors in the event of a merger or acquisition, subject to this Policy
+
+6. International transfers
+Our servers and subprocessors may be located in various countries. Where required, we implement appropriate safeguards for cross-border transfers.
+
+7. Retention
+We retain account and session data while your account is active and as needed for legitimate business, legal, or security purposes. You may request deletion subject to applicable law and technical constraints.
+
+Interviews: recordings, transcripts and feedback are kept with your account until you delete the practice or your account. An unfinished practice is completed automatically after 24 hours without activity. Deleting a practice removes its recording, transcript, answers and feedback; usage records needed for billing and security are kept without the content.
+
+8. Security
+We use industry-standard measures including encryption in transit, access controls, and monitoring. No method of transmission or storage is 100% secure.
+
+9. Your rights
+Depending on your location, you may have rights to access, correct, delete, restrict, or port your data, and to object to certain processing. Contact us via in-app feedback or support to exercise these rights.
+
+10. Children
+SpashtAI is not directed at children under 18. We do not knowingly collect data from minors.
+
+11. Cookies and local storage
+We use essential cookies and local storage (e.g., authentication tokens, session preferences) to operate the Service. Analytics cookies, if any, will be disclosed separately.
+
+12. Changes
+We may update this Policy. The "Last updated" date will reflect revisions. Material changes will be communicated where required by law.
+
+13. Contact
+For privacy questions or requests, use the feedback feature in the app or contact our support team.
+
+— SpashtAI Team

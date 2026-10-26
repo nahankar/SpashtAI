@@ -29,3 +29,8 @@ limit is not unlimited questions; the setup label says "No time limit (up to 8 q
 Difficulty starts at All supported difficulties. The "eligible questions · up to 8 · pauses" line is removed;
 loading, access and no-matching-question messages remain. The landing page keeps the latest three practices;
 full History keeps pagination, filters and deletion.
+
+## Release
+
+Publishing the approved Terms and Privacy additions is part of releasing this branch. Follow
+`POLICY-INTERVIEWS-RECORDING.md` §7 after the deploy checks pass.

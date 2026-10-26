@@ -97,3 +97,26 @@ time, and you may stop using Interviews or delete practices at any time."
 2. Add an explicit Terms/Privacy checkbox to Google `complete-profile`, mirroring email signup.
 3. When the published Terms/Privacy change materially, prompt existing users once and store that acceptance;
    do not create acceptance records for anyone who has not accepted.
+
+## 7. Release step: publish with this branch (authorised 26 Oct 2026)
+
+The user asked for the approved §4–§5 additions to be published **when this branch is released**, not before.
+The full revised documents are ready in `docs/prepare/legal/terms.txt` and `docs/prepare/legal/privacy.txt`.
+They are the production text of 2026-06-23 with only the approved additions applied (§4 heading and paragraph,
+a sentence added to Terms §3, and Privacy §1, §3, §4 and §7). Every other line is unchanged.
+
+At release, after the deploy has passed its checks:
+
+1. Read the live documents (`GET /api/legal/terms`, `GET /api/legal/privacy`). Confirm each `content` still
+   has SHA-256 `25b309b8…909b9a` (terms) or `c9850edf…180fb0b` (privacy), the 2026-06-23 baseline. If either
+   differs, someone has edited it since review: stop and re-apply the additions to the current text for approval.
+2. Replace `{RELEASE_DATE}` with the release date (YYYY-MM-DD).
+3. Publish through the Admin legal editor (`PUT /api/admin/legal/:slug`, Admin), keeping the titles
+   "Terms and Conditions" and "Privacy Policy".
+4. Confirm both public pages show the new text and date, and record the publish in the release report.
+
+Do not publish if the release does not include the acknowledgment (`interview-recording-ai-1`), because the
+new text says recording happens only after that acknowledgment.
+
+Full baseline hashes: terms `25b309b87e82d5fbdfac1bfdbd7f90fa65331d3436c97bea37a80d4a35909b9a`, privacy
+`c9850edf01e27666f29f55272e897d170c1171569827eae3545f411f4180fb0b`.
