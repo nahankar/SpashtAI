@@ -77,7 +77,8 @@ export function interviewCompletionMessage(error: unknown): string | null {
 }
 /** A capture failure with its agent code, so the UI can offer the matching recovery. */
 export class CaptureError extends Error {
-  constructor(public code?: string) { super(captureFailure(code)) }
+  code?: string
+  constructor(code?: string) { super(captureFailure(code)); this.code = code }
 }
 export const NO_SPEECH_HELP = 'No answer has been heard for this question yet. Your microphone is on: speak your answer, or choose Skip question.'
 export const UNCONFIRMED_SPEECH_HELP = 'Some speech could not be confirmed as transcribed. Retry saving, or save only the confirmed speech (the unconfirmed part will not be included).'

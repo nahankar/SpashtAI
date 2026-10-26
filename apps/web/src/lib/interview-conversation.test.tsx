@@ -6,7 +6,7 @@ import type { InterviewAttempt } from './interview-practice'
 import type { ChatMessage } from '@/features/live-session/types'
 const start='2026-10-12T20:00:00Z'
 const attempt=(id='a1',index=1):InterviewAttempt=>({id,index,status:'ASKED',assistance:'NONE',askedAt:start,
-  question:{text:`Question ${index}?`,track:'Testing',topic:'Isolation',difficulty:'Simple',expectedDepth:'Explain.'},
+  question:{text:`Question ${index}?`,track:'Testing',topic:'Isolation',difficulty:'Simple'},
   capturedText:'',capturedParts:[],completionReason:null,answer:null})
 const part=(segmentId:string,sourceTurnId:string,text:string,createdAt=start)=>({segmentId,sourceTurnId,text,createdAt})
 const live=(id:string,content:string,timestamp=start):ChatMessage=>({id,role:'user',content,timestamp})
