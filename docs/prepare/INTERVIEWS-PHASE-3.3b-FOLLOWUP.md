@@ -1,7 +1,10 @@
-# Phase 3.3c — Human-pilot grading findings, Interview history and inline feedback (plan)
+# Phase 3.3b follow-up — Human-pilot grading findings, Interview history and inline feedback
 
-Branch: `codex/interviews-phase3.3c-history-feedback`, based on `codex/interviews-phase3.3b-coordinator`
-(which already contains `main`). Not merged or deployed. Grade-dependent adaptation and generated
+**This is not Phase 3.3c.** It is the grading, history and playback follow-up to 3.3b. Bank-first adaptive
+difficulty and grounded generated follow-ups (3.3c in `INTERVIEWS-PHASE-3.3.md`) have **not** been started.
+The branch name `codex/interviews-phase3.3c-history-feedback` predates this correction; the branch content is
+the 3.3b follow-up only. It is based on `codex/interviews-phase3.3b-coordinator` (which already contains
+`main`). Not merged or deployed. Grade-dependent adaptation and generated
 follow-ups stay deferred until grading acceptance; Interviews stay outside Progress Pulse.
 
 ## 1. Grading findings (regression source: local session `session_1792914992205_vcdezwozx`, run pinned to `learner-evaluation-3`)
@@ -90,3 +93,37 @@ UI (local browser, test learner): history shows counts, search/no-match, Review 
 playback shows one collapsed disclosure per answer keyed by attempt id, the skipped question keeps its badge,
 the old findings section is gone; expanding feedback during playback kept audio playing (27.96 → 29.72 s),
 scroll unchanged and focus on the play button; no horizontal overflow at 390 px; no page errors.
+
+## Acceptance pass (26 Oct 2026)
+
+**Reasoning judged by meaning** (fixture `reasoning-1`, pre-registered; real Bedrock, accounted Admin preview):
+
+| Case | v3 | v5 (current) | v6 (measured, not adopted) |
+| --- | --- | --- | --- |
+| False reason with "because" (RS-01, RS-04) | not credited | **RS-01 credited as MET** | not credited |
+| Empty "because it is better / good practice" (RS-02, RS-06) | both evaluations failed (inconsistent output) | RS-02 correct; **RS-06 evaluation failed** | both correct |
+| Valid reasoning without causal words (RS-03, RS-05) | not credited; says "no reasoning" | not credited; no false wording | not credited; **says "no reasoning"** |
+| Classification agreement | 4/6 | 5/6 | 6/6 (and 8/8 pilot-1, 12/12 regression) |
+
+`learner-evaluation-6` (prompt `interview-answer-9`) treats extracted passages as candidates and stops
+over-crediting, but then credits no reasoning at all and re-introduces the pilot Q1 wording. It is registered
+(stored previews stay valid) but **not adopted**; `learner-evaluation-5` remains current. Iteration stopped
+here by agreement: the REASONING criterion is not yet reliable in either direction (**open blocker**).
+Classification is stable across v5/v6 on every set.
+
+**Inline feedback space.** Every answer shows a same-height "Technical feedback · Loading…" line until
+findings arrive; it becomes the summary, "Not enabled for this practice", "Skipped · not evaluated" (speech
+saved before a Skip), "Incomplete answer · not evaluated" or "Could not load". Measured with the assessments
+response delayed 3 s: page height and the last answer's position unchanged (0 px) with evaluation on and off.
+
+## Open before merge or deployment
+
+1. **REASONING reliability** (above): decide between another measured prompt iteration, or not surfacing the
+   REASONING criterion to learners until it passes `reasoning-1` and `pilot-1` together.
+2. **Human microphone practice on v5** through History → Review (the v3 regression session keeps its stored
+   feedback by design).
+3. **D-1 recording loss on refresh** remains open (saved answers and transcripts unaffected).
+4. Expert review of grades remains an acceptance requirement.
+
+Roadmap status: 3.3a done locally; 3.3b and this follow-up done locally on review branches; **3.3c (adaptive
+difficulty, generated follow-ups) and the rest of 3.3d not started.**

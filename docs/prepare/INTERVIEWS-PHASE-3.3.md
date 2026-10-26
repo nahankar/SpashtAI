@@ -205,6 +205,11 @@ noise and mid-sentence disconnect do not create phantom answers or feedback.
 
 ## 3.3c — Bank-first adaptation and grounded generated follow-ups
 
+> **Status (26 Oct 2026): not started.** Grade-dependent adaptation and generated follow-ups stay deferred
+> until grading acceptance (REASONING reliability, human microphone run, expert review). The branch
+> `codex/interviews-phase3.3c-history-feedback` holds the 3.3b follow-up only (pilot grading findings,
+> Interview history, inline playback feedback): see `INTERVIEWS-PHASE-3.3b-FOLLOWUP.md`.
+
 - Add `interviews/practice/adaptation.ts` with one server-owned policy. It consumes
   a validated completed assessment; it never reads earlier standalone run
   answers/grades as context. Existing recent question-exposure avoidance remains
@@ -253,6 +258,9 @@ produce justified next steps; no unsupported live verdict, duplicate follow-up,
 unreviewed bank selection, false quotation or change to old session snapshots.
 
 ## 3.3d — Learner UI and minimum review
+
+> **Status (26 Oct 2026):** Interview history and inline per-answer feedback were delivered early in the 3.3b
+> follow-up. The rest of 3.3d depends on 3.3c and is not started.
 
 - Extend `Interviews.tsx`, `InterviewControls.tsx` and shared status interfaces;
   do not copy Elevate page logic. Default new eligible runs to conversation mode
