@@ -43,3 +43,80 @@ class InterviewAudioTests(unittest.IsolatedAsyncioTestCase):
             await anext(keep_interview_audio_alive(source(),interval=.01))
 
 if __name__=='__main__':unittest.main()
+
+
+from interview_audio import RecognizerWatch, supervise_recognizer
+
+
+def voiced(n):
+    return rtc.AudioFrame(bytes([n, 0]) * 160, 16000, 1, 160)
+
+
+class RecognizerStallTests(unittest.IsolatedAsyncioTestCase):
+    """A recognizer stream that stops returning results while the learner speaks is replaced."""
+
+    async def asyncSetUp(self):
+        self.source = asyncio.Queue()
+        self.opened, self.streams = [], []
+
+        async def audio():
+            while (frame := await self.source.get()) is not None:
+                yield frame
+        self.audio = audio()
+
+    def recognizer(self, *, dead):
+        received = []
+        self.streams.append(received)
+
+        async def stream(frames):
+            try:
+                async for frame in frames:
+                    received.append(frame)
+                    if not dead and frame.data.tobytes()[0] == 9:
+                        yield 'final'
+            finally:
+                received.append('closed')
+        return stream
+
+    async def test_speech_without_results_restarts_and_replays_what_was_said(self):
+        watch = RecognizerWatch(stall=.08)
+        streams = iter([self.recognizer(dead=True), self.recognizer(dead=False)])
+        events = supervise_recognizer(self.audio, lambda frames: next(streams)(frames), watch, self.opened.append, poll=.01)
+        reading = asyncio.ensure_future(anext(events))
+        await self.source.put(voiced(1)); await asyncio.sleep(.4)  # outside the replay margin
+        watch.speech_started()
+        spoken_at = watch.unanswered_since
+        for n in (2, 3):
+            await self.source.put(voiced(n)); await asyncio.sleep(.01)
+        await asyncio.sleep(.12)  # the stall restarts the stream
+        await self.source.put(voiced(9))
+        self.assertEqual(await asyncio.wait_for(reading, 2), 'final')
+        dead, replacement = self.streams
+        self.assertEqual(dead[-1], 'closed')  # the stalled stream was closed and got no later audio
+        bytes_of = lambda frames: [f.data.tobytes()[0] for f in frames if f != 'closed']
+        self.assertEqual(bytes_of(dead), [1, 2, 3])
+        # Audio from the unanswered speech onwards (not before it) reaches the replacement, in order.
+        self.assertEqual(bytes_of(replacement), [2, 3, 9])
+        self.assertEqual(len(self.opened), 2)
+        self.assertGreaterEqual(self.opened[1], spoken_at - .3)
+        self.assertIsNone(watch.unanswered_since)
+        await self.source.put(None)
+        with self.assertRaises(StopAsyncIteration):
+            await asyncio.wait_for(anext(events), 2)
+
+    async def test_silence_or_a_working_stream_never_restarts(self):
+        watch = RecognizerWatch(stall=.05)
+        events = supervise_recognizer(self.audio, self.recognizer(dead=False), watch, self.opened.append, poll=.01)
+        reading = asyncio.ensure_future(anext(events))
+        for n in (1, 2):
+            await self.source.put(voiced(n))
+        await asyncio.sleep(.15)  # a dead-quiet stream without speech is never treated as stalled
+        watch.speech_started(); await self.source.put(voiced(9))
+        self.assertEqual(await asyncio.wait_for(reading, 2), 'final')
+        watch.result()
+        await asyncio.sleep(.1)
+        self.assertEqual(len(self.streams), 1)
+        self.assertEqual(len(self.opened), 1)
+        await self.source.put(None)
+        with self.assertRaises(StopAsyncIteration):
+            await asyncio.wait_for(anext(events), 2)

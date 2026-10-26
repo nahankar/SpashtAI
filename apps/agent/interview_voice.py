@@ -11,7 +11,7 @@ from livekit.agents import Agent, stt, room_io
 from livekit import rtc
 from interview_capture import CaptureUnavailable, InterviewCapture, parse_control
 from interview_coordinator import InterviewCoordinator, ServerRefused
-from interview_audio import ProviderClock, keep_interview_audio_alive, INTERVIEW_SAMPLE_RATE
+from interview_audio import ProviderClock, RecognizerWatch, keep_interview_audio_alive, supervise_recognizer, INTERVIEW_SAMPLE_RATE
 from voice_backends import VoiceBackendConfig, build_interview_session
 
 logger = logging.getLogger("spashtai-agent.interview_voice")
@@ -108,10 +108,13 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
             # Withdrawn access turns the coordinator off mid-practice; the learner continues manually.
             return coordinator is not None and coordinator.active
 
+        recognizer_watch = RecognizerWatch()
+
         @session.on("user_state_changed")
         def speech_started(event):
             if event.new_state == "speaking":
                 capture.observe_speech_start(event.created_at)
+                recognizer_watch.speech_started(event.created_at)
             elif event.old_state == "speaking":
                 capture.observe_speech_end(event.created_at)
             if conversing() and (event.new_state == "speaking" or event.old_state == "speaking"):
@@ -122,9 +125,19 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
                 super().__init__(instructions="Read only saved interview questions. Wait for explicit user controls; never invent feedback.")
 
             async def stt_node(self, audio, model_settings):
-                # Each recognizer stream gets its own clock; question changes restart the stream.
+                # Each recognizer stream gets its own clock; question changes, and a stream that stops
+                # returning results while the learner speaks, restart the stream.
                 clock = ProviderClock(time.time())
-                async for event in Agent.default.stt_node(self, keep_interview_audio_alive(audio), model_settings):
+
+                def opened(at: float):
+                    nonlocal clock
+                    clock = ProviderClock(at)
+
+                recognizer_watch.reset()
+                async for event in supervise_recognizer(keep_interview_audio_alive(audio),
+                        lambda frames: Agent.default.stt_node(self, frames, model_settings), recognizer_watch, opened):
+                    if isinstance(event, stt.SpeechEvent) and event.type in {stt.SpeechEventType.FINAL_TRANSCRIPT, stt.SpeechEventType.INTERIM_TRANSCRIPT}:
+                        recognizer_watch.result()
                     if isinstance(event, stt.SpeechEvent) and event.alternatives:
                         alternative = event.alternatives[0]
                         has_words = bool(alternative.text and alternative.text.strip())
