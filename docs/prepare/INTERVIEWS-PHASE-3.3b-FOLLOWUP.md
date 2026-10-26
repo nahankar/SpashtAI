@@ -127,3 +127,34 @@ response delayed 3 s: page height and the last answer's position unchanged (0 px
 
 Roadmap status: 3.3a done locally; 3.3b and this follow-up done locally on review branches; **3.3c (adaptive
 difficulty, generated follow-ups) and the rest of 3.3d not started.**
+
+## Second human v5 practice (26 Oct 2026, run `cmvot1shp000l8p4vuw0v654x`)
+
+Handled as intended: v5 pinned; one evaluation per answer; "Can you repeat that question?" → request only;
+"I don't know." → did not know; skipped question ungraded; empty "…because." not credited; history 7 answered
+/ 1 skipped; one segment with a complete 261 s recording.
+
+UI follow-up (commit 04db037): the practice/results page now shows the same collapsed feedback under each
+saved answer (the separate section is removed), and question cards no longer show the bank's expected-depth
+authoring text (removed from the learner API; evaluators keep it in the snapshot). Verified on this saved
+session on both the practice page and History → Review.
+
+Grading reproductions (pre-registered fixture `pilot-2`, exact saved answers; Q1/Q2 are controls):
+
+| Case | v5 (current) | v7 (measured, not adopted) |
+| --- | --- | --- |
+| Q6 correct "composition rather than nested futures" beside a false "use synchronous calls" | INCORRECT; correct concept not acknowledged | same |
+| Q7 implicit reason "positive tabindex creates a competing manual order" | PARTIAL; reasoning not credited, says "no reasoning" | PARTIAL; not credited, false wording gone |
+| Q8 vague but substantive fragments | NOT_ANSWERED | NOT_ANSWERED |
+| Q1/Q2 controls (instruction echo, empty "because") | NOT_ANSWERED | NOT_ANSWERED |
+
+v7 (prompt `interview-answer-10`, built on v5 with balanced reasoning rules, whole-answer and
+no-technical-answer definitions) kept 26/26 classifications on earlier sets and stopped writing false
+"no reasoning" wording, but re-credited a false "because" reason (RS-01), credited no implicit reasoning and
+left Q6/Q8 unchanged. Three prompt revisions (v4, v6, v7) on Nova 2 Lite have moved wording, not judgement.
+
+**Unresolved (merge blockers):** REASONING judgement (both directions); acknowledging correct concepts in
+mixed answers (Q6); vague-but-substantive vs no technical answer (Q8). Options, none started: measure a
+stronger model (the registered Nova Pro comparison configuration) on the same 31 cases; or stop surfacing
+REASONING findings and gap text about reasoning to learners until the sets pass. Recording loss on refresh
+(D-1) remains open.

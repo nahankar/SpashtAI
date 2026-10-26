@@ -11,7 +11,7 @@ import { assessmentDetail, enqueueAssessment, retryAssessment, sweepAssessments 
 
 type Case = { id?: string; name?: string; qid: string; category?: string; expected: string; acceptable?: string[]; mustNotBe?: string[]
   answer: string; evidence?: string[]; mustNotQuote?: string[]; mustNotGap?: string[]; expectMisconception?: boolean; expectGap?: string; notes?: string
-  mustNotSay?: string[]; expectReasoning?: boolean; reasoningMustNotBeMet?: boolean; expectedKind?: string; expectAcknowledged?: string[] }
+  mustNotSay?: string[]; expectReasoning?: boolean; reasoningMustNotBeMet?: boolean; expectStrength?: string[]; expectedKind?: string; expectAcknowledged?: string[] }
 type Fixture = { fixtureVersion: string; reviewer?: string; questions?: Record<string, { revision: number; guidanceIssues: string[] }>; cases: Case[] }
 type Result = { classification?: string; criteria?: { criterion: string; finding: string; evidence: string[] }[]; strengths?: string[]
   gaps?: string[]; misconceptions?: string[]; uncertainty?: string[]; guidance?: string; responseKind?: string; next?: { action: string; topic: string | null; source: string } }
@@ -57,6 +57,8 @@ function review(test: Case, answer: string, result: Result | null) {
     reasoningCredited: test.expectReasoning === undefined ? null : (result.criteria ?? []).some(c => c.criterion === 'REASONING' && c.finding !== 'NOT_ASSESSED'),
     // A stated reason that is false or empty must never be credited as demonstrated reasoning.
     reasoningNotOverCredited: test.reasoningMustNotBeMet ? !(result.criteria ?? []).some(c => c.criterion === 'REASONING' && c.finding === 'MET') : null,
+    // A correct concept inside a mixed answer must be named under strengths, not only in an explanation.
+    strengthAcknowledged: test.expectStrength?.length ? test.expectStrength.every(t => lower(result.strengths).includes(t.toLowerCase())) : null,
     responseKindMatches: test.expectedKind === undefined ? null : result.responseKind === test.expectedKind,
     acknowledged: test.expectAcknowledged?.length ? test.expectAcknowledged.every(t => lower([...(result.strengths ?? []), ...(result.criteria ?? []).map(c => (c as { explanation?: string }).explanation ?? '')]).includes(t.toLowerCase())) : null,
   }

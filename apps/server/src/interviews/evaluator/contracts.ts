@@ -32,6 +32,9 @@ export const LEARNER_POLICIES: Record<string, LearnerPolicy> = {
   // Measured, not adopted: stopped over-crediting false or empty reasons but then credited no reasoning at all.
   'learner-evaluation-6': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova2-lite-learner-6', modelId: 'us.amazon.nova-2-lite-v1:0', region: 'us-east-1', label: 'Nova 2 Lite · learner grading 6',
     prompt: 'interview-answer-9', schema: 'interview-result-3', rubric: 'bank-guidance-3', policy: 'learner-evaluation-6', temperature: 0, maxTokens: 2000, timeoutMs: 20_000 } },
+  // Measured, not adopted: removed false 'no reasoning' wording but still missed pilot-2 Q6/Q7/Q8 and over-credited RS-01.
+  'learner-evaluation-7': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova2-lite-learner-7', modelId: 'us.amazon.nova-2-lite-v1:0', region: 'us-east-1', label: 'Nova 2 Lite · learner grading 7',
+    prompt: 'interview-answer-10', schema: 'interview-result-3', rubric: 'bank-guidance-3', policy: 'learner-evaluation-7', temperature: 0, maxTokens: 2000, timeoutMs: 20_000 } },
 }
 export const CURRENT_LEARNER_POLICY = 'learner-evaluation-5'
 // Admins can preview a learner policy through the accounted Admin test path. learner-evaluation-1

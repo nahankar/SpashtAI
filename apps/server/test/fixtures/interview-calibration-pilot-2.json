@@ -1,0 +1,119 @@
+{
+  "fixtureVersion": "pilot-2",
+  "preRegistered": "Second human v5 microphone practice (run cmvot1shp000l8p4vuw0v654x, 26 Oct 2026); answers copied exactly from the saved snapshots. Labels and checks fixed before any run. Q1/Q2 are controls that must stay NOT_ANSWERED.",
+  "reviewer": "Claude (AI) against the saved bank guidance and the user's confirmed findings. Not an independent human expert review.",
+  "namespace": "automation-pilot",
+  "questions": {
+    "PY-NEW-010": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DE-NEW-016": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DEV-NEW-016": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "WEB-NEW-099": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DE-NEW-001": {
+      "revision": 2,
+      "guidanceIssues": []
+    }
+  },
+  "cases": [
+    {
+      "id": "P2-06",
+      "qid": "DEV-NEW-016",
+      "category": "mixed-correct-and-false",
+      "expected": "PARTIAL",
+      "acceptable": [
+        "PARTIAL",
+        "INCORRECT"
+      ],
+      "mustNotBe": [
+        "CORRECT",
+        "NOT_ANSWERED"
+      ],
+      "answer": "And asynchronous dependent call needs composition rather than nested future values.\nThe stated misconception is a false, and we should use synchronous calls whenever possible.",
+      "expectMisconception": true,
+      "expectStrength": [
+        "compos"
+      ],
+      "mustNotSay": [
+        "no explanation of why asynchronous dependent calls need composition"
+      ],
+      "notes": "First sentence is correct (dependent async calls need composition, not nested futures); 'use synchronous calls whenever possible' is false. The correct concept must be acknowledged."
+    },
+    {
+      "id": "P2-07",
+      "qid": "WEB-NEW-099",
+      "category": "fragmented-implicit-reasoning",
+      "expected": "PARTIAL",
+      "acceptable": [
+        "PARTIAL",
+        "CORRECT"
+      ],
+      "mustNotBe": [
+        "INCORRECT",
+        "NOT_ANSWERED"
+      ],
+      "answer": "Keyboard order follows semantic controls.\nAnd\nDom position.\nPositive TB index.\nCreates\nUh, competing manual order?\nUh, the example.\nI don't have one.\nMaybe, I don't know.",
+      "expectReasoning": true,
+      "mustNotSay": [
+        "does not provide any reasoning",
+        "lacks reasoning",
+        "no reasoning",
+        "does not explain why"
+      ],
+      "notes": "'Positive TB index. Creates ... competing manual order' is the reason positive tabindex is discouraged."
+    },
+    {
+      "id": "P2-08",
+      "qid": "DE-NEW-001",
+      "category": "vague-substantive-fragments",
+      "expected": "PARTIAL",
+      "acceptable": [
+        "PARTIAL",
+        "INCORRECT"
+      ],
+      "mustNotBe": [
+        "NOT_ANSWERED",
+        "CORRECT"
+      ],
+      "answer": "Packed tables are the real data.\nUm,\nWhich are specific to any artifact dimensions can be\nCreated, derived.\nAcross the data.\ncombination of the data aggregation of the data.\nAgainst any specific\nOther fields, so multiple dimensions can be created.\nTo query all of the data at once, instead of the basic rows and columns that 1 may typically do.",
+      "mustNotQuote": [
+        "grain",
+        "measure"
+      ],
+      "notes": "Vague but makes claims (fact tables hold the real data; dimensions derived across the data; aggregation). Grade those claims; do not credit grain or measures, which are not stated. 'Packed' is a mishearing of 'fact'."
+    },
+    {
+      "id": "P2-01",
+      "qid": "PY-NEW-010",
+      "category": "control-guidance-echo",
+      "expected": "NOT_ANSWERED",
+      "acceptable": [
+        "NOT_ANSWERED"
+      ],
+      "answer": "None defaults with concrete.\nAnd standard limitation, a clear mechanism.\nAnd the current application are sufficient.",
+      "notes": "Control: repeats instruction wording; no technical claim. Must not be upgraded."
+    },
+    {
+      "id": "P2-02",
+      "qid": "DE-NEW-016",
+      "category": "control-empty-because",
+      "expected": "NOT_ANSWERED",
+      "acceptable": [
+        "NOT_ANSWERED"
+      ],
+      "reasoningMustNotBeMet": true,
+      "answer": "Joint types use the concrete case, because.\nThe identity, the incorrect assumption and its consequence.\nBasic behavior is good.",
+      "notes": "Control: empty 'because' plus instruction wording."
+    }
+  ]
+}

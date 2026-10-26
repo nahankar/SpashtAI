@@ -78,9 +78,22 @@ const STATED_REASONS_9 = `statedReasons, when present, lists passages of candida
 Reasoning does not need causal words: a correct explanation of how or why something behaves (a mechanism, a contrast, a consequence) is reasoning. Quote it under REASONING even when statedReasons is absent. Never write that the answer gives no reasoning when it explains how or why.`
 if (!LEARNER_PROMPT_8.includes(STATED_REASONS_8)) throw new Error('interview-answer-9 base text changed')
 export const LEARNER_PROMPT_9 = LEARNER_PROMPT_8.replace(STATED_REASONS_8, STATED_REASONS_9)
+// learner-evaluation-7: the second human v5 practice showed a correct concept ignored beside a false
+// claim, implicit reasoning reported as missing and a vague but substantive answer graded as no answer.
+// Built on v5's text (v6 under-credited reasoning); the reasoning rule is balanced with generic examples.
+const STATED_REASONS_10 = `Reasoning is any statement of why or how something behaves: a cause, mechanism, contrast or consequence, with or without words like "because". statedReasons, when present, points to passages with causal wording; it is a pointer, not a verdict. Assess REASONING on the most relevant such statement in the whole answer:
+- MET when it is technically correct and explains what the question asks; PARTIAL when correct but covering only part of it.
+- NOT_MET when it is false or explains the wrong thing; quote it and list the false claim under misconceptions.
+- NOT_ASSESSED only when the answer has no such statement, or only an empty justification.
+Generic examples (not this question): "An index lets the database seek to matching rows instead of scanning the whole table" is valid reasoning without "because" (MET). "Use an index because it is better" is an empty justification (NOT_ASSESSED). "Use an index because it makes writes faster" is a false reason (NOT_MET).
+Never write that reasoning or an explanation is missing when the answer states why or how; never credit a reason that is false or empty.`
+const WHOLE_ANSWER_10 = `Grade the whole saved answer. A false claim never erases correct ones: name every correct, relevant concept under strengths even when the answer also asserts a misconception. When the answer's main relevant point is correct and another claim is false, the answer is PARTIAL; it is INCORRECT only when the central claim about what the question asks is false.
+NOT_ANSWERED means the answer makes no technical claim about the question: it declines, asks for something, only repeats instruction or guidance wording (for example "a concrete case", "a clear mechanism", "the incorrect assumption and its consequence"), or gives only empty justifications. If a fragmented or vague answer makes at least one technical claim about the subject, grade that claim (PARTIAL when it is relevant and correct, INCORRECT when it is false) instead of NOT_ANSWERED. Do not upgrade vague words that make no claim, and do not complete fragments with meaning the candidate did not state.`
+if (!LEARNER_PROMPT_8.includes(STATED_REASONS_8)) throw new Error('interview-answer-10 base text changed')
+export const LEARNER_PROMPT_10 = LEARNER_PROMPT_8.replace(STATED_REASONS_8, `${STATED_REASONS_10}\n${WHOLE_ANSWER_10}`)
 // Prompt text is part of its version: editing an entry requires a new ID (sha256 frozen in tests).
 export const PROMPTS: Record<string, string> = { 'interview-answer-4': SYSTEM_PROMPT, 'interview-answer-5': LEARNER_PROMPT_5, 'interview-answer-6': LEARNER_PROMPT_6,
-  'interview-answer-7': LEARNER_PROMPT_7, 'interview-answer-8': LEARNER_PROMPT_8, 'interview-answer-9': LEARNER_PROMPT_9 }
+  'interview-answer-7': LEARNER_PROMPT_7, 'interview-answer-8': LEARNER_PROMPT_8, 'interview-answer-9': LEARNER_PROMPT_9, 'interview-answer-10': LEARNER_PROMPT_10 }
 function userMessage(question: QuestionSnapshot, answer: string, assistance: string, rubric: string) {
   if (rubric !== 'bank-guidance-2' && rubric !== 'bank-guidance-3') return { question, candidateAnswer: answer, assistance }
   const { questionText, track, topic, difficulty, experienceBand } = question

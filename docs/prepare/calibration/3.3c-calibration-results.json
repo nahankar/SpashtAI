@@ -1,7 +1,7 @@
 {
  "generated": "2026-10-25",
  "path": "Admin preview through the accounted Admin test path, real Bedrock (Nova 2 Lite, us-east-1)",
- "note": "Small pre-registered development set. Agreement on this sample is not a calibration claim. Admin cap raised locally for these batches only and restored; every call accounted. 26 Oct: reasoning-1 added (meaning, not keywords); v6 measured and not adopted.",
+ "note": "Small pre-registered development set. Agreement on this sample is not a calibration claim. Admin cap raised locally for these batches only and restored; every call accounted. 26 Oct: reasoning-1 added (meaning, not keywords); v6 measured and not adopted. pilot-2 (second human v5 practice) added; v7 measured and not adopted.",
  "runs": [
   {
    "run": "pilot-1 \u00b7 learner-evaluation-3 (pinned baseline)",
@@ -1609,6 +1609,689 @@
       "acceptable": true,
       "forbidden": false,
       "quotesExact": true,
+      "misconceptionReported": false,
+      "unexpectedMisconception": false
+     }
+    }
+   ]
+  },
+  {
+   "run": "pilot-2 \u00b7 v5 (current)",
+   "summary": {
+    "cases": 5,
+    "completed": 5,
+    "agreement": 4,
+    "forbiddenClassification": 1,
+    "invalidOutputJobs": 0,
+    "providerFailureJobs": 0,
+    "invocations": 5,
+    "modelLatencyMs": {
+     "p50": 2309,
+     "p95": 2633,
+     "max": 2633
+    },
+    "tokens": {
+     "input": 9423,
+     "output": 1359,
+     "invocationsWithUnknownUsage": 0
+    },
+    "quotesExact": true
+   },
+   "cases": [
+    {
+     "id": "P2-06",
+     "category": "mixed-correct-and-false",
+     "expected": "PARTIAL",
+     "actual": "INCORRECT",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "misconceptionReported": true,
+      "unexpectedMisconception": false,
+      "forbiddenWording": false,
+      "strengthAcknowledged": false
+     }
+    },
+    {
+     "id": "P2-07",
+     "category": "fragmented-implicit-reasoning",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false,
+      "forbiddenWording": true,
+      "reasoningCredited": false
+     }
+    },
+    {
+     "id": "P2-08",
+     "category": "vague-substantive-fragments",
+     "expected": "PARTIAL",
+     "actual": "NOT_ANSWERED",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": false,
+      "forbidden": true,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false
+     }
+    },
+    {
+     "id": "P2-01",
+     "category": "control-guidance-echo",
+     "expected": "NOT_ANSWERED",
+     "actual": "NOT_ANSWERED",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false
+     }
+    },
+    {
+     "id": "P2-02",
+     "category": "control-empty-because",
+     "expected": "NOT_ANSWERED",
+     "actual": "NOT_ANSWERED",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false,
+      "reasoningNotOverCredited": true
+     }
+    }
+   ]
+  },
+  {
+   "run": "pilot-2 \u00b7 v7 (measured, not adopted)",
+   "summary": {
+    "cases": 5,
+    "completed": 5,
+    "agreement": 4,
+    "forbiddenClassification": 1,
+    "invalidOutputJobs": 0,
+    "providerFailureJobs": 0,
+    "invocations": 5,
+    "modelLatencyMs": {
+     "p50": 2116,
+     "p95": 2574,
+     "max": 2574
+    },
+    "tokens": {
+     "input": 11118,
+     "output": 1354,
+     "invocationsWithUnknownUsage": 0
+    },
+    "quotesExact": true
+   },
+   "cases": [
+    {
+     "id": "P2-06",
+     "category": "mixed-correct-and-false",
+     "expected": "PARTIAL",
+     "actual": "INCORRECT",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "misconceptionReported": true,
+      "unexpectedMisconception": false,
+      "forbiddenWording": false,
+      "strengthAcknowledged": false
+     }
+    },
+    {
+     "id": "P2-07",
+     "category": "fragmented-implicit-reasoning",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false,
+      "forbiddenWording": false,
+      "reasoningCredited": false
+     }
+    },
+    {
+     "id": "P2-08",
+     "category": "vague-substantive-fragments",
+     "expected": "PARTIAL",
+     "actual": "NOT_ANSWERED",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": false,
+      "forbidden": true,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false
+     }
+    },
+    {
+     "id": "P2-01",
+     "category": "control-guidance-echo",
+     "expected": "NOT_ANSWERED",
+     "actual": "NOT_ANSWERED",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false
+     }
+    },
+    {
+     "id": "P2-02",
+     "category": "control-empty-because",
+     "expected": "NOT_ANSWERED",
+     "actual": "NOT_ANSWERED",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false,
+      "reasoningNotOverCredited": true
+     }
+    }
+   ]
+  },
+  {
+   "run": "reasoning-1 \u00b7 v7",
+   "summary": {
+    "cases": 6,
+    "completed": 6,
+    "agreement": 6,
+    "forbiddenClassification": 0,
+    "invalidOutputJobs": 0,
+    "providerFailureJobs": 0,
+    "invocations": 6,
+    "modelLatencyMs": {
+     "p50": 2214,
+     "p95": 3061,
+     "max": 3061
+    },
+    "tokens": {
+     "input": 13295,
+     "output": 2009,
+     "invocationsWithUnknownUsage": 0
+    },
+    "quotesExact": true
+   },
+   "cases": [
+    {
+     "id": "RS-01",
+     "category": "incorrect-causality",
+     "expected": "INCORRECT",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "reasoningFinding": "MET",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false,
+      "reasoningNotOverCredited": false
+     }
+    },
+    {
+     "id": "RS-02",
+     "category": "empty-because",
+     "expected": "NOT_ANSWERED",
+     "actual": "NOT_ANSWERED",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false,
+      "reasoningNotOverCredited": true
+     }
+    },
+    {
+     "id": "RS-03",
+     "category": "implicit-valid-reasoning",
+     "expected": "CORRECT",
+     "actual": "CORRECT",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false,
+      "forbiddenWording": false,
+      "reasoningCredited": false
+     }
+    },
+    {
+     "id": "RS-04",
+     "category": "incorrect-causality",
+     "expected": "INCORRECT",
+     "actual": "INCORRECT",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "misconceptionReported": true,
+      "unexpectedMisconception": false,
+      "reasoningNotOverCredited": true
+     }
+    },
+    {
+     "id": "RS-05",
+     "category": "implicit-valid-reasoning",
+     "expected": "CORRECT",
+     "actual": "CORRECT",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false,
+      "forbiddenWording": false,
+      "reasoningCredited": false
+     }
+    },
+    {
+     "id": "RS-06",
+     "category": "empty-because",
+     "expected": "NOT_ANSWERED",
+     "actual": "NOT_ANSWERED",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false,
+      "reasoningNotOverCredited": true
+     }
+    }
+   ]
+  },
+  {
+   "run": "pilot-1 \u00b7 v7",
+   "summary": {
+    "cases": 8,
+    "completed": 8,
+    "agreement": 8,
+    "forbiddenClassification": 0,
+    "invalidOutputJobs": 0,
+    "providerFailureJobs": 0,
+    "invocations": 5,
+    "modelLatencyMs": {
+     "p50": 2383,
+     "p95": 2612,
+     "max": 2612
+    },
+    "tokens": {
+     "input": 11171,
+     "output": 1731,
+     "invocationsWithUnknownUsage": 0
+    },
+    "quotesExact": true
+   },
+   "cases": [
+    {
+     "id": "P1-01",
+     "category": "terse-reason",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false,
+      "forbiddenWording": false,
+      "reasoningCredited": false
+     }
+    },
+    {
+     "id": "P1-02",
+     "category": "fragmented-transcript",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false,
+      "forbiddenWording": false
+     }
+    },
+    {
+     "id": "P1-03",
+     "category": "request-repeat",
+     "expected": "NOT_ANSWERED",
+     "actual": "NOT_ANSWERED",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false
+     }
+    },
+    {
+     "id": "P1-04",
+     "category": "request-skip",
+     "expected": "NOT_ANSWERED",
+     "actual": "NOT_ANSWERED",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false
+     }
+    },
+    {
+     "id": "P1-05",
+     "category": "explicit-dont-know",
+     "expected": "NOT_ANSWERED",
+     "actual": "NOT_ANSWERED",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false
+     }
+    },
+    {
+     "id": "P1-06",
+     "category": "embedded-request-correct",
+     "expected": "CORRECT",
+     "actual": "CORRECT",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false
+     }
+    },
+    {
+     "id": "P1-07",
+     "category": "embedded-skip-word",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false
+     }
+    },
+    {
+     "id": "P1-08",
+     "category": "fragmented-transcript",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false,
+      "forbiddenWording": false
+     }
+    }
+   ]
+  },
+  {
+   "run": "reviewed-1 subset \u00b7 v7",
+   "summary": {
+    "cases": 7,
+    "completed": 7,
+    "agreement": 7,
+    "forbiddenClassification": 0,
+    "invalidOutputJobs": 0,
+    "providerFailureJobs": 0,
+    "invocations": 7,
+    "modelLatencyMs": {
+     "p50": 2383,
+     "p95": 2875,
+     "max": 2875
+    },
+    "tokens": {
+     "input": 15499,
+     "output": 2557,
+     "invocationsWithUnknownUsage": 0
+    },
+    "quotesExact": true
+   },
+   "cases": [
+    {
+     "id": "R1-04",
+     "category": "concise-correct",
+     "expected": "CORRECT",
+     "actual": "CORRECT",
+     "status": "COMPLETED",
+     "reasoningFinding": "MET",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false
+     }
+    },
+    {
+     "id": "R1-05",
+     "category": "partial",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false
+     }
+    },
+    {
+     "id": "R1-06",
+     "category": "prompt-injection",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false
+     }
+    },
+    {
+     "id": "R1-08",
+     "category": "central-error",
+     "expected": "INCORRECT",
+     "actual": "INCORRECT",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "misconceptionReported": true,
+      "unexpectedMisconception": false
+     }
+    },
+    {
+     "id": "R1-13",
+     "category": "fluent-incorrect",
+     "expected": "INCORRECT",
+     "actual": "INCORRECT",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "misconceptionReported": true,
+      "unexpectedMisconception": false
+     }
+    },
+    {
+     "id": "R1-14",
+     "category": "optional-depth-omitted",
+     "expected": "CORRECT",
+     "actual": "CORRECT",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false
+     }
+    },
+    {
+     "id": "R1-16",
+     "category": "partial",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false
+     }
+    }
+   ]
+  },
+  {
+   "run": "heldout-1 subset \u00b7 v7",
+   "summary": {
+    "cases": 5,
+    "completed": 5,
+    "agreement": 5,
+    "forbiddenClassification": 0,
+    "invalidOutputJobs": 0,
+    "providerFailureJobs": 0,
+    "invocations": 5,
+    "modelLatencyMs": {
+     "p50": 2331,
+     "p95": 2867,
+     "max": 2867
+    },
+    "tokens": {
+     "input": 11001,
+     "output": 1724,
+     "invocationsWithUnknownUsage": 0
+    },
+    "quotesExact": true
+   },
+   "cases": [
+    {
+     "id": "H1-02",
+     "category": "fluent-incorrect",
+     "expected": "INCORRECT",
+     "actual": "INCORRECT",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "misconceptionReported": true,
+      "unexpectedMisconception": false
+     }
+    },
+    {
+     "id": "H1-03",
+     "category": "spelling-grammar-partial",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false
+     }
+    },
+    {
+     "id": "H1-05",
+     "category": "prompt-injection-correct",
+     "expected": "CORRECT",
+     "actual": "CORRECT",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false
+     }
+    },
+    {
+     "id": "H1-09",
+     "category": "near-abstention-with-idea",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
+      "unexpectedMisconception": false
+     }
+    },
+    {
+     "id": "H1-10",
+     "category": "mixed-secondary-error",
+     "expected": "PARTIAL",
+     "actual": "PARTIAL",
+     "status": "COMPLETED",
+     "reasoningFinding": "NOT_ASSESSED",
+     "checks": {
+      "acceptable": true,
+      "forbidden": false,
+      "forbiddenQuote": false,
       "misconceptionReported": false,
       "unexpectedMisconception": false
      }
