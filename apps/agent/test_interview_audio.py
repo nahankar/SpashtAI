@@ -269,3 +269,72 @@ class RecognizerWatchTests(unittest.TestCase):
         self.now = 102.0; self.watch.new_stream()
         self.assertTrue(self.watch.speaking); self.assertIsNone(self.watch.committed_until); self.assertEqual(self.watch.restarts, 0)
         self.now = 108.0; self.assertTrue(self.watch.stalled())
+
+
+class RecognizerTeardownTests(unittest.IsolatedAsyncioTestCase):
+    """Closing the supervisor leaves no running task and no unretrieved exception on the event loop."""
+
+    async def asyncSetUp(self):
+        import gc
+        self.gc = gc
+        self.loop_errors = []
+        loop = asyncio.get_running_loop()
+        self.previous_handler = loop.get_exception_handler()
+        loop.set_exception_handler(lambda _loop, context: self.loop_errors.append(context.get('message', '')))
+        self.baseline = set(asyncio.all_tasks())
+
+    async def asyncTearDown(self):
+        asyncio.get_running_loop().set_exception_handler(self.previous_handler)
+
+    async def assert_clean(self):
+        for _ in range(5):
+            await asyncio.sleep(0)
+        self.gc.collect()  # unretrieved task exceptions are reported when the task is collected
+        await asyncio.sleep(0)
+        self.assertEqual(self.loop_errors, [])
+        leftover = [t for t in asyncio.all_tasks() - self.baseline if t is not asyncio.current_task() and not t.done()]
+        self.assertEqual(leftover, [])
+
+    async def run_and_close(self, recognizer, *, during):
+        source = asyncio.Queue()
+
+        async def audio():
+            while (frame := await source.get()) is not None:
+                yield frame
+        watch = RecognizerWatch(stall=.05)
+        events = supervise_recognizer(audio(), recognizer, watch, lambda at: None, poll=.01)
+        reading = asyncio.ensure_future(anext(events))
+        watch.speech_started()
+        for n in range(1, 4):
+            await source.put(voiced(n)); await asyncio.sleep(.01)
+        await during()
+        # A question change or disconnect: the consumer is cancelled, then the node's iterator is closed.
+        reading.cancel()
+        await asyncio.gather(reading, return_exceptions=True)
+        await events.aclose()
+        return recognizer
+
+    async def test_closing_while_a_read_is_pending_settles_every_task(self):
+        recognizer = Recognizer()  # healthy but silent: the read is pending when the consumer goes away
+        await self.run_and_close(recognizer, during=lambda: asyncio.sleep(.02))
+        self.assertTrue(recognizer.closed)
+        await self.assert_clean()
+
+    async def test_closing_during_a_stall_restart_settles_every_task(self):
+        streams = iter([Recognizer(stall_after=0), Recognizer(stall_after=0), Recognizer(stall_after=0)])
+        opened = []
+
+        def recognizer(frames):
+            stream = next(streams); opened.append(stream); return stream(frames)
+        await self.run_and_close(recognizer, during=lambda: asyncio.sleep(.12))  # at least one replacement opened
+        self.assertGreaterEqual(len(opened), 2)
+        self.assertTrue(all(stream.closed for stream in opened))
+        await self.assert_clean()
+
+    async def test_closing_after_the_audio_ends_settles_every_task(self):
+        source_done = asyncio.Event()
+
+        async def during():
+            source_done.set()
+        await self.run_and_close(Recognizer({3: 'final'}), during=during)
+        await self.assert_clean()

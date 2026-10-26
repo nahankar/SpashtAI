@@ -159,8 +159,17 @@ async def supervise_recognizer(audio: AsyncIterable[rtc.AudioFrame], open_stream
                 yield frame
         return frames()
 
+    async def settle(task) -> None:
+        """Cancel a pending read and await it, so no task outlives its stream or leaves an unretrieved exception."""
+        if task is None:
+            return
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
     pumping = asyncio.create_task(pump())
     events = None
+    upcoming = None
     replayed: list = []
     reported = False
     try:
@@ -173,13 +182,12 @@ async def supervise_recognizer(audio: AsyncIterable[rtc.AudioFrame], open_stream
                 while not (await asyncio.wait({upcoming}, timeout=poll))[0]:
                     if watch.stalled():
                         reason = "no_result_while_speaking"
-                        upcoming.cancel()
-                        await asyncio.gather(upcoming, return_exceptions=True)
+                        await settle(upcoming)
                         break
                 if reason is not None:
                     break
                 try:
-                    event = upcoming.result()
+                    event, upcoming = upcoming.result(), None
                 except StopAsyncIteration:
                     if pumping.done():
                         return  # the audio ended (teardown or question change): nothing to recover
@@ -210,14 +218,18 @@ async def supervise_recognizer(audio: AsyncIterable[rtc.AudioFrame], open_stream
                 reported = True
                 on_issue("unavailable", {"reason": reason})
             on_open(first)
+            await settle(upcoming)
+            upcoming = None
             with contextlib.suppress(Exception):
                 await events.aclose()
             if reason.startswith("stream_") and watch.restarts > 1:
                 # A stream that fails at once again (for example credentials) is retried with backoff, not in a loop.
                 await asyncio.sleep(min(.5 * 2 ** (watch.restarts - 1), 5.0))
     finally:
-        pumping.cancel()
-        await asyncio.gather(pumping, return_exceptions=True)
+        # Teardown (question change, disconnect, or a cancelled consumer): the pending read first, then the
+        # recognizer stream, then the audio pump.
+        await settle(upcoming)
+        await settle(pumping)
         if events is not None:
             with contextlib.suppress(Exception):
                 await events.aclose()
