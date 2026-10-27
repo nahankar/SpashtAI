@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { feedbackSummary, unavailableReason, UNAVAILABLE_DETAIL } from './feedback-summary'
+import { feedbackSummary, transcriptWarning, unavailableReason, UNAVAILABLE_DETAIL } from './feedback-summary'
 import { PENDING_FINDING, type LearnerFinding } from './useInterviewFindings'
 
 const SUMMARY = 'block rounded-lg px-3 py-1.5 text-xs font-medium text-muted-foreground'
@@ -32,7 +32,9 @@ export const InterviewFeedbackDisclosure = memo(function InterviewFeedbackDisclo
     </summary>
     <div className="space-y-2.5 border-t px-3 py-2.5">
       {PENDING_FINDING.includes(finding.status) && <p>Evaluation is in progress. Playback is unaffected; the result appears here when it is ready.</p>}
-      {reason && <p>{UNAVAILABLE_DETAIL[reason]} Your saved answer and recording are unaffected.</p>}
+      {reason === 'transcript'
+        ? <><p>{UNAVAILABLE_DETAIL.transcript}</p>{transcriptWarning(finding) && <p className="text-orange-700 dark:text-orange-300">{transcriptWarning(finding)}</p>}</>
+        : reason && <p>{UNAVAILABLE_DETAIL[reason]} Your saved answer and recording are unaffected.</p>}
       {finding.status === 'INCOMPLETE' && <p>This answer was not finished, so it was not evaluated.</p>}
       {finding.afterExample && <p className="text-orange-700 dark:text-orange-300">Given after seeing an example, so it does not establish independent recall.</p>}
       {finding.assistance === 'HINT' && <p className="text-orange-700 dark:text-orange-300">Hint-assisted answer.</p>}

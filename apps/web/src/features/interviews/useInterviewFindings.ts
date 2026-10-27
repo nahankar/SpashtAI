@@ -3,7 +3,9 @@ import { apiClient } from '@/lib/api-client'
 import type { Assessment } from '@/lib/interview-evaluator'
 
 export type LearnerFinding = { attemptId: string; index: number; question: string; status: string; errorCode: string | null; assistance: string; afterExample: boolean;
-  result: Omit<NonNullable<Assessment['result']>, 'next'> | null }
+  result: Omit<NonNullable<Assessment['result']>, 'next'> | null
+  /** Present when speech recognition missed part of the answer (the answer is then never graded). */
+  transcriptIntegrity?: { gapSpeechSeconds: number; unresolved: boolean; unconfirmedAccepted: boolean; recordingAvailable: boolean } }
 
 export const PENDING_FINDING = ['PENDING', 'RUNNING']
 

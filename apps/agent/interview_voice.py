@@ -114,6 +114,14 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
         def recognition_issue(kind: str, detail: dict):
             if conversing():
                 coordinator.recognition_event(kind, detail)
+            # Durable integrity record on the affected answer: a confirmed gap (speech seconds beyond the replay
+            # bound), recognition that stopped responding, and its recovery (which never clears an earlier gap).
+            if kind == "restarted" and detail.get("lostSeconds"):
+                capture.record_issue("GAP", detail["lostSeconds"])
+            elif kind == "unavailable":
+                capture.record_issue("RECOGNITION_UNAVAILABLE")
+            elif kind == "recovered":
+                capture.record_issue("RECOGNITION_RECOVERED")
             # Tell the learner when recognition is not recovering, or when audio beyond the replay bound was not
             # transcribed; a successful silent restart needs no notice.
             if kind == "restarted" and not detail.get("lostSeconds"):

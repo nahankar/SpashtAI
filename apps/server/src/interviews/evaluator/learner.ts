@@ -7,6 +7,7 @@ import { lockWritableSession } from '../../lib/sessionDiscard'
 import { BankError } from '../bank/csv'
 import { CURRENT_LEARNER_POLICY, LEARNER_POLICIES, deterministicResult, hash, explicitDontKnow, questionSnapshotSchema, resultSchema } from './contracts'
 import { evaluateAnswer, EvaluationFailure, type Invocation } from './model'
+import { transcriptIntegrity } from '../practice/integrity'
 
 type Tx = Prisma.TransactionClient
 const json = (v: unknown) => v as Prisma.InputJsonValue
@@ -14,6 +15,12 @@ const today = () => new Date().toISOString().slice(0, 10)
 export const LEARNER_LIMITS = { perUser: 30, global: 300, concurrent: 2, attempts: 2, leaseMs: 60_000 }
 const persistedResult = resultSchema.extend({ validationNotes: z.array(z.string().max(2000)).max(6).optional(), responseKind: z.enum(['REQUEST_ONLY', 'DONT_KNOW']).optional() })
 const scopes = (ownerId: string) => ['learner-global', `learner-${hash(ownerId)}`]
+/** Current integrity of an answer from its append-only events (a late event still counts). */
+async function attemptIntegrity(tx: Tx, attemptId: string) {
+  return transcriptIntegrity(await tx.interviewTranscriptIssue.findMany({ where: { attemptId } }))
+}
+const savedIncomplete = (value: Prisma.JsonValue | null) =>
+  !!value && typeof value === 'object' && !Array.isArray(value) && (value as { incomplete?: unknown }).incomplete === true
 
 export async function learnerEvaluationAccess(ownerId: string, tx: Tx = prisma) {
   for (const feature of ['interviews', 'interview_voice', 'interview_adaptive']) {
@@ -61,9 +68,12 @@ export async function enqueueLearnerAssessment(tx: Tx, snapshotId: string, polic
   const pinned = typeof policy === 'object' && !Array.isArray(policy) ? policy : {}
   const config = entry?.config ?? (pinned.config && typeof pinned.config === 'object' ? pinned.config : {})
   const inputKey = hash({ version: pinned.version ?? null, snapshotId, attemptId: snapshot.attemptId, ownerId: snapshot.ownerId,
-    source: snapshot.source, questionHash: snapshot.questionHash, answerHash: snapshot.answerHash, assistance: snapshot.assistance, config })
+    source: snapshot.source, questionHash: snapshot.questionHash, answerHash: snapshot.answerHash, assistance: snapshot.assistance, config,
+    ...(snapshot.transcriptIntegrity ? { transcriptIntegrity: snapshot.transcriptIntegrity } : {}) })
   let status = 'PENDING'; let errorCode: string | null = null; let result: unknown = null
-  if (!entry) { status = 'CANCELLED'; errorCode = 'EVALUATOR_POLICY_UNAVAILABLE' }
+  // Missing transcript is not evidence of a knowledge gap: such answers are never graded (no model call, no budget).
+  if (savedIncomplete(snapshot.transcriptIntegrity) || (await attemptIntegrity(tx, snapshot.attemptId)).incomplete) { status = 'CANCELLED'; errorCode = 'TRANSCRIPT_INCOMPLETE' }
+  else if (!entry) { status = 'CANCELLED'; errorCode = 'EVALUATOR_POLICY_UNAVAILABLE' }
   else if (!await learnerEvaluationAccess(snapshot.ownerId, tx)) { status = 'CANCELLED'; errorCode = 'PILOT_ACCESS_UNAVAILABLE' }
   else if ((result = deterministicResult(entry, snapshot.answerText))) status = 'COMPLETED'
   else {
@@ -104,7 +114,8 @@ export async function claimLearnerAssessment() {
     const policy = pinnedPolicy(run.evaluationPolicySnapshot)
     const cancel = !session || session.discardedAt ? 'SESSION_DISCARDED' : !policy ? 'EVALUATOR_POLICY_UNAVAILABLE'
       : hash(row.config) !== hash(policy.config) ? 'CONFIG_MISMATCH' : row.attempts >= LEARNER_LIMITS.attempts ? 'ATTEMPTS_EXHAUSTED'
-      : !await learnerEvaluationAccess(row.snapshot.ownerId, tx) ? 'PILOT_ACCESS_UNAVAILABLE' : null
+      : !await learnerEvaluationAccess(row.snapshot.ownerId, tx) ? 'PILOT_ACCESS_UNAVAILABLE'
+      : row.snapshot.attemptId && (await attemptIntegrity(tx, row.snapshot.attemptId)).incomplete ? 'TRANSCRIPT_INCOMPLETE' : null
     if (cancel || !policy) { await tx.interviewAssessment.update({ where: { id: row.id }, data: { status: 'CANCELLED', errorCode: cancel } }); return null }
     const leaseToken = randomUUID()
     await tx.interviewAssessment.update({ where: { id: row.id }, data: { status: 'RUNNING', attempts: { increment: 1 }, leaseToken,
@@ -131,7 +142,9 @@ export async function finishLearnerAssessment(job: Claim, invocation: Invocation
       invocationKey: job.leaseToken, assessmentId: current?.id ?? null, modelId: job.policy.config.modelId, region: job.policy.config.region, ...recorded } })
     if (!current || current.status !== 'RUNNING' || current.leaseToken !== job.leaseToken) return
     const release = { leaseToken: null, leaseUntil: null }
-    const cancel = !session || session.discardedAt ? 'SESSION_DISCARDED' : !await learnerEvaluationAccess(job.snapshot.ownerId, tx) ? 'PILOT_ACCESS_UNAVAILABLE' : null
+    const cancel = !session || session.discardedAt ? 'SESSION_DISCARDED' : !await learnerEvaluationAccess(job.snapshot.ownerId, tx) ? 'PILOT_ACCESS_UNAVAILABLE'
+      // A gap reported while the model ran: the result is not stored as a grade.
+      : job.snapshot.attemptId && (await attemptIntegrity(tx, job.snapshot.attemptId)).incomplete ? 'TRANSCRIPT_INCOMPLETE' : null
     if (cancel) { await tx.interviewAssessment.update({ where: { id: job.id }, data: { ...release, status: 'CANCELLED', errorCode: cancel } }); return }
     if (failure) {
       let retry = invocation.retryable && current.attempts < LEARNER_LIMITS.attempts
@@ -151,7 +164,8 @@ export async function learnerFindings(runId: string, ownerId: string, tx: Tx = p
   if (!run) throw new BankError(404, 'Interview not found')
   await lockWritableSession(tx, run.sessionId)
   const rows = await tx.interviewAttempt.findMany({ where: { runId }, orderBy: { index: 'asc' },
-    include: { answerSnapshots: { include: { assessment: true } } } })
+    include: { answerSnapshots: { include: { assessment: true } }, transcriptIssues: { include: { segment: { select: { id: true, audioStatus: true } } } },
+      chunks: { select: { segment: { select: { id: true, audioStatus: true } } } } } })
   const enabled = run.evaluationPolicySnapshot !== null
   // Technical feedback is shown only after the practice ends (a pause is not an end). Assessments may already
   // have run in the background; until then neither status nor content is revealed.
@@ -162,6 +176,19 @@ export async function learnerFindings(runId: string, ownerId: string, tx: Tx = p
   }
   return rows.map(a => {
     const snapshot = a.answerSnapshots[0]; const assessment = snapshot?.assessment
+    // Integrity from the durable events (and the saved summary): an affected answer is never shown as graded,
+    // even if a result was stored before a late event arrived. Stored rows are not rewritten.
+    const integrity = transcriptIntegrity(a.transcriptIssues)
+    const incomplete = !!snapshot && (integrity.incomplete || savedIncomplete(snapshot.transcriptIntegrity))
+    // Audio is described as available only when every segment this answer used has a verified upload.
+    const segments = [...new Map([...a.chunks.map(c => c.segment), ...a.transcriptIssues.map(i => i.segment)].map(g => [g.id, g])).values()]
+    const recordingAvailable = segments.length > 0 && segments.every(g => g.audioStatus === 'available')
+    const transcript = incomplete ? { transcriptIntegrity: { gapSpeechSeconds: integrity.gapSpeechSeconds, unresolved: integrity.unresolved,
+      unconfirmedAccepted: integrity.unconfirmedAccepted, recordingAvailable } } : {}
+    if (incomplete) {
+      return { attemptId: a.id, index: a.index, question: run.owner.hideTranscriptText ? '' : questionSnapshotSchema.parse(a.questionSnapshot).questionText,
+        status: 'TRANSCRIPT_INCOMPLETE', errorCode: 'TRANSCRIPT_INCOMPLETE', assistance: snapshot.assistance, afterExample: snapshot.assistance === 'EXAMPLE', result: null, ...transcript }
+    }
     const result = assessment?.status === 'COMPLETED' ? persistedResult.safeParse(assessment.result) : null
     const unassessed = a.status === 'SKIPPED' || a.status === 'INCOMPLETE' ? a.status
       : enabled && (a.status === 'PREPARED' || a.status === 'ASKED') ? 'AWAITING_ANSWER' : 'NOT_ENABLED'

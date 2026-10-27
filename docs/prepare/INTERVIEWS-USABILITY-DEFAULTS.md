@@ -67,3 +67,25 @@ reported to the learner as lost words. **Remaining risk:** a short sound cannot 
 word. A word the recognizer never transcribes within about 8 s (3 s wait + 5 s countdown) is left out of the saved
 answer, although the recording keeps it. Sustained speech (over 1.5 s) without a transcript is never finished
 automatically; the recognizer watchdog restarts the stream or reports that recognition is not responding.
+
+## Transcript integrity (persisted per answer)
+
+The agent records append-only `InterviewTranscriptIssue` events on the open answer and its segment, in the same
+ordered save queue as the answer's speech, so they reach the server before the completion receipt (a failed save
+blocks the receipt and is retried with the same event key, recorded once):
+
+| Event | Source | Transcript incomplete? |
+| --- | --- | --- |
+| `GAP` (estimated seconds of detected speech, never silence) | speech older than the 20 s replay bound when a recognizer stream was replaced | yes, permanently |
+| `RECOGNITION_UNAVAILABLE` / `RECOGNITION_RECOVERED` | repeated replacement failures / first result afterwards | yes while unrecovered; recovery never clears a gap |
+| `UNCONFIRMED_ACCEPTED` | the learner saved only confirmed speech while text was still pending | yes |
+| `NOISE_IGNORED` | the bounded wait ignored a short VAD-only sound | no (traceability only) |
+
+Events outside an open answer are dropped, never moved to the next question. The saved answer stores its integrity
+summary (`InterviewAnswerSnapshot.transcriptIntegrity`, part of the evaluation input key). An incomplete transcript
+is never sent to the model: the assessment is `CANCELLED` with `TRANSCRIPT_INCOMPLETE` (no budget used), the claim
+and result paths re-check for late events, and findings show "Not assessed · Part of this answer was not
+transcribed" without any grade. That holds even if a result was stored before a late event, and stored rows are
+never rewritten. Playback states the estimated untranscribed speech and says a recording exists only when every
+segment the answer used has a verified upload. Progression after an affected answer continues normally.
+Correcting a transcript or reassessing would need a separate, explicit, traceable operation (not implemented).

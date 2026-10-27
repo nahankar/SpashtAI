@@ -585,6 +585,7 @@ model SessionSegment {
   audioStatus          String    @default("pending") // pending | available | failed | unavailable
 
   recording SessionRecording?
+  transcriptIssues InterviewTranscriptIssue[]
   turns     SessionTurn[]
 
   createdAt DateTime @default(now())
@@ -1203,6 +1204,7 @@ model InterviewAttempt {
   chunks           InterviewAnswerChunk[]
   answerSnapshots  InterviewAnswerSnapshot[]
   captureReceipts InterviewCaptureReceipt[]
+  transcriptIssues InterviewTranscriptIssue[]
   @@unique([runId, index])
   @@unique([runId, questionId])
   @@index([runId, status])
@@ -1255,6 +1257,8 @@ model InterviewAnswerSnapshot {
   textRevision     Int @default(1)
   language         String @default("en")
   assistance       String @default("NONE")
+  // Transcript-integrity summary at the time of saving (evaluation input); NULL on earlier answers.
+  transcriptIntegrity Json?
   createdAt        DateTime @default(now())
   assessment       InterviewAssessment?
 
@@ -1372,4 +1376,20 @@ model RecordingAcknowledgment {
   acceptedAt DateTime @default(now())
 
   @@unique([userId, version])
+}
+
+// Append-only transcript-integrity events for one answer and segment (see migration 20261028090000).
+model InterviewTranscriptIssue {
+  id                String   @id @default(cuid())
+  attemptId         String
+  attempt           InterviewAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  segmentId         String
+  segment           SessionSegment @relation(fields: [segmentId], references: [id], onDelete: Cascade)
+  kind              String
+  lostSpeechSeconds Float?
+  eventKey          String
+  createdAt         DateTime @default(now())
+
+  @@unique([attemptId, eventKey])
+  @@index([segmentId])
 }

@@ -31,7 +31,7 @@ export const UNAVAILABLE_DETAIL: Record<UnavailableReason, string> = {
   budget: 'A daily evaluation limit was reached before this answer, so it was not evaluated.',
   service: 'The evaluation service could not complete this answer. No grade was invented.',
   not_enabled: 'Technical evaluation was not enabled for this answer.',
-  transcript: 'Speech recognition missed part of this answer, so it was not graded: a missing transcript is not evidence of a knowledge gap. Listen to the recording where it was saved.',
+  transcript: 'Speech recognition missed part of this answer, so it was not graded: a missing transcript is not evidence of a knowledge gap, and this is not a judgement of your answer.',
 }
 
 /** Summary text for an answer's feedback, or null when there is none to show (not enabled, skipped). */
@@ -47,4 +47,16 @@ export function feedbackSummary(finding: LearnerFinding | undefined): string | n
   // Kept as a line (not removed) so the reserved space below each answer never collapses after loading.
   if (finding.status === 'NOT_ENABLED') return 'Technical feedback · Not enabled for this practice'
   return null
+}
+
+/** Playback warning for an answer whose transcript is incomplete: an estimate of untranscribed speech, never words. */
+export function transcriptWarning(finding: LearnerFinding): string | null {
+  const t = finding.transcriptIntegrity
+  if (!t) return null
+  const parts: string[] = []
+  if (t.gapSpeechSeconds > 0) parts.push(`about ${Math.max(1, Math.round(t.gapSpeechSeconds))} seconds of speech could not be transcribed`)
+  if (t.unresolved) parts.push('speech recognition stopped responding and did not recover during this answer')
+  if (t.unconfirmedAccepted) parts.push('it was saved without speech that had not been transcribed yet')
+  const what = parts.length ? `${parts.join('; ')}.` : 'part of it could not be transcribed.'
+  return `${what.charAt(0).toUpperCase()}${what.slice(1)} ${t.recordingAvailable ? 'The recording of this answer was saved; listen to it in playback.' : 'No saved recording was confirmed for this answer.'}`
 }

@@ -74,6 +74,50 @@ class CaptureTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(loop.time()-start,MAX_BARRIER-.01)
         self.assertNotIn('and then',[b.get('text') for p,b in self.sent])
 
+    async def test_integrity_events_are_saved_in_order_before_the_receipt(self):
+        self.capture.observe_provider_transcript('Before the gap.',True)
+        self.assertTrue(self.capture.record_issue('GAP',12.37))
+        self.capture.observe_provider_transcript('After recovery.',True)
+        self.capture.record_issue('RECOGNITION_RECOVERED')
+        await self.capture.drain(self.session,'FINISH',str(uuid4()))
+        paths=[p.rsplit('/',1)[-1] for p,_ in self.sent]
+        self.assertEqual(paths,['chunks','transcript-issues','chunks','transcript-issues','receipts'])
+        gap=[b for p,b in self.sent if p.endswith('/transcript-issues')][0]
+        self.assertEqual((gap['kind'],gap['lostSpeechSeconds'],gap['segmentId']),('GAP',12.4,'segment-1'))
+        attempt=self.capture.state['attempt']['id']
+        self.assertTrue(all(p.startswith(f'/attempts/{attempt}/') for p,_ in self.sent))
+        # After the answer boundary an event belongs to no answer and is dropped, never moved to the next one.
+        self.assertFalse(self.capture.record_issue('GAP',3))
+
+    async def test_saving_without_unconfirmed_speech_or_ignoring_noise_is_recorded(self):
+        self.capture.observe_provider_transcript('Confirmed.',True)
+        self.capture.observe_provider_transcript('and then',False)
+        await self.capture.drain(self.session,'FINISH',str(uuid4()),accept_unresolved=True)
+        self.assertEqual([b['kind'] for p,b in self.sent if p.endswith('/transcript-issues')],['UNCONFIRMED_ACCEPTED'])
+        fresh=InterviewCapture(state(),self.send,AsyncMock(),settle=SETTLE,max_barrier=MAX_BARRIER,unresolved_wait=UNRESOLVED_WAIT,vad_tail=VAD_TAIL,grace=.01,poll=.005)
+        fresh.accepting=True; fresh.attached=True; self.sent.clear()
+        fresh.observe_provider_transcript('Confirmed.',True)
+        fresh.observe_speech_start(); fresh.observe_speech_end()
+        await fresh.drain(self.session,'FINISH',str(uuid4()),accept_vad_only=True)
+        self.assertEqual([b['kind'] for p,b in self.sent if p.endswith('/transcript-issues')],['NOISE_IGNORED'])
+
+    async def test_an_unsaved_integrity_event_blocks_the_receipt_and_is_retried(self):
+        failures={'left':2}  # the background save and the drain's retry both fail
+        async def flaky(path, body):
+            if path.endswith('/transcript-issues') and failures['left']:
+                failures['left']-=1; raise RuntimeError('network')
+            self.sent.append((path,body.copy())); return {'id':body.get('id','chunk')}
+        self.capture.send=flaky
+        self.capture.observe_provider_transcript('Words.',True)
+        self.capture.record_issue('GAP',5)
+        with self.assertRaisesRegex(CaptureUnavailable,'SAVE_FAILED'):
+            await self.capture.drain(self.session,'FINISH',str(uuid4()))
+        self.assertFalse(any(p.endswith('/receipts') for p,_ in self.sent))
+        await self.capture.drain(self.session,'FINISH',str(uuid4()))
+        issues=[b for p,b in self.sent if p.endswith('/transcript-issues')]
+        self.assertEqual(len(issues),1)                       # the same event, retried once with its key
+        self.assertTrue(self.sent[-1][0].endswith('/receipts'))
+
     async def test_voiced_speech_with_an_interim_waits_for_its_final(self):
         self.capture.observe_speech_start()
         self.capture.observe_provider_transcript('still speaking',False)
