@@ -42,7 +42,11 @@ async function budget(ownerId: string, tx: Tx) {
   const keys = scopes(ownerId)
   for (const [i, scope] of keys.entries()) {
     const row = await tx.interviewEvaluatorBudget.upsert({ where: { scope_day: { scope, day: today() } }, create: { scope, day: today() }, update: {} })
-    if (row.used >= (i === 0 ? LEARNER_LIMITS.global : LEARNER_LIMITS.perUser)) throw new BankError(429, 'Learner evaluation budget reached', 'EVALUATION_BUDGET_REACHED')
+    // The shared (all learners) and personal daily limits are reported separately, so a shared limit is never
+    // described as the learner's own allowance. Each model evaluation and each retry uses one unit.
+    if (row.used >= (i === 0 ? LEARNER_LIMITS.global : LEARNER_LIMITS.perUser)) {
+      throw new BankError(429, 'Learner evaluation budget reached', i === 0 ? 'EVALUATION_SHARED_BUDGET_REACHED' : 'EVALUATION_USER_BUDGET_REACHED')
+    }
   }
   await tx.interviewEvaluatorBudget.updateMany({ where: { day: today(), scope: { in: keys } }, data: { used: { increment: 1 } } })
 }
@@ -65,7 +69,7 @@ export async function enqueueLearnerAssessment(tx: Tx, snapshotId: string, polic
   else {
     try { await budget(snapshot.ownerId, tx) } catch (e) {
       if (!(e instanceof BankError) || e.status !== 429) throw e
-      status = 'FAILED'; errorCode = 'EVALUATION_BUDGET_REACHED'
+      status = 'FAILED'; errorCode = e.code ?? 'EVALUATION_BUDGET_REACHED'
     }
   }
   await tx.interviewAssessment.create({ data: { snapshotId, inputKey, config: json(config), status, errorCode,
@@ -149,6 +153,13 @@ export async function learnerFindings(runId: string, ownerId: string, tx: Tx = p
   const rows = await tx.interviewAttempt.findMany({ where: { runId }, orderBy: { index: 'asc' },
     include: { answerSnapshots: { include: { assessment: true } } } })
   const enabled = run.evaluationPolicySnapshot !== null
+  // Technical feedback is shown only after the practice ends (a pause is not an end). Assessments may already
+  // have run in the background; until then neither status nor content is revealed.
+  const session = await tx.session.findUnique({ where: { id: run.sessionId }, select: { endedAt: true } })
+  if (!session?.endedAt) {
+    return rows.map(a => ({ attemptId: a.id, index: a.index, question: run.owner.hideTranscriptText ? '' : questionSnapshotSchema.parse(a.questionSnapshot).questionText,
+      status: enabled ? 'AFTER_PRACTICE' : 'NOT_ENABLED', errorCode: null, assistance: a.assistance, afterExample: false, result: null }))
+  }
   return rows.map(a => {
     const snapshot = a.answerSnapshots[0]; const assessment = snapshot?.assessment
     const result = assessment?.status === 'COMPLETED' ? persistedResult.safeParse(assessment.result) : null

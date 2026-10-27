@@ -30,10 +30,16 @@ Practices created earlier keep their stored `maxQuestions = 8`; a trigger enforc
 attempt insert, and the run check now allows only NULL or 8. The attempt index check is `index >= 1`.
 No-repeat selection, ownership, access and evaluation budgets are unchanged.
 
-**Evaluation quota:** learner technical feedback stays limited to 30 answers per learner per day (300 across all
-learners). Longer practices can reach it. Answers past the limit are saved and labelled "Technical feedback ·
-Daily limit reached" rather than graded or shown as a generic failure, and setup states the daily limit. The quota
-was not raised.
+**Evaluation quota:** unchanged budgets: each model evaluation and each retry uses one unit of a per-learner daily
+limit (30) and a shared daily limit for all learners (300), so the number of graded answers per day is not a fixed
+promise. Answers past either limit are saved; playback names which limit applied ("Your daily evaluation limit" or
+"Shared daily evaluation limit", never presenting a shared limit as the learner's allowance) and distinguishes a
+service failure, disabled evaluation and an incomplete transcript. The setup page no longer shows a quota sentence.
+
+**When feedback appears:** technical feedback is shown only in playback after End practice succeeds, collapsed under
+each answer. During practice (and while paused) both learner assessment API paths return a neutral
+`AFTER_PRACTICE` state with no status or content; assessments may still run in the background, with no extra model
+calls. The practice page never shows feedback; after End it links to playback.
 
 ## Setup and recent history
 

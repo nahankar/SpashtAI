@@ -203,6 +203,34 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
     } finally { await prisma.user.update({ where: { id: owner }, data: { hideTranscriptText: false } }) }
     expect((await prisma.session.findUniqueOrThrow({ where: { id: r.sessionId } })).sessionPointsAwarded).toBe(false)
   })
+  it('reveals technical feedback on both learner paths only after the practice ends', async () => {
+    await enableLearner()
+    const { r, a, s } = await asked()
+    await captureCommittedTurn(a.id, turn(s.id, testAnswer))
+    await finish(r.id, a.id)
+    // The assessment runs privately in the background and completes before the practice ends.
+    const job = await learnerClaim()
+    await finishLearnerAssessment(job, { result: correctEvaluation(), inputTokens: 100, outputTokens: 50, latencyMs: 120 })
+    expect(await prisma.interviewAssessment.findUniqueOrThrow({ where: { id: job.id } })).toMatchObject({ status: 'COMPLETED' })
+    const paths = [`/practice/runs/${r.id}/assessments`, `/practice/playback/${r.sessionId}/assessments`]
+    // While unfinished (including a paused segment), neither path returns status or content.
+    await prisma.sessionSegment.update({ where: { id: s.id }, data: { endedAt: new Date() } })
+    for (const path of paths) {
+      const during = await request(app).get(path).auth(token(owner), { type: 'bearer' })
+      expect(during.status).toBe(200)
+      expect(during.body.assessments).toEqual([expect.objectContaining({ attemptId: a.id, status: 'AFTER_PRACTICE', errorCode: null, result: null })])
+      expect(JSON.stringify(during.body)).not.toMatch(/CORRECT|COMPLETED|strengths|gaps|guidance|criteria/)
+    }
+    expect((await request(app).get(paths[1]).auth(token(other, 'SUPER_ADMIN'), { type: 'bearer' })).status).toBe(404)
+    await endPractice(r.id, owner)
+    for (const path of paths) {
+      const after = await request(app).get(path).auth(token(owner), { type: 'bearer' })
+      expect(after.body.assessments[0]).toMatchObject({ status: 'COMPLETED', result: { classification: 'CORRECT' } })
+    }
+    // No extra model call was made to delay the display: still exactly one assessment, claimed once.
+    expect(await prisma.interviewAssessment.count({ where: { snapshot: { attemptId: a.id } } })).toBe(1)
+    expect((await prisma.interviewAssessment.findUniqueOrThrow({ where: { id: job.id } })).attempts).toBe(1)
+  })
   it('preserves the saved answer when learner budget is exhausted', async () => {
     await enableLearner()
     await prisma.interviewEvaluatorBudget.upsert({ where: { scope_day: { scope: `learner-${hash(owner)}`, day: learnerDay() } },
@@ -210,7 +238,7 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
     const { r, a, s } = await asked(); await captureCommittedTurn(a.id, turn(s.id, testAnswer))
     const saved = await finish(r.id, a.id)
     expect((await prisma.interviewAnswerSnapshot.findUniqueOrThrow({ where: { id: saved.id! } })).answerText).toBe(testAnswer)
-    expect(await prisma.interviewAssessment.findUnique({ where: { snapshotId: saved.id! } })).toMatchObject({ status: 'FAILED', errorCode: 'EVALUATION_BUDGET_REACHED' })
+    expect(await prisma.interviewAssessment.findUnique({ where: { snapshotId: saved.id! } })).toMatchObject({ status: 'FAILED', errorCode: 'EVALUATION_USER_BUDGET_REACHED' })
     expect(await claimLearnerAssessment()).toBeNull()
   })
   it('cancels queued learner work through the real Admin grant-revocation endpoint', async () => {
@@ -319,6 +347,7 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
     expect((row.result as { classification: string }).classification).toBe('NOT_ANSWERED')
     expect(await ownerBudget()).toBeNull()
     expect(await claimLearnerAssessment()).toBeNull()
+    await endPractice(r.id, owner)
     const findings = await request(app).get(`/practice/runs/${r.id}/assessments`).auth(token(owner), { type: 'bearer' })
     expect(findings.body.assessments[0]).toMatchObject({ status: 'COMPLETED', result: { classification: 'NOT_ANSWERED', strengths: [], misconceptions: [] } })
   })
@@ -329,6 +358,7 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
     const row = await prisma.interviewAssessment.findUniqueOrThrow({ where: { snapshotId: saved.id! }, include: { usage: true } })
     expect(row).toMatchObject({ status: 'COMPLETED', attempts: 0 }); expect(row.usage).toHaveLength(0)
     expect(await ownerBudget()).toBeNull()
+    await endPractice(r.id, owner)
     const findings = await request(app).get(`/practice/runs/${r.id}/assessments`).auth(token(owner), { type: 'bearer' })
     expect(findings.body.assessments[0].result).toMatchObject({ classification: 'NOT_ANSWERED', responseKind: 'REQUEST_ONLY', strengths: [] })
   })
@@ -604,7 +634,10 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
     await endPractice(legacy.r.id, owner)
     await enableLearner()
     const { r } = await asked()
-    expect((await request(app).get(`/practice/runs/${r.id}/assessments`).auth(token(owner), { type: 'bearer' })).body.assessments[0].status).toBe('AWAITING_ANSWER')
+    // During practice an evaluated run reveals nothing; an open answer left at End reads as incomplete.
+    expect((await request(app).get(`/practice/runs/${r.id}/assessments`).auth(token(owner), { type: 'bearer' })).body.assessments[0].status).toBe('AFTER_PRACTICE')
+    await endPractice(r.id, owner)
+    expect((await request(app).get(`/practice/runs/${r.id}/assessments`).auth(token(owner), { type: 'bearer' })).body.assessments[0].status).toBe('INCOMPLETE')
   })
   it('pins conversation mode only with Interview conversation access and falls back to manual when it is revoked', async () => {
     const manual = await asked()
@@ -688,7 +721,7 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
       const done = await agent(`/attempts/${a.id}/finish`, { receiptId: ack.id })
       expect(done.status).toBe(200); expect(done.body).toMatchObject({ status: 'ANSWERED', reused: false }); expect(done.body.ownerId).toBeUndefined()
       expect((await agent(`/attempts/${a.id}/finish`, { receiptId: ack.id })).body.reused).toBe(true)
-      expect(await prisma.interviewAssessment.findFirst({ where: { snapshot: { attemptId: a.id } } })).toMatchObject({ status: 'FAILED', errorCode: 'EVALUATION_BUDGET_REACHED' })
+      expect(await prisma.interviewAssessment.findFirst({ where: { snapshot: { attemptId: a.id } } })).toMatchObject({ status: 'FAILED', errorCode: 'EVALUATION_USER_BUDGET_REACHED' })
       const next = await agent(`/runs/${r.id}/next`, { afterAttemptId: a.id })
       expect(next.status).toBe(200); expect(next.body.index).toBe(2)
       expect((await agent(`/runs/${r.id}/next`, { afterAttemptId: a.id })).body.id).toBe(next.body.id)

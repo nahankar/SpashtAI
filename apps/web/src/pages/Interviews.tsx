@@ -13,8 +13,6 @@ import { LiveSessionRoom } from '@/features/live-session/components/LiveSessionR
 import type { ChatMessage } from '@/features/live-session/types'
 import { ConversationPanel } from '@/features/live-session/components/ConversationPanel'
 import { interviewConversation } from '@/lib/interview-conversation'
-import { useInterviewFindings } from '@/features/interviews/useInterviewFindings'
-import { inlineFeedback } from '@/features/interviews/InlineFeedback'
 import { InterviewControls } from '@/features/interviews/InterviewControls'
 import { InterviewHistoryList } from '@/features/interviews/InterviewHistoryList'
 import { RecordingAcknowledgmentCard } from '@/features/interviews/RecordingAcknowledgmentCard'
@@ -147,8 +145,6 @@ export function Interviews() {
     return ()=>clearInterval(timer)
   },[selected,live.token])
   const current=detail?.attempts.at(-1)
-  // Same findings and inline disclosures as playback, refreshed when the current answer changes state.
-  const findings=useInterviewFindings({runId:detail?.id,refreshKey:`${current?.id}:${current?.status}`})
   const conversationJson=JSON.stringify(detail ? interviewConversation(detail.attempts,messages,detail.startedAt) : [])
   // Keep the shared panel stable when polling returns identical saved speech.
   const conversation=useMemo(()=>JSON.parse(conversationJson) as ChatMessage[],[conversationJson])
@@ -191,8 +187,7 @@ export function Interviews() {
   // Only states that need attention are shown: loading, missing access, or no matching questions.
   const setupMessage=!optionsLoaded ? 'Loading practice options…' : !options ? 'Practice becomes available once your pilot access and voice pipeline are enabled.' : matching ? '' : 'No reviewed questions are ready for this selection. Choose another combination or ask an administrator to confirm a pilot set.'
   return <div className="mx-auto max-w-5xl space-y-6">
-    <header className="space-y-2"><div className="flex flex-wrap items-center justify-between gap-2"><h1 className="text-3xl font-semibold">Interviews</h1><Button asChild variant="outline" size="sm"><Link to="/interviews/history" onClick={guardHistory}>Interview history</Link></Button></div><p className="text-muted-foreground">Practice technical questions aloud, at your own pace.</p>
-      <p className="text-sm text-muted-foreground">This preview saves questions, answers and recordings for review. {(detail ? detail.evaluationEnabled : options?.evaluationAvailable) ? (options?.evaluationDailyLimit ? `Technical feedback is prepared for up to ${options.evaluationDailyLimit} saved answers a day; later answers are saved without feedback.` : 'Technical feedback is prepared from saved answers.') : 'Technical evaluation is not enabled for this practice.'} Interview activity stays outside Progress Pulse.</p></header>
+    <header className="space-y-2"><div className="flex flex-wrap items-center justify-between gap-2"><h1 className="text-3xl font-semibold">Interviews</h1><Button asChild variant="outline" size="sm"><Link to="/interviews/history" onClick={guardHistory}>Interview history</Link></Button></div><p className="text-muted-foreground">Practice technical questions aloud, at your own pace.</p></header>
     {accessError && <p role="alert" className="rounded-lg border p-4">{accessError} Your saved interview history is still available below.</p>}
     {error && <p role="alert" className="text-destructive">{error}</p>}
     {loading && <p role="status">Loading interview…</p>}
@@ -231,14 +226,13 @@ export function Interviews() {
           leave={leave} incomplete={leave} reconnect={reconnect} discard={()=>controller.discard(recorderRef.current,adapter)}
           conversation={!!detail.conversationMode} />} />}
       {!live.token && !detail.endedAt && <div className="rounded-xl border p-5 space-y-3"><p>Your interview is paused. Confirmed answers are saved.</p><div className="flex gap-2"><Button disabled={!options || live.isResuming || loading} onClick={()=>void resume()}>{live.isResuming?'Reconnecting…':'Resume practice'}</Button><Button variant="outline" disabled={live.isLeaving} onClick={()=>void leave()}>End practice</Button></div></div>}
-      {findings.error && <p role="status" className="text-xs text-muted-foreground">Technical feedback could not be loaded; your saved answers are safe. <button type="button" className="underline hover:text-foreground" onClick={findings.retry}>Retry</button></p>}
       {!detail.endedAt && <ConversationToggle checked={showConversation} onChange={setShowConversation} controls="interview-conversation" />}
       {/* Hidden, not unmounted: messages keep accumulating and reappear in full when shown again. */}
       <div id="interview-conversation" hidden={conversationHidden(showConversation,!!detail.endedAt)}>
-        {conversation.length>0 && <ConversationPanel messages={conversation} stitchAdjacentUserMessages={false} timestampPlacement="side"
-          renderAfterMessage={message=>inlineFeedback(message,findings)} />}
+        {/* Technical feedback is never shown here, during or after practice: it appears in playback once the practice ends. */}
+        {conversation.length>0 && <ConversationPanel messages={conversation} stitchAdjacentUserMessages={false} timestampPlacement="side" />}
       </div>
-      {detail.endedAt && <Link className="text-sm underline" to={interviewPlaybackPath(detail.sessionId)}>Review answer recordings and communication feedback</Link>}
+      {detail.endedAt && <Link className="text-sm underline" to={interviewPlaybackPath(detail.sessionId)}>Review recordings and technical feedback in playback</Link>}
     </section>}
     {!selected && <section className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-xl font-semibold">Recent practice</h2>

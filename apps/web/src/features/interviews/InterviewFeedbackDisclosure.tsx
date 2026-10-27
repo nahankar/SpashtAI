@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { feedbackSummary } from './feedback-summary'
+import { feedbackSummary, unavailableReason, UNAVAILABLE_DETAIL } from './feedback-summary'
 import { PENDING_FINDING, type LearnerFinding } from './useInterviewFindings'
 
 const SUMMARY = 'block rounded-lg px-3 py-1.5 text-xs font-medium text-muted-foreground'
@@ -23,7 +23,8 @@ function List({ title, items }: { title: string; items: string[] }) {
 export const InterviewFeedbackDisclosure = memo(function InterviewFeedbackDisclosure({ finding }: { finding: LearnerFinding | undefined }) {
   const summary = feedbackSummary(finding)
   if (!finding || !summary) return null
-  if (['NOT_ENABLED', 'SKIPPED'].includes(finding.status)) return <InterviewFeedbackPlaceholder text={summary} />
+  if (['NOT_ENABLED', 'SKIPPED', 'AFTER_PRACTICE'].includes(finding.status)) return <InterviewFeedbackPlaceholder text={summary} />
+  const reason = unavailableReason(finding)
   const result = finding.status === 'COMPLETED' ? finding.result : null
   return <details className="group mt-1.5 w-full max-w-xl rounded-lg border bg-background/80 text-left text-sm text-foreground" data-attempt-id={finding.attemptId}>
     <summary className="cursor-pointer select-none rounded-lg px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -31,9 +32,7 @@ export const InterviewFeedbackDisclosure = memo(function InterviewFeedbackDisclo
     </summary>
     <div className="space-y-2.5 border-t px-3 py-2.5">
       {PENDING_FINDING.includes(finding.status) && <p>Evaluation is in progress. Playback is unaffected; the result appears here when it is ready.</p>}
-      {finding.errorCode === 'EVALUATION_BUDGET_REACHED'
-        ? <p>Today's technical feedback limit was reached before this answer, so it was not evaluated. Your saved answer is unchanged.</p>
-        : ['FAILED', 'CANCELLED'].includes(finding.status) && <p>Technical evaluation is unavailable for this answer. No grade was invented, and your saved answer is unchanged.</p>}
+      {reason && <p>{UNAVAILABLE_DETAIL[reason]} Your saved answer and recording are unaffected.</p>}
       {finding.status === 'INCOMPLETE' && <p>This answer was not finished, so it was not evaluated.</p>}
       {finding.afterExample && <p className="text-orange-700 dark:text-orange-300">Given after seeing an example, so it does not establish independent recall.</p>}
       {finding.assistance === 'HINT' && <p className="text-orange-700 dark:text-orange-300">Hint-assisted answer.</p>}
