@@ -1,12 +1,12 @@
-# Interviews usability update — release report (26 Oct 2026)
+# Interviews usability update — release report (26–27 Oct 2026)
 
 **Production has not changed.** Nothing on this branch is merged or deployed.
 
 | | Revision | How checked |
 | --- | --- | --- |
-| Branch `codex/interviews-usability-defaults-consent` | `048473f` before this report's commit (local and GitHub match) | `git fetch` |
-| GitHub `main` | `bd8eabf` | `git fetch` |
-| EC2 `/opt/spashtai` | `bd8eabf`, API health 200, none of this branch's `20261027*` migrations present | read-only SSH; only modified tracked files are the preserved production LiveKit overlays (`infra/livekit/livekit.yaml`, `egress.yaml`) |
+| Branch `codex/interviews-usability-defaults-consent` | `7ac74eb` before this report update (local and GitHub match) | `git fetch`, 27 Oct |
+| GitHub `main` | `bd8eabf` | `git fetch`, 27 Oct |
+| EC2 `/opt/spashtai` | `bd8eabf` on 26 Oct (read-only SSH: API health 200, no `20261027*` migrations; only modified tracked files are the preserved LiveKit overlays). On 27 Oct SSH port 22 timed out from this machine, so the revision could not be re-read; instead the live site was checked: `https://spasht.ai/api/health` 200, and the served web bundle still contains the old question card text and none of this branch's strings ("No time limit · Ultra", "30 minutes · Pro", "Show conversation", recognition notices) | read-only SSH (26 Oct); public HTTPS (27 Oct) |
 
 ## Commits not in main (oldest first)
 
@@ -14,13 +14,14 @@
 `195bfb1`, `69a455a` approved policy text and release step · `be47d58` Show conversation toggle · `6bde486` recognizer
 restart · `47bf9ac` no reminder near Start · `3aabbfc` no fixed question count · `ac68cde` plan labels, history buttons ·
 `a5988d5` provider-neutral wording, acknowledgment v2 · `cc8e9cb` mid-utterance stall detection · `83805b5` teardown
-cleanup · `048473f` local-only recognizer fault switch.
+cleanup · `048473f` local-only recognizer fault switch · `23bdaaa` first release report · `452a889` stale short sounds
+and speech-only gap measurement · `7ac74eb` bounded wait for isolated short untranscribed sounds.
 
 ## Automated checks (actual results)
 
 - Server: 648 passed, 4 skipped (PostgreSQL test database); typecheck clean.
 - Web: 309 passed; typecheck, lint and production build pass.
-- Agent: 219 passed, twice, with **zero** "Task exception was never retrieved" lines in the full output.
+- Agent: 254 passed (latest run, 27 Oct) with zero "Task exception was never retrieved" lines; earlier 219 passed, twice, with **zero** "Task exception was never retrieved" lines in the full output.
   The new teardown tests install an event-loop exception handler and fail on any unretrieved task exception or
   leftover task. Against the previous code, two of them fail with exactly that loop error; with `83805b5` all pass.
 - **Fresh installation verified** with the supported procedure (`INTERVIEWS-PHASE-0.md`, "Empty installation"): a
@@ -48,29 +49,44 @@ cleanup · `048473f` local-only recognizer fault switch.
 The practices were created through the server's practice service functions (start, prepare, asked, receipt, skip,
 end), not through a voice session, because the browser pane blocks microphone access.
 
-## Not yet verified (needs a real microphone)
+## Live microphone checks (27 Oct 2026, local app, the user speaking, the agent handled by Claude)
 
-- Show conversation ON by default and toggling while the interviewer speaks and while answering, including automatic
-  progression to the next question.
-- Recognition notices in a live session. Use the local-only fault switch (refused in production or off localhost):
-  stop the local agent and start it with `SPASHTAI_DEV_STT_FAULT=stall-once` (expected: silent recovery, both parts of
-  the answer saved once) or `stall-repeatedly` (expected: "Speech recognition is not responding…", cleared when the
-  fourth stream recovers; with more than about 20 s of continuous speech beyond the replay bound, an "about N seconds
-  could not be transcribed" notice). Remove the variable afterwards.
+Local development only; production untouched. Fault injection used the local-only switch
+(`SPASHTAI_DEV_STT_FAULT`, refused in production or off localhost), was set only for Runs 2 and 3, and was removed
+afterwards (agent restarted without it; variable absent from the agent processes; no fault log line).
+**Runs 2 and 3 are injected failures through the live microphone path, not observed recovery from a spontaneous
+service outage.**
 
-## Recovery evidence: synthetic vs real
+| Run | Setup | Observed | Saved data |
+| --- | --- | --- | --- |
+| 1 | Fault off | Show conversation defaulted ON; toggling while the interviewer spoke and while answering did not interrupt speech, recording or progression, and hidden messages reappeared (user-confirmed). **Defect found:** a 0.7 s sound with no transcript after a complete answer held it on "speech not transcribed yet" for about 45 s; when the user spoke again the watchdog restarted a working recognizer and showed a false "about 35 seconds could not be transcribed" notice (silence counted as speech) | 6 answers in order, no duplicates, nothing in the next question; recording 307 s available |
+| — | Fixes | `452a889`: stale short sounds no longer count towards owed speech; untranscribed time counts detected speech only. `7ac74eb`: bounded wait (thresholds below) | — |
+| 1b | Fault off, repeat | Confirmed answer → 0.76 s sound → about 8 s later saved and advanced automatically, no loss notice, no restart (`saved_ignoring_untranscribed_sound`); a short "Yes." kept; a sound before any confirmed words did not trigger the shortcut | 4 answers, no duplicates; recording 134 s available |
+| 2 | `stall-once` | Each question's first stream stopped after its first sentence; the watchdog replaced it (Q1 at about 13 s, 11.6 s resent, 0 lost; Q2, 12.7 s resent, 0 lost); later sentences appeared in a burst; no notice (silent recovery); progression resumed | Q1 4 sentences and Q2 4 utterances in order, no duplicates, nothing crossed questions; recording 125 s available |
+| 3 | `stall-repeatedly` | Restarts at about 13 s (lost 0), 28 s (lost 2.8 s, "could not be transcribed" notice, then "Speech recognition is not responding") and 55 s (lost 28.3 s, notice); the fourth stream recovered at about 60 s and "not responding" cleared; the gap notice stayed | 7 sentences in order, no duplicates. About 31 s of speech during the outage is **not** in the transcript (matching the two gap reports) but remains in the 173 s recording. Not complete transcription recovery |
 
-- **Synthetic (reproducible):** scripted recognizers in unit tests and one integration test through the real voice
-  path (`stt_node`, capture, coordinator): a stream that returns words and then silently stops while speech continues
-  is replaced, the answer is saved once with no duplicate, and nothing reaches the next question.
-- **Real service dropout:** observed once on 26 Oct 2026 at 19:18 (Amazon Transcribe stopped returning results; the
-  error surfaced at 19:20) before the watchdog existed. Recovery from a real dropout **has not been observed**; it
-  cannot be triggered on demand. If it recurs, the agent log shows `interview_stt restarted`.
+After the reported gap the answer still completed by the normal 5 s handoff once recognition recovered (the gap only
+disables the short-sound shortcut); Q2 had no speech, so Finish was refused ("no speech") three times and the user
+skipped it. AWS library lines `InvalidStateError … awscrt/aio/http.py` ("Exception ignored") appear when streams
+close at question changes; they come from the third-party library and were present before these changes.
+
+**Short-sound bounded wait (thresholds):** applies only when the answer has confirmed words, untranscribed voice
+activity totals at most 1.5 s, no partial text is pending, and there is no restart or reported gap; 3 s of quiet,
+then the normal 5 s handoff; late finals and partial text are still waited for. Remaining risk: a short word the
+recognizer never transcribes within about 8 s is left out of the saved answer (the recording keeps it).
+
+## Recovery evidence: synthetic, injected and real
+
+- **Synthetic (reproducible):** scripted recognizers in unit tests and an integration test through the real voice
+  path (`stt_node`, capture, coordinator).
+- **Injected through the live microphone path:** Runs 2 and 3 above.
+- **Real service dropout:** observed once on 26 Oct 2026 at 19:18 (Amazon Transcribe stopped returning results)
+  before the watchdog existed. Recovery from a spontaneous dropout **has not been observed**.
 
 ## Limitations and open decisions
 
-- Replay is bounded to 20 s; speech older than that during a long outage stays in the recording but is not
-  transcribed, and the learner is told roughly how many seconds.
+- Replay is bounded to 20 s and replacements back off (6, 12, 24, 30 s), so a long outage loses transcription of
+  earlier speech (31 s in Run 3); it stays in the recording and the learner is told roughly how many seconds.
 - Continuous non-speech sound detected as voice (for example a TV) can cause harmless restarts and, after two, the
   "not responding" notice.
 - Learner feedback stays limited to 30 answers per day; longer practices can reach it.
