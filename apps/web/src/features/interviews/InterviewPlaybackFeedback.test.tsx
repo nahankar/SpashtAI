@@ -63,10 +63,22 @@ describe('interview playback feedback', () => {
     expect(feedbackSummary({ ...base, result: { ...base.result!, classification: 'NOT_ANSWERED' } })).toBe('Technical feedback · No technical answer')
     expect(feedbackSummary({ ...base, status: 'INCOMPLETE', result: null })).toBe('Incomplete answer · not evaluated')
     expect(renderToStaticMarkup(<InterviewFeedbackDisclosure finding={{ ...base, status: 'FAILED', result: null }} />)).toContain('No grade was invented')
-    // The daily feedback limit is named, never shown as a generic failure or a grade.
-    const overLimit = { ...base, status: 'FAILED', errorCode: 'EVALUATION_BUDGET_REACHED', result: null }
-    expect(feedbackSummary(overLimit)).toBe('Technical feedback · Daily limit reached')
-    expect(renderToStaticMarkup(<InterviewFeedbackDisclosure finding={overLimit} />)).toContain('technical feedback limit was reached')
+    // Each unavailable cause is named: personal vs shared budget, provider failure, disabled, incomplete transcript.
+    const failed = (errorCode: string | null, status = 'FAILED') => ({ ...base, status, errorCode, result: null })
+    expect(feedbackSummary(failed('EVALUATION_USER_BUDGET_REACHED'))).toBe('Technical feedback · Your daily evaluation limit was reached')
+    const shared = renderToStaticMarkup(<InterviewFeedbackDisclosure finding={failed('EVALUATION_SHARED_BUDGET_REACHED')} />)
+    expect(shared).toContain('Shared daily evaluation limit'); expect(shared).toContain('This is not your personal allowance')
+    expect(feedbackSummary(failed('EVALUATION_BUDGET_REACHED'))).toBe('Technical feedback · A daily evaluation limit was reached')
+    expect(feedbackSummary(failed('LEASE_EXPIRED'))).toBe('Technical feedback · Evaluation service unavailable')
+    expect(feedbackSummary(failed('PILOT_ACCESS_UNAVAILABLE', 'CANCELLED'))).toBe('Technical feedback · Not enabled for this practice')
+    const gap = renderToStaticMarkup(<InterviewFeedbackDisclosure finding={failed(null, 'TRANSCRIPT_INCOMPLETE')} />)
+    expect(gap).toContain('Not assessed · Part of this answer was not transcribed'); expect(gap).toContain('not evidence of a knowledge gap')
+    for (const code of ['EVALUATION_USER_BUDGET_REACHED', 'EVALUATION_SHARED_BUDGET_REACHED', 'LEASE_EXPIRED']) {
+      expect(renderToStaticMarkup(<InterviewFeedbackDisclosure finding={failed(code)} />)).toContain('Your saved answer and recording are unaffected')
+    }
+    // During practice (or while paused) nothing is revealed: a neutral line with no grade or content.
+    const during = renderToStaticMarkup(<InterviewFeedbackDisclosure finding={{ ...base, status: 'AFTER_PRACTICE', result: null }} />)
+    expect(during).toContain('Available after practice ends'); expect(during).not.toContain('<details')
     expect(feedbackSummary({ ...base, status: 'NOT_ENABLED', result: null })).toBe('Technical feedback · Not enabled for this practice')
     expect(feedbackSummary({ ...base, status: 'SKIPPED', result: null })).toBe('Skipped · not evaluated')
     expect(feedbackSummary(undefined)).toBeNull()
