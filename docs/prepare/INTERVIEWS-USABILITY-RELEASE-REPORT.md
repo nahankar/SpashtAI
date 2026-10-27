@@ -4,9 +4,9 @@
 
 | | Revision | How checked |
 | --- | --- | --- |
-| Branch `codex/interviews-usability-defaults-consent` | `7ac74eb` before this report update (local and GitHub match) | `git fetch`, 27 Oct |
+| Branch `codex/interviews-usability-defaults-consent` | `fbbb236` before this row update (local and GitHub match) | `git fetch`, 27 Oct |
 | GitHub `main` | `bd8eabf` | `git fetch`, 27 Oct |
-| EC2 `/opt/spashtai` | `bd8eabf` on 26 Oct (read-only SSH: API health 200, no `20261027*` migrations; only modified tracked files are the preserved LiveKit overlays). On 27 Oct SSH port 22 timed out from this machine, so the revision could not be re-read; instead the live site was checked: `https://spasht.ai/api/health` 200, and the served web bundle still contains the old question card text and none of this branch's strings ("No time limit · Ultra", "30 minutes · Pro", "Show conversation", recognition notices) | read-only SSH (26 Oct); public HTTPS (27 Oct) |
+| EC2 `/opt/spashtai` | `bd8eabf` (27 Oct): API health 200, no `20261027*` migrations; only modified tracked files are the preserved LiveKit overlays (`infra/livekit/livekit.yaml`, `egress.yaml`). The live web bundle also still lacks this branch's strings | read-only SSH and public HTTPS, 27 Oct |
 
 ## Commits not in main (oldest first)
 
