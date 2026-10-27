@@ -231,6 +231,116 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
     expect(await prisma.interviewAssessment.count({ where: { snapshot: { attemptId: a.id } } })).toBe(1)
     expect((await prisma.interviewAssessment.findUniqueOrThrow({ where: { id: job.id } })).attempts).toBe(1)
   })
+  describe('transcript integrity', () => {
+    const previousToken = process.env.INTERNAL_AGENT_TOKEN
+    const agent = (path: string, body: unknown) => request(app).post(`/agent${path}`).set('x-internal-agent-token', `${fixture}-internal`).send(body)
+    const issue = (attemptId: string, segmentId: string, kind: string, extra: Record<string, unknown> = {}) =>
+      agent(`/attempts/${attemptId}/transcript-issues`, { segmentId, kind, eventKey: randomUUID(), ...extra })
+    const findingsAfterEnd = async (runId: string) => {
+      await endPractice(runId, owner)
+      return (await request(app).get(`/practice/runs/${runId}/assessments`).auth(token(owner), { type: 'bearer' })).body.assessments
+    }
+    beforeAll(() => { process.env.INTERNAL_AGENT_TOKEN = `${fixture}-internal` })
+    afterAll(() => { if (previousToken === undefined) delete process.env.INTERNAL_AGENT_TOKEN; else process.env.INTERNAL_AGENT_TOKEN = previousToken })
+
+    it('records events once, on the named answer and its own practice, append-only', async () => {
+      const { r, a, s } = await asked()
+      const key = randomUUID()
+      const body = { segmentId: s.id, kind: 'GAP', lostSpeechSeconds: 12.4, eventKey: key }
+      expect((await agent(`/attempts/${a.id}/transcript-issues`, body)).body.reused).toBe(false)
+      expect((await agent(`/attempts/${a.id}/transcript-issues`, body)).body.reused).toBe(true)  // duplicate notification
+      expect((await agent(`/attempts/${a.id}/transcript-issues`, { ...body, lostSpeechSeconds: 3 })).status).toBe(409)
+      expect((await issue(a.id, s.id, 'GAP')).status).toBe(400)                         // a gap needs its speech estimate
+      expect((await issue(a.id, s.id, 'NOISE_IGNORED', { lostSpeechSeconds: 1 })).status).toBe(400)
+      const other = await prisma.sessionSegment.create({ data: { id: randomUUID(), sessionId: (await prisma.session.create({ data: { id: randomUUID(), userId: owner, module: 'elevate' } })).id,
+        segmentIndex: 0, roomName: randomUUID(), startedAt: new Date() } })
+      expect((await issue(a.id, other.id, 'RECOGNITION_UNAVAILABLE')).status).toBe(409) // never attributed across practices
+      const row = await prisma.interviewTranscriptIssue.findFirstOrThrow({ where: { attemptId: a.id } })
+      await expect(prisma.interviewTranscriptIssue.update({ where: { id: row.id }, data: { lostSpeechSeconds: 1 } })).rejects.toThrow()
+      expect(await prisma.interviewTranscriptIssue.count({ where: { attemptId: a.id } })).toBe(1)
+      await endPractice(r.id, owner)
+    })
+
+    it('never grades an answer with a confirmed gap, and a later recovery does not clear it', async () => {
+      await enableLearner()
+      const { r, a, s } = await asked()
+      await captureCommittedTurn(a.id, turn(s.id, testAnswer))
+      await issue(a.id, s.id, 'RECOGNITION_UNAVAILABLE')
+      await issue(a.id, s.id, 'GAP', { lostSpeechSeconds: 28.3 })
+      await issue(a.id, s.id, 'RECOGNITION_RECOVERED')
+      const saved = await finish(r.id, a.id)
+      const snapshot = await prisma.interviewAnswerSnapshot.findUniqueOrThrow({ where: { id: saved.id! } })
+      expect(snapshot.transcriptIntegrity).toMatchObject({ incomplete: true, gapSpeechSeconds: 28.3, unresolved: false })
+      const row = await prisma.interviewAssessment.findUniqueOrThrow({ where: { snapshotId: saved.id! } })
+      expect(row).toMatchObject({ status: 'CANCELLED', errorCode: 'TRANSCRIPT_INCOMPLETE', attempts: 0, result: null })
+      expect(await claimLearnerAssessment()).toBeNull()                                // no model call
+      const [finding] = await findingsAfterEnd(r.id)
+      expect(finding).toMatchObject({ status: 'TRANSCRIPT_INCOMPLETE', result: null,
+        transcriptIntegrity: { gapSpeechSeconds: 28.3, unresolved: false, unconfirmedAccepted: false, recordingAvailable: false } })
+      expect(JSON.stringify(finding)).not.toMatch(/INCORRECT|NOT_ANSWERED|DONT_KNOW/)
+    })
+
+    it('treats unresolved recognition and accepted unconfirmed speech as incomplete, but not ignored noise', async () => {
+      await enableLearner()
+      const { r, a, s } = await asked()
+      await captureCommittedTurn(a.id, turn(s.id, testAnswer))
+      await issue(a.id, s.id, 'RECOGNITION_UNAVAILABLE')                              // never recovered
+      const first = await finish(r.id, a.id)
+      expect(await prisma.interviewAssessment.findUniqueOrThrow({ where: { snapshotId: first.id! } })).toMatchObject({ errorCode: 'TRANSCRIPT_INCOMPLETE' })
+      // The next question starts clean: the gap stays with the answer it affected.
+      const b = await prepareBankAttempt(r.id, owner, a.id)
+      await markQuestionAsked(b.id, { segmentId: s.id, questionText: b.question.text })
+      await captureCommittedTurn(b.id, turn(s.id, testAnswer, 1))
+      await issue(b.id, s.id, 'NOISE_IGNORED')
+      const second = await finish(r.id, b.id)
+      expect((await prisma.interviewAnswerSnapshot.findUniqueOrThrow({ where: { id: second.id! } })).transcriptIntegrity).toMatchObject({ incomplete: false, ignoredSounds: 1 })
+      expect(await prisma.interviewAssessment.findUniqueOrThrow({ where: { snapshotId: second.id! } })).toMatchObject({ status: 'PENDING', errorCode: null })
+      const job = await learnerClaim()
+      expect(job.snapshot.attemptId).toBe(b.id)
+      await finishLearnerAssessment(job, { result: correctEvaluation(), inputTokens: 10, outputTokens: 5, latencyMs: 1 })
+      const findings = await findingsAfterEnd(r.id)
+      expect(findings[0]).toMatchObject({ status: 'TRANSCRIPT_INCOMPLETE', transcriptIntegrity: { unresolved: true } })
+      expect(findings[1]).toMatchObject({ status: 'COMPLETED', result: { classification: 'CORRECT' } })
+      expect(findings[1].transcriptIntegrity).toBeUndefined()
+    })
+
+    it('a gap arriving after grading hides the grade without rewriting the stored evaluation', async () => {
+      await enableLearner()
+      const { r, a, s } = await asked()
+      await captureCommittedTurn(a.id, turn(s.id, testAnswer))
+      await finish(r.id, a.id)
+      const job = await learnerClaim()
+      // Reported while the model ran: the late result is not stored as a grade.
+      await issue(a.id, s.id, 'GAP', { lostSpeechSeconds: 4 })
+      await finishLearnerAssessment(job, { result: correctEvaluation(), inputTokens: 10, outputTokens: 5, latencyMs: 1 })
+      const row = await prisma.interviewAssessment.findUniqueOrThrow({ where: { id: job.id } })
+      expect(row).toMatchObject({ status: 'CANCELLED', errorCode: 'TRANSCRIPT_INCOMPLETE', result: null })
+      // An evaluation completed before a later event stays stored as it was, but is never shown as a grade.
+      const c = await prepareBankAttempt(r.id, owner, a.id)
+      await markQuestionAsked(c.id, { segmentId: s.id, questionText: c.question.text })
+      await captureCommittedTurn(c.id, turn(s.id, testAnswer, 1)); await finish(r.id, c.id)
+      const graded = await learnerClaim()
+      await finishLearnerAssessment(graded, { result: correctEvaluation(), inputTokens: 10, outputTokens: 5, latencyMs: 1 })
+      const stored = await prisma.interviewAssessment.findUniqueOrThrow({ where: { id: graded.id } })
+      await prisma.interviewTranscriptIssue.create({ data: { attemptId: c.id, segmentId: s.id, kind: 'UNCONFIRMED_ACCEPTED', eventKey: randomUUID() } })
+      const findings = await findingsAfterEnd(r.id)
+      expect(findings[1]).toMatchObject({ status: 'TRANSCRIPT_INCOMPLETE', result: null, transcriptIntegrity: { unconfirmedAccepted: true } })
+      expect(await prisma.interviewAssessment.findUniqueOrThrow({ where: { id: graded.id } })).toEqual(stored)
+    }, 30000)
+
+    it('events go with their answer through Pause, a new segment and discard', async () => {
+      const { r, a, s } = await asked()
+      await issue(a.id, s.id, 'GAP', { lostSpeechSeconds: 2.5 })
+      // Pause ends the segment; the answer continues on a new segment after reconnecting.
+      await prisma.sessionSegment.update({ where: { id: s.id }, data: { endedAt: new Date() } })
+      const s2 = await segment(r.sessionId, 1)
+      await issue(a.id, s2.id, 'RECOGNITION_UNAVAILABLE')
+      expect(await prisma.interviewTranscriptIssue.findMany({ where: { attemptId: a.id }, select: { segmentId: true }, orderBy: { createdAt: 'asc' } }))
+        .toEqual([{ segmentId: s.id }, { segmentId: s2.id }])
+      await prisma.session.delete({ where: { id: r.sessionId } })
+      expect(await prisma.interviewTranscriptIssue.count({ where: { attemptId: a.id } })).toBe(0)
+    })
+  })
   it('preserves the saved answer when learner budget is exhausted', async () => {
     await enableLearner()
     await prisma.interviewEvaluatorBudget.upsert({ where: { scope_day: { scope: `learner-${hash(owner)}`, day: learnerDay() } },

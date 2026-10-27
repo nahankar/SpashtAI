@@ -10,6 +10,7 @@ import { learnerEligibleWhere } from '../bank/schemas'
 import { hash, questionSnapshotSchema } from '../evaluator/contracts'
 import { RECORDING_ACKNOWLEDGMENT, RECORDING_CONSENT_VERSIONS, acknowledgmentSchema, joinSelection, splitSelection, askedSchema, assistanceSchema, chunkSchema, MAX_ANSWER_LENGTH, PRACTICE_NAMESPACE, receiptSchema, startSchema, VOICE_CONSENT_VERSION,
   CONVERSATION_POLICY, conversationPolicySchema, agentFinishSchema, agentNextSchema } from './contracts'
+import { transcriptIntegrity, transcriptIssueSchema } from './integrity'
 import { conversationAccess, currentInterviewVoiceProfile, ownerPracticeDurations, practiceExecutionAccess, voiceProfileSchema } from './access'
 import { LEARNER_LIMITS, learnerPolicy, enqueueLearnerAssessment, learnerEvaluationAccess } from '../evaluator/learner'
 
@@ -189,6 +190,27 @@ export async function captureCommittedTurn(attemptId: string, input: unknown) {
     return { id: chunk.id, reused: false }
   })
 }
+/** One transcript-integrity event for the answer (idempotent by event key; append-only). */
+export async function recordTranscriptIssue(attemptId: string, input: unknown) {
+  const body = transcriptIssueSchema.parse(input)
+  return prisma.$transaction(async tx => {
+    const { run } = await agentAttempt(tx, attemptId)
+    const previous = await tx.interviewTranscriptIssue.findUnique({ where: { attemptId_eventKey: { attemptId, eventKey: body.eventKey } } })
+    if (previous) {
+      if (previous.kind !== body.kind || previous.segmentId !== body.segmentId || (previous.lostSpeechSeconds ?? undefined) !== body.lostSpeechSeconds) {
+        throw new BankError(409, 'Transcript event key already records a different event')
+      }
+      return { id: previous.id, reused: true }
+    }
+    // Attributed to the answer the agent names, on a segment of this practice; never moved to another answer.
+    if (!await tx.sessionSegment.findFirst({ where: { id: body.segmentId, sessionId: run.sessionId }, select: { id: true } })) {
+      throw new BankError(409, 'The segment does not belong to this practice')
+    }
+    const issue = await tx.interviewTranscriptIssue.create({ data: { attemptId, segmentId: body.segmentId, kind: body.kind,
+      lostSpeechSeconds: body.lostSpeechSeconds ?? null, eventKey: body.eventKey } })
+    return { id: issue.id, reused: false }
+  })
+}
 export async function recordAssistance(attemptId: string, input: unknown) {
   const body = assistanceSchema.parse(input)
   return prisma.$transaction(async tx => {
@@ -225,9 +247,12 @@ export async function finishAnswer(runId: string, attemptId: string, ownerId: st
     if (!skip && answerText.length > MAX_ANSWER_LENGTH) throw new BankError(413, 'Answer exceeds the capture limit')
     await tx.interviewAttempt.update({ where: { id: attemptId }, data: { status: skip ? 'SKIPPED' : 'ANSWERED', completedAt: new Date() } })
     if (skip) return { id: null, status: 'SKIPPED', reused: false }
+    // The receipt is saved after every integrity event the agent queued before it, so this summary is complete.
+    const integrity = transcriptIntegrity(await tx.interviewTranscriptIssue.findMany({ where: { attemptId } }))
     const saved = await tx.interviewAnswerSnapshot.create({ data: { ownerId, source: 'LIVE_ATTEMPT', attemptId,
       questionId: attempt.questionId, questionSnapshot: json(attempt.questionSnapshot), questionHash: attempt.questionHash,
-      answerText, answerHash: hash(answerText), textSource: 'AGENT_COMMITTED_TURNS', textRevision: 1, assistance: attempt.assistance } })
+      answerText, answerHash: hash(answerText), textSource: 'AGENT_COMMITTED_TURNS', textRevision: 1, assistance: attempt.assistance,
+      transcriptIntegrity: json(integrity) } })
     await enqueueLearnerAssessment(tx, saved.id, run.evaluationPolicySnapshot)
     return { id: saved.id, status: 'ANSWERED', answerText, reused: false }
   })

@@ -11,7 +11,7 @@ import logging
 import time
 from collections import deque
 from typing import Awaitable, Callable
-from uuid import UUID
+from uuid import UUID, uuid4
 
 logger = logging.getLogger("spashtai-agent.interview_capture")
 
@@ -180,11 +180,33 @@ class InterviewCapture:
         if self.worker is None or self.worker.done():
             self.worker = asyncio.create_task(self._flush())
 
+    def record_issue(self, kind: str, lost_speech_seconds: float | None = None) -> bool:
+        """Attach a transcript-integrity event to the open answer (ordered with its speech, before any receipt).
+
+        Only while the answer accepts speech: an event outside an answer belongs to no attempt and is dropped."""
+        if not self.accepting:
+            logger.info("interview_transcript_issue dropped kind=%s reason=no_open_answer", kind)
+            return False
+        self._queue_issue(kind, lost_speech_seconds)
+        return True
+
+    def _queue_issue(self, kind: str, lost_speech_seconds: float | None = None) -> None:
+        body = {"segmentId": self.state["segmentId"], "kind": kind, "eventKey": str(uuid4())}
+        if lost_speech_seconds is not None:
+            body["lostSpeechSeconds"] = round(float(lost_speech_seconds), 1)
+        self.pending.append({"attemptId": self.state["attempt"]["id"], "path": "transcript-issues", "body": body})
+        self._start_worker()
+
     async def _flush(self):
         self.error = None
         while self.pending:
             item = self.pending[0]
             try:
+                if item.get("path") == "transcript-issues":
+                    # Retried with the same event key, so a repeated post is recorded once.
+                    await self.send(f"/attempts/{item['attemptId']}/transcript-issues", item["body"])
+                    self.pending.popleft()
+                    continue
                 await self.send(f"/attempts/{item['attemptId']}/chunks", item["body"])
                 await self.publish("user", item["body"]["text"],
                     f"answer_{item['attemptId']}::{item['body']['segmentId']}::{item['body']['sourceTurnId']}")
@@ -266,10 +288,15 @@ class InterviewCapture:
                 raise CaptureUnavailable("TRANSCRIPT_PENDING")
             if reason:
                 logger.info("interview_drain action=%s outcome=saved_confirmed_only reason=%s barrier_ms=%d", action, reason, barrier_ms)
+                if open_answer and action != "SKIP":
+                    # The learner chose to save without speech that was never transcribed: the transcript is incomplete.
+                    self._queue_issue("UNCONFIRMED_ACCEPTED")
             elif accept_vad_only and self.pending_audio:
                 # Not lost words: a short sound with no transcript at all. The recording keeps it.
                 logger.info("interview_drain action=%s outcome=saved_ignoring_untranscribed_sound unresolved_voiced_ms=%d barrier_ms=%d",
                             action, round(self.unresolved_voiced * 1000), barrier_ms)
+                # Recorded for traceability only: a short sound treated as noise is not a transcription gap.
+                self._queue_issue("NOISE_IGNORED")
             if action == "FINISH" and open_answer and not self.answer_words and not self.prior_speech:
                 # Nothing has been said for this answer: keep it open instead of storing an empty completion.
                 self.enable_input(session)

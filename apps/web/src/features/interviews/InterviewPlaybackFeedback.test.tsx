@@ -71,8 +71,14 @@ describe('interview playback feedback', () => {
     expect(feedbackSummary(failed('EVALUATION_BUDGET_REACHED'))).toBe('Technical feedback · A daily evaluation limit was reached')
     expect(feedbackSummary(failed('LEASE_EXPIRED'))).toBe('Technical feedback · Evaluation service unavailable')
     expect(feedbackSummary(failed('PILOT_ACCESS_UNAVAILABLE', 'CANCELLED'))).toBe('Technical feedback · Not enabled for this practice')
-    const gap = renderToStaticMarkup(<InterviewFeedbackDisclosure finding={failed(null, 'TRANSCRIPT_INCOMPLETE')} />)
+    const gap = renderToStaticMarkup(<InterviewFeedbackDisclosure finding={{ ...failed('TRANSCRIPT_INCOMPLETE', 'TRANSCRIPT_INCOMPLETE'),
+      transcriptIntegrity: { gapSpeechSeconds: 28.3, unresolved: false, unconfirmedAccepted: false, recordingAvailable: true } }} />)
     expect(gap).toContain('Not assessed · Part of this answer was not transcribed'); expect(gap).toContain('not evidence of a knowledge gap')
+    expect(gap).toContain('About 28 seconds of speech could not be transcribed'); expect(gap).toContain('recording of this answer was saved')
+    expect(gap).not.toMatch(/Incorrect|Did not know|What was correct/)
+    const noAudio = renderToStaticMarkup(<InterviewFeedbackDisclosure finding={{ ...failed('TRANSCRIPT_INCOMPLETE', 'TRANSCRIPT_INCOMPLETE'),
+      transcriptIntegrity: { gapSpeechSeconds: 0, unresolved: true, unconfirmedAccepted: false, recordingAvailable: false } }} />)
+    expect(noAudio).toContain('did not recover'); expect(noAudio).toContain('No saved recording was confirmed')
     for (const code of ['EVALUATION_USER_BUDGET_REACHED', 'EVALUATION_SHARED_BUDGET_REACHED', 'LEASE_EXPIRED']) {
       expect(renderToStaticMarkup(<InterviewFeedbackDisclosure finding={failed(code)} />)).toContain('Your saved answer and recording are unaffected')
     }

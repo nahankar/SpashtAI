@@ -9,7 +9,7 @@ import { deleteSession } from './sessions'
 import { recordFeatureUsage, recordUserFeatureUsage } from '../middleware/tracking'
 import { learnerFindings, wakeLearnerEvaluator } from '../interviews/evaluator/learner'
 import { nextSchema } from '../interviews/practice/contracts'
-import { acceptRecordingAcknowledgment, recordingAcknowledgment, agentFinishAnswer, agentPrepareNext, captureCommittedTurn, endPractice, finishAnswer, markQuestionAsked, ownedCaptureReceipt, practiceDetail, practiceHistory, practiceOptions, prepareBankAttempt, recordAssistance, saveCaptureReceipt, startPractice, voiceState } from '../interviews/practice/service'
+import { recordTranscriptIssue, acceptRecordingAcknowledgment, recordingAcknowledgment, agentFinishAnswer, agentPrepareNext, captureCommittedTurn, endPractice, finishAnswer, markQuestionAsked, ownedCaptureReceipt, practiceDetail, practiceHistory, practiceOptions, prepareBankAttempt, recordAssistance, saveCaptureReceipt, startPractice, voiceState } from '../interviews/practice/service'
 
 const route = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => { void fn(req, res).catch(next) }
 const empty = z.object({}).strict()
@@ -82,6 +82,7 @@ practiceAgentRouter.use((req, res, next) => {
 })
 practiceAgentRouter.post('/attempts/:attemptId/asked', route(async (req, res) => { res.json(await markQuestionAsked(req.params.attemptId, req.body)) }))
 practiceAgentRouter.post('/attempts/:attemptId/chunks', route(async (req, res) => { res.json(await captureCommittedTurn(req.params.attemptId, req.body)) }))
+practiceAgentRouter.post('/attempts/:attemptId/transcript-issues', route(async (req, res) => { res.json(await recordTranscriptIssue(req.params.attemptId, req.body)) }))
 practiceAgentRouter.post('/attempts/:attemptId/assistance', route(async (req, res) => { await recordAssistance(req.params.attemptId, req.body); res.json({ saved: true }) }))
 practiceAgentRouter.post('/attempts/:attemptId/receipts', route(async (req, res) => { res.json(await saveCaptureReceipt(req.params.attemptId, req.body)) }))
 // Conversation coordinator: finish and advance for the run owner, only on conversation-enabled runs.
