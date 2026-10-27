@@ -112,6 +112,8 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
         stt_fault = dev_stt_fault()
 
         def recognition_issue(kind: str, detail: dict):
+            if conversing():
+                coordinator.recognition_event(kind, detail)
             # Tell the learner when recognition is not recovering, or when audio beyond the replay bound was not
             # transcribed; a successful silent restart needs no notice.
             if kind == "restarted" and not detail.get("lostSeconds"):

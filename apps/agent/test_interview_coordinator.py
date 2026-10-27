@@ -276,5 +276,99 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(extra['receiptId'])
         self.assertFalse(self.coordinator.active)
 
+
+GRACE = .12  # scaled from the 3 s bounded wait; sounds below are a few ms (scaled from about 0.7 s)
+
+
+class ShortSoundTests(CoordinatorTests):
+    """Bounded wait for an isolated short sound with no transcript (from the 27 Oct live run)."""
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        self.coordinator.vad_only_grace, self.coordinator.vad_only_max = GRACE, .1
+
+    async def blip(self, seconds=.02):
+        self.speech(True); await asyncio.sleep(seconds); self.speech(False)
+
+    def chunks(self):
+        return [body['text'] for path, body in self.sent if path.endswith('/chunks')]
+
+    async def wait_for_finish(self, timeout=2.0):
+        for _ in range(int(timeout / .02)):
+            if self.finishes():
+                await self.settle_tasks(); return
+            await asyncio.sleep(.02)
+
+    async def test_confirmed_answer_then_a_short_sound_then_silence_progresses_without_a_loss_notice(self):
+        self.final('Confirmed words.')
+        await self.blip()
+        await asyncio.sleep(GRACE * .5)
+        self.assertEqual(self.finishes(), [])                    # still inside the bounded wait
+        self.assertIn(('listening', 'SPEECH_UNCONFIRMED'), self.states)
+        await self.wait_for_finish()
+        self.assertEqual(len(self.finishes()), 1)
+        self.assertEqual(self.chunks(), ['Confirmed words.'])
+        self.assertNotIn('waiting', [name for name, _ in self.states])
+        self.assertFalse(self.coordinator.gap)                   # no "could not be transcribed" report
+
+    async def test_a_short_word_whose_transcript_arrives_late_is_kept(self):
+        self.final('My answer is retries.')
+        await self.blip()
+        await asyncio.sleep(GRACE * .6)
+        self.final('Yes.')                                      # during the bounded wait
+        await self.wait_for_finish()
+        self.assertEqual(self.chunks(), ['My answer is retries.', 'Yes.'])
+
+    async def test_a_transcript_arriving_during_the_countdown_is_kept(self):
+        self.final('Backoff with jitter.')
+        await self.blip()
+        await asyncio.sleep(GRACE + HANDOFF * .4)                # bounded wait over, countdown running
+        self.final('Correction: exponential.')
+        await self.wait_for_finish()
+        self.assertEqual(self.chunks(), ['Backoff with jitter.', 'Correction: exponential.'])
+        self.assertEqual(len(self.finishes()), 1)
+
+    async def test_speech_resuming_during_the_wait_keeps_listening(self):
+        self.final('First part.')
+        await self.blip()
+        await asyncio.sleep(GRACE * .5)
+        self.speech(True)                                       # the learner carries on
+        await asyncio.sleep(GRACE + HANDOFF + .2)
+        self.assertEqual(self.finishes(), [])
+        self.assertEqual(self.coordinator.state, 'listening')
+
+    async def test_sustained_untranscribed_speech_is_never_finished_silently(self):
+        self.final('Confirmed words.')
+        await self.blip(.2)                                     # longer than the short-sound limit
+        await asyncio.sleep(GRACE + HANDOFF + .3)
+        self.assertEqual(self.finishes(), [])
+        self.assertIn(('listening', 'SPEECH_UNCONFIRMED'), self.states)
+
+    async def test_recognizer_recovery_or_a_reported_gap_disables_the_shortcut(self):
+        self.final('Confirmed words.')
+        await self.blip()
+        self.coordinator.recognition_event('restarted', {'lostSeconds': 0})
+        await asyncio.sleep(GRACE + HANDOFF + .3)
+        self.assertEqual(self.finishes(), [])
+        self.coordinator.recognition_event('restarted', {'lostSeconds': 4.2})
+        self.coordinator.recognition_event('recovered', {})
+        await self.blip()
+        await asyncio.sleep(GRACE + HANDOFF + .3)
+        self.assertEqual(self.finishes(), [])                    # a gap was reported for this answer
+
+    async def test_pending_partial_text_is_never_skipped(self):
+        self.final('Confirmed words.')
+        self.interim('and then we')
+        await self.blip()
+        await asyncio.sleep(GRACE + HANDOFF + .3)
+        self.assertEqual(self.finishes(), [])
+
+    async def test_noise_with_no_confirmed_answer_neither_finishes_nor_skips(self):
+        await self.blip()
+        await asyncio.sleep(GRACE + HANDOFF + .3)
+        self.assertEqual(self.finishes(), [])
+        self.assertFalse([b for p, b in self.requests if b.get('skip')])
+        self.assertEqual(self.coordinator.state, 'listening')
+
 if __name__ == '__main__':
     unittest.main()

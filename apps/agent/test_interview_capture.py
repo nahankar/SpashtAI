@@ -55,6 +55,25 @@ class CaptureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.sent,[])
         self.assertTrue(self.capture.accepting)
 
+    async def test_ignoring_an_untranscribed_sound_never_drops_partial_text_or_late_finals(self):
+        self.capture.observe_provider_transcript('Confirmed.',True)
+        self.capture.observe_speech_start(); self.capture.observe_speech_end()   # a sound with no transcript
+        self.assertTrue(self.capture.unresolved_speech)
+        self.later(.03,lambda:self.capture.observe_provider_transcript('Late word.',True))
+        ack=await self.capture.drain(self.session,'FINISH',str(uuid4()),accept_vad_only=True)
+        self.assertEqual([b['text'] for p,b in self.sent if p.endswith('/chunks')],['Confirmed.','Late word.'])
+        self.assertEqual(ack['action'],'FINISH')
+        # Partial text is still waited for in full and never saved as an answer.
+        fresh=InterviewCapture(state(),self.send,AsyncMock(),settle=SETTLE,max_barrier=MAX_BARRIER,unresolved_wait=UNRESOLVED_WAIT,vad_tail=VAD_TAIL,grace=.01,poll=.005)
+        fresh.accepting=True; fresh.attached=True; self.sent.clear()
+        fresh.observe_provider_transcript('Confirmed.',True)
+        fresh.observe_provider_transcript('and then',False)
+        loop=asyncio.get_running_loop(); start=loop.time()
+        with self.assertRaisesRegex(CaptureUnavailable,'TRANSCRIPT_PENDING'):
+            await fresh.drain(self.session,'FINISH',str(uuid4()),accept_vad_only=True)
+        self.assertGreaterEqual(loop.time()-start,MAX_BARRIER-.01)
+        self.assertNotIn('and then',[b.get('text') for p,b in self.sent])
+
     async def test_voiced_speech_with_an_interim_waits_for_its_final(self):
         self.capture.observe_speech_start()
         self.capture.observe_provider_transcript('still speaking',False)

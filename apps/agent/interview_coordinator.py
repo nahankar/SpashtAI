@@ -21,6 +21,13 @@ STOP_CODES = {"PRACTICE_DURATION_REACHED", "PRACTICE_QUESTION_LIMIT", "QUESTION_
 # The learner's access to automatic conversation was withdrawn: continue with manual controls.
 WITHDRAWN = "CONVERSATION_UNAVAILABLE"
 CLOSING_LINE = "That's the end of this practice. You can end it now to review your answers."
+# Bounded wait for an isolated short sound that never produced any transcript (a breath, click or cough
+# detected as voice). Only when the answer already has confirmed words, the untranscribed sound totals at most
+# VAD_ONLY_MAX_SECONDS, no partial text is pending, and recognition is not recovering or reporting a gap. After
+# VAD_ONLY_GRACE_SECONDS of quiet the normal handoff countdown starts. This cannot always tell a short word
+# from noise: a word the recognizer never transcribes is left out of the saved answer (the recording keeps it).
+VAD_ONLY_MAX_SECONDS = 1.5
+VAD_ONLY_GRACE_SECONDS = 3.0
 
 
 class ServerRefused(RuntimeError):
@@ -38,7 +45,8 @@ class InterviewCoordinator:
 
     def __init__(self, *, capture: InterviewCapture, session, request: Callable[..., Awaitable[dict]],
                  voice_state: Callable[[], Awaitable[dict]], publish_state: Callable[[str, dict], Awaitable[None]],
-                 run_id: str, policy: dict, attempt_has_speech: bool = False):
+                 run_id: str, policy: dict, attempt_has_speech: bool = False,
+                 vad_only_grace: float = VAD_ONLY_GRACE_SECONDS, vad_only_max: float = VAD_ONLY_MAX_SECONDS):
         self.capture = capture
         self.session = session
         self.request = request
@@ -61,6 +69,11 @@ class InterviewCoordinator:
         self.active = True
         self.stopped = False
         self.suspended = False
+        self.vad_only_grace, self.vad_only_max = vad_only_grace, vad_only_max
+        self.grace = None            # pending bounded wait for an untranscribed short sound
+        self.vad_only = False        # that wait elapsed: the next handoff may ignore the sound
+        self.recovering = False      # the recognizer was restarted and has not produced a result since
+        self.gap = False             # untranscribed speech was reported for this answer
 
     # ---- state -----------------------------------------------------------------------------
     async def _set(self, state: str, **extra):
@@ -79,6 +92,8 @@ class InterviewCoordinator:
 
     # ---- speech events (from the voice adapter) ---------------------------------------------
     def on_transcript(self, is_final: bool, has_words: bool = True):
+        if has_words or is_final:
+            self.recovering = False  # recognizer progress
         if not self._listening():
             return
         if is_final:
@@ -98,17 +113,58 @@ class InterviewCoordinator:
         else:
             self._arm()
 
+    def recognition_event(self, kind: str, detail: dict | None = None):
+        """Recognizer supervision reports: a restart or gap disables the short-sound shortcut for the answer."""
+        if kind in {"restarted", "unavailable"}:
+            self.recovering = True
+            if (detail or {}).get("lostSeconds"):
+                self.gap = True
+            self._cancel_grace()
+        elif kind == "recovered":
+            self.recovering = False
+
+    def _vad_only_eligible(self) -> bool:
+        c = self.capture
+        return (self.has_speech and not c.pending_interim and not self.recovering and not self.gap
+                and 0.0 < c.unresolved_voiced <= self.vad_only_max and not self.vad_speaking)
+
+    def _cancel_grace(self):
+        if self.grace is not None and not self.grace.done():
+            self.grace.cancel()
+        self.grace = None
+        self.vad_only = False
+
+    async def _grace_elapsed(self, attempt_id: str):
+        try:
+            await asyncio.sleep(self.vad_only_grace)
+        except asyncio.CancelledError:
+            return
+        self.grace = None
+        if (self._listening() and not self.hold and not self.suspended and self.capture.state["attempt"]["id"] == attempt_id
+                and self.capture.unresolved_speech and self._vad_only_eligible()):
+            logger.info("interview_coordinator untranscribed_sound_ignored voiced_ms=%d grace_ms=%d",
+                        round(self.capture.unresolved_voiced * 1000), round(self.vad_only_grace * 1000))
+            self.vad_only = True
+            self._arm()
+
     def _arm(self):
         """Start the handoff countdown only after real silence that follows provider-final speech."""
         if not self._listening() or self.hold or self.vad_speaking or self.suspended:
             return
+        vad_only = False
         if self.capture.unresolved_speech:
-            # Voiced audio without any transcript is never saved or discarded automatically.
-            asyncio.create_task(self._set("listening", reason="SPEECH_UNCONFIRMED"))
-            return
-        if not self.has_speech or self.capture.pending_interim or self.capture.pending_audio:
+            if self._vad_only_eligible() and self.vad_only:
+                vad_only = True  # bounded wait elapsed for a short sound with no transcript at all
+            else:
+                if self._vad_only_eligible() and self.grace is None:
+                    self.grace = asyncio.create_task(self._grace_elapsed(self.capture.state["attempt"]["id"]))
+                # Otherwise voiced audio without any transcript is never saved or discarded automatically.
+                asyncio.create_task(self._set("listening", reason="SPEECH_UNCONFIRMED"))
+                return
+        if not self.has_speech or self.capture.pending_interim or (self.capture.pending_audio and not vad_only):
             return
         self._cancel(None)
+        self.vad_only = vad_only
         attempt_id = self.capture.state["attempt"]["id"]
         self.timer = asyncio.create_task(self._countdown(attempt_id))
         asyncio.create_task(self._set("candidate_end", handoffAt=str(int((time.time() + self.handoff) * 1000))))
@@ -117,6 +173,9 @@ class InterviewCoordinator:
         if self.timer is not None and not self.timer.done():
             self.timer.cancel()
         self.timer = None
+        if state is not None:
+            # Renewed speech, recognizer progress or More time: any bounded wait starts again later.
+            self._cancel_grace()
         if state and self.state == "candidate_end":
             asyncio.create_task(self._set(state))
 
@@ -131,7 +190,7 @@ class InterviewCoordinator:
         self.timer = None
         logger.info("interview_coordinator handoff=automatic handoff_ms=%d", round(self.handoff * 1000))
         try:
-            await self.complete("FINISH", str(uuid4()), attempt_id, origin="automatic")
+            await self.complete("FINISH", str(uuid4()), attempt_id, origin="automatic", accept_vad_only=self.vad_only)
         except CaptureUnavailable as error:
             logger.info("interview_coordinator automatic_finish_deferred code=%s", error.code)
         except Exception:
@@ -161,13 +220,14 @@ class InterviewCoordinator:
                 self._arm()
 
     async def complete(self, action: str, request_id: str, attempt_id: str | None, *, origin: str = "manual",
-                       accept_unresolved: bool = False) -> dict:
+                       accept_unresolved: bool = False, accept_vad_only: bool = False) -> dict:
         """Save the answer (FINISH) or skip it, then finish it on the server and move to the next question."""
         async with self.lock:
-            return await self._complete(action, request_id, attempt_id, origin=origin, accept_unresolved=accept_unresolved)
+            return await self._complete(action, request_id, attempt_id, origin=origin, accept_unresolved=accept_unresolved,
+                                        accept_vad_only=accept_vad_only)
 
     async def _complete(self, action: str, request_id: str, attempt_id: str | None, *, origin: str,
-                        accept_unresolved: bool = False) -> dict:
+                        accept_unresolved: bool = False, accept_vad_only: bool = False) -> dict:
         if request_id in self.outcomes:
             return self.outcomes[request_id]
         current = self.capture.state["attempt"]["id"]
@@ -184,7 +244,8 @@ class InterviewCoordinator:
         started = time.monotonic()
         await self._set("confirming")
         try:
-            receipt = await self.capture.drain(self.session, action, request_id, accept_unresolved=accept_unresolved)
+            receipt = await self.capture.drain(self.session, action, request_id, accept_unresolved=accept_unresolved,
+                                               accept_vad_only=accept_vad_only and action == "FINISH")
         except Exception as error:
             code = _code(error, "SAVE_FAILED")
             if self.capture.accepting and not self.stopped and not self.suspended:
@@ -199,6 +260,7 @@ class InterviewCoordinator:
             raise
         drained = time.monotonic()
         self.has_speech = False
+        self._cancel_grace(); self.gap = self.recovering = False
         await self._set("saving")
         try:
             await self.request(f"/attempts/{current}/finish", {"receiptId": receipt["receiptId"], "skip": action == "SKIP"})
@@ -333,6 +395,7 @@ class InterviewCoordinator:
     async def question_ready(self, attempt_has_speech: bool):
         self.has_speech = attempt_has_speech
         self.hold = False
+        self._cancel_grace(); self.gap = self.recovering = False
         if not self.capture.accepting:
             return  # the question was interrupted (Pause or End): there is nothing to listen for
         await self._set("listening")
@@ -343,9 +406,11 @@ class InterviewCoordinator:
         """Pause or End requested: no automatic handoff or advance while that save runs."""
         self.suspended = True
         self._cancel(None)
+        self._cancel_grace()
 
     def stop(self):
         self.stopped = True
         self._cancel(None)
+        self._cancel_grace()
         if self.ask_task is not None and not self.ask_task.done():
             self.ask_task.cancel()

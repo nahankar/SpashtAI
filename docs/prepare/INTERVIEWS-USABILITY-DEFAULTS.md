@@ -45,3 +45,19 @@ full History keeps pagination, filters and deletion.
 
 Publishing the approved Terms and Privacy additions is part of releasing this branch. Follow
 `POLICY-INTERVIEWS-RECORDING.md` §7 after the deploy checks pass.
+
+## Short untranscribed sounds (bounded wait)
+
+Automatic conversation used to wait indefinitely when voice activity produced no transcript at all (a breath,
+click or cough), showing "Some speech has not been transcribed yet". It now uses a bounded wait **only** when the
+answer already has confirmed words, the untranscribed voice activity totals at most **1.5 s**, no partial text is
+pending, and the recognizer is neither recovering from a restart nor reporting a transcription gap for the
+answer. After **3 s** of quiet the normal **5 s** handoff countdown starts; the save then waits for late finals
+and still waits the full 8 s barrier for any partial text. Renewed speech, any recognizer result, More time,
+a restart or a reported gap cancels it. With no confirmed words nothing is finished or skipped automatically.
+
+The ignored sound stays in the recording and is logged as `saved_ignoring_untranscribed_sound`; it is never
+reported to the learner as lost words. **Remaining risk:** a short sound cannot always be told apart from a short
+word. A word the recognizer never transcribes within about 8 s (3 s wait + 5 s countdown) is left out of the saved
+answer, although the recording keeps it. Sustained speech (over 1.5 s) without a transcript is never finished
+automatically; the recognizer watchdog restarts the stream or reports that recognition is not responding.

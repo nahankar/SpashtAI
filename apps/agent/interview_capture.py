@@ -78,6 +78,8 @@ class InterviewCapture:
         self.speech_active = False
         self.transcript_since_speech = True
         self.voiced_at = None      # wall-clock start of the latest voiced audio
+        self.voice_started = None  # wall-clock start of the current voice-activity run
+        self.unresolved_voiced = 0.0  # seconds of voice activity that no transcript has covered yet
         self.covered_until = None  # wall-clock end of the latest audio a provider final covers
         self.answer_words = 0      # provider finals with words for the open answer in this connection
         self.prior_speech = bool(state.get("attemptHasSpeech"))
@@ -92,6 +94,7 @@ class InterviewCapture:
         return bool(self.open_interims)
 
     def _reset_speech(self) -> None:
+        self.unresolved_voiced, self.voice_started = 0.0, None
         self.open_interims = []
         self.pending_audio = False
         self.speech_active = False
@@ -117,6 +120,7 @@ class InterviewCapture:
                 self.open_interims.append(start if timed else None)
                 if covers:
                     self.transcript_since_speech = True
+                    self.unresolved_voiced = 0.0
             return
         # A provider final (even an empty one) completes its recognizer segment and any earlier one; only one
         # with words becomes part of the answer. An interim of a later segment stays pending.
@@ -126,6 +130,7 @@ class InterviewCapture:
         if covers:
             self.transcript_since_speech = True
             self.pending_audio = False
+            self.unresolved_voiced = 0.0
         if not words:
             return
         item = {"attemptId": self.state["attempt"]["id"], "body": {
@@ -141,7 +146,7 @@ class InterviewCapture:
         if self.accepting:
             self.pending_audio = True
             self.transcript_since_speech = False
-            self.voiced_at = at if at is not None else time.time()
+            self.voiced_at = self.voice_started = at if at is not None else time.time()
             self.last_activity = self._now()
             # A start processed after the detach comes from audio sent before it and cannot still be going on.
             self.speech_active = self.attached
@@ -150,6 +155,9 @@ class InterviewCapture:
         self.speech_active = False
         if self.accepting:
             self.last_activity = self._now()
+            if self.voice_started is not None and not self.transcript_since_speech:
+                self.unresolved_voiced += max(0.0, (at if at is not None else time.time()) - self.voice_started)
+        self.voice_started = None
 
     @property
     def unresolved_speech(self) -> bool:
@@ -185,22 +193,28 @@ class InterviewCapture:
                 return
             self.pending.popleft()
 
-    async def _await_complete_speech(self, detached_at: float, bound: float, settle: float):
-        """Return None once provider-final speech is complete, else the pending reason after the bound."""
+    async def _await_complete_speech(self, detached_at: float, bound: float, settle: float, ignore_audio: bool = False):
+        """Return None once provider-final speech is complete, else the pending reason after the bound.
+
+        ignore_audio skips only voice activity that never produced any transcript; pending partial text is
+        still waited for, for the full bound."""
         deadline = detached_at + bound
         while True:
             now = self._now()
-            if not self.pending_interim and not self.pending_audio and now - max(self.last_activity, detached_at) >= settle:
+            if not self.pending_interim and (ignore_audio or not self.pending_audio) and now - max(self.last_activity, detached_at) >= settle:
                 return None
             if now >= deadline:
                 return "interim" if self.pending_interim else "speech"
             await asyncio.sleep(self.poll)
 
-    async def drain(self, session, action: str, request_id: str, *, accept_unresolved: bool = False) -> dict:
+    async def drain(self, session, action: str, request_id: str, *, accept_unresolved: bool = False,
+                    accept_vad_only: bool = False) -> dict:
         """Save everything finalised before the boundary and record a receipt for exactly those turns.
 
         accept_unresolved is the learner's explicit choice, after TRANSCRIPT_PENDING, to save only the
-        confirmed speech. Nothing is ever discarded automatically.
+        confirmed speech. accept_vad_only is the coordinator's bounded wait for a short sound that never
+        produced any transcript (see InterviewCoordinator): pending partial text is still waited for in full,
+        and no transcribed word is ever dropped.
         """
         if action not in {"FINISH", "SKIP", "PAUSE", "LEAVE"}:
             raise CaptureUnavailable("INVALID_ACTION")
@@ -244,7 +258,7 @@ class InterviewCapture:
                 self._detach(session)
                 if open_answer:
                     reason = await self._await_complete_speech(self._now(), self.unresolved_wait if accept_unresolved else self.max_barrier,
-                                                               self.settle + (self.vad_tail if ambiguous else 0.0))
+                                                               self.settle + (self.vad_tail if ambiguous else 0.0), ignore_audio=accept_vad_only)
             barrier_ms = round((self._now() - started) * 1000)
             if reason and not accept_unresolved:
                 logger.info("interview_drain action=%s outcome=transcript_pending reason=%s barrier_ms=%d pending_interim=%s pending_audio=%s",
@@ -252,6 +266,10 @@ class InterviewCapture:
                 raise CaptureUnavailable("TRANSCRIPT_PENDING")
             if reason:
                 logger.info("interview_drain action=%s outcome=saved_confirmed_only reason=%s barrier_ms=%d", action, reason, barrier_ms)
+            elif accept_vad_only and self.pending_audio:
+                # Not lost words: a short sound with no transcript at all. The recording keeps it.
+                logger.info("interview_drain action=%s outcome=saved_ignoring_untranscribed_sound unresolved_voiced_ms=%d barrier_ms=%d",
+                            action, round(self.unresolved_voiced * 1000), barrier_ms)
             if action == "FINISH" and open_answer and not self.answer_words and not self.prior_speech:
                 # Nothing has been said for this answer: keep it open instead of storing an empty completion.
                 self.enable_input(session)
