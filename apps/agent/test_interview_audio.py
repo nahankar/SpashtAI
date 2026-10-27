@@ -371,3 +371,26 @@ class DevSttFaultTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(once, [script[:2], script])
         repeated = await self.collect("stall-repeatedly", [script] * 4)
         self.assertEqual(repeated, [script[:2], [], [], script])
+
+
+class RecognizerWatchLiveRegressionTests(unittest.TestCase):
+    """From the first live microphone run (27 Oct): a short unrecognised sound, a long silence, then speech."""
+
+    def setUp(self):
+        self.now = 0.0
+        self.watch = RecognizerWatch(stall=6, clock=lambda: self.now)
+
+    def test_a_stale_short_sound_does_not_make_new_speech_look_stalled(self):
+        self.watch.speech_started(0.0); self.now = 1.0; self.watch.result(final=True, covered_until=.9); self.watch.speech_ended(1.0)
+        self.watch.speech_started(6.2); self.watch.speech_ended(6.9)        # 0.7 s sound, no transcript
+        self.now = 52.0; self.watch.speech_started(52.0)                    # 45 s of silence, then the learner speaks
+        self.now = 53.6; self.watch.speech_ended(53.6)
+        self.assertFalse(self.watch.stalled())                              # live recognizer still gets its window
+        self.now = 57.9; self.assertFalse(self.watch.stalled())
+        self.now = 58.0; self.assertTrue(self.watch.stalled())              # 6 s after the new speech began, no result
+
+    def test_untranscribed_time_counts_speech_not_silence(self):
+        self.watch.speech_started(10.0); self.watch.speech_ended(10.7)
+        self.watch.speech_started(55.0); self.now = 58.0
+        self.assertAlmostEqual(self.watch.voiced_between(10.0, 40.0), .7)
+        self.assertAlmostEqual(self.watch.voiced_between(50.0, 60.0), 3.0)  # the current run counts up to now

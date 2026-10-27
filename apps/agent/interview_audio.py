@@ -55,6 +55,9 @@ class RecognizerWatch:
         self.first_voiced: float | None = None     # first voiced audio after the latest final
         self.restart_at: float | None = None       # each replacement gets its own full window
         self.restarts = 0                          # consecutive replacements without progress
+        self.run_start: float | None = None        # start of the current voiced run (never moved by results)
+        self.last_voice_end: float | None = None
+        self.runs: deque = deque()                 # recent voiced runs (start, end), for measuring untranscribed speech
 
     def new_stream(self) -> None:
         """A new recognizer stream (session start or a question change): forget recognizer progress, but keep
@@ -66,16 +69,30 @@ class RecognizerWatch:
 
     def speech_started(self, at: float | None = None) -> None:
         at = at if at is not None else self.clock()
-        self.speaking, self.speech_at = True, at
+        if (not self.speaking and not self.awaiting_final and self.last_voice_end is not None
+                and at - self.last_voice_end > self.base_stall):
+            # A short sound followed by a long silence is owed nothing: do not let it count towards new speech.
+            self.voiced, self.voiced_since = 0.0, None
+        self.speaking, self.speech_at, self.run_start = True, at, at
         if self.voiced_since is None:
             self.voiced_since = at
         if self.first_voiced is None:
             self.first_voiced = at
 
     def speech_ended(self, at: float | None = None) -> None:
+        at = at if at is not None else self.clock()
         if self.speaking and self.speech_at is not None:
-            self.voiced += max(0.0, (at if at is not None else self.clock()) - self.speech_at)
-        self.speaking = False
+            self.voiced += max(0.0, at - self.speech_at)
+        if self.speaking and self.run_start is not None:
+            self.runs.append((self.run_start, at))
+            while self.runs and at - self.runs[0][1] > 300:
+                self.runs.popleft()
+        self.speaking, self.last_voice_end = False, at
+
+    def voiced_between(self, start: float, end: float) -> float:
+        """Seconds of detected speech between two wall-clock times (silence is not counted)."""
+        runs = list(self.runs) + ([(self.run_start, self.clock())] if self.speaking and self.run_start is not None else [])
+        return sum(max(0.0, min(b, end) - max(a, start)) for a, b in runs)
 
     def result(self, final: bool, covered_until: float | None = None) -> None:
         """Any interim or final is progress; a final also commits the audio it covers."""
@@ -206,8 +223,9 @@ async def supervise_recognizer(audio: AsyncIterable[rtc.AudioFrame], open_stream
             old, queue = queue, asyncio.Queue()
             replayed = [frame for at, frame in history if at >= since]
             first = next((at for at, _ in history if at >= since), clock())
-            # Audio older than the buffer bound is not resent (it stays in the recording, untranscribed).
-            lost = max(0.0, dropped["until"] - since) if dropped["until"] is not None and dropped["until"] > since else 0.0
+            # Speech older than the buffer bound is not resent (it stays in the recording, untranscribed). Count
+            # only detected speech in that span, never silence.
+            lost = watch.voiced_between(since, dropped["until"]) if dropped["until"] is not None and dropped["until"] > since else 0.0
             old.put_nowait(None)
             watch.restarted()
             logger.warning("interview_stt restarted reason=%s attempt=%d replay_s=%.1f lost_s=%.1f",
