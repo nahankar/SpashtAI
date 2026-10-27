@@ -124,6 +124,43 @@ recognizer never transcribes within about 8 s is left out of the saved answer (t
 - Continuous non-speech sound detected as voice (for example a TV) can cause harmless restarts and, after two, the
   "not responding" notice.
 - Learner feedback stays limited to 30 answers per day; longer practices can reach it.
-- Grading remains experimental; recording loss on refresh (D-1) remains open.
+- Grading remains experimental. Recording loss on refresh (D-1) remains open in production; a fix is on branch `codex/interviews-reliability-d1` (see below), not yet released.
 - Release still needs explicit authorisation; at release, publish the Terms/Privacy additions per
   `POLICY-INTERVIEWS-RECORDING.md` §7 (Privacy §3 now uses the provider-neutral wording).
+
+## Next update: Interviews reliability (branch `codex/interviews-reliability-d1`, 28 Oct 2026) — not merged or deployed
+
+Built from `main` `e1f9d19` (plus this report's two documentation commits). Three reviewable commits:
+
+| Commit | Change |
+| --- | --- |
+| `ac5d5cc` | Technical feedback only after practice ends, in playback. Both learner assessment API paths return a neutral `AFTER_PRACTICE` state with no status or content until the session ends (a pause is not an end). The practice page never shows feedback and links to playback after End. The "This preview saves…" paragraph is removed. Budgets unchanged; personal vs shared daily limits are recorded distinctly, and playback names each unavailable cause (your limit, shared limit, legacy limit, service failure, disabled, incomplete transcript). |
+| `b95da5e` | Transcript integrity persisted per answer (`InterviewTranscriptIssue`, migration `20261028090000`): confirmed gaps (estimated seconds of detected speech), unresolved recognition, recovery, accepted unconfirmed speech, ignored short sounds; saved before the completion receipt; never moved to another answer. Incomplete transcripts are never graded (`TRANSCRIPT_INCOMPLETE`, no model call or budget), re-checked at claim, result and display; a recovery never clears a gap; stored evaluations are not rewritten. |
+| `74d763d` | D-1 fix: recoverable local recording journal in the shared recorder (Interviews and Elevate). Details, deletion policy and limits: `INTERVIEWS-RECORDING-RECOVERY.md`. At most about 1 s (the current timeslice) plus one local write is unpersisted at a crash. |
+
+**Checks (actual):** server 654 passed, 4 skipped; agent 257 passed (zero unretrieved-task warnings); web 318
+passed, typecheck, lint and build pass. The new migration passes the supported empty-installation procedure
+(`migrate diff` exit 0) and upgraded the local development database cleanly. Browser checks with a generated tone
+and disposable accounts (since deleted): a page reloaded mid-recording was recovered by the app to its original
+segment (server decoded 15.24 s of Opus 48 kHz); a live recording was refused; two concurrent recoveries made one
+upload; another account's journal stayed untouched until that account signed back in; a deleted practice dropped
+the local copy.
+
+**Unresolved risks:**
+- Recovery depends on IndexedDB and Web Locks (fallback: 2 minutes of inactivity); without IndexedDB there is none.
+- Signing in as another account without signing out leaves the previous account's journal in the browser for up to
+  7 days. The acknowledgment and Privacy Policy do not yet mention temporary local recovery storage; proposed
+  wording is in `INTERVIEWS-RECORDING-RECOVERY.md` (needs approval, a new acknowledgment version and a republish).
+- Gap seconds are estimates of detected speech; continuous non-speech sound detected as voice can still cause
+  restarts and notices.
+- Grading remains experimental; adaptive interviewing and grading-prompt rewrites are out of scope.
+
+**Human microphone checks needed before release (local, then production):**
+1. Feedback timing: during practice and while paused, no technical feedback anywhere; after End, playback shows it
+   collapsed under each answer; the ended practice page shows only the playback link.
+2. Refresh mid-answer and between questions: the reloaded page recovers the recording to the original segment;
+   playback plays it; nothing is attached to a later question.
+3. Two tabs open on the same practice during a reload: one upload.
+4. Sign out after a crash and sign in as another account: no recovery of the first account's audio.
+5. With the local fault switch: a reported gap makes that answer "Not assessed · Part of this answer was not
+   transcribed" in playback, with the estimate and recording note, while the next answer is graded normally.
