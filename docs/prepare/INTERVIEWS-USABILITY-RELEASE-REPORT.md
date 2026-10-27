@@ -31,13 +31,13 @@ deployed to EC2 with `infra/ec2/deploy.sh`. EC2 `/opt/spashtai` is at `e1f9d19` 
 - **Web:** the served bundle contains the plan labels, Show conversation, Load more and recognition notices, and no
   longer contains the question card, "up to 8 questions" or the reminder near Start. The server runs acknowledgment
   `interview-recording-ai-2` (the ai-1 text is kept verbatim only for verifying earlier acceptances).
-- **Terms/Privacy:** live text re-checked against the reviewed 2026-06-23 baseline (both hashes match; no intervening
-  edits). **Not yet published:** publishing through the Admin legal editor needs a signed-in Admin. The dated text is
-  prepared (`Last updated: 2026-10-27`); expected stored SHA-256 terms `d8ab386e…6dd6`, privacy `41f03e24…16cd`.
+- **Terms/Privacy published 27 Oct 2026** by the user in Admin → Legal, after the live text was re-checked against the
+  reviewed 2026-06-23 baseline (both hashes matched; no intervening edits). Verified through the public API: titles
+  unchanged, stored text identical to the approved provider-neutral text (SHA-256 terms `d8ab386e…6dd6`, privacy
+  `41f03e24…16cd`), `Last updated: 2026-10-27`, no provider named; updated 18:18:08 and 18:18:21 UTC.
 
 ### Remaining production checks
 
-- Publish Terms/Privacy in Admin → Legal, then verify the stored text against the expected hashes.
 - With the user's account: setup labels and defaults, acknowledgment (shown once for the new version), history
   buttons, Show conversation, no question card; a short normal microphone practice (no fault injection in production);
   confirm the new practice stores no question limit.
