@@ -1,4 +1,5 @@
 import { createContext, useEffect, useState, useCallback, type ReactNode } from 'react'
+import { clearRecordingsOnSignOut } from '@/lib/recordingRecovery'
 import { apiClient } from '@/lib/api-client'
 
 export interface AuthUser {
@@ -116,10 +117,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const logout = useCallback(() => {
+    const token = localStorage.getItem(TOKEN_KEY)
+    const accountId = user?.id
     apiClient('/api/auth/logout', { method: 'POST' }).catch(() => {})
     localStorage.removeItem(TOKEN_KEY)
     setUser(null)
-  }, [])
+    // Local refresh-recovery recordings of this account: a bounded upload, then deleted (never left for another user).
+    if (accountId) void clearRecordingsOnSignOut(accountId, token)
+  }, [user?.id])
 
   const updateUser = useCallback((data: Partial<AuthUser>) => {
     setUser((prev) => (prev ? { ...prev, ...data } : null))

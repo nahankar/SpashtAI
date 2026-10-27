@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { RecordingRecovery } from '@/components/session/RecordingRecovery'
 import { BrowserRouter, Link, Navigate, Route, Routes, useLocation, useSearchParams } from 'react-router-dom'
 import { Menu, RotateCcw, X } from 'lucide-react'
 import { AuthProvider } from '@/contexts/AuthContext'
@@ -489,6 +490,7 @@ function AppRoutes() {
   return (
     <>
       <Navbar />
+      {user && <RecordingRecovery accountId={user.id} />}
       <div className="flex min-h-[calc(100vh-4rem)] flex-col">
         <div className="flex-1">
       <Routes>
