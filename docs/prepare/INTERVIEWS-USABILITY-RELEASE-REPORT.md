@@ -1,14 +1,48 @@
 # Interviews usability update — release report (26–27 Oct 2026)
 
-**Production has not changed.** Nothing on this branch is merged or deployed.
+**Released 27 Oct 2026:** GitHub `main` fast-forwarded to `e1f9d19` (from `bd8eabf`; no intervening commits) and
+deployed to EC2 with `infra/ec2/deploy.sh`. EC2 `/opt/spashtai` is at `e1f9d19` on `main`.
 
 | | Revision | How checked |
 | --- | --- | --- |
-| Branch `codex/interviews-usability-defaults-consent` | `fbbb236` before this row update (local and GitHub match) | `git fetch`, 27 Oct |
-| GitHub `main` | `bd8eabf` | `git fetch`, 27 Oct |
-| EC2 `/opt/spashtai` | `bd8eabf` (27 Oct): API health 200, no `20261027*` migrations; only modified tracked files are the preserved LiveKit overlays (`infra/livekit/livekit.yaml`, `egress.yaml`). The live web bundle also still lacks this branch's strings | read-only SSH and public HTTPS, 27 Oct |
+| GitHub `main` | `e1f9d19` | `git fetch`, after the push |
+| EC2 `/opt/spashtai` | `e1f9d19`; only modified tracked files are the preserved LiveKit overlays (`infra/livekit/livekit.yaml`, `egress.yaml`) | read-only SSH after deploy |
+| This report | committed to the release branch after `e1f9d19` (documentation only; not on `main` or EC2) | — |
 
-## Commits not in main (oldest first)
+### Deployment record
+
+- **Pre-checks:** no open voice segment in the last 3 hours and no active interview practice; `SPASHTAI_DEV_STT_FAULT`
+  absent from the env files, the PM2 config and every agent process (before and after the deploy).
+- **Backup:** `~/spashtai-backups/usability-e1f9d19-20261027` on EC2 (mode 700): `database.dump` (pg_dump custom
+  format, 56 table-data entries; restored in full into a temporary database during verification, then dropped),
+  copies of `apps/server/.env`, `apps/agent/.env`, `.env.bak`, `infra/ec2/env/postgres.env`, the two LiveKit overlays,
+  `before.json`/`after.json` snapshots and `cutoff.txt`.
+- **Migrations (maintenance window, API and agent stopped):** `20261027090000_interview_unlimited_duration`,
+  `20261027100000_recording_acknowledgment`, `20261027110000_interview_open_question_count`,
+  `20261027120000_recording_acknowledgment_versions`, all applied; `migrate status` reports the schema up to date.
+- **Services:** API health `{"status":"ok"}` (local and `https://api.spasht.ai/health`), agent registered with LiveKit;
+  no new errors in the API or agent logs. Recurring "prosody … Broken pipe" lines for one old Elevate session predate
+  the deploy and are unrelated.
+- **Data preserved (checksums before vs after):** question bank (1649), feature flags, grants (6), answer snapshots,
+  finished assessments, voice config, legal documents and user plans unchanged. The 5 existing interview runs keep
+  every original column (compared against the restored dump) and their stored `maxQuestions = 8`; the only change is
+  the two new consent columns, empty on all 5. Feature access unchanged (flags hash identical); nothing broadened and
+  adaptive/generated questions not enabled by this release.
+- **Web:** the served bundle contains the plan labels, Show conversation, Load more and recognition notices, and no
+  longer contains the question card, "up to 8 questions" or the reminder near Start. The server runs acknowledgment
+  `interview-recording-ai-2` (the ai-1 text is kept verbatim only for verifying earlier acceptances).
+- **Terms/Privacy:** live text re-checked against the reviewed 2026-06-23 baseline (both hashes match; no intervening
+  edits). **Not yet published:** publishing through the Admin legal editor needs a signed-in Admin. The dated text is
+  prepared (`Last updated: 2026-10-27`); expected stored SHA-256 terms `d8ab386e…6dd6`, privacy `41f03e24…16cd`.
+
+### Remaining production checks
+
+- Publish Terms/Privacy in Admin → Legal, then verify the stored text against the expected hashes.
+- With the user's account: setup labels and defaults, acknowledgment (shown once for the new version), history
+  buttons, Show conversation, no question card; a short normal microphone practice (no fault injection in production);
+  confirm the new practice stores no question limit.
+
+## Commits released (oldest first)
 
 `4512539` compact voice rows, All difficulty · `cf276f1` plan-based practice time · `dfc5182` recording acknowledgment ·
 `195bfb1`, `69a455a` approved policy text and release step · `be47d58` Show conversation toggle · `6bde486` recognizer
