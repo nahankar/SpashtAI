@@ -42,6 +42,11 @@ export function dayRange(days: number, timeZone = REPORT_TIMEZONE, now = new Dat
 }
 export type DayRange = ReturnType<typeof dayRange>
 
+export function presentRange(days: number, range: DayRange) {
+  return { days, timeZone: range.timeZone, firstDay: range.firstDay, lastDay: range.lastDay,
+    since: range.since.toISOString(), until: range.until.toISOString() }
+}
+
 /** SQL for the local calendar day of a stored UTC timestamp column. */
 export function localDaySql(column: Prisma.Sql, timeZone: string) {
   return Prisma.sql`to_char(timezone(${timeZone}, ${column} AT TIME ZONE 'UTC'), 'YYYY-MM-DD')`

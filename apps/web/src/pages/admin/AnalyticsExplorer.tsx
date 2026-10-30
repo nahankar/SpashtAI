@@ -6,6 +6,8 @@ import { PlanDraft } from '@/components/admin/analytics-explorer/PlanDraft'
 import { QuestionComposer } from '@/components/admin/analytics-explorer/QuestionComposer'
 import { SavedQueryRail } from '@/components/admin/analytics-explorer/SavedQueryRail'
 import { UnderstoodSummary } from '@/components/admin/analytics-explorer/UnderstoodSummary'
+import { IndividualPlanDraft, IndividualResults, IndividualSummary, LearnerChoice } from '@/components/admin/analytics-explorer/IndividualExplorer'
+import type { LearnerSummary } from '@/components/admin/LearnerSelector'
 import {
   deleteSavedQuery,
   errorMessage,
@@ -19,13 +21,15 @@ import {
 } from '@/components/admin/analytics-explorer/api'
 import { normalizeRefreshInterval, replaceSavedQuery } from '@/components/admin/analytics-explorer/format'
 import { usePinnedAutoRefresh } from '@/components/admin/analytics-explorer/usePinnedAutoRefresh'
-import type {
-  AnalyticsPlan,
-  AnalyticsResult,
-  IdentityState,
-  RefreshIntervalSec,
-  SavedQuery,
-  SavedQueryLists,
+import {
+  isIndividualPlan,
+  isIndividualResult,
+  type AnyAnalyticsPlan,
+  type AnyAnalyticsResult,
+  type IdentityState,
+  type RefreshIntervalSec,
+  type SavedQuery,
+  type SavedQueryLists,
 } from '@/components/admin/analytics-explorer/types'
 
 type ExplorerView =
@@ -34,13 +38,15 @@ type ExplorerView =
   | { status: 'error'; message: string }
   | { status: 'clarification'; question: string }
   | { status: 'unsupported'; reason: string }
-  | { status: 'draft'; question: string; plan: AnalyticsPlan; error: string | null }
-  | { status: 'ready'; savedQuery: SavedQuery; result: AnalyticsResult }
+  | { status: 'no_match'; reason: string }
+  | { status: 'choose_learner'; question: string; reason: string; candidates: LearnerSummary[] }
+  | { status: 'draft'; question: string; plan: AnyAnalyticsPlan; learner?: LearnerSummary; error: string | null }
+  | { status: 'ready'; savedQuery: SavedQuery; result: AnyAnalyticsResult }
 
-function viewMessage(view: Exclude<ExplorerView, { status: 'ready' }>) {
+function viewMessage(view: Exclude<ExplorerView, { status: 'ready' | 'choose_learner' | 'draft' }>) {
   if (view.status === 'loading' || view.status === 'error') return view.message
   if (view.status === 'clarification') return view.question
-  if (view.status === 'unsupported') return view.reason
+  if (view.status === 'unsupported' || view.status === 'no_match') return view.reason
   return undefined
 }
 
@@ -186,12 +192,12 @@ export function AnalyticsExplorer() {
     }
   }
 
-  function showResult(saved: SavedQuery, result: AnalyticsResult, ticket: number, page: number) {
+  function showResult(saved: SavedQuery, result: AnyAnalyticsResult, ticket: number, page: number) {
     if (foreground.current !== ticket) return
     activeIdRef.current = saved.id
     setActiveId(saved.id)
     setView({ status: 'ready', savedQuery: saved, result })
-    if (saved.plan.answerKind === 'users') void loadUsers(saved.id, page)
+    if (!isIndividualPlan(saved.plan) && saved.plan.answerKind === 'users') void loadUsers(saved.id, page)
     else clearIdentity()
   }
 
@@ -247,7 +253,7 @@ export function AnalyticsExplorer() {
     await executeRun(id, signal, 'background')
   }
 
-  async function ask(text: string) {
+  async function ask(text: string, learnerId?: string) {
     const trimmed = text.trim()
     if (!trimmed || trimmed.length > 1000 || askingRef.current) return
     askingRef.current = true
@@ -259,18 +265,22 @@ export function AnalyticsExplorer() {
     askAbort.current = controller
     setView({ status: 'loading', message: 'Turning that question into a query...' })
     try {
-      const response = await interpretQuestion(trimmed, controller.signal)
+      const response = await interpretQuestion(trimmed, controller.signal, learnerId)
       if (controller.signal.aborted || isAbortError(controller.signal.reason) || foreground.current !== ticket) return
       const interpretation = response.interpretation
       if (interpretation.status === 'clarification') {
         setView({ status: 'clarification', question: interpretation.question })
         return
       }
-      if (interpretation.status === 'unsupported') {
-        setView({ status: 'unsupported', reason: interpretation.reason })
+      if (interpretation.status === 'unsupported' || interpretation.status === 'no_match') {
+        setView({ status: interpretation.status, reason: interpretation.reason })
         return
       }
-      setView({ status: 'draft', question: trimmed, plan: interpretation.plan, error: null })
+      if (interpretation.status === 'choose_learner') {
+        setView({ status: 'choose_learner', question: trimmed, reason: interpretation.reason, candidates: interpretation.candidates })
+        return
+      }
+      setView({ status: 'draft', question: trimmed, plan: interpretation.plan, learner: interpretation.learner, error: null })
     } catch (error) {
       if (controller.signal.aborted || isAbortError(error) || foreground.current !== ticket) return
       setView({ status: 'error', message: errorMessage(error, 'AI analytics is temporarily unavailable.') })
@@ -280,7 +290,7 @@ export function AnalyticsExplorer() {
     }
   }
 
-  async function runDraft(questionText: string, plan: AnalyticsPlan) {
+  async function runDraft(questionText: string, plan: AnyAnalyticsPlan, learner?: LearnerSummary) {
     if (askingRef.current) return
     askingRef.current = true
     setAsking(true)
@@ -288,7 +298,7 @@ export function AnalyticsExplorer() {
     askAbort.current?.abort()
     const controller = new AbortController()
     askAbort.current = controller
-    setView({ status: 'draft', question: questionText, plan, error: null })
+    setView({ status: 'draft', question: questionText, plan, learner, error: null })
     try {
       const response = await runAnalyticsPlan(questionText, plan, controller.signal)
       if (controller.signal.aborted || isAbortError(controller.signal.reason) || foreground.current !== ticket) return
@@ -301,6 +311,7 @@ export function AnalyticsExplorer() {
         status: 'draft',
         question: questionText,
         plan,
+        learner,
         error: errorMessage(error, 'Could not run this analytics plan.'),
       })
     } finally {
@@ -362,21 +373,39 @@ export function AnalyticsExplorer() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">AI Analytics</h1>
         <p className="text-muted-foreground">
-          Ask a plain-language question about learners, feature use, or language scores. Pinned answers refresh from the saved plan while this tab is visible.
+          Ask a plain-language question about learners, feature use, or language scores, or about one learner's Progress Pulse or day-wise activity (name them by email). Pinned answers refresh from the saved plan while this tab is visible.
         </p>
       </div>
       <QuestionComposer question={question} asking={asking} onQuestion={setQuestion} onAsk={(value) => { void ask(value) }} />
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
         <div className="min-w-0 space-y-4" aria-live="polite">
           {view.status === 'draft' ? (
-            <PlanDraft
-              plan={view.plan}
-              running={asking}
-              error={view.error}
-              onChange={(plan) => setView({ status: 'draft', question: view.question, plan, error: null })}
-              onRun={() => { void runDraft(view.question, view.plan) }}
-            />
-          ) : view.status === 'ready' ? (
+            isIndividualPlan(view.plan) ? (
+              <IndividualPlanDraft
+                plan={view.plan}
+                learner={view.learner}
+                running={asking}
+                error={view.error}
+                onChange={(plan) => setView({ ...view, plan, error: null })}
+                onRun={() => { void runDraft(view.question, view.plan, view.learner) }}
+              />
+            ) : (
+              <PlanDraft
+                plan={view.plan}
+                running={asking}
+                error={view.error}
+                onChange={(plan) => setView({ status: 'draft', question: view.question, plan, error: null })}
+                onRun={() => { void runDraft(view.question, view.plan) }}
+              />
+            )
+          ) : view.status === 'choose_learner' ? (
+            <LearnerChoice reason={view.reason} candidates={view.candidates} onChoose={(learnerId) => { void ask(view.question, learnerId) }} />
+          ) : view.status === 'ready' && isIndividualPlan(view.savedQuery.plan) && isIndividualResult(view.result) ? (
+            <>
+              <IndividualSummary plan={view.savedQuery.plan} learner={view.result.learner} />
+              <IndividualResults title={view.savedQuery.title} result={view.result} refreshing={Boolean(refreshing[view.savedQuery.id])} />
+            </>
+          ) : view.status === 'ready' && !isIndividualPlan(view.savedQuery.plan) && !isIndividualResult(view.result) ? (
             <>
               <UnderstoodSummary plan={view.savedQuery.plan} />
               <ExplorerResults
@@ -392,9 +421,12 @@ export function AnalyticsExplorer() {
                 />
               )}
             </>
+          ) : view.status === 'ready' ? (
+            <ExplorerStatus status="error" message="This saved answer no longer matches its plan. Run the question again." />
           ) : (
             <ExplorerStatus
-              status={view.status}
+              status={view.status === 'no_match' ? 'unsupported' : view.status}
+              title={view.status === 'no_match' ? 'No learner matches' : undefined}
               message={viewMessage(view)}
               onRetry={view.status === 'error' ? () => { void ask(question) } : undefined}
             />

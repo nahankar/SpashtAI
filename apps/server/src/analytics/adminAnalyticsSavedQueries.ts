@@ -1,13 +1,13 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/prisma'
 import { logger } from '../lib/logger'
-import { adminAnalyticsPlanSchema, type AdminAnalyticsPlan } from './adminAnalyticsQuerySchema'
+import { analyticsPlanSchema, type AnyAnalyticsPlan } from './adminAnalyticsQuerySchema'
 import { analyticsPlanHash } from './adminAnalyticsQueryEngine'
 
 export async function saveAdminAnalyticsQuery(
   adminId: string,
   question: string,
-  plan: AdminAnalyticsPlan,
+  plan: AnyAnalyticsPlan,
 ) {
   const planHash = analyticsPlanHash(plan)
   const saved = await prisma.adminAnalyticsQuery.upsert({
@@ -81,7 +81,7 @@ export function presentSavedQuery(row: {
   lastRunAt: Date
   createdAt: Date
 }) {
-  const plan = adminAnalyticsPlanSchema.safeParse(row.plan)
+  const plan = analyticsPlanSchema.safeParse(row.plan)
   if (!plan.success) {
     logger.warn({ event: 'admin_analytics.saved_plan_skipped', queryId: row.id })
     return null
@@ -102,7 +102,7 @@ export function presentSavedQuery(row: {
 export async function getAdminAnalyticsQuery(adminId: string, id: string) {
   const row = await prisma.adminAnalyticsQuery.findFirst({ where: { id, adminId } })
   if (!row) return null
-  const plan = adminAnalyticsPlanSchema.safeParse(row.plan)
+  const plan = analyticsPlanSchema.safeParse(row.plan)
   if (!plan.success) {
     logger.warn({ event: 'admin_analytics.saved_plan_skipped', queryId: row.id })
     return null

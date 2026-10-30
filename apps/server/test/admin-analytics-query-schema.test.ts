@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { adminAnalyticsPlanSchema } from '../src/analytics/adminAnalyticsQuerySchema'
+import { adminAnalyticsPlanSchema, analyticsPlanSchema, individualPlanSchema } from '../src/analytics/adminAnalyticsQuerySchema'
 import {
   buildAdminAnalyticsPrompt,
   isAnalyticsPlanRejection,
@@ -132,5 +132,36 @@ describe('admin analytics query contract', () => {
       expect(parsed.plan.cohorts[0].predicates).toEqual([{ type: 'gender', value: 'MALE' }])
       expect(parsed.plan.cohorts[1].predicates).toEqual([{ type: 'gender', value: 'FEMALE' }])
     }
+  })
+})
+
+describe('version 2 individual plans', () => {
+  const individual = { version: 2, title: 'Learner progress', report: 'learner_progress', learnerId: 'cmh1a2b3c4d5e6f7', explanation: 'One learner.' }
+
+  it('parses alongside unchanged version 1 plans', () => {
+    expect(analyticsPlanSchema.parse(userListPlan)).toEqual(adminAnalyticsPlanSchema.parse(userListPlan))
+    expect(analyticsPlanSchema.parse(individual)).toMatchObject({ version: 2, days: 30, sources: [], skills: [], feature: null })
+  })
+
+  it('needs a learner for learner progress and accepts no raw SQL or identity text', () => {
+    expect(() => individualPlanSchema.parse({ ...individual, learnerId: null })).toThrow()
+    expect(() => individualPlanSchema.parse({ ...individual, learnerId: 'someone@example.com' })).toThrow()
+    expect(() => individualPlanSchema.parse({ ...individual, sql: 'SELECT 1' })).toThrow()
+    expect(individualPlanSchema.parse({ ...individual, report: 'daily_activity', learnerId: null })).toMatchObject({ learnerId: null })
+  })
+
+  it('lets the model reference only placeholders, never an id', () => {
+    const draft = { version: 2, title: 't', report: 'daily_activity', learner: 'LEARNER_1', explanation: 'e' }
+    expect(parseAdminAnalyticsCompletion(JSON.stringify({ status: 'ready', plan: draft }))).toMatchObject({ plan: { learner: 'LEARNER_1' } })
+    expect(() => parseAdminAnalyticsCompletion(JSON.stringify({ status: 'ready', plan: { ...draft, learner: 'cmh1a2b3c4d5e6f7' } }))).toThrow()
+    expect(() => parseAdminAnalyticsCompletion(JSON.stringify({ status: 'ready', plan: { ...draft, learnerId: 'cmh1a2b3c4d5e6f7' } }))).toThrow()
+  })
+
+  it('replaces the blanket personal-data refusal with a narrow one', () => {
+    const prompt = buildAdminAnalyticsPrompt('LEARNER_1 progress', ['LEARNER_1'])
+    expect(prompt).toContain('AVAILABLE LEARNERS: LEARNER_1')
+    expect(prompt).toContain('transcripts, recordings, answers, contact details')
+    expect(prompt).not.toContain('needs unsupported personal data')
+    expect(buildAdminAnalyticsPrompt('x')).toContain('AVAILABLE LEARNERS: none')
   })
 })

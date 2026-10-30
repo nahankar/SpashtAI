@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { prisma } from '../../lib/prisma'
 import { getEnabledFeatures } from '../../lib/featureFlags'
 import { type AnalyticsFilters, parseAnalyticsFilters } from '../../analytics/adminAnalyticsFilters'
-import { type DayRange, dayRange, learnerFilterMatch, loadLearnerProgress, resolveLearner, searchLearners } from '../../analytics/learnerReport'
+import { dayRange, learnerFilterMatch, loadLearnerProgress, presentRange, resolveLearner, searchLearners } from '../../analytics/learnerReport'
 import { loadDailyActivity } from '../../analytics/dailyActivity'
 import { hasCurrentAdminRole, requireCurrentAdmin } from '../../middleware/admin'
 import {
@@ -15,7 +15,9 @@ import {
   loadProgressPulseReport,
 } from '../../analytics/adminProductAnalytics'
 import { interpretAdminAnalyticsQuestion, isAnalyticsPlanRejection } from '../../analytics/adminAnalyticsInterpreter'
-import { adminAnalyticsPlanSchema } from '../../analytics/adminAnalyticsQuerySchema'
+import { analyticsPlanSchema, isIndividualPlan, type AnyAnalyticsPlan } from '../../analytics/adminAnalyticsQuerySchema'
+import { redactQuestion } from '../../analytics/analyticsIdentity'
+import { executeIndividualPlan } from '../../analytics/individualAnalytics'
 import { executeAdminAnalyticsPlan, loadAdminAnalyticsUsers } from '../../analytics/adminAnalyticsQueryEngine'
 import {
   getAdminAnalyticsQuery,
@@ -254,11 +256,6 @@ router.get('/learners/search', learnerSearchLimiter, requireCurrentAdmin, async 
   }
 })
 
-function presentRange(filters: AnalyticsFilters, range: DayRange) {
-  return { days: filters.days, timeZone: range.timeZone, firstDay: range.firstDay, lastDay: range.lastDay,
-    since: range.since.toISOString(), until: range.until.toISOString() }
-}
-
 /**
  * Resolves ?learner= for an individual report after rechecking the caller's current role (the token role is a
  * login-time snapshot). Responds, and returns null, when the report cannot be served.
@@ -290,7 +287,7 @@ router.get('/progress-pulse', async (req: Request, res: Response) => {
       res.json({
         mode: 'individual',
         learner,
-        range: presentRange(filters, range),
+        range: presentRange(filters.days, range),
         match,
         // Other filters still apply: a learner they exclude gets an explicit no-match, not an empty report.
         report: match.matches ? await loadLearnerProgress(learner.id, filters, range) : null,
@@ -321,7 +318,7 @@ router.get('/activity/daily', async (req: Request, res: Response) => {
         res.status(400).json({ error: activity.error })
         return
       }
-      res.json({ learner, range: presentRange(filters, range), match, activity })
+      res.json({ learner, range: presentRange(filters.days, range), match, activity })
       return
     }
     const range = dayRange(filters.days)
@@ -330,7 +327,7 @@ router.get('/activity/daily', async (req: Request, res: Response) => {
       res.status(400).json({ error: activity.error })
       return
     }
-    res.json({ range: presentRange(filters, range), activity })
+    res.json({ range: presentRange(filters.days, range), activity })
   } catch (err) {
     console.error('Daily activity analytics error:', err)
     res.status(500).json({ error: 'Failed to load daily activity' })
@@ -384,10 +381,14 @@ const explorerAiLimiter = rateLimit({
   legacyHeaders: false,
 })
 
-const questionSchema = z.object({ question: z.string().trim().min(1).max(1_000) }).strict()
+const questionSchema = z.object({
+  question: z.string().trim().min(1).max(1_000),
+  /** An explicit learner selection (from search or a name clarification); identity is still re-resolved. */
+  learnerId: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/).optional(),
+}).strict()
 const runSchema = z.object({
   question: z.string().trim().min(1).max(1_000).optional(),
-  plan: adminAnalyticsPlanSchema,
+  plan: analyticsPlanSchema,
 }).strict()
 const savedUpdateSchema = z.object({
   pinned: z.boolean().optional(),
@@ -395,15 +396,41 @@ const savedUpdateSchema = z.object({
   refreshIntervalSec: z.union([z.literal(30), z.literal(60), z.literal(300)]).optional(),
 }).strict().refine((value) => Object.keys(value).length > 0, 'No changes supplied')
 
-async function auditExplorer(adminId: string, action: string, queryId: string, metadata?: Record<string, unknown>) {
+async function auditExplorer(adminId: string, action: string, queryId: string, metadata?: Record<string, unknown>, targetUserId?: string | null) {
   await prisma.adminAction.create({
     data: {
       adminId,
       action,
+      targetUserId: targetUserId ?? null,
       targetResource: `admin-analytics-query:${queryId}`,
       metadata: metadata as never,
     },
   })
+}
+
+class ExplorerForbidden extends Error {}
+
+/**
+ * Runs any plan version. Version 2 (individual and day-wise reports) rechecks the caller's current role on every
+ * execution, including saved and pinned refreshes, and the learner is re-resolved inside the executor.
+ */
+async function executeExplorerPlan(adminId: string, plan: AnyAnalyticsPlan) {
+  if (!isIndividualPlan(plan)) return executeAdminAnalyticsPlan(plan)
+  if (!(await hasCurrentAdminRole(adminId))) throw new ExplorerForbidden()
+  return executeIndividualPlan(plan)
+}
+
+function explorerTarget(plan: AnyAnalyticsPlan) {
+  return isIndividualPlan(plan) ? plan.learnerId : null
+}
+
+function sendExplorerError(res: Response, error: unknown, fallback: string) {
+  if (error instanceof ExplorerForbidden) {
+    res.status(403).json({ error: 'Admin access required' })
+    return
+  }
+  console.error(`${fallback}:`, error)
+  res.status(500).json({ error: fallback })
 }
 
 router.post('/explorer/interpret', explorerAiLimiter, async (req: Request, res: Response) => {
@@ -413,7 +440,14 @@ router.post('/explorer/interpret', explorerAiLimiter, async (req: Request, res: 
     return
   }
   try {
-    const interpretation = await interpretAdminAnalyticsQuestion(parsed.data.question)
+    if ((parsed.data.learnerId || parsed.data.question.includes('@')) && !(await hasCurrentAdminRole(req.user!.userId))) {
+      res.status(403).json({ error: 'Admin access required' })
+      return
+    }
+    const interpretation = await interpretAdminAnalyticsQuestion(parsed.data.question, { learnerId: parsed.data.learnerId })
+    if (interpretation.status === 'ready' && interpretation.learner) {
+      await auditIndividual(req.user!.userId, 'analytics_learner_resolved', interpretation.learner.id, { via: parsed.data.learnerId ? 'selection' : 'question' })
+    }
     res.json({ interpretation })
   } catch (error) {
     console.error('AI analytics interpretation error:', error)
@@ -433,16 +467,16 @@ router.post('/explorer/run', async (req: Request, res: Response) => {
   }
   try {
     const adminId = req.user!.userId
-    const question = parsed.data.question ?? parsed.data.plan.title
-    const [result, saved] = await Promise.all([
-      executeAdminAnalyticsPlan(parsed.data.plan),
-      saveAdminAnalyticsQuery(adminId, question, parsed.data.plan),
-    ])
-    await auditExplorer(adminId, 'analytics_query_run', saved.id, { planHash: result.planHash, aiInterpreted: false })
+    const plan = parsed.data.plan
+    const result = await executeExplorerPlan(adminId, plan)
+    const learner = 'kind' in result ? result.learner : null
+    // Saved history keeps no identity text: emails and the bound learner's name become "[learner]".
+    const question = redactQuestion(parsed.data.question ?? plan.title, learner)
+    const saved = await saveAdminAnalyticsQuery(adminId, question, plan)
+    await auditExplorer(adminId, 'analytics_query_run', saved.id, { planHash: result.planHash, aiInterpreted: false, version: plan.version }, explorerTarget(plan))
     res.json({ result, savedQuery: presentSavedQuery(saved) })
   } catch (error) {
-    console.error('Analytics explorer run error:', error)
-    res.status(500).json({ error: 'Failed to run analytics query' })
+    sendExplorerError(res, error, 'Failed to run analytics query')
   }
 })
 
@@ -471,18 +505,18 @@ router.post('/explorer/saved/:id/run', async (req: Request, res: Response) => {
       res.status(404).json({ error: 'Saved query not found' })
       return
     }
-    const result = await executeAdminAnalyticsPlan(found.plan)
+    const result = await executeExplorerPlan(req.user!.userId, found.plan)
     const saved = await prisma.adminAnalyticsQuery.update({
       where: { id: found.row.id },
       data: { lastRunAt: new Date() },
     })
-    if (parsed.data.source !== 'auto') {
-      await auditExplorer(req.user!.userId, 'analytics_query_refresh', saved.id, { planHash: result.planHash })
+    // Individual reports are audited on every refresh, automatic ones included; aggregate auto-refreshes are not.
+    if (parsed.data.source !== 'auto' || isIndividualPlan(found.plan)) {
+      await auditExplorer(req.user!.userId, 'analytics_query_refresh', saved.id, { planHash: result.planHash, source: parsed.data.source ?? 'manual' }, explorerTarget(found.plan))
     }
     res.json({ result, savedQuery: presentSavedQuery(saved) })
   } catch (error) {
-    console.error('Analytics explorer refresh error:', error)
-    res.status(500).json({ error: 'Failed to refresh analytics query' })
+    sendExplorerError(res, error, 'Failed to refresh analytics query')
   }
 })
 
@@ -491,6 +525,10 @@ router.get('/explorer/saved/:id/users', async (req: Request, res: Response) => {
     const found = await getAdminAnalyticsQuery(req.user!.userId, req.params.id)
     if (!found) {
       res.status(404).json({ error: 'Saved query not found' })
+      return
+    }
+    if (isIndividualPlan(found.plan)) {
+      res.status(400).json({ error: 'This question has no learner list' })
       return
     }
     const page = Math.max(1, Number.parseInt(String(req.query.page ?? '1'), 10) || 1)

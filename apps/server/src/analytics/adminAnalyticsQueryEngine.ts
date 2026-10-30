@@ -7,6 +7,7 @@ import { isCubeAnalyticsConfigured, loadCubeAnalytics, type CubeQuery } from './
 import { logger } from '../lib/logger'
 import {
   type AdminAnalyticsPlan,
+  type AnyAnalyticsPlan,
   type AnalyticsMetric,
   type AnalyticsPredicate,
 } from './adminAnalyticsQuerySchema'
@@ -346,7 +347,7 @@ function canonicalJson(value: unknown): string {
   return JSON.stringify(value) ?? 'null'
 }
 
-export function analyticsPlanHash(plan: AdminAnalyticsPlan) {
+export function analyticsPlanHash(plan: AnyAnalyticsPlan) {
   return createHash('sha256').update(canonicalJson(plan)).digest('hex')
 }
 

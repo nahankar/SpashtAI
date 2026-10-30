@@ -4,17 +4,20 @@ import { Card, CardContent } from '@/components/ui/card'
 export function ExplorerStatus({
   status,
   message,
+  title,
   onRetry,
 }: {
   status: 'idle' | 'loading' | 'error' | 'clarification' | 'unsupported'
   message?: string
+  /** Overrides the default heading of the unsupported card (for example a learner no-match). */
+  title?: string
   onRetry?: () => void
 }) {
   if (status === 'idle') {
     return (
       <Card>
         <CardContent className="py-10 text-center">
-          <p className="font-medium">Ask a question to see learner aggregates.</p>
+          <p className="font-medium">Ask a question to see learner aggregates, or one learner's progress.</p>
           <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
             Results include the reading of your question, metric cards, and a comparison chart. Learner names stay on their own list.
           </p>
@@ -49,7 +52,7 @@ export function ExplorerStatus({
     return (
       <Card>
         <CardContent className="py-6">
-          <p className="font-medium">This question is outside the analytics catalog.</p>
+          <p className="font-medium">{title ?? 'This question is outside the analytics catalog.'}</p>
           <p className="mt-2 text-sm text-muted-foreground">{message}</p>
         </CardContent>
       </Card>

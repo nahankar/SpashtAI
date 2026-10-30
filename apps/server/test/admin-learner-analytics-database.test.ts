@@ -45,7 +45,7 @@ describe.skipIf(!testDb.url)('individual learner reporting (PostgreSQL)', () => 
   afterAll(async () => { await fx?.cleanup(); await prisma.$disconnect() })
 
   it('finds both same-name learners with distinguishing details, never admins', async () => {
-    const found = await searchLearners(`Rao ${fx.tag}`)
+    const found = await searchLearners(`Rao ${fx.nameWord}`)
     expect(found.map(l => l.id).sort()).toEqual([fx.asha.id, fx.twin.id].sort())
     expect(found.every(l => l.email && l.joinedAt)).toBe(true)
     expect(found.map(l => l.city).sort()).toEqual(['Mysuru', 'Pune'])
@@ -95,7 +95,7 @@ describe.skipIf(!testDb.url)('individual learner reporting (PostgreSQL)', () => 
 
   it('serves individual mode only to a current Admin, audits access, and keeps aggregate suppression', async () => {
     const adminToken = token(fx.admin.id, 'ADMIN')
-    expect((await request(app).get(`/analytics/learners/search?q=Rao%20${fx.tag}`).auth(token(fx.asha.id, 'USER'), { type: 'bearer' })).status).toBe(403)
+    expect((await request(app).get(`/analytics/learners/search?q=Rao%20${fx.nameWord}`).auth(token(fx.asha.id, 'USER'), { type: 'bearer' })).status).toBe(403)
     const ok = await request(app).get(`/analytics/progress-pulse?learner=${fx.asha.id}`).auth(adminToken, { type: 'bearer' })
     expect(ok.status).toBe(200)
     expect(ok.body).toMatchObject({ mode: 'individual', learner: { id: fx.asha.id }, match: { matches: true }, range: { timeZone: 'Asia/Kolkata' } })
@@ -118,7 +118,7 @@ describe.skipIf(!testDb.url)('individual learner reporting (PostgreSQL)', () => 
     await prisma.user.update({ where: { id: fx.admin.id }, data: { role: 'USER' } })
     try {
       expect((await request(app).get(`/analytics/progress-pulse?learner=${fx.asha.id}`).auth(adminToken, { type: 'bearer' })).status).toBe(403)
-      expect((await request(app).get(`/analytics/learners/search?q=Rao%20${fx.tag}`).auth(adminToken, { type: 'bearer' })).status).toBe(403)
+      expect((await request(app).get(`/analytics/learners/search?q=Rao%20${fx.nameWord}`).auth(adminToken, { type: 'bearer' })).status).toBe(403)
     } finally {
       await prisma.user.update({ where: { id: fx.admin.id }, data: { role: 'ADMIN' } })
     }

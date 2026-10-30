@@ -1,3 +1,7 @@
+import type { LearnerSummary } from '@/components/admin/LearnerSelector'
+import type { LearnerProgressReport, ReportRange } from '@/components/admin/LearnerProgress'
+import type { DailyActivityReport } from '@/components/admin/DailyActivity'
+
 export type RefreshIntervalSec = 30 | 60 | 300
 
 export type AnalyticsPredicate =
@@ -30,10 +34,31 @@ export type AnalyticsPlan = {
   explanation: string
 }
 
+/** Version 2: one learner's progress, or day-wise activity. learnerId is always set by the server. */
+export type IndividualAnalyticsPlan = {
+  version: 2
+  title: string
+  report: 'learner_progress' | 'daily_activity'
+  learnerId: string | null
+  days: number
+  sources: string[]
+  skills: string[]
+  feature: string | null
+  explanation: string
+}
+
+export type AnyAnalyticsPlan = AnalyticsPlan | IndividualAnalyticsPlan
+
+export function isIndividualPlan(plan: AnyAnalyticsPlan): plan is IndividualAnalyticsPlan {
+  return plan.version === 2
+}
+
 export type AnalyticsInterpretation =
-  | { status: 'ready'; plan: AnalyticsPlan }
+  | { status: 'ready'; plan: AnyAnalyticsPlan; learner?: LearnerSummary }
   | { status: 'clarification'; question: string }
   | { status: 'unsupported'; reason: string }
+  | { status: 'no_match'; reason: string }
+  | { status: 'choose_learner'; reason: string; candidates: LearnerSummary[] }
 
 export type MetricResult = {
   key: string
@@ -57,11 +82,32 @@ export type AnalyticsResult = {
   cohorts: CohortResult[]
 }
 
+export type IndividualResult = {
+  kind: 'individual'
+  report: IndividualAnalyticsPlan['report']
+  status: 'ok' | 'no_match'
+  planHash: string
+  executedAt: string
+  privacyThreshold: number
+  range: ReportRange
+  learner: LearnerSummary | null
+  sampleSize: Record<string, number | null> | null
+  missingData: string[]
+  progress?: LearnerProgressReport
+  activity?: DailyActivityReport
+}
+
+export type AnyAnalyticsResult = AnalyticsResult | IndividualResult
+
+export function isIndividualResult(result: AnyAnalyticsResult): result is IndividualResult {
+  return 'kind' in result && result.kind === 'individual'
+}
+
 export type SavedQuery = {
   id: string
   question: string
   title: string
-  plan: AnalyticsPlan
+  plan: AnyAnalyticsPlan
   planHash: string
   pinned: boolean
   refreshIntervalSec: RefreshIntervalSec
@@ -76,7 +122,7 @@ export type SavedQueryLists = {
 
 export type InterpretResponse = {
   interpretation: AnalyticsInterpretation
-  result?: AnalyticsResult
+  result?: AnyAnalyticsResult
   savedQuery?: SavedQuery
 }
 
