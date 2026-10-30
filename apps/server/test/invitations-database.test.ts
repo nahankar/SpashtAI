@@ -219,14 +219,43 @@ describe.skipIf(!testDb.url)('learner invitations (PostgreSQL)', () => {
     expect((await invite(email)).status).toBe(201)
   })
 
-  it('keeps the signups-paused control for new accounts and leaves the invitation pending', async () => {
+  it('lets only a valid invitation for the verified invited address create a learner while signups are paused', async () => {
     const email = addr('paused')
     await invite(email)
     mocks.signupsPaused = true
-    const res = await accept(tokenFor(email), google(email))
-    expect(res.status).toBe(403)
-    expect(res.body.error).toBe('signups_paused')
-    expect((await prisma.userInvitation.findFirstOrThrow({ where: { email } })).status).toBe('PENDING')
+    const token = tokenFor(email)
+
+    // A different Google identity gets nothing, even though the link itself is valid.
+    expect((await accept(token, google(addr('paused-other')))).status).toBe(403)
+    expect(await prisma.user.count({ where: { email: addr('paused-other') } })).toBe(0)
+
+    const res = await accept(token, google(email))
+    expect(res.status).toBe(200)
+    expect(res.body.user).toMatchObject({ email, role: 'USER', needsProfileCompletion: true })
+    const activity = await prisma.userActivity.findFirstOrThrow({ where: { userId: res.body.user.id, action: 'invitation_accepted' } })
+    expect(activity.metadata).toEqual({ newAccount: true, signupsPausedBypass: true })
+    expect(JSON.stringify(activity)).not.toContain(email)
+    expect(JSON.stringify(activity)).not.toContain(token)
+
+    // Ordinary Google signup stays blocked while paused.
+    const { signInWithGoogleUser } = await import('../src/lib/googleSignIn')
+    const req = { ip: '127.0.0.1', headers: {} } as unknown as express.Request
+    const outsider = addr('paused-outsider')
+    const blocked = await signInWithGoogleUser({ googleId: `g-${outsider}`, email: outsider, emailVerified: true, firstName: null, lastName: null, avatar: null }, req)
+    expect(blocked).toMatchObject({ ok: false, status: 403, body: { error: 'signups_paused' } })
+    expect(await prisma.user.count({ where: { email: outsider } })).toBe(0)
+  })
+
+  it('does not bypass paused signups for expired or revoked invitations', async () => {
+    mocks.signupsPaused = true
+    const expiredEmail = addr('paused-expired')
+    await createInvitation(admin.id, { email: expiredEmail }, new Date(Date.now() - 8 * 86_400_000))
+    expect((await accept(tokenFor(expiredEmail), google(expiredEmail))).status).toBe(410)
+    const revokedEmail = addr('paused-revoked')
+    const created = await invite(revokedEmail)
+    await request(app).post(`/api/admin/invitations/${created.body.invitation.id}/revoke`).set('Authorization', bearer(admin))
+    expect((await accept(tokenFor(revokedEmail), google(revokedEmail))).status).toBe(410)
+    expect(await prisma.user.count({ where: { email: { in: [expiredEmail, revokedEmail] } } })).toBe(0)
   })
 
   it('never reports a failed or unconfigured send as delivered', async () => {

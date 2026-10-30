@@ -11,9 +11,17 @@ export type GoogleSignInResult =
 /**
  * Resolves a verified Google identity to a SpashtAI account, exactly as `POST /api/auth/google` does:
  * an existing account only gains missing Google/profile fields and login bookkeeping (never a role or
- * permission change), and a new account respects the signups-paused control.
+ * permission change), and a new account respects the signups-paused control unless an invitation allows it.
  */
-export async function signInWithGoogleUser(googleUser: GoogleUserInfo, req: Request): Promise<GoogleSignInResult> {
+export async function signInWithGoogleUser(
+  googleUser: GoogleUserInfo,
+  req: Request,
+  /**
+   * Only for accepting a valid invitation whose verified Google email matched: a new learner (USER) account may
+   * be created while signups are paused. Every other signup path must leave this unset.
+   */
+  opts: { invitationBypassesSignupPause?: boolean } = {},
+): Promise<GoogleSignInResult> {
   let user = await prisma.user.findFirst({
     where: {
       OR: [{ googleId: googleUser.googleId }, { email: googleUser.email }],
@@ -39,7 +47,7 @@ export async function signInWithGoogleUser(googleUser: GoogleUserInfo, req: Requ
       },
     })
   } else {
-    if (await areSignupsPaused()) {
+    if (!opts.invitationBypassesSignupPause && (await areSignupsPaused())) {
       return {
         ok: false,
         status: 403,

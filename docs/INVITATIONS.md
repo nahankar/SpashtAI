@@ -24,8 +24,12 @@ and the Tenant Admin demo Dashboard. All three use the same server service (`app
    page says **Switch Google account** and nothing changes.
 4. Account handling reuses normal Google sign-in (`lib/googleSignIn.ts`):
    - Existing account: signed in; role, permissions, flags and history are unchanged; no duplicate is created.
-   - New account: created as `USER` only if signups are open (the signups-paused control still applies and the
-     invitation stays pending), then the normal profile/terms onboarding runs.
+   - New account: created as `USER`, then the normal profile/terms onboarding runs. This works even while
+     signups are paused, but only for a pending, unexpired, unrevoked invitation accepted through this flow
+     with the exact verified invited address. Every other signup (register, `/api/auth/google`) stays blocked.
+     The bypass is audited without content as `UserActivity` `invitation_accepted` with metadata
+     `{ newAccount: true, signupsPausedBypass: true }`. If the invitation is revoked or expires mid-sign-in,
+     an account created only for it is removed again.
 5. Accepting again with the same account is idempotent.
 
 ## Statuses and safeguards
@@ -38,7 +42,7 @@ and the Tenant Admin demo Dashboard. All three use the same server service (`app
 - Expiry: `INVITATION_EXPIRY_DAYS` (1–30, default 7).
 - Audit: `AdminAction` rows `invitation_create`, `invitation_resend`, `invitation_revoke` with
   `targetResource = invitation:<id>` and content-free metadata (no email, name or token).
-  Acceptance is recorded as `UserActivity` `invitation_accepted`.
+  Acceptance is recorded as `UserActivity` `invitation_accepted` (`newAccount`, `signupsPausedBypass` flags only).
 - Rate limits (production): 60 sends/resends per Admin per hour; 20 lookups/acceptances per IP per 15 minutes.
 
 ## Email configuration

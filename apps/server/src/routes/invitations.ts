@@ -4,6 +4,7 @@ import { signToken } from '../lib/jwt'
 import { logger } from '../lib/logger'
 import { verifyGoogleIdToken, type GoogleUserInfo } from '../lib/google-auth'
 import { signInWithGoogleUser } from '../lib/googleSignIn'
+import { areSignupsPaused } from '../lib/platformSettings'
 import { authUserForClient } from '../lib/profile'
 import { effectiveStatus, findInvitationByToken, markInvitationAccepted, maskEmail } from '../lib/invitations'
 import { invitationAcceptLimiter } from '../middleware/rate-limit'
@@ -78,8 +79,11 @@ router.post('/accept', invitationAcceptLimiter, async (req: Request, res: Respon
     }
 
     // Same account resolution as normal Google sign-in: an existing account keeps its data, role and
-    // permissions; a new account respects signups-paused and then goes through normal onboarding.
-    const result = await signInWithGoogleUser(googleUser, req)
+    // permissions; a new account then goes through normal onboarding. A pending, unexpired invitation for this
+    // exact verified address may create a USER account while signups are paused; nothing else bypasses the pause.
+    const pending = status === 'pending'
+    const signupsPaused = pending && (await areSignupsPaused())
+    const result = await signInWithGoogleUser(googleUser, req, { invitationBypassesSignupPause: pending })
     if (!result.ok) {
       res.status(result.status).json(result.body)
       return
@@ -95,13 +99,25 @@ router.post('/accept', invitationAcceptLimiter, async (req: Request, res: Respon
     } else if (!(await markInvitationAccepted(inv, user.id))) {
       const latest = await prisma.userInvitation.findUnique({ where: { id: inv.id } })
       if (latest?.status !== 'ACCEPTED' || latest.acceptedUserId !== user.id) {
+        // Revoked or expired while signing in: an account created only for this invitation is removed again.
+        if (result.created) await prisma.user.delete({ where: { id: user.id } })
         res.status(409).json({ error: 'invitation_changed', message: 'This invitation changed while you were signing in. Ask your administrator for a new one.' })
         return
       }
       alreadyAccepted = true
     } else {
+      const bypassed = result.created && signupsPaused
       await prisma.userActivity.create({
-        data: { userId: user.id, action: 'invitation_accepted', resource: 'invitation', resourceId: inv.id, ipAddress: req.ip || null, userAgent: req.headers['user-agent'] || null },
+        data: {
+          userId: user.id,
+          action: 'invitation_accepted',
+          resource: 'invitation',
+          resourceId: inv.id,
+          ipAddress: req.ip || null,
+          userAgent: req.headers['user-agent'] || null,
+          // Content-free: records only that the paused-signup control was bypassed by this invitation.
+          metadata: { newAccount: result.created, signupsPausedBypass: bypassed },
+        },
       })
     }
 
