@@ -18,6 +18,7 @@ import { AnalyticsFilters } from '@/components/admin/AnalyticsFilters'
 import { LearnerSelector } from '@/components/admin/LearnerSelector'
 import { LearnerProgress, NoLearnerMatch, skillLabel, type IndividualPulseResponse } from '@/components/admin/LearnerProgress'
 import { Button } from '@/components/ui/button'
+import { DailyActivity } from '@/components/admin/DailyActivity'
 import { AnalyticsStatus } from '@/components/admin/AnalyticsStatus'
 import { MetricCard } from '@/components/admin/MetricCard'
 import { LanguageAnalytics, type LanguageSnapshot } from '@/components/admin/LanguageAnalytics'
@@ -139,7 +140,7 @@ export function ProgressPulseAnalytics() {
       <AnalyticsStatus state={state === 'ready' ? 'ready' : state} onRetry={() => setReload((value) => value + 1)} />
       {report && state !== 'loading' && state !== 'error' && (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div id="pulse-summary" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <MetricCard label="Learners with scores" value={report.summary.suppressed ? 'Hidden' : report.summary.users ?? 0} sublabel={report.summary.suppressed ? 'Filter matches fewer than 5 learners' : 'Eligible Pulse rows'} />
             <MetricCard label="Score entries" value={report.summary.suppressed ? '—' : report.summary.entries ?? 0} />
             <MetricCard label="Sessions represented" value={report.summary.suppressed ? '—' : report.summary.sessions ?? 0} />
@@ -286,6 +287,7 @@ export function ProgressPulseAnalytics() {
       )}
       </>
       )}
+      {!missingLearner && <DailyActivity query={query} onChange={update} pulseHref={query.learner ? '#score-history' : '#pulse-summary'} />}
     </div>
   )
 }

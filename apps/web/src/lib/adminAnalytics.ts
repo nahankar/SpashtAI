@@ -36,7 +36,8 @@ export const DEFAULT_ANALYTICS_QUERY: AnalyticsQuery = {
   ageBand: [],
   source: [],
   skill: [],
-  feature: 'replay',
+  // Empty unless a page sets it, so a default never lingers in shared URLs as a stale filter.
+  feature: '',
   learner: '',
 }
 
@@ -57,7 +58,7 @@ export function analyticsQueryFromSearch(params: URLSearchParams): AnalyticsQuer
     ageBand: readList(params, 'ageBand'),
     source: readList(params, 'source'),
     skill: readList(params, 'skill'),
-    feature: params.get('feature') || 'replay',
+    feature: params.get('feature') || '',
     learner: LEARNER_ID.test(params.get('learner') ?? '') ? params.get('learner')! : '',
   }
 }
@@ -71,6 +72,19 @@ export function analyticsQueryToSearch(query: AnalyticsQuery) {
   if (query.feature) params.set('feature', query.feature)
   if (query.learner) params.set('learner', query.learner)
   return params.toString()
+}
+
+export const ACTIVITY_FEATURES = [
+  { id: 'elevate', label: 'Elevate' },
+  { id: 'replay', label: 'Replay' },
+  { id: 'interviews', label: 'Interviews' },
+  { id: 'prepare', label: 'Prepare' },
+  { id: 'progress_pulse', label: 'Progress Pulse' },
+  { id: 'feedback', label: 'Feedback' },
+] as const
+
+export function activityFeatureLabel(id: string) {
+  return ACTIVITY_FEATURES.find((feature) => feature.id === id)?.label ?? id
 }
 
 export function formatDuration(ms: number | null | undefined) {

@@ -25,6 +25,11 @@ describe('admin analytics view helpers', () => {
     })
   })
 
+  it('does not write a default feature into shared URLs', () => {
+    expect(analyticsQueryFromSearch(new URLSearchParams()).feature).toBe('')
+    expect(analyticsQueryToSearch(analyticsQueryFromSearch(new URLSearchParams('days=7')))).toBe('days=7')
+  })
+
   it('keeps only a learner id in the URL, never an email', () => {
     expect(analyticsQueryFromSearch(new URLSearchParams('learner=someone@example.com')).learner).toBe('')
     expect(analyticsQueryToSearch({ ...analyticsQueryFromSearch(new URLSearchParams()), learner: '' })).not.toContain('learner')

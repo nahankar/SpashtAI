@@ -26,7 +26,7 @@ export async function createLearnerFixture(prisma: PrismaClient) {
   // 18:45 UTC on 28 Oct is 00:15 IST on 29 Oct.
   const s3 = await session(asha.id, '2026-10-28T18:45:00Z', { endedAt: at('2026-10-28T19:00:00Z') }) // ended, no decision
   const s4 = await session(asha.id, '2026-10-31T05:00:00Z') // still open
-  const interview = await session(asha.id, '2026-10-26T06:00:00Z', { purpose: 'INTERVIEW', endedAt: at('2026-10-26T06:30:00Z') })
+  const interview = await session(asha.id, '2026-10-26T06:00:00Z', { purpose: 'INTERVIEW', contextScope: 'SESSION_ONLY' })
   const r1 = await prisma.replaySession.create({ data: { userId: asha.id, meetingType: 'standup', userRole: 'speaker', focusAreas: [],
     status: 'completed', progressPulseStatus: 'tracked', createdAt: at('2026-10-27T08:00:00Z') } })
   const r2 = await prisma.replaySession.create({ data: { userId: asha.id, meetingType: 'standup', userRole: 'speaker', focusAreas: [],
@@ -48,15 +48,29 @@ export async function createLearnerFixture(prisma: PrismaClient) {
 
   const event = (userId: string, feature: string, action: string, timestamp: string, extra: Record<string, unknown> = {}) =>
     ({ userId, feature, action, timestamp: at(timestamp), eventId: `${tag}_${randomUUID()}`, ...extra })
+  await prisma.replayResult.create({ data: { replaySessionId: r1.id, transcriptText: 'Disposable fixture transcript.', transcriptionSource: 'pasted',
+    createdAt: at('2026-10-27T08:05:00Z') } })
+  // A run needs an open interview session and recorded consent; the session is ended afterwards.
+  await prisma.interviewRun.create({ data: { sessionId: interview.id, ownerId: asha.id, namespace: 'automation-pilot', track: 'Automation Testing',
+    experienceBand: '2-5', startingDifficulty: 'Medium', durationMinutes: 10, maxQuestions: 8, createdAt: at('2026-10-26T06:00:00Z'),
+    recordingConsentAt: at('2026-10-26T06:00:00Z'), recordingConsentVersion: 'interview-recording-1', recordingConsentSource: 'PRACTICE_CHECKBOX',
+    voiceConfigSnapshot: { backend: 'pipeline-bedrock', sttProvider: 'transcribe', ttsProvider: 'polly' } } })
+  await prisma.session.update({ where: { id: interview.id }, data: { endedAt: at('2026-10-26T06:30:00Z') } })
+
+  // Page views and active time are app events attributed by path; feature actions carry the feature.
   await prisma.featureUsage.createMany({ data: [
-    event(asha.id, 'elevate', 'page_view', '2026-10-20T03:58:00Z', { path: '/elevate', engagementMs: 60_000 }),
+    event(asha.id, 'app', 'page_view', '2026-10-20T03:58:00Z', { path: '/elevate' }),
+    event(asha.id, 'app', 'page_exit', '2026-10-20T04:25:00Z', { path: '/elevate', engagementMs: 60_000 }),
     event(asha.id, 'elevate', 'session_start', '2026-10-20T04:00:00Z', { sessionId: s1.id }),
     event(asha.id, 'elevate', 'session_end', '2026-10-20T04:20:00Z', { sessionId: s1.id, duration: 1200 }),
-    event(asha.id, 'interviews', 'page_view', '2026-10-26T05:59:00Z', { path: '/interviews', engagementMs: 30_000 }),
+    event(asha.id, 'elevate', 'results_viewed', '2026-10-20T04:21:00Z', { sessionId: s1.id }), // a view, not a use action
+    event(asha.id, 'app', 'page_view', '2026-10-26T05:59:00Z', { path: '/interviews' }),
+    event(asha.id, 'interviews', 'practice_start', '2026-10-26T06:00:00Z', { sessionId: interview.id }),
     event(asha.id, 'elevate', 'session_start', '2026-10-28T18:45:00Z', { sessionId: s3.id }), // IST 29 Oct
-    event(quiet.id, 'replay', 'page_view', '2026-10-27T10:00:00Z', { path: '/replay', engagementMs: 45_000 }),
-    event(quiet.id, 'prepare', 'page_view', '2026-10-27T10:05:00Z', { path: '/prepare' }),
-    event(admin.id, 'elevate', 'page_view', '2026-10-27T10:00:00Z', { path: '/elevate' }), // admin: excluded
+    event(quiet.id, 'app', 'page_view', '2026-10-27T10:00:00Z', { path: '/replay' }),
+    event(quiet.id, 'app', 'page_exit', '2026-10-27T10:02:00Z', { path: '/replay', engagementMs: 45_000 }),
+    event(quiet.id, 'app', 'page_view', '2026-10-27T10:05:00Z', { path: '/prepare' }),
+    event(admin.id, 'app', 'page_view', '2026-10-27T10:00:00Z', { path: '/elevate' }), // admin: excluded
   ] })
   return { tag, admin, asha, twin, quiet, sessions: { s1, s2, s3, s4, interview }, replays: { r1, r2 },
     cleanup: async () => {

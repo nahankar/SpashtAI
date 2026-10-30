@@ -14,6 +14,7 @@ vi.mock('../src/lib/featureFlags', () => ({ getEnabledFeatures: vi.fn().mockReso
 import { prisma } from '../src/lib/prisma'
 import { parseAnalyticsFilters } from '../src/analytics/adminAnalyticsFilters'
 import { dayRange, learnerFilterMatch, loadLearnerProgress, searchLearners, zonedMidnight } from '../src/analytics/learnerReport'
+import { loadDailyActivity } from '../src/analytics/dailyActivity'
 import analyticsRouter from '../src/routes/admin/analytics'
 import { requireAuth } from '../src/middleware/auth'
 import { requireAdmin } from '../src/middleware/admin'
@@ -121,5 +122,99 @@ describe.skipIf(!testDb.url)('individual learner reporting (PostgreSQL)', () => 
     } finally {
       await prisma.user.update({ where: { id: fx.admin.id }, data: { role: 'ADMIN' } })
     }
+  })
+
+  describe('daily activity', () => {
+    const range = () => dayRange(30, 'Asia/Kolkata', FIXTURE_NOW)
+    const individual = async (query: Record<string, string> = {}) => {
+      const result = await loadDailyActivity(filtersFor(query), range(), { learnerId: fx.asha.id })
+      if ('error' in result || result.suppressed) throw new Error('unexpected')
+      return result
+    }
+    const dayOf = (result: Awaited<ReturnType<typeof individual>>, day: string) => result.days.find((d) => d.day === day)!
+    const feature = (row: ReturnType<typeof dayOf>, name: string) => row.features.find((f) => f.feature === name)!
+
+    it('keeps page views, actions, starts and completions as separate measures on IST days', async () => {
+      const result = await individual()
+      expect(result.days).toHaveLength(30)
+      const oct20 = feature(dayOf(result, '2026-10-20'), 'elevate')
+      // results_viewed is not a feature-use action; the page view is not an action either.
+      expect(oct20).toMatchObject({ pageViews: 1, actions: 2, starts: 1, completions: 1, activeMs: 60_000, activeLearners: 1 })
+      // 18:45 UTC on 28 Oct counts on 29 Oct IST.
+      expect(feature(dayOf(result, '2026-10-29'), 'elevate')).toMatchObject({ actions: 1, starts: 1, completions: 1 })
+      expect(feature(dayOf(result, '2026-10-28'), 'elevate')).toMatchObject({ starts: 0, actions: 0 })
+      expect(feature(dayOf(result, '2026-10-27'), 'replay')).toMatchObject({ starts: 1, completions: 1 })
+      expect(feature(dayOf(result, '2026-10-26'), 'interviews')).toMatchObject({ pageViews: 1, actions: 1, starts: 1, completions: 1 })
+    })
+
+    it('reports Interviews activity without counting it as Pulse evidence', async () => {
+      const result = await individual()
+      expect(dayOf(result, '2026-10-26').pulseEntries).toBe(0)
+      expect(result.totals).toMatchObject({ pulseEntries: 7, pulseSessions: 4 })
+      expect(dayOf(result, '2026-10-25')).toMatchObject({ pulseEntries: 3, pulseSessions: 1 }) // three skills, one session
+    })
+
+    it('marks unrecorded and not-applicable measures instead of zero', async () => {
+      const result = await individual()
+      expect(result.recordedSince.progress_pulse.starts).toBe('not_applicable')
+      expect(feature(dayOf(result, '2026-10-20'), 'progress_pulse').starts).toBeNull()
+      for (const name of Object.keys(result.recordedSince)) {
+        for (const [measure, first] of Object.entries(result.recordedSince[name])) {
+          for (const day of result.days) {
+            const value = feature(day, name)[measure as 'pageViews']
+            if (first === null || first === 'not_applicable' || day.day < first) expect(value).toBeNull()
+            else expect(value).not.toBeNull()
+          }
+        }
+      }
+    })
+
+    it('scopes features and sources independently', async () => {
+      const result = await individual({ source: 'elevate', feature: 'replay' })
+      expect(result.scope.activity.features).toEqual(['replay'])
+      expect(result.scope.pulse.sources).toEqual(['elevate'])
+      expect(result.days.every((d) => d.features.every((f) => f.feature === 'replay'))).toBe(true)
+      // Pulse entries follow the source filter only: six Elevate entries, regardless of the Replay activity filter.
+      expect(result.totals.pulseEntries).toBe(6)
+      // The Elevate page view on 20 Oct does not leak into the Replay scope (zero, or not recorded yet).
+      expect(dayOf(result, '2026-10-20').pageViews ?? 0).toBe(0)
+      await expect(loadDailyActivity(filtersFor({ feature: 'app' }), range(), null)).resolves.toEqual({ error: 'Invalid activity feature' })
+    })
+
+    it('counts distinct learners without double counting across features, excluding admins', async () => {
+      const result = await loadDailyActivity(filtersFor({}), range(), null)
+      if ('error' in result || result.suppressed) throw new Error('unexpected')
+      const oct27 = result.days.find((d) => d.day === '2026-10-27')!
+      const byFeature = Object.fromEntries(oct27.features.map((f) => [f.feature, f.activeLearners]))
+      // quiet used Replay and Prepare and asha used Replay: two learners that day, not three; the admin is not counted.
+      expect(oct27.activeLearners).toBeGreaterThanOrEqual(2)
+      expect(oct27.activeLearners).toBeLessThan(byFeature.replay + byFeature.prepare + byFeature.elevate + 1)
+      expect(result.totals.activeLearners).toBeLessThanOrEqual(result.totals.byFeature.reduce((sum, f) => sum + f.activeLearners, 0))
+    })
+
+    it('suppresses small demographic cohorts in aggregate mode only', async () => {
+      const aggregate = await loadDailyActivity(filtersFor({ city: 'Pune' }), range(), null)
+      expect(aggregate).toMatchObject({ suppressed: true, days: null, totals: null })
+      const one = await loadDailyActivity(filtersFor({ city: 'Pune' }), range(), { learnerId: fx.asha.id })
+      expect(one).toMatchObject({ suppressed: false })
+    })
+
+    it('reports a learner with activity but no Pulse scores', async () => {
+      const result = await loadDailyActivity(filtersFor({}), range(), { learnerId: fx.quiet.id })
+      if ('error' in result || result.suppressed) throw new Error('unexpected')
+      expect(result.totals.pulseEntries).toBe(0)
+      expect(result.days.find((d) => d.day === '2026-10-27')).toMatchObject({ activeLearners: 1, pageViews: 2, activeMs: 45_000 })
+    })
+
+    it('serves the daily route with the same individual checks and audit', async () => {
+      const adminToken = token(fx.admin.id, 'ADMIN')
+      const ok = await request(app).get(`/analytics/activity/daily?learner=${fx.asha.id}&feature=elevate`).auth(adminToken, { type: 'bearer' })
+      expect(ok.status).toBe(200)
+      expect(ok.body).toMatchObject({ learner: { id: fx.asha.id }, range: { timeZone: 'Asia/Kolkata' }, activity: { mode: 'individual' } })
+      expect(await prisma.adminAction.count({ where: { adminId: fx.admin.id, targetUserId: fx.asha.id, action: 'analytics_individual_report_viewed' } })).toBeGreaterThan(0)
+      expect((await request(app).get(`/analytics/activity/daily?learner=${fx.asha.id}`).auth(token(fx.asha.id, 'USER'), { type: 'bearer' })).status).toBe(403)
+      const conflict = await request(app).get(`/analytics/activity/daily?learner=${fx.asha.id}&gender=MALE`).auth(adminToken, { type: 'bearer' })
+      expect(conflict.body).toMatchObject({ match: { matches: false }, activity: null })
+    })
   })
 })

@@ -41,7 +41,7 @@ export function demographicFilterActive(filters: AnalyticsFilters) {
   return Boolean(filters.cities.length || filters.states.length || filters.genders.length || filters.ageBands.length)
 }
 
-function learners(filters: AnalyticsFilters) {
+export function learners(filters: AnalyticsFilters) {
   return Prisma.sql`SELECT u.id FROM "User" u WHERE ${learnerWhere(filters)}`
 }
 
@@ -356,7 +356,7 @@ const FUNNELS: Record<string, Array<{ action: string; label: string; canonical?:
   ],
 }
 
-function featureFromPath(column: Prisma.Sql) {
+export function featureFromPath(column: Prisma.Sql) {
   return Prisma.sql`CASE
     WHEN ${column} LIKE '/replay%' THEN 'replay'
     WHEN ${column} LIKE '/elevate%' THEN 'elevate'

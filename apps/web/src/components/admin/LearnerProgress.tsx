@@ -167,7 +167,7 @@ export function LearnerProgress({ data }: { data: IndividualPulseResponse & { re
       </Card>
 
       {history.length > 0 && (
-        <Card>
+        <Card id="score-history">
           <CardHeader><CardTitle className="text-base">Score history</CardTitle></CardHeader>
           <CardContent className="overflow-x-auto">
             <table className="w-full text-sm">

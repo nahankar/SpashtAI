@@ -5,6 +5,7 @@ import { prisma } from '../../lib/prisma'
 import { getEnabledFeatures } from '../../lib/featureFlags'
 import { type AnalyticsFilters, parseAnalyticsFilters } from '../../analytics/adminAnalyticsFilters'
 import { type DayRange, dayRange, learnerFilterMatch, loadLearnerProgress, resolveLearner, searchLearners } from '../../analytics/learnerReport'
+import { loadDailyActivity } from '../../analytics/dailyActivity'
 import { hasCurrentAdminRole, requireCurrentAdmin } from '../../middleware/admin'
 import {
   loadFeatureReport,
@@ -300,6 +301,39 @@ router.get('/progress-pulse', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Progress pulse analytics error:', err)
     res.status(500).json({ error: 'Failed to load progress pulse analytics' })
+  }
+})
+
+// GET /api/admin/analytics/activity/daily — day-wise activity for all learners, or one with ?learner=<id>.
+router.get('/activity/daily', async (req: Request, res: Response) => {
+  try {
+    const filters = filtersFrom(req, res)
+    if (!filters) return
+    if (filters.learner) {
+      const target = await individualTarget(req, res, filters)
+      if (!target) return
+      const { learner, match, range } = target
+      await auditIndividual(req.user!.userId, 'analytics_individual_report_viewed', learner.id, {
+        report: 'daily-activity', days: filters.days, filtered: !match.matches,
+      })
+      const activity = match.matches ? await loadDailyActivity(filters, range, { learnerId: learner.id }) : null
+      if (activity && 'error' in activity) {
+        res.status(400).json({ error: activity.error })
+        return
+      }
+      res.json({ learner, range: presentRange(filters, range), match, activity })
+      return
+    }
+    const range = dayRange(filters.days)
+    const activity = await loadDailyActivity(filters, range, null)
+    if ('error' in activity) {
+      res.status(400).json({ error: activity.error })
+      return
+    }
+    res.json({ range: presentRange(filters, range), activity })
+  } catch (err) {
+    console.error('Daily activity analytics error:', err)
+    res.status(500).json({ error: 'Failed to load daily activity' })
   }
 })
 
