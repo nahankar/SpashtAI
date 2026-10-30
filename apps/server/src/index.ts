@@ -86,6 +86,8 @@ import adminLegalRouter from './routes/admin/legal'
 import adminPlatformRouter from './routes/admin/platform'
 import adminInterviewBankRouter from './routes/admin/interview-bank'
 import adminInterviewEvaluatorRouter from './routes/admin/interview-evaluator'
+import adminInvitationsRouter from './routes/admin/invitations'
+import invitationsRouter from './routes/invitations'
 import { startLearnerEvaluatorWorker } from './interviews/evaluator/learner'
 import { startInterviewEvaluatorWorker } from './interviews/evaluator/service'
 import { practiceRouter, practiceAgentRouter } from './routes/interview-practice'
@@ -99,7 +101,7 @@ import { getPublicPlatform } from './routes/platform'
 import { ensureAdminExists } from './lib/init-admin'
 import { ensureLegalDocuments } from './lib/ensure-legal'
 import { requireAuth, requireAuthOrAgent, requireAuthOrMediaToken } from './middleware/auth'
-import { requireAdmin } from './middleware/admin'
+import { requireAdmin, requireCurrentAdmin } from './middleware/admin'
 import { trackFeatureUsage } from './middleware/tracking'
 import eventsRouter from './routes/events'
 import { requireFeature, ensureFeatureFlags } from './lib/featureFlags'
@@ -214,6 +216,8 @@ app.use('/api/legal', legalRouter)
 
 // Auth routes (authLimiter applied inside the router for login/register)
 app.use('/api/auth', authRouter)
+// Public invitation lookup/acceptance (rate-limited inside the router)
+app.use('/api/invitations', invitationsRouter)
 
 // Browser remote logs → S3 (operational only; gated by CLIENT_LOGS_ENABLED).
 // Fail-safe: never blocks or errors the app; no-ops when disabled.
@@ -221,6 +225,8 @@ app.post('/api/client-logs', clientLogsLimiter, requireAuth, ingestClientLogs)
 
 // Admin routes
 app.use('/api/admin/users', requireAuth, requireAdmin, adminUsersRouter)
+// Invitations recheck the current role in the database on every request.
+app.use('/api/admin/invitations', requireAuth, requireCurrentAdmin, adminInvitationsRouter)
 app.use('/api/admin/analytics', requireAuth, requireAdmin, adminAnalyticsRouter)
 app.use('/api/admin/system', requireAuth, requireAdmin, adminSystemRouter)
 app.use('/api/admin/voice-config', requireAuth, requireAdmin, adminVoiceConfigRouter)

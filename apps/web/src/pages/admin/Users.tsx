@@ -7,7 +7,11 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Gauge, Loader2, UserPlus, UserX } from 'lucide-react'
+import { Gauge, Loader2, MailPlus, UserPlus, UserX } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { InviteUserDialog } from '@/components/admin/InviteUserDialog'
+import { InvitationTable } from '@/components/admin/InvitationTable'
+import { listInvitations, type InvitationList } from '@/lib/invitations'
 
 interface UserRow {
   id: string
@@ -49,6 +53,16 @@ export function Users() {
   const [togglingRateLimit, setTogglingRateLimit] = useState(false)
   const [rewardPointsEnabled, setRewardPointsEnabled] = useState(false)
   const [togglingRewardPoints, setTogglingRewardPoints] = useState(false)
+  const [inviteOpen, setInviteOpen] = useState(false)
+  const [pending, setPending] = useState<InvitationList | null>(null)
+
+  const fetchPending = useCallback(() => {
+    listInvitations({ status: 'pending', pageSize: 5 }).then(setPending).catch(() => setPending(null))
+  }, [])
+
+  useEffect(() => {
+    fetchPending()
+  }, [fetchPending])
 
   const fetchUsers = useCallback(async () => {
     setLoading(true)
@@ -177,10 +191,42 @@ export function Users() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Users</h1>
-        <p className="text-muted-foreground">{total} registered users</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Users</h1>
+          <p className="text-muted-foreground">
+            {total} registered users. Pending invitations are listed separately and are not counted as users.
+          </p>
+        </div>
+        <Button onClick={() => setInviteOpen(true)}>
+          <MailPlus className="mr-2 h-4 w-4" />
+          Invite user
+        </Button>
       </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle className="text-lg">Pending invitations</CardTitle>
+              <CardDescription>
+                Invited people who have not accepted yet. They have no account until they accept.
+              </CardDescription>
+            </div>
+            <Badge variant="outline">{pending ? `${pending.counts.pending} pending` : '…'}</Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {pending && pending.items.length > 0 ? (
+            <InvitationTable invitations={pending.items} onChanged={fetchPending} showStatus={false} />
+          ) : (
+            <p className="text-sm text-muted-foreground">{pending ? 'No pending invitations.' : 'Loading…'}</p>
+          )}
+          <Link to="/admin/invitations" className="inline-block text-sm font-medium text-primary hover:underline">
+            View all invitations
+          </Link>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="pb-3">
@@ -297,6 +343,7 @@ export function Users() {
         </CardContent>
       </Card>
 
+      <h2 className="text-lg font-semibold">Accounts</h2>
       <div className="flex gap-3">
         <Input
           placeholder="Search by email or name..."
@@ -342,6 +389,8 @@ export function Users() {
           )}
         </>
       )}
+
+      <InviteUserDialog open={inviteOpen} onOpenChange={setInviteOpen} onSent={fetchPending} />
     </div>
   )
 }

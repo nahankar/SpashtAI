@@ -1393,3 +1393,53 @@ model InterviewTranscriptIssue {
   @@unique([attemptId, eventKey])
   @@index([segmentId])
 }
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
+}
+
+// Delivery is tracked apart from invitation status: a failed send leaves the invitation PENDING.
+// SENT means the mail server accepted the message, not that it reached the inbox.
+enum InvitationDeliveryStatus {
+  SENDING
+  SENT
+  FAILED
+  DEV_CAPTURED
+}
+
+// Platform-level learner invitation. Recipients join as ordinary USER accounts; no tenant or
+// organization is assigned. Once real tenancy exists this needs a tenant scope.
+model UserInvitation {
+  id                   String           @id @default(cuid())
+  email                String
+  recipientName        String?
+  status               InvitationStatus @default(PENDING)
+  // Equals email only while PENDING, so the unique index allows one pending invitation per address.
+  pendingKey           String?          @unique
+  // SHA-256 of the acceptance token. The raw token exists only in the sent link.
+  tokenHash            String           @unique
+  expiresAt            DateTime
+  invitedById          String
+  // An account already existed for this address when the invitation was created.
+  existingUserAtInvite Boolean          @default(false)
+
+  deliveryStatus InvitationDeliveryStatus @default(SENDING)
+  deliveryError  String?
+  sendCount      Int                      @default(0)
+  lastSentAt     DateTime?
+
+  acceptedAt     DateTime?
+  acceptedUserId String?
+  revokedAt      DateTime?
+  revokedById    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, expiresAt])
+  @@index([email])
+  @@index([createdAt])
+}

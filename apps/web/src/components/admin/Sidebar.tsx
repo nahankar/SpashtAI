@@ -12,6 +12,7 @@ import {
   Gauge,
   HeartPulse,
   LayoutDashboard,
+  MailPlus,
   MessageSquareText,
   Mic2,
   Scale,
@@ -28,6 +29,7 @@ const groups = [
     links: [
       { to: '/admin', label: 'Dashboard', end: true, icon: LayoutDashboard },
       { to: '/admin/users', label: 'Users', end: false, icon: Users },
+      { to: '/admin/invitations', label: 'Invitations', end: false, icon: MailPlus },
       { to: '/admin/feedback', label: 'Feedback', end: false, icon: MessageSquareText },
     ],
   },

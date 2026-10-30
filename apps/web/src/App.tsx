@@ -24,6 +24,8 @@ import { CompleteProfile } from '@/pages/auth/CompleteProfile'
 import { AdminLayout } from '@/components/admin/AdminLayout'
 import { Dashboard as AdminDashboard } from '@/pages/admin/Dashboard'
 import { Users as AdminUsers } from '@/pages/admin/Users'
+import { Invitations as AdminInvitations } from '@/pages/admin/Invitations'
+import { AcceptInvitation } from '@/pages/auth/AcceptInvitation'
 import { UserDetail as AdminUserDetail } from '@/pages/admin/UserDetail'
 import { AnalyticsExplorer } from '@/pages/admin/AnalyticsExplorer'
 import { FeatureAnalytics } from '@/pages/admin/FeatureAnalytics'
@@ -501,6 +503,7 @@ function AppRoutes() {
         <Route path="/auth/register" element={<Register />} />
         <Route path="/auth/forgot-password" element={<ForgotPassword />} />
         <Route path="/auth/reset-password" element={<ResetPassword />} />
+        <Route path="/invite" element={<AcceptInvitation />} />
 
         <Route element={<ProtectedRoute requireProfile={false} />}>
           <Route path="/auth/complete-profile" element={<CompleteProfile />} />
@@ -621,6 +624,7 @@ function AppRoutes() {
             <Route index element={<AdminDashboard />} />
             <Route path="users" element={<AdminUsers />} />
             <Route path="users/:id" element={<AdminUserDetail />} />
+            <Route path="invitations" element={<AdminInvitations />} />
             <Route path="feedback" element={<AdminFeedback />} />
             <Route path="feedback/:id" element={<AdminFeedbackDetail />} />
             <Route path="analytics/explorer" element={<AnalyticsExplorer />} />

@@ -8,6 +8,7 @@ import { requireAuth } from '../middleware/auth'
 import { authLimiter } from '../middleware/rate-limit'
 import { sendEmail, buildPasswordResetEmail } from '../lib/email'
 import { verifyGoogleIdToken } from '../lib/google-auth'
+import { signInWithGoogleUser } from '../lib/googleSignIn'
 import { validateProfileFields, resolveProfileLocation, authUserForClient } from '../lib/profile'
 import { areSignupsPaused, getSignupsPausedMessage } from '../lib/platformSettings'
 
@@ -185,76 +186,14 @@ router.post('/google', authLimiter, async (req: Request, res: Response) => {
     }
 
     const googleUser = await verifyGoogleIdToken(credential)
-
-    let user = await prisma.user.findFirst({
-      where: {
-        OR: [{ googleId: googleUser.googleId }, { email: googleUser.email }],
-      },
-    })
-
-    if (user && user.googleId && user.googleId !== googleUser.googleId) {
-      res.status(409).json({ error: 'Email already linked to another Google account' })
+    const result = await signInWithGoogleUser(googleUser, req)
+    if (!result.ok) {
+      res.status(result.status).json(result.body)
       return
     }
-
-    if (user) {
-      user = await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          googleId: user.googleId ?? googleUser.googleId,
-          emailVerified: user.emailVerified || googleUser.emailVerified,
-          firstName: user.firstName ?? googleUser.firstName,
-          lastName: user.lastName ?? googleUser.lastName,
-          avatar: user.avatar ?? googleUser.avatar,
-          lastLoginAt: new Date(),
-          loginCount: { increment: 1 },
-        },
-      })
-    } else {
-      if (await areSignupsPaused()) {
-        res.status(403).json({
-          error: 'signups_paused',
-          message: await getSignupsPausedMessage(),
-        })
-        return
-      }
-
-      user = await prisma.user.create({
-        data: {
-          email: googleUser.email,
-          googleId: googleUser.googleId,
-          emailVerified: googleUser.emailVerified,
-          firstName: googleUser.firstName,
-          lastName: googleUser.lastName,
-          avatar: googleUser.avatar,
-          lastLoginAt: new Date(),
-          loginCount: 1,
-          enablePro: true,
-          enableUltra: true,
-          enableReprocess: false,
-        },
-      })
-
-      await prisma.userActivity.create({
-        data: {
-          userId: user.id,
-          action: 'register_google',
-          ipAddress: req.ip || null,
-          userAgent: req.headers['user-agent'] || null,
-        },
-      })
-    }
+    const { user } = result
 
     const token = signToken({ userId: user.id, email: user.email, role: user.role })
-
-    await prisma.userActivity.create({
-      data: {
-        userId: user.id,
-        action: 'login_google',
-        ipAddress: req.ip || null,
-        userAgent: req.headers['user-agent'] || null,
-      },
-    })
 
     res.json({ token, user: await authUserForClient(user) })
   } catch (err) {
