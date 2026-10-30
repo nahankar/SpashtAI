@@ -127,3 +127,50 @@ recognizer never transcribes within about 8 s is left out of the saved answer (t
 - Grading remains experimental; recording loss on refresh (D-1) remains open.
 - Release still needs explicit authorisation; at release, publish the Terms/Privacy additions per
   `POLICY-INTERVIEWS-RECORDING.md` §7 (Privacy §3 now uses the provider-neutral wording).
+
+## Limited reliability release (30 Oct 2026, 18:26 UTC)
+
+**Released:** `ac5d5cc` (technical feedback only after End, in playback) and `b95da5e` (persisted transcript integrity;
+incomplete transcripts never graded), cherry-picked onto `main` `e1f9d19` in a clean worktree on
+`release/interviews-reliability-subset`, with the two report-only commits. **Not released:** `74d763d` recording
+journal/recovery and any browser-storage acknowledgment or policy wording, all parked on
+`codex/interviews-reliability-d1` (`8564bd0`) for their microphone checks and privacy-wording review.
+**Recording loss on refresh (D-1) remains open in production.**
+
+| | Revision |
+| --- | --- |
+| GitHub `main` | `6add717` (fast-forward from `e1f9d19`; no intervening commits) |
+| EC2 `/opt/spashtai` | `6add717` on `main`; only modified tracked files are the preserved LiveKit overlays |
+| This report section | release branch only (documentation), not on `main` or EC2 |
+
+**Checks on the release subset (not the parked branch):** server 654 passed, 4 skipped (after creating the
+untracked `audio_storage` directory the worktree lacked); web 309 passed, typecheck and build pass; agent 257
+passed with zero unretrieved-task warnings; `20261028090000_interview_transcript_integrity` passes the supported
+empty-installation procedure (`migrate diff` exit 0).
+
+**Deployment:**
+- SSH was unavailable from this machine until the user allowed its IP; nothing was changed before that.
+- Pre-checks: one production interview practice was open (session `…0u1l6y59i`, started 15:25 UTC); the agent log
+  shows the learner never joined the voice room (the job ended at 15:35 with "room disconnected while waiting for
+  participant"). It was left untouched (auto-completes after 24 h). The deploy ran only after a fresh check found
+  no voice segment open within 3 hours; `FORCE_MAINTENANCE` was not used. `SPASHTAI_DEV_STT_FAULT` absent from the
+  env files, PM2 config and every agent process, before and after.
+- Backup: `~/spashtai-backups/reliability-6add717-20261030` (pg_dump, 57 table-data entries; env files; LiveKit
+  overlays; before/after snapshots). The dump was restored in full into a temporary database for verification,
+  then dropped.
+- Migration: only `20261028090000_interview_transcript_integrity` applied; `migrate status` up to date.
+- Services: API health ok (local and `https://api.spasht.ai/health`), agent registered 18:28:05 UTC, no new API
+  errors.
+- Data: bank (1649), flags, grants (6), runs (9), finished assessments (12), voice config, legal documents and plans
+  unchanged. Saved answers: all 22 keep every original column (compared with the restored dump); the new
+  `transcriptIntegrity` column is empty on all 22. No transcript-integrity events exist yet.
+- Web: the served bundle contains the after-practice and cause-specific feedback states and the playback link;
+  "This preview saves questions…" and the Progress Pulse sentence are gone; no recording-journal code is present.
+- Post-End restriction on production data, using the deployed server code read-only: the one unended practice
+  returns only `AFTER_PRACTICE` with no results; all 8 ended practices return their states and the 11 historical
+  results are intact. Both learner endpoints use this code path; an authenticated HTTP check in production is still
+  to be done by a signed-in user.
+
+**Remaining:** the deferred microphone checks (feedback timing in a live practice, integrity notices with real
+gaps), the signed-in production check of both assessment endpoints, D-1 recording recovery (parked), and the
+recovery privacy-wording review. Grading remains experimental.
