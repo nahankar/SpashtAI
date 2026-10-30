@@ -12,6 +12,7 @@ describe('admin analytics view helpers', () => {
       source: ['elevate'],
       skill: ['clarity'],
       feature: 'replay',
+      learner: 'cmh1a2b3c4d5e6f7',
     })
     const params = new URLSearchParams(search)
     expect(analyticsQueryFromSearch(params)).toMatchObject({
@@ -20,7 +21,13 @@ describe('admin analytics view helpers', () => {
       gender: ['FEMALE'],
       ageBand: ['25_34'],
       feature: 'replay',
+      learner: 'cmh1a2b3c4d5e6f7',
     })
+  })
+
+  it('keeps only a learner id in the URL, never an email', () => {
+    expect(analyticsQueryFromSearch(new URLSearchParams('learner=someone@example.com')).learner).toBe('')
+    expect(analyticsQueryToSearch({ ...analyticsQueryFromSearch(new URLSearchParams()), learner: '' })).not.toContain('learner')
   })
 
   it('labels missing active time instead of a zero and distinguishes view states', () => {

@@ -3,7 +3,9 @@ import rateLimit from 'express-rate-limit'
 import { z } from 'zod'
 import { prisma } from '../../lib/prisma'
 import { getEnabledFeatures } from '../../lib/featureFlags'
-import { parseAnalyticsFilters } from '../../analytics/adminAnalyticsFilters'
+import { type AnalyticsFilters, parseAnalyticsFilters } from '../../analytics/adminAnalyticsFilters'
+import { type DayRange, dayRange, learnerFilterMatch, loadLearnerProgress, resolveLearner, searchLearners } from '../../analytics/learnerReport'
+import { hasCurrentAdminRole, requireCurrentAdmin } from '../../middleware/admin'
 import {
   loadFeatureReport,
   loadFeatureUsers,
@@ -218,10 +220,82 @@ function filtersFrom(req: Request, res: Response) {
   return parsed.filters
 }
 
+async function auditIndividual(adminId: string, action: string, targetUserId: string | null, metadata: Record<string, unknown>) {
+  await prisma.adminAction.create({
+    data: { adminId, action, targetUserId, targetResource: 'admin-analytics:individual', metadata: metadata as never },
+  })
+}
+
+const learnerSearchLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 60,
+  keyGenerator: (req) => req.user?.userId || 'anonymous',
+  message: { error: 'Too many learner searches. Please wait a moment.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+})
+
+// GET /api/admin/analytics/learners/search?q= — name or email fragment; returns stable ids for selection.
+router.get('/learners/search', learnerSearchLimiter, requireCurrentAdmin, async (req: Request, res: Response) => {
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : ''
+  if (q.length < 2 || q.length > 100) {
+    res.status(400).json({ error: 'Search with 2 to 100 characters' })
+    return
+  }
+  try {
+    const learners = await searchLearners(q)
+    // The search text itself is not logged.
+    await auditIndividual(req.user!.userId, 'analytics_learner_search', null, { resultCount: learners.length })
+    res.json({ learners })
+  } catch (err) {
+    console.error('Learner search error:', err)
+    res.status(500).json({ error: 'Failed to search learners' })
+  }
+})
+
+function presentRange(filters: AnalyticsFilters, range: DayRange) {
+  return { days: filters.days, timeZone: range.timeZone, firstDay: range.firstDay, lastDay: range.lastDay,
+    since: range.since.toISOString(), until: range.until.toISOString() }
+}
+
+/**
+ * Resolves ?learner= for an individual report after rechecking the caller's current role (the token role is a
+ * login-time snapshot). Responds, and returns null, when the report cannot be served.
+ */
+async function individualTarget(req: Request, res: Response, filters: AnalyticsFilters) {
+  if (!(await hasCurrentAdminRole(req.user?.userId))) {
+    res.status(403).json({ error: 'Admin access required' })
+    return null
+  }
+  const learner = await resolveLearner(filters.learner!)
+  if (!learner) {
+    res.status(404).json({ error: 'Learner not found', code: 'learner_not_found' })
+    return null
+  }
+  return { learner, match: await learnerFilterMatch(learner.id, filters), range: dayRange(filters.days) }
+}
+
 router.get('/progress-pulse', async (req: Request, res: Response) => {
   try {
     const filters = filtersFrom(req, res)
     if (!filters) return
+    if (filters.learner) {
+      const target = await individualTarget(req, res, filters)
+      if (!target) return
+      const { learner, match, range } = target
+      await auditIndividual(req.user!.userId, 'analytics_individual_report_viewed', learner.id, {
+        report: 'progress-pulse', days: filters.days, filtered: !match.matches,
+      })
+      res.json({
+        mode: 'individual',
+        learner,
+        range: presentRange(filters, range),
+        match,
+        // Other filters still apply: a learner they exclude gets an explicit no-match, not an empty report.
+        report: match.matches ? await loadLearnerProgress(learner.id, filters, range) : null,
+      })
+      return
+    }
     res.json(await loadProgressPulseReport(filters))
   } catch (err) {
     console.error('Progress pulse analytics error:', err)

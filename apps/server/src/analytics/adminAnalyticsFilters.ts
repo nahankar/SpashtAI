@@ -31,6 +31,8 @@ export type AnalyticsFilters = {
   skills: string[]
   feature: string | null
   page: number
+  /** Explicit individual-report target (a stable user id; never a name or email). */
+  learner: string | null
 }
 
 export function ageBandFromDob(dob: Date | null, now = new Date()): AgeBand {
@@ -76,6 +78,8 @@ export function parseAnalyticsFilters(query: Record<string, unknown>, now = new 
   if (skills.some((skill) => !(PULSE_SKILLS as readonly string[]).includes(skill))) return { error: 'Invalid skill filter' }
   const feature = typeof query.feature === 'string' && query.feature ? query.feature : null
   const page = Math.min(50, Math.max(1, Number.parseInt(String(query.page ?? '1'), 10) || 1))
+  const learnerParam = typeof query.learner === 'string' ? query.learner.trim() : ''
+  if (learnerParam && !/^[A-Za-z0-9_-]{8,64}$/.test(learnerParam)) return { error: 'Invalid learner' }
   return {
     filters: {
       since,
@@ -90,6 +94,7 @@ export function parseAnalyticsFilters(query: Record<string, unknown>, now = new 
       skills,
       feature,
       page,
+      learner: learnerParam || null,
     },
   }
 }

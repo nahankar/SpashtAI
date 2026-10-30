@@ -16,7 +16,7 @@ const COVERAGE = {
   historical: 'Older feature events keep their original action names. Milestones added in this release show “not recorded yet” until the first real sample arrives.',
 }
 
-function ageBandSql() {
+export function ageBandSql() {
   return Prisma.sql`CASE
     WHEN u."dateOfBirth" IS NULL THEN 'unknown'
     WHEN EXTRACT(YEAR FROM AGE(CURRENT_TIMESTAMP, u."dateOfBirth")) < 18 THEN 'under_18'
@@ -28,7 +28,7 @@ function ageBandSql() {
   END`
 }
 
-function learnerWhere(filters: AnalyticsFilters) {
+export function learnerWhere(filters: AnalyticsFilters) {
   const clauses: Prisma.Sql[] = [Prisma.sql`u.role = 'USER'`]
   if (filters.cities.length) clauses.push(Prisma.sql`u.city IN (${Prisma.join(filters.cities)})`)
   if (filters.states.length) clauses.push(Prisma.sql`u.state IN (${Prisma.join(filters.states)})`)
@@ -37,7 +37,7 @@ function learnerWhere(filters: AnalyticsFilters) {
   return Prisma.join(clauses, ' AND ')
 }
 
-function demographicFilterActive(filters: AnalyticsFilters) {
+export function demographicFilterActive(filters: AnalyticsFilters) {
   return Boolean(filters.cities.length || filters.states.length || filters.genders.length || filters.ageBands.length)
 }
 
@@ -45,7 +45,7 @@ function learners(filters: AnalyticsFilters) {
   return Prisma.sql`SELECT u.id FROM "User" u WHERE ${learnerWhere(filters)}`
 }
 
-function sourcesFor(filters: AnalyticsFilters, enabled: string[]) {
+export function sourcesFor(filters: AnalyticsFilters, enabled: string[]) {
   const allowed = ['elevate', 'replay'].filter((source) => enabled.includes(source))
   const selected = filters.sources.length ? allowed.filter((source) => filters.sources.includes(source)) : allowed
   return selected.length ? selected : ['__none__']

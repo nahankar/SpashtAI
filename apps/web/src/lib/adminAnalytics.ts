@@ -24,6 +24,8 @@ export type AnalyticsQuery = {
   source: string[]
   skill: string[]
   feature: string
+  /** Selected learner's stable id ('' = all learners). Never an email or name. */
+  learner: string
 }
 
 export const DEFAULT_ANALYTICS_QUERY: AnalyticsQuery = {
@@ -35,7 +37,10 @@ export const DEFAULT_ANALYTICS_QUERY: AnalyticsQuery = {
   source: [],
   skill: [],
   feature: 'replay',
+  learner: '',
 }
+
+const LEARNER_ID = /^[A-Za-z0-9_-]{8,64}$/
 
 function readList(params: URLSearchParams, key: string) {
   return (params.get(key) ?? '').split(',').map((item) => item.trim()).filter(Boolean)
@@ -53,6 +58,7 @@ export function analyticsQueryFromSearch(params: URLSearchParams): AnalyticsQuer
     source: readList(params, 'source'),
     skill: readList(params, 'skill'),
     feature: params.get('feature') || 'replay',
+    learner: LEARNER_ID.test(params.get('learner') ?? '') ? params.get('learner')! : '',
   }
 }
 
@@ -63,6 +69,7 @@ export function analyticsQueryToSearch(query: AnalyticsQuery) {
     if (query[key].length) params.set(key, query[key].join(','))
   }
   if (query.feature) params.set('feature', query.feature)
+  if (query.learner) params.set('learner', query.learner)
   return params.toString()
 }
 

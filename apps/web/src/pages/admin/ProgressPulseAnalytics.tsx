@@ -12,9 +12,12 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { apiClient } from '@/lib/api-client'
+import { ApiError, apiClient } from '@/lib/api-client'
 import { analyticsQueryFromSearch, analyticsQueryToSearch, viewState, type AnalyticsQuery } from '@/lib/adminAnalytics'
 import { AnalyticsFilters } from '@/components/admin/AnalyticsFilters'
+import { LearnerSelector } from '@/components/admin/LearnerSelector'
+import { LearnerProgress, NoLearnerMatch, skillLabel, type IndividualPulseResponse } from '@/components/admin/LearnerProgress'
+import { Button } from '@/components/ui/button'
 import { AnalyticsStatus } from '@/components/admin/AnalyticsStatus'
 import { MetricCard } from '@/components/admin/MetricCard'
 import { LanguageAnalytics, type LanguageSnapshot } from '@/components/admin/LanguageAnalytics'
@@ -42,10 +45,6 @@ const CHART_COLORS = [
   'hsl(var(--chart-4))',
   'hsl(var(--chart-5))',
 ]
-
-function skillLabel(value: string | undefined) {
-  return value?.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) ?? ''
-}
 
 function CohortChart({ title, rows }: { title: string; rows: Cohort[] }) {
   const visible = rows.filter((row) => !row.suppressed)
@@ -79,21 +78,34 @@ export function ProgressPulseAnalytics() {
   const [params, setParams] = useSearchParams()
   const query = analyticsQueryFromSearch(params)
   const [report, setReport] = useState<Report | null>(null)
+  const [individual, setIndividual] = useState<IndividualPulseResponse | null>(null)
+  const [missingLearner, setMissingLearner] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [reload, setReload] = useState(0)
 
   useEffect(() => {
-    const search = analyticsQueryToSearch(analyticsQueryFromSearch(params))
+    const current = analyticsQueryFromSearch(params)
+    const search = analyticsQueryToSearch(current)
+    let active = true
     setLoading(true)
     setError(null)
-    apiClient<Report>(`/api/admin/analytics/progress-pulse?${search}`)
-      .then(setReport)
-      .catch((err: Error) => setError(err.message || 'Failed'))
-      .finally(() => setLoading(false))
+    setMissingLearner(false)
+    const request = current.learner
+      ? apiClient<IndividualPulseResponse>(`/api/admin/analytics/progress-pulse?${search}`).then((body) => { if (active) { setIndividual(body); setReport(null) } })
+      : apiClient<Report>(`/api/admin/analytics/progress-pulse?${search}`).then((body) => { if (active) { setReport(body); setIndividual(null) } })
+    request
+      .catch((err: Error) => {
+        if (!active) return
+        if (err instanceof ApiError && err.status === 404 && err.code === 'learner_not_found') setMissingLearner(true)
+        else setError(err.message || 'Failed')
+      })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
   }, [params, reload])
 
   const update = (next: AnalyticsQuery) => setParams(analyticsQueryToSearch(next))
+  const selectLearner = (learner: string) => update({ ...query, learner })
   const state = viewState(loading, error, !report || ((report.summary.entries ?? 0) === 0 && report.decisions.every((row) => row.tracked + row.skipped + row.undecided === 0)))
   const trendSkills = [...new Set((report?.trends ?? []).map((row) => row.skill))]
   const trendData = [...new Set((report?.trends ?? []).map((row) => row.day))].map((day) => ({
@@ -105,9 +117,24 @@ export function ProgressPulseAnalytics() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Progress Pulse</h1>
-        <p className="text-muted-foreground">Joint learner progress, with small demographic groups hidden.</p>
+        <p className="text-muted-foreground">
+          {query.learner ? 'One learner\'s progress, shown to authorized admins. Access is audited.' : 'Joint learner progress, with small demographic groups hidden.'}
+        </p>
       </div>
+      <LearnerSelector selectedId={query.learner} selected={individual?.learner ?? null} onSelect={selectLearner} />
       <AnalyticsFilters query={query} onChange={update} showPulse />
+      {query.learner ? (
+        loading ? <AnalyticsStatus state="loading" /> : error ? <AnalyticsStatus state="error" onRetry={() => setReload((value) => value + 1)} /> : missingLearner ? (
+          <div className="space-y-3 rounded-lg border p-6">
+            <p className="font-medium">No learner account matches this selection.</p>
+            <p className="text-sm text-muted-foreground">It may have been removed, or it is not a learner account.</p>
+            <Button type="button" size="sm" variant="outline" onClick={() => selectLearner('')}>Clear selection</Button>
+          </div>
+        ) : individual && (individual.report
+          ? <LearnerProgress key={individual.learner.id} data={{ ...individual, report: individual.report }} />
+          : <NoLearnerMatch excludedBy={individual.match.excludedBy} onClearFilters={() => update({ ...query, city: [], state: [], gender: [], ageBand: [] })} />)
+      ) : (
+      <>
       {report && <p className="text-xs text-muted-foreground">{report.coverage.canonical}</p>}
       <AnalyticsStatus state={state === 'ready' ? 'ready' : state} onRetry={() => setReload((value) => value + 1)} />
       {report && state !== 'loading' && state !== 'error' && (
@@ -256,6 +283,8 @@ export function ProgressPulseAnalytics() {
             </AccordionItem>
           </Accordion>
         </>
+      )}
+      </>
       )}
     </div>
   )
