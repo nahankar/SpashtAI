@@ -16,7 +16,7 @@ import { ApiError, apiClient } from '@/lib/api-client'
 import { analyticsQueryFromSearch, analyticsQueryToSearch, viewState, type AnalyticsQuery } from '@/lib/adminAnalytics'
 import { AnalyticsFilters } from '@/components/admin/AnalyticsFilters'
 import { LearnerSelector } from '@/components/admin/LearnerSelector'
-import { LearnerProgress, NoLearnerMatch, skillLabel, type IndividualPulseResponse } from '@/components/admin/LearnerProgress'
+import { LearnerProgress, NoLearnerMatch, rangeLabel, skillLabel, type IndividualPulseResponse, type ReportRange } from '@/components/admin/LearnerProgress'
 import { Button } from '@/components/ui/button'
 import { DailyActivity } from '@/components/admin/DailyActivity'
 import { AnalyticsStatus } from '@/components/admin/AnalyticsStatus'
@@ -27,6 +27,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/
 
 type Cohort = { bucket?: string; users: number | null; suppressed: boolean; averageScore?: number | null }
 type Report = {
+  range: ReportRange
   coverage: { canonical: string; engagement: string }
   summary: { users: number | null; suppressed: boolean; entries?: number; sessions?: number }
   skills: Array<{ skill: string; entries: number; users: number | null; suppressed: boolean; average?: number | null; median?: number | null }>
@@ -136,7 +137,7 @@ export function ProgressPulseAnalytics() {
           : <NoLearnerMatch excludedBy={individual.match.excludedBy} onClearFilters={() => update({ ...query, city: [], state: [], gender: [], ageBand: [] })} />)
       ) : (
       <>
-      {report && <p className="text-xs text-muted-foreground">{report.coverage.canonical}</p>}
+      {report && <p className="text-xs text-muted-foreground">{rangeLabel(report.range)} · {report.coverage.canonical}</p>}
       <AnalyticsStatus state={state === 'ready' ? 'ready' : state} onRetry={() => setReload((value) => value + 1)} />
       {report && state !== 'loading' && state !== 'error' && (
         <>
@@ -217,7 +218,7 @@ export function ProgressPulseAnalytics() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Daily skill trend</CardTitle>
-                <p className="text-xs text-muted-foreground">Only daily skill groups with at least 5 learners are plotted.</p>
+                <p className="text-xs text-muted-foreground">Days in {report.range.timeZone === 'Asia/Kolkata' ? 'IST (Asia/Kolkata)' : report.range.timeZone}. Only daily skill groups with at least 5 learners are plotted.</p>
               </CardHeader>
               <CardContent className="h-72">
                 <ResponsiveContainer width="100%" height="100%">

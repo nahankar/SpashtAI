@@ -15,6 +15,7 @@ import { prisma } from '../src/lib/prisma'
 import { parseAnalyticsFilters } from '../src/analytics/adminAnalyticsFilters'
 import { dayRange, learnerFilterMatch, loadLearnerProgress, searchLearners, zonedMidnight } from '../src/analytics/learnerReport'
 import { loadDailyActivity } from '../src/analytics/dailyActivity'
+import { loadProgressPulseReport } from '../src/analytics/adminProductAnalytics'
 import analyticsRouter from '../src/routes/admin/analytics'
 import { requireAuth } from '../src/middleware/auth'
 import { requireAdmin } from '../src/middleware/admin'
@@ -122,6 +123,13 @@ describe.skipIf(!testDb.url)('individual learner reporting (PostgreSQL)', () => 
     } finally {
       await prisma.user.update({ where: { id: fx.admin.id }, data: { role: 'ADMIN' } })
     }
+  })
+
+  it('puts the aggregate Pulse report on the same Asia/Kolkata days as the daily sections', async () => {
+    const report = await loadProgressPulseReport(filtersFor({}))
+    const daily = await request(app).get('/analytics/activity/daily?days=30').auth(token(fx.admin.id, 'ADMIN'), { type: 'bearer' })
+    expect(report.range).toMatchObject({ timeZone: 'Asia/Kolkata', firstDay: '2026-10-02', lastDay: '2026-10-31', since: '2026-10-01T18:30:00.000Z' })
+    expect(daily.body.range.timeZone).toBe(report.range.timeZone)
   })
 
   describe('daily activity', () => {

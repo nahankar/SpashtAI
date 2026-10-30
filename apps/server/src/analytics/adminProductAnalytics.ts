@@ -9,6 +9,7 @@ import {
   round1,
 } from './adminAnalyticsFilters'
 import { MIN_COHORT, PRODUCT_FEATURES, type ProductFeature } from './productEvents'
+import { type DayRange, dayRange, localDaySql, presentRange } from './reportDays'
 
 const COVERAGE = {
   canonical: 'Session, journey, interview, feedback, and Progress Pulse figures use retained product records in the selected range.',
@@ -164,7 +165,12 @@ function redactScores(suppress: boolean, users: number, metrics: Record<string, 
   return { users, suppressed: false, threshold: MIN_COHORT, ...metrics }
 }
 
-export async function loadProgressPulseReport(filters: AnalyticsFilters) {
+/**
+ * Aggregate Progress Pulse over whole calendar days in the report time zone (Asia/Kolkata by default), the same
+ * window and day boundaries as the individual and day-wise sections.
+ */
+export async function loadProgressPulseReport(requested: AnalyticsFilters, range: DayRange = dayRange(requested.days, undefined, requested.until)) {
+  const filters = { ...requested, since: range.since, until: range.until }
   const enabled = await getEnabledFeatures()
   const sources = sourcesFor(filters, enabled)
   const scope = pulseScope(filters, sources)
@@ -231,7 +237,7 @@ export async function loadProgressPulseReport(filters: AnalyticsFilters) {
     prisma.$queryRaw<CohortRow[]>`SELECT ${ageBandSql()} AS bucket, COUNT(DISTINCT p."userId")::int AS users, AVG(p.score) AS avg_score ${pulseScope(filters, sources, true)} GROUP BY 1`,
     prisma.$queryRaw<CohortRow[]>`SELECT COALESCE(u.state, 'unknown') AS bucket, COUNT(DISTINCT p."userId")::int AS users, AVG(p.score) AS avg_score ${pulseScope(filters, sources, true)} GROUP BY 1`,
     prisma.$queryRaw<TrendRow[]>`
-      SELECT to_char(date_trunc('day', p."recordedAt"), 'YYYY-MM-DD') AS day, p.skill,
+      SELECT ${localDaySql(Prisma.sql`p."recordedAt"`, range.timeZone)} AS day, p.skill,
         COUNT(DISTINCT p."userId")::int AS users, AVG(p.score) AS avg_score
       ${scope} GROUP BY 1, 2 ORDER BY 1, 2`,
     loadLanguageAnalytics(filters, sources.filter((source): source is 'elevate' | 'replay' => source === 'elevate' || source === 'replay')),
@@ -244,7 +250,7 @@ export async function loadProgressPulseReport(filters: AnalyticsFilters) {
     averageScore: round1(numberOrNull(row.avg_score)),
   }))
   return {
-    range: { days: filters.days, since: filters.since.toISOString(), until: filters.until.toISOString() },
+    range: presentRange(filters.days, range),
     filters: { ...filters, since: filters.since.toISOString(), until: filters.until.toISOString() },
     coverage: COVERAGE,
     enabledFeatures: enabled,
