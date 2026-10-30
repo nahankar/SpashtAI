@@ -23,10 +23,13 @@ export function InviteUserDialog({
   open,
   onOpenChange,
   onSent,
+  demo = false,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSent?: (invitation: Invitation) => void
+  /** Tenant Admin demo: the action is real and runs as the signed-in platform Admin. */
+  demo?: boolean
 }) {
   const [step, setStep] = useState<Step>('form')
   const [email, setEmail] = useState('')
@@ -77,6 +80,12 @@ export function InviteUserDialog({
             Invites one person to SpashtAI as a learner. It grants no admin access and assigns no organization.
           </DialogDescription>
         </DialogHeader>
+
+        {demo && (
+          <p className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+            Tenant Admin demo: this sends a real platform invitation from your Admin account. It is not tenant-scoped.
+          </p>
+        )}
 
         {step === 'form' && (
           <form

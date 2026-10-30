@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { useTenantDemo } from '@/contexts/TenantDemoContext'
+import { TenantDemoDashboard } from '@/components/admin/TenantDemoDashboard'
 import { Link } from 'react-router-dom'
 import { apiClient } from '@/lib/api-client'
 import { MetricCard } from '@/components/admin/MetricCard'
@@ -20,6 +22,11 @@ interface Overview {
 }
 
 export function Dashboard() {
+  const { enabled } = useTenantDemo()
+  return enabled ? <TenantDemoDashboard /> : <PlatformDashboard />
+}
+
+function PlatformDashboard() {
   const [data, setData] = useState<Overview | null>(null)
   const [loading, setLoading] = useState(true)
 

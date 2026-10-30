@@ -1,4 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
+import { useTenantDemo } from '@/contexts/TenantDemoContext'
+import { TenantDemoUsers } from '@/components/admin/TenantDemoUsers'
 import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
 import { useConfirm } from '@/hooks/useConfirm'
@@ -38,6 +40,11 @@ interface PlatformSettings {
 }
 
 export function Users() {
+  const { enabled } = useTenantDemo()
+  return enabled ? <TenantDemoUsers /> : <PlatformUsers />
+}
+
+function PlatformUsers() {
   const confirm = useConfirm()
   const [users, setUsers] = useState<UserRow[]>([])
   const [search, setSearch] = useState('')

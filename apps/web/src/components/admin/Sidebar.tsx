@@ -22,6 +22,8 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { useTenantDemo } from '@/contexts/TenantDemoContext'
+import { isDemoPath } from '@/lib/tenantDemo'
 
 const groups = [
   {
@@ -62,10 +64,47 @@ const groups = [
   },
 ]
 
+/** The Tenant Admin demo keeps only what a tenant administrator would see; System and Administration are hidden. */
+function visibleGroups(demo: boolean) {
+  if (!demo) return groups
+  return groups
+    .filter((group) => group.label === 'Overview' || group.label === 'Analytics')
+    .map((group) => ({ ...group, links: group.links.filter((link) => isDemoPath(link.to)) }))
+}
+
+export function TenantDemoToggle() {
+  const { enabled, setEnabled } = useTenantDemo()
+  return (
+    <div className={cn('mb-4 rounded-md border px-3 py-2', enabled && 'border-amber-300 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/10')}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-medium">Tenant Admin demo</span>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={enabled}
+          aria-label="Tenant Admin demo"
+          onClick={() => setEnabled(!enabled)}
+          className={cn(
+            'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            enabled ? 'bg-amber-500' : 'bg-muted-foreground/30',
+          )}
+        >
+          <span className={cn('inline-block h-4 w-4 rounded-full bg-white shadow transition-transform', enabled ? 'translate-x-4' : 'translate-x-0.5')} />
+        </button>
+      </div>
+      <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+        {enabled ? 'Preview only. Your Admin access is unchanged.' : 'Preview the tenant administrator view.'}
+      </p>
+    </div>
+  )
+}
+
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
+  const { enabled } = useTenantDemo()
   return (
     <>
-      {groups.map((group) => (
+      <TenantDemoToggle />
+      {visibleGroups(enabled).map((group) => (
         <div key={group.label} className="mb-4 last:mb-0">
           <p className="mb-1.5 px-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
             {group.label}
@@ -102,6 +141,8 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
 
 export function Sidebar() {
   const [open, setOpen] = useState(false)
+  const { enabled: demo } = useTenantDemo()
+  const title = demo ? 'Tenant Admin (demo)' : 'Admin Panel'
 
   return (
     <>
@@ -122,7 +163,7 @@ export function Sidebar() {
           />
           <aside className="absolute left-0 top-0 h-full w-72 max-w-[85vw] border-r bg-card shadow-xl flex flex-col">
             <div className="flex items-center justify-between border-b px-4 py-3">
-              <span className="text-sm font-semibold">Admin Panel</span>
+              <span className="text-sm font-semibold">{title}</span>
               <Button variant="ghost" size="icon" onClick={() => setOpen(false)}>
                 <X className="h-4 w-4" />
               </Button>
@@ -137,7 +178,7 @@ export function Sidebar() {
       <aside className="hidden md:block w-64 shrink-0 border-r bg-card/50 min-h-[calc(100vh-65px)]">
         <nav className="flex flex-col gap-1 p-4">
           <div className="mb-4 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            Admin Panel
+            {title}
           </div>
           <NavLinks />
         </nav>

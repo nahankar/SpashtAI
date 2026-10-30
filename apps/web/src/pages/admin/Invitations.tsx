@@ -6,6 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { InvitationTable } from '@/components/admin/InvitationTable'
 import { InviteUserDialog } from '@/components/admin/InviteUserDialog'
 import { cn } from '@/lib/utils'
+import { useTenantDemo } from '@/contexts/TenantDemoContext'
+import { sampleInvitationList } from '@/lib/tenantDemoSample'
 import {
   INVITATION_STATUSES,
   STATUS_LABEL,
@@ -68,6 +70,8 @@ function DevMailbox({ refreshKey }: { refreshKey: number }) {
 
 /** Searchable, paginated invitation management. Platform-wide until real tenancy scopes it. */
 export function Invitations() {
+  const demo = useTenantDemo()
+  const sample = demo.enabled && demo.dataSource === 'sample'
   const [status, setStatus] = useState<InvitationStatus | undefined>('pending')
   const [query, setQuery] = useState('')
   const [search, setSearch] = useState('')
@@ -92,13 +96,15 @@ export function Invitations() {
     setLoading(true)
     setError('')
     try {
-      setData(await listInvitations({ status, q: search || undefined, page, pageSize: PAGE_SIZE }))
+      const params = { status, q: search || undefined, page, pageSize: PAGE_SIZE }
+      // Tenant Admin demo with sample data never calls the server for invitation rows.
+      setData(sample ? sampleInvitationList(params) : await listInvitations(params))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load invitations')
     } finally {
       setLoading(false)
     }
-  }, [status, search, page])
+  }, [status, search, page, sample])
 
   useEffect(() => { load() }, [load, refreshKey])
   const refresh = () => setRefreshKey((k) => k + 1)
@@ -118,7 +124,7 @@ export function Invitations() {
         <Button onClick={() => setInviteOpen(true)}><MailPlus className="mr-2 h-4 w-4" /> Invite user</Button>
       </div>
 
-      <EmailSetupNotice config={config} />
+      {!sample && <EmailSetupNotice config={config} />}
 
       <div className="flex flex-wrap items-center gap-2">
         {filters.map((f) => (
@@ -165,9 +171,9 @@ export function Invitations() {
         </>
       ) : null}
 
-      {config?.mode === 'dev_capture' && <DevMailbox refreshKey={refreshKey} />}
+      {!sample && config?.mode === 'dev_capture' && <DevMailbox refreshKey={refreshKey} />}
 
-      <InviteUserDialog open={inviteOpen} onOpenChange={setInviteOpen} onSent={refresh} />
+      <InviteUserDialog open={inviteOpen} onOpenChange={setInviteOpen} onSent={refresh} demo={demo.enabled} />
     </div>
   )
 }

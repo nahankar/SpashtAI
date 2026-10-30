@@ -1,5 +1,6 @@
 import { createContext, useEffect, useState, useCallback, type ReactNode } from 'react'
 import { apiClient } from '@/lib/api-client'
+import { clearTenantDemo } from '@/lib/tenantDemo'
 
 export interface AuthUser {
   id: string
@@ -118,6 +119,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     apiClient('/api/auth/logout', { method: 'POST' }).catch(() => {})
     localStorage.removeItem(TOKEN_KEY)
+    // The Tenant Admin demo preview never outlives the session that turned it on.
+    clearTenantDemo()
     setUser(null)
   }, [])
 

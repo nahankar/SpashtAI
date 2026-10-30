@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { apiClient } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { useTenantDemo } from '@/contexts/TenantDemoContext'
 
 export type LearnerSummary = {
   id: string
@@ -30,6 +31,7 @@ export function LearnerSelector({
   selected: LearnerSummary | null
   onSelect: (id: string) => void
 }) {
+  const { enabled: demo } = useTenantDemo()
   const [text, setText] = useState('')
   const [results, setResults] = useState<LearnerSummary[] | null>(null)
   const [searching, setSearching] = useState(false)
@@ -48,6 +50,10 @@ export function LearnerSelector({
     }, 300)
     return () => { current = false; window.clearTimeout(timer) }
   }, [text])
+
+  if (demo) {
+    return <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">Individual learner views are off in the Tenant Admin demo. Aggregate analytics are shown instead.</p>
+  }
 
   if (selectedId) {
     return (
