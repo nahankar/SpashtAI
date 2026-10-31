@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { useTenantDemo } from '@/contexts/TenantDemoContext'
+import { TenantDemoAnalytics } from '@/components/admin/TenantDemoAnalytics'
 import { useSearchParams } from 'react-router-dom'
 import {
   Bar,
@@ -77,6 +79,12 @@ function CohortChart({ title, rows }: { title: string; rows: Cohort[] }) {
 }
 
 export function ProgressPulseAnalytics() {
+  // The Tenant Admin demo never loads platform analytics: it shows labelled sample organization data.
+  const { enabled } = useTenantDemo()
+  return enabled ? <TenantDemoAnalytics view="pulse" /> : <PlatformProgressPulseAnalytics />
+}
+
+function PlatformProgressPulseAnalytics() {
   const [params, setParams] = useSearchParams()
   const query = analyticsQueryFromSearch(params)
   const [report, setReport] = useState<Report | null>(null)

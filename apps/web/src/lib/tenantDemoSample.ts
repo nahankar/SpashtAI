@@ -94,3 +94,71 @@ export function sampleInvitationList(opts: { status?: InvitationStatus; q?: stri
     counts: { pending: count('pending'), accepted: count('accepted'), expired: count('expired'), revoked: count('revoked') },
   }
 }
+
+// ---------------------------------------------------------------- sample organization analytics
+
+/** Fictional organization name used throughout the demo. */
+export const SAMPLE_ORG = 'Sample Organization'
+
+export interface SampleFeatureUsage { feature: string; activeLearners: number; sessions: number; avgActiveMinutes: number; completionRate: number }
+export const SAMPLE_FEATURE_USAGE: SampleFeatureUsage[] = [
+  { feature: 'Elevate', activeLearners: 8, sessions: 54, avgActiveMinutes: 14, completionRate: 0.81 },
+  { feature: 'Replay', activeLearners: 6, sessions: 23, avgActiveMinutes: 9, completionRate: 0.74 },
+  { feature: 'Prepare', activeLearners: 5, sessions: 17, avgActiveMinutes: 21, completionRate: 0.65 },
+  { feature: 'Interviews', activeLearners: 4, sessions: 11, avgActiveMinutes: 18, completionRate: 0.73 },
+]
+/** Weekly sessions per feature, oldest first. */
+export const SAMPLE_WEEKLY_SESSIONS = ['W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7', 'W8'].map((name, i) => ({
+  name,
+  Elevate: [3, 4, 6, 5, 7, 8, 10, 11][i],
+  Replay: [1, 2, 2, 3, 3, 3, 4, 5][i],
+  Prepare: [0, 1, 2, 2, 3, 2, 3, 4][i],
+  Interviews: [0, 0, 1, 1, 2, 2, 2, 3][i],
+}))
+
+export interface SampleSkill { skill: string; first: number; latest: number; learners: number }
+/** Average Progress Pulse score (1–10) at each learner's first and latest eligible session. */
+export const SAMPLE_PULSE_SKILLS: SampleSkill[] = [
+  { skill: 'Clarity', first: 5.4, latest: 6.6, learners: 7 },
+  { skill: 'Confidence', first: 5.1, latest: 6.2, learners: 7 },
+  { skill: 'Structure', first: 4.8, latest: 6.0, learners: 6 },
+  { skill: 'Pace', first: 5.9, latest: 6.4, learners: 7 },
+  { skill: 'Filler words', first: 5.2, latest: 5.9, learners: 6 },
+]
+export const SAMPLE_PULSE_TREND = ['W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7', 'W8'].map((name, i) => ({
+  name, average: [5.2, 5.3, 5.5, 5.6, 5.8, 5.9, 6.1, 6.2][i],
+}))
+
+export interface SampleAiAnswer { question: string; answer: string; figures: { label: string; value: string }[] }
+/** Canned aggregate answers; the demo never runs real or saved queries and never shows an individual learner. */
+export const SAMPLE_AI_ANSWERS: SampleAiAnswer[] = [
+  {
+    question: 'Which skill improved most this quarter?',
+    answer: 'Structure improved most across the sample cohort, followed by Clarity.',
+    figures: [{ label: 'Structure', value: '+1.2' }, { label: 'Clarity', value: '+1.2' }, { label: 'Confidence', value: '+1.1' }],
+  },
+  {
+    question: 'How many learners practised at least weekly?',
+    answer: '6 of 9 sample learners practised in at least 6 of the last 8 weeks.',
+    figures: [{ label: 'Weekly practisers', value: '6' }, { label: 'Learners', value: '9' }],
+  },
+  {
+    question: 'Which feature drives the most active time?',
+    answer: 'Elevate accounts for the most practice time; Prepare sessions are the longest on average.',
+    figures: [{ label: 'Elevate sessions', value: '54' }, { label: 'Prepare avg minutes', value: '21' }],
+  },
+]
+
+export const SAMPLE_UX_PAGES = [
+  { page: 'Home', views: 212, medianSeconds: 34 },
+  { page: 'Elevate', views: 168, medianSeconds: 420 },
+  { page: 'Replay results', views: 96, medianSeconds: 185 },
+  { page: 'Prepare', views: 74, medianSeconds: 260 },
+  { page: 'Progress Pulse', views: 61, medianSeconds: 48 },
+]
+export const SAMPLE_UX_FUNNEL = [
+  { step: 'Opened practice', learners: 9 },
+  { step: 'Started a session', learners: 8 },
+  { step: 'Completed a session', learners: 7 },
+  { step: 'Viewed feedback', learners: 6 },
+]

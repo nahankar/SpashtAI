@@ -23,27 +23,32 @@ Full multi-tenancy is out of scope.
 
 ## Data
 
-- Overview pages default to **Sample data**: fictional, labelled learners and invitations on `example.com`
-  (`apps/web/src/lib/tenantDemoSample.ts`). Resend/Revoke are disabled on sample rows.
-- **Live platform data** can be chosen in the banner for internal walkthroughs; it is labelled as platform-wide
-  and must not be presented as a customer's data.
-- Analytics pages show the existing platform-wide aggregates (with existing small-cohort suppression) under a
-  banner saying so. Individual learner selection is off in the demo, and a `learner` URL parameter is removed.
-- **Invite user** is always real: it uses the normal invitation service (see `INVITATIONS.md`) as the signed-in
-  Admin, and the dialog says so.
+- **Sample data only.** Every demo page (Dashboard, Users, Invitations, Feature Usage, Progress Pulse,
+  AI Analytics, UX Analytics) shows fictional, labelled "Sample Organization" data from
+  `apps/web/src/lib/tenantDemoSample.ts` (`example.com` addresses). No platform users, invitations or
+  analytics are loaded in the demo, and there is no live-data switch.
+- AI Analytics shows example questions with canned aggregate answers: no question box, no saved queries and
+  no individual learner results.
+- Resend and Revoke are disabled on sample rows.
+- **Invite user** is the one real action. It uses the normal invitation service as the signed-in Admin, and the
+  dialog says it creates an actual platform invitation that appears on the platform Invitations page (demo off),
+  not in the sample view.
 
 ## Demo pages
 
-- **Dashboard:** learner count; Pending / Accepted / Expired / Revoked invitation counts; a Pending invitations
-  table (recipient, invited date, expiry, delivery status) with Invite user, Resend, Revoke and View all
-  invitations; an empty state when nothing is pending. Delivery status is separate from invitation status.
-- **Users:** accepted users and pending invitees in separate lists; pending invitations are never counted as
-  users. Platform settings (signups, rate limits, reward points) are not shown.
-- **Invitations:** the normal searchable, paginated page with status filters.
+- **Dashboard:** sample learner figures; Pending / Accepted / Expired / Revoked invitation counts; a Pending
+  invitations table (recipient, invited date, expiry, delivery status) with Invite user, View all invitations
+  and an empty state. Delivery status is separate from invitation status.
+- **Users:** sample accepted users and pending invitees in separate lists; pending invitations are never
+  counted as users. Platform settings (signups, rate limits, reward points) are not shown.
+- **Invitations:** the normal searchable, paginated page with status filters, over sample rows.
+- **Analytics:** sample organization charts and tables for each of the four pages.
+
+The normal (demo off) platform Dashboard has the same invitation section with real platform data.
 
 ## Before real tenant administrators
 
-Every section above is platform-wide today. Once real tenancy exists, Dashboard counts, Users, Invitations and
-each analytics page must be scoped to the active tenant (and cohort suppression applied per tenant) before any
+The demo shows sample data, but the real sections it previews (Dashboard counts, Users, Invitations and
+analytics) are platform-wide today. Once real tenancy exists, each of them must be scoped to the active tenant (and cohort suppression applied per tenant) before any
 real tenant administrator is given access. Real tenant administrators must never see platform-wide users,
 invitations or analytics.

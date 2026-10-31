@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { useTenantDemo } from '@/contexts/TenantDemoContext'
+import { TenantDemoAnalytics } from '@/components/admin/TenantDemoAnalytics'
 import { useSearchParams } from 'react-router-dom'
 import { ExternalLink } from 'lucide-react'
 import {
@@ -50,6 +52,12 @@ type PageViewReport = {
 }
 
 export function UxAnalytics() {
+  // The Tenant Admin demo never loads platform analytics: it shows labelled sample organization data.
+  const { enabled } = useTenantDemo()
+  return enabled ? <TenantDemoAnalytics view="ux" /> : <PlatformUxAnalytics />
+}
+
+function PlatformUxAnalytics() {
   const [params, setParams] = useSearchParams()
   const query = analyticsQueryFromSearch(params)
   const [report, setReport] = useState<PageViewReport | null>(null)

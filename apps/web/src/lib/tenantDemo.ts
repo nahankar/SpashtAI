@@ -1,15 +1,15 @@
 /**
  * Tenant Admin demo: a presentation preview of what a tenant administrator would see, available only inside the
  * platform Admin panel. It is purely cosmetic: it grants no permission, changes no role, and creates no tenant
- * isolation — every API call still runs as the signed-in platform Admin. The setting lives in this browser tab
- * only (sessionStorage), belongs to the signed-in user, and is cleared on logout.
+ * isolation. Every page shows labelled fictional sample data only; the one real action, Invite user, runs as the
+ * signed-in platform Admin. The setting lives in this browser tab only (sessionStorage), belongs to the
+ * signed-in user, and is cleared on logout.
  *
  * When real tenancy exists, each section shown here must be scoped to the active tenant before a real tenant
  * administrator may use it.
  */
 
-export type DemoDataSource = 'sample' | 'live'
-export interface StoredDemo { userId: string; on: boolean; data: DemoDataSource }
+export interface StoredDemo { userId: string; on: boolean }
 
 const STORAGE_KEY = 'spashtai_tenant_admin_demo'
 

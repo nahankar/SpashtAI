@@ -2,6 +2,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Sidebar } from '@/components/admin/Sidebar'
+import { TenantDemoAnalytics } from '@/components/admin/TenantDemoAnalytics'
+import { sendConsequence } from './invitations'
 import { TenantDemoProvider } from '@/contexts/TenantDemoContext'
 import { clearTenantDemo, isDemoPath, readDemo, writeDemo } from './tenantDemo'
 import { sampleInvitationList, sampleInvitations, sampleLearners } from './tenantDemoSample'
@@ -31,7 +33,7 @@ describe('Tenant Admin demo navigation', () => {
   })
 
   it('shows only Overview (Dashboard, Users, Invitations) and the four analytics pages when on', () => {
-    writeDemo({ userId: 'admin-1', on: true, data: 'sample' })
+    writeDemo({ userId: 'admin-1', on: true })
     const html = sidebar()
     expect(html).toContain('aria-checked="true"')
     expect(html).toContain('Tenant Admin (demo)')
@@ -40,7 +42,7 @@ describe('Tenant Admin demo navigation', () => {
   })
 
   it('belongs to the signed-in user and is cleared on logout', () => {
-    writeDemo({ userId: 'admin-1', on: true, data: 'live' })
+    writeDemo({ userId: 'admin-1', on: true })
     expect(readDemo('admin-2')).toBeNull()
     expect(sidebar('admin-2')).toContain('aria-checked="false"')
     clearTenantDemo()
@@ -72,5 +74,27 @@ describe('Tenant Admin demo sample data', () => {
     const paged = sampleInvitationList({ page: 2, pageSize: 5 })
     expect(paged.items).toHaveLength(5)
     expect(paged.totalPages).toBe(3)
+  })
+})
+
+describe('Tenant Admin demo analytics', () => {
+  it.each(['features', 'pulse', 'ai', 'ux'] as const)('labels the %s page as sample organization data', (view) => {
+    const html = renderToStaticMarkup(<TenantDemoAnalytics view={view} />)
+    expect(html).toContain('Sample data')
+    expect(html).toContain('Sample Organization')
+  })
+
+  it('offers no saved queries, question box or individual learners in AI Analytics', () => {
+    const html = renderToStaticMarkup(<TenantDemoAnalytics view="ai" />)
+    expect(html).toContain('saved queries and individual learner results are not available in the demo')
+    expect(html).not.toMatch(/<input|<textarea/)
+  })
+})
+
+describe('invite confirmation copy', () => {
+  it('says plainly what happens to the email', () => {
+    expect(sendConsequence('pat@example.com', { mode: 'smtp', smtpReady: true })).toBe('This sends a real invitation email to pat@example.com.')
+    expect(sendConsequence('pat@example.com', { mode: 'dev_capture', smtpReady: false })).toMatch(/captured locally and not sent/)
+    expect(sendConsequence('pat@example.com', { mode: 'smtp', smtpReady: false })).toMatch(/email is not configured/)
   })
 })

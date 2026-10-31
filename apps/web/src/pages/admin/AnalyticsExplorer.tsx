@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { useTenantDemo } from '@/contexts/TenantDemoContext'
+import { TenantDemoAnalytics } from '@/components/admin/TenantDemoAnalytics'
 import { ExplorerResults } from '@/components/admin/analytics-explorer/ExplorerResults'
 import { ExplorerStatus } from '@/components/admin/analytics-explorer/ExplorerStatus'
 import { IdentityTable } from '@/components/admin/analytics-explorer/IdentityTable'
@@ -51,6 +53,12 @@ function viewMessage(view: Exclude<ExplorerView, { status: 'ready' | 'choose_lea
 }
 
 export function AnalyticsExplorer() {
+  // The Tenant Admin demo never loads platform analytics: it shows labelled sample organization data.
+  const { enabled } = useTenantDemo()
+  return enabled ? <TenantDemoAnalytics view="ai" /> : <PlatformAnalyticsExplorer />
+}
+
+function PlatformAnalyticsExplorer() {
   const [question, setQuestion] = useState('')
   const [asking, setAsking] = useState(false)
   const [view, setView] = useState<ExplorerView>({ status: 'idle' })

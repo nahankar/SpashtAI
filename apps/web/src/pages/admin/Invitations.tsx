@@ -70,8 +70,8 @@ function DevMailbox({ refreshKey }: { refreshKey: number }) {
 
 /** Searchable, paginated invitation management. Platform-wide until real tenancy scopes it. */
 export function Invitations() {
-  const demo = useTenantDemo()
-  const sample = demo.enabled && demo.dataSource === 'sample'
+  // The Tenant Admin demo lists sample rows only; Invite user stays real.
+  const { enabled: sample } = useTenantDemo()
   const [status, setStatus] = useState<InvitationStatus | undefined>('pending')
   const [query, setQuery] = useState('')
   const [search, setSearch] = useState('')
@@ -173,7 +173,7 @@ export function Invitations() {
 
       {!sample && config?.mode === 'dev_capture' && <DevMailbox refreshKey={refreshKey} />}
 
-      <InviteUserDialog open={inviteOpen} onOpenChange={setInviteOpen} onSent={refresh} demo={demo.enabled} />
+      <InviteUserDialog open={inviteOpen} onOpenChange={setInviteOpen} onSent={refresh} demo={sample} />
     </div>
   )
 }
