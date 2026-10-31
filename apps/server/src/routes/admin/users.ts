@@ -4,6 +4,7 @@ import { prisma } from '../../lib/prisma'
 import { hashPassword } from '../../lib/password'
 import { resolveProfileLocation, PROFILE_GENDERS } from '../../lib/profile'
 import { isValidPhone, isValidPincodeFormat } from '../../lib/pincode'
+import { deleteInvitationsForUser } from '../../lib/invitations'
 const router = Router()
 
 // GET /api/admin/users
@@ -241,7 +242,17 @@ router.delete('/:id', async (req: Request, res: Response) => {
       return
     }
 
-    await prisma.user.delete({ where: { id: req.params.id } })
+    const target = await prisma.user.findUnique({ where: { id: req.params.id }, select: { id: true, email: true } })
+    if (!target) {
+      res.status(404).json({ error: 'User not found' })
+      return
+    }
+    // Invitations hold the address and name, so they go with the account.
+    const removedInvitations = await prisma.$transaction(async (tx) => {
+      const count = await deleteInvitationsForUser(tx, target)
+      await tx.user.delete({ where: { id: target.id } })
+      return count
+    })
 
     await prisma.adminAction.create({
       data: {
@@ -249,6 +260,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
         action: 'user_deleted',
         targetUserId: req.params.id,
         reason: req.body.reason || null,
+        metadata: removedInvitations ? { removedInvitations } : undefined,
       },
     })
 

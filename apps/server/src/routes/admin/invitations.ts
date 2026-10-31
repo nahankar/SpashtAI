@@ -7,7 +7,7 @@ import {
   InvitationError,
   capturedInvitationEmails,
   createInvitation,
-  invitationDeliveryMode,
+  devMailboxAvailable,
   invitationEmailConfig,
   invitationInputSchema,
   listInvitations,
@@ -60,9 +60,9 @@ router.get('/email-config', (_req, res) => {
   res.json(invitationEmailConfig())
 })
 
-// Development-only captured invitations (with their accept links) for local testing.
+// Development-only captured invitations (with their accept links) for local testing. Never available in production.
 router.get('/dev-mailbox', (_req, res) => {
-  if (invitationDeliveryMode() !== 'dev_capture') {
+  if (!devMailboxAvailable()) {
     res.status(404).json({ error: 'not_available' })
     return
   }

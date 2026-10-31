@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Loader2, MailPlus } from 'lucide-react'
 import { toast } from 'sonner'
 import { ApiError } from '@/lib/api-client'
-import { createInvitation, deliveryLabel, type Invitation } from '@/lib/invitations'
+import { createInvitation, deliveryLabel, getInvitationEmailConfig, sendConsequence, type Invitation, type InvitationEmailConfig } from '@/lib/invitations'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -17,6 +17,7 @@ import {
 
 type Step = 'form' | 'confirm' | 'existing' | 'done'
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 
 /** Invites one learner to SpashtAI through the server invitation service, acting as the signed-in Admin. */
 export function InviteUserDialog({
@@ -37,6 +38,11 @@ export function InviteUserDialog({
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<{ invitation: Invitation; notice: string } | null>(null)
+  const [config, setConfig] = useState<InvitationEmailConfig | null>(null)
+
+  useEffect(() => {
+    if (open) getInvitationEmailConfig().then(setConfig).catch(() => setConfig(null))
+  }, [open])
 
   const reset = () => {
     setStep('form'); setEmail(''); setName(''); setError(''); setBusy(false); setResult(null)
@@ -83,7 +89,9 @@ export function InviteUserDialog({
 
         {demo && (
           <p className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
-            Tenant Admin demo: this sends a real platform invitation from your Admin account. It is not tenant-scoped.
+            Tenant Admin demo: this is not sample data. It creates an actual platform invitation from your Admin account
+            (not tenant-scoped). It will appear on the platform Invitations page with the demo turned off, not in this
+            sample view.
           </p>
         )}
 
@@ -123,8 +131,13 @@ export function InviteUserDialog({
         {step === 'confirm' && (
           <div className="space-y-4">
             <p className="text-sm">
-              Send a SpashtAI invitation to <span className="font-medium break-all">{recipient}</span>? The link works once and expires
-              after the configured period (7 days by default).
+              Send a SpashtAI invitation to <span className="font-medium break-all">{recipient}</span>?
+            </p>
+            <p className={config?.mode === 'dev_capture' ? 'rounded-md bg-amber-50 p-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200' : 'rounded-md bg-muted p-2 text-sm font-medium'}>
+              {sendConsequence(email.trim(), config)}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              The link works once and expires after {config?.expiryDays ?? 7} days.
             </p>
             <DialogFooter>
               <Button variant="outline" disabled={busy} onClick={() => setStep('form')}>Back</Button>

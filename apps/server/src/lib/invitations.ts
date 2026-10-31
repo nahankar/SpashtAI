@@ -3,6 +3,7 @@ import { Prisma, type InvitationDeliveryStatus, type UserInvitation } from '@pri
 import { z } from 'zod'
 import { prisma } from './prisma'
 import { sendEmail } from './email'
+import { logger } from './logger'
 
 /**
  * Platform learner invitations. Every invitation targets an ordinary USER account and assigns no tenant or
@@ -54,13 +55,6 @@ function viewWhere(view: InvitationView, now: Date): Prisma.UserInvitationWhereI
   }
 }
 
-export function maskEmail(email: string): string {
-  const [local, domain] = email.split('@')
-  if (!domain) return '•••'
-  const shown = local.length <= 2 ? local.slice(0, 1) : `${local[0]}${'•'.repeat(Math.min(local.length - 2, 6))}${local[local.length - 1]}`
-  return `${shown}@${domain}`
-}
-
 // ---------------------------------------------------------------- email delivery
 
 const SMTP_REQUIRED = ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS'] as const
@@ -68,12 +62,18 @@ const SMTP_REQUIRED = ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS'] as const
 /**
  * Outside production, invitations are captured in memory (development only) unless
  * INVITATION_EMAIL_DELIVERY=smtp, so local testing never mails a real address by accident.
+ * Production always uses SMTP: INVITATION_EMAIL_DELIVERY=capture is refused there.
  */
 export function invitationDeliveryMode(): 'smtp' | 'dev_capture' {
-  const forced = process.env.INVITATION_EMAIL_DELIVERY?.trim()
-  if (forced === 'capture') return 'dev_capture'
-  if (forced === 'smtp' || process.env.NODE_ENV === 'production') return 'smtp'
-  return 'dev_capture'
+  if (process.env.NODE_ENV === 'production') return 'smtp'
+  return process.env.INVITATION_EMAIL_DELIVERY?.trim() === 'smtp' ? 'smtp' : 'dev_capture'
+}
+
+/** Logged once at startup so a production capture setting is visibly ignored, never silently honoured. */
+export function warnIfCaptureRequestedInProduction() {
+  if (process.env.NODE_ENV === 'production' && process.env.INVITATION_EMAIL_DELIVERY?.trim() === 'capture') {
+    logger.error({ event: 'invitations.capture_refused' }, 'INVITATION_EMAIL_DELIVERY=capture is ignored in production; invitations use SMTP')
+  }
 }
 
 export function invitationEmailConfig() {
@@ -81,11 +81,13 @@ export function invitationEmailConfig() {
   if (!process.env.FRONTEND_URL?.trim()) missing.push('FRONTEND_URL')
   return {
     mode: invitationDeliveryMode(),
+    // Set when production was asked to capture mail; the request is refused.
+    captureRefused: process.env.NODE_ENV === 'production' && process.env.INVITATION_EMAIL_DELIVERY?.trim() === 'capture',
     expiryDays: invitationExpiryDays(),
     smtpReady: missing.length === 0,
     // Names only — never values.
     missing,
-    optional: ['SMTP_PORT (default 587; 465 uses TLS)', 'SMTP_FROM (default noreply@spashtai.com)', 'INVITATION_EXPIRY_DAYS (default 7)'],
+    optional: ['SMTP_PORT (default 587; 465 uses TLS)', 'SMTP_FROM (default noreply@spashtai.com)', 'INVITATION_EXPIRY_DAYS (default 7)', 'INVITATION_RETENTION_DAYS (default 90)'],
   }
 }
 
@@ -101,8 +103,13 @@ export interface CapturedInvitationEmail {
 
 const devMailbox: CapturedInvitationEmail[] = []
 
+/** The development mailbox never exists in production, whatever the delivery setting. */
+export function devMailboxAvailable() {
+  return process.env.NODE_ENV !== 'production' && invitationDeliveryMode() === 'dev_capture'
+}
+
 export function capturedInvitationEmails(): CapturedInvitationEmail[] {
-  return invitationDeliveryMode() === 'dev_capture' ? [...devMailbox] : []
+  return devMailboxAvailable() ? [...devMailbox] : []
 }
 
 export function clearCapturedInvitationEmails() {
@@ -153,7 +160,7 @@ export function buildInvitationEmail(opts: { recipientName?: string | null; acce
 async function deliver(inv: UserInvitation, token: string): Promise<{ deliveryStatus: InvitationDeliveryStatus; deliveryError: string | null }> {
   const acceptUrl = acceptUrlFor(token)
   const email = buildInvitationEmail({ recipientName: inv.recipientName, acceptUrl, expiresAt: inv.expiresAt })
-  if (invitationDeliveryMode() === 'dev_capture') {
+  if (devMailboxAvailable()) {
     devMailbox.unshift({ id: inv.id, to: inv.email, subject: email.subject, text: email.text, acceptUrl, capturedAt: new Date().toISOString(), developmentOnly: true })
     devMailbox.length = Math.min(devMailbox.length, 25)
     return { deliveryStatus: 'DEV_CAPTURED', deliveryError: null }
@@ -322,4 +329,61 @@ export async function markInvitationAccepted(inv: UserInvitation, userId: string
     data: { status: 'ACCEPTED', pendingKey: null, acceptedAt: now, acceptedUserId: userId },
   })
   return updated.count === 1
+}
+
+// ---------------------------------------------------------------- retention
+
+export const DEFAULT_INVITATION_RETENTION_DAYS = 90
+
+/** INVITATION_RETENTION_DAYS (30–730), default 90. */
+export function invitationRetentionDays(): number {
+  const raw = Number.parseInt(process.env.INVITATION_RETENTION_DAYS ?? '', 10)
+  return Number.isFinite(raw) && raw >= 30 && raw <= 730 ? raw : DEFAULT_INVITATION_RETENTION_DAYS
+}
+
+/**
+ * Deletes closed invitations (with their email and name) once they are older than the retention period:
+ * accepted ones by acceptance date, revoked ones by revocation date, expired ones by expiry. Pending invitations
+ * are never purged. Idempotent, like the other retention sweeps.
+ */
+export async function purgeClosedInvitations(now = new Date()) {
+  const cutoff = new Date(now.getTime() - invitationRetentionDays() * 24 * 60 * 60 * 1000)
+  const { count } = await prisma.userInvitation.deleteMany({
+    where: {
+      OR: [
+        { status: 'ACCEPTED', acceptedAt: { lt: cutoff } },
+        { status: 'REVOKED', revokedAt: { lt: cutoff } },
+        { status: { in: ['EXPIRED', 'PENDING'] }, expiresAt: { lt: cutoff } },
+      ],
+    },
+  })
+  return count
+}
+
+let retentionTimer: NodeJS.Timeout | null = null
+let purging = false
+/** Hourly per API process, like the evaluator budget cleanup. */
+export function startInvitationRetentionWorker() {
+  if (retentionTimer) return
+  const run = () => {
+    if (purging) return
+    purging = true
+    void purgeClosedInvitations()
+      .then((count) => { if (count) logger.info({ event: 'invitations.purged', count }, 'Purged closed invitations past retention') })
+      .catch((error) => logger.error({ event: 'invitations.purge_failed', errorType: error instanceof Error ? error.name : 'unknown' }, 'Invitation retention purge failed'))
+      .finally(() => { purging = false })
+  }
+  retentionTimer = setInterval(run, 3600000)
+  retentionTimer.unref?.()
+}
+
+/**
+ * Removes every invitation for a deleted account (by address or by the account that accepted it), so no
+ * invitation email or name outlives the user. Run in the same transaction as the user delete.
+ */
+export async function deleteInvitationsForUser(tx: Prisma.TransactionClient, user: { id: string; email: string }) {
+  const { count } = await tx.userInvitation.deleteMany({
+    where: { OR: [{ email: user.email.toLowerCase() }, { acceptedUserId: user.id }] },
+  })
+  return count
 }

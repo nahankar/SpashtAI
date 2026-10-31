@@ -88,6 +88,7 @@ import adminInterviewBankRouter from './routes/admin/interview-bank'
 import adminInterviewEvaluatorRouter from './routes/admin/interview-evaluator'
 import adminInvitationsRouter from './routes/admin/invitations'
 import invitationsRouter from './routes/invitations'
+import { startInvitationRetentionWorker, warnIfCaptureRequestedInProduction } from './lib/invitations'
 import { startLearnerEvaluatorWorker } from './interviews/evaluator/learner'
 import { startInterviewEvaluatorWorker } from './interviews/evaluator/service'
 import { practiceRouter, practiceAgentRouter } from './routes/interview-practice'
@@ -476,6 +477,8 @@ async function startServer() {
   startDeliveryAlignmentWorker()
   startAudioEnrichmentRetryWorker()
   startSessionInactivityWorker()
+  startInvitationRetentionWorker()
+  warnIfCaptureRequestedInProduction()
   startInterviewEvaluatorWorker()
   startLearnerEvaluatorWorker()
 

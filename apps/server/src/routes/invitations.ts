@@ -6,7 +6,7 @@ import { verifyGoogleIdToken, type GoogleUserInfo } from '../lib/google-auth'
 import { signInWithGoogleUser } from '../lib/googleSignIn'
 import { areSignupsPaused } from '../lib/platformSettings'
 import { authUserForClient } from '../lib/profile'
-import { effectiveStatus, findInvitationByToken, markInvitationAccepted, maskEmail } from '../lib/invitations'
+import { effectiveStatus, findInvitationByToken, markInvitationAccepted } from '../lib/invitations'
 import { invitationAcceptLimiter } from '../middleware/rate-limit'
 
 // Public recipient endpoints. The token travels in the request body (the link keeps it in the URL fragment),
@@ -28,7 +28,8 @@ router.post('/lookup', invitationAcceptLimiter, async (req: Request, res: Respon
     res.json({
       status: effectiveStatus(inv),
       recipientName: inv.recipientName,
-      invitedEmail: maskEmail(inv.email),
+      // The link holder is shown the full address so they know which Google Account to use.
+      invitedEmail: inv.email,
       expiresAt: inv.expiresAt,
     })
   } catch (err) {
@@ -61,8 +62,8 @@ router.post('/accept', invitationAcceptLimiter, async (req: Request, res: Respon
     if (!googleUser.emailVerified || googleUser.email !== inv.email) {
       res.status(403).json({
         error: 'wrong_account',
-        message: `This invitation is for ${maskEmail(inv.email)}. Switch Google account and sign in with that address.`,
-        invitedEmail: maskEmail(inv.email),
+        message: `This invitation is for ${inv.email}. Switch Google account and sign in with that address.`,
+        invitedEmail: inv.email,
       })
       return
     }
@@ -117,6 +118,16 @@ router.post('/accept', invitationAcceptLimiter, async (req: Request, res: Respon
           userAgent: req.headers['user-agent'] || null,
           // Content-free: records only that the paused-signup control was bypassed by this invitation.
           metadata: { newAccount: result.created, signupsPausedBypass: bypassed },
+        },
+      })
+      // Also in the Admin audit trail, attributed to the inviting Admin; the recipient is the target account.
+      await prisma.adminAction.create({
+        data: {
+          adminId: inv.invitedById,
+          action: 'invitation_accepted',
+          targetUserId: user.id,
+          targetResource: `invitation:${inv.id}`,
+          metadata: { actor: 'recipient', newAccount: result.created, signupsPausedBypass: bypassed },
         },
       })
     }

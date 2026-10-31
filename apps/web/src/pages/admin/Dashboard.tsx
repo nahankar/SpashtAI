@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useTenantDemo } from '@/contexts/TenantDemoContext'
 import { TenantDemoDashboard } from '@/components/admin/TenantDemoDashboard'
+import { InvitationOverview } from '@/components/admin/InvitationOverview'
 import { Link } from 'react-router-dom'
 import { apiClient } from '@/lib/api-client'
 import { MetricCard } from '@/components/admin/MetricCard'
@@ -130,6 +131,8 @@ function PlatformDashboard() {
           </p>
         </div>
       </div>
+
+      <InvitationOverview />
     </div>
   )
 }

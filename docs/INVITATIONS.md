@@ -1,8 +1,10 @@
 # Learner invitations
 
 Platform Admins (ADMIN / SUPER_ADMIN, rechecked in the database on every request) can invite a person to
-SpashtAI by email. Invitations are available from **Admin → Users** (Invite user), **Admin → Invitations**,
-and the Tenant Admin demo Dashboard. All three use the same server service (`apps/server/src/lib/invitations.ts`).
+SpashtAI by email. Invitations are available from **Admin → Dashboard** (invitation counts, pending table and
+Invite user), **Admin → Users**, **Admin → Invitations**, and the Tenant Admin demo. All use the same server
+service (`apps/server/src/lib/invitations.ts`). Before sending, the confirmation states plainly that a real
+invitation email goes to the recipient (or, in development, that it is captured locally and not sent).
 
 ## Scope of this release
 
@@ -21,7 +23,7 @@ and the Tenant Admin demo Dashboard. All three use the same server service (`app
 2. The branded email has an **Accept invitation** link: `FRONTEND_URL/invite#token=…`. The token is in the URL
    fragment, so it never reaches server or proxy logs.
 3. The recipient signs in with Google. The verified Google email must equal the invited address; otherwise the
-   page says **Switch Google account** and nothing changes.
+   page says **Switch Google account**, shows the full invited address to the link holder, and nothing changes.
 4. Account handling reuses normal Google sign-in (`lib/googleSignIn.ts`):
    - Existing account: signed in; role, permissions, flags and history are unchanged; no duplicate is created.
    - New account: created as `USER`, then the normal profile/terms onboarding runs. This works even while
@@ -42,7 +44,9 @@ and the Tenant Admin demo Dashboard. All three use the same server service (`app
 - Expiry: `INVITATION_EXPIRY_DAYS` (1–30, default 7).
 - Audit: `AdminAction` rows `invitation_create`, `invitation_resend`, `invitation_revoke` with
   `targetResource = invitation:<id>` and content-free metadata (no email, name or token).
-  Acceptance is recorded as `UserActivity` `invitation_accepted` (`newAccount`, `signupsPausedBypass` flags only).
+  Acceptance is recorded both as `UserActivity` `invitation_accepted` and as an `AdminAction`
+  `invitation_accepted` attributed to the inviting Admin (`targetUserId` = the account, `targetResource` =
+  `invitation:<id>`, metadata `{ actor: 'recipient', newAccount, signupsPausedBypass }` only).
 - Rate limits (production): 60 sends/resends per Admin per hour; 20 lookups/acceptances per IP per 15 minutes.
 
 ## Email configuration
@@ -62,8 +66,21 @@ Optional: `SMTP_PORT` (default 587; 465 uses TLS), `SMTP_FROM` (default `noreply
 
 Outside production (`NODE_ENV !== 'production'`) invitations are **captured in memory and not sent**, unless
 `INVITATION_EMAIL_DELIVERY=smtp` is set explicitly. Captured messages appear on the Invitations page under
-"Captured invitation emails (development only)" and at `GET /api/admin/invitations/dev-mailbox`, which returns
-404 when capture is off. `INVITATION_EMAIL_DELIVERY=capture` forces capture in any environment.
+"Captured invitation emails (development only)" and at `GET /api/admin/invitations/dev-mailbox`.
+
+Production always uses SMTP: `INVITATION_EMAIL_DELIVERY=capture` is refused there (logged at startup and
+reported as `captureRefused` by `email-config`), and the dev mailbox endpoint returns 404 in production.
+
+## Retention and deletion
+
+- **Purge:** an hourly sweep per API process (`startInvitationRetentionWorker`, same pattern as the evaluator
+  budget cleanup) deletes closed invitations, including their email and name, once they are older than
+  `INVITATION_RETENTION_DAYS` (30–730, default 90): accepted ones by acceptance date, revoked ones by
+  revocation date, expired ones by expiry date. Pending invitations are never purged.
+- **User deletion:** when an Admin deletes a user (`DELETE /api/admin/users/:id`), every invitation for that
+  address or accepted by that account is deleted in the same transaction. The `user_deleted` audit row records
+  only how many invitations were removed.
+- Audit rows (`AdminAction`) contain no email, name or token, so they are kept under the existing audit rules.
 
 ## API
 

@@ -7,13 +7,15 @@ const testDb = vi.hoisted(() => {
   if (url && url !== 'postgresql://postgres@127.0.0.1:55441/simple_bank') throw new Error('Invitation tests use only the isolated simple_bank database')
   return { url }
 })
-const mocks = vi.hoisted(() => ({ signupsPaused: false, sendEmail: vi.fn() }))
+const mocks = vi.hoisted(() => ({ signupsPaused: false, sendEmail: vi.fn(), onPauseCheck: null as null | (() => Promise<void>) }))
 vi.mock('../src/lib/prisma', async () => {
   const { PrismaClient } = await import('@prisma/client')
   return { prisma: new PrismaClient({ datasourceUrl: testDb.url || 'postgresql://postgres@127.0.0.1:55441/simple_bank' }) }
 })
 vi.mock('../src/lib/platformSettings', () => ({
-  areSignupsPaused: async () => mocks.signupsPaused,
+  // The acceptance route checks the pause just before resolving the account, so tests can change the
+  // invitation "mid-sign-in" from here.
+  areSignupsPaused: async () => { await mocks.onPauseCheck?.(); return mocks.signupsPaused },
   getSignupsPausedMessage: async () => 'Signups are paused',
   areRewardPointsEnabled: async () => false,
 }))
@@ -30,12 +32,14 @@ import { requireAuth } from '../src/middleware/auth'
 import { requireCurrentAdmin } from '../src/middleware/admin'
 import { signToken } from '../src/lib/jwt'
 import adminInvitationsRouter from '../src/routes/admin/invitations'
+import adminUsersRouter from '../src/routes/admin/users'
 import invitationsRouter from '../src/routes/invitations'
-import { capturedInvitationEmails, clearCapturedInvitationEmails, createInvitation, hashInvitationToken } from '../src/lib/invitations'
+import { capturedInvitationEmails, clearCapturedInvitationEmails, createInvitation, hashInvitationToken, invitationDeliveryMode, purgeClosedInvitations } from '../src/lib/invitations'
 
 const app = express(); app.use(express.json())
 app.use('/api/admin/invitations', requireAuth, requireCurrentAdmin, adminInvitationsRouter)
 app.use('/api/invitations', invitationsRouter)
+app.use('/api/admin/users', requireAuth, requireCurrentAdmin, adminUsersRouter)
 
 const tag = `inv_${randomUUID().replaceAll('-', '').slice(0, 12)}`
 const addr = (name: string) => `${tag}_${name}@example.invalid`
@@ -61,7 +65,10 @@ describe.skipIf(!testDb.url)('learner invitations (PostgreSQL)', () => {
   })
   afterEach(() => {
     mocks.signupsPaused = false
+    mocks.onPauseCheck = null
+    process.env.NODE_ENV = 'test'
     delete process.env.INVITATION_EMAIL_DELIVERY
+    delete process.env.INVITATION_RETENTION_DAYS
     for (const key of ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS', 'FRONTEND_URL']) delete process.env[key]
   })
   afterAll(async () => {
@@ -142,7 +149,8 @@ describe.skipIf(!testDb.url)('learner invitations (PostgreSQL)', () => {
     const token = tokenFor(email)
     const lookup = await request(app).post('/api/invitations/lookup').send({ token })
     expect(lookup.body).toMatchObject({ status: 'pending' })
-    expect(lookup.body.invitedEmail).not.toBe(email)
+    // The link holder sees exactly which address to sign in with.
+    expect(lookup.body.invitedEmail).toBe(email)
 
     const first = await accept(token, google(email))
     expect(first.status).toBe(200)
@@ -185,7 +193,7 @@ describe.skipIf(!testDb.url)('learner invitations (PostgreSQL)', () => {
     expect((await accept(oldToken, google(email))).status).toBe(404)
     expect((await accept(newToken, google(email))).status).toBe(200)
     const actions = await prisma.adminAction.findMany({ where: { targetResource: `invitation:${created.body.invitation.id}` }, select: { action: true } })
-    expect(actions.map((a) => a.action).sort()).toEqual(['invitation_create', 'invitation_resend'])
+    expect(actions.map((a) => a.action).sort()).toEqual(['invitation_accepted', 'invitation_create', 'invitation_resend'])
   })
 
   it('blocks acceptance after revocation and refuses to revoke an accepted invitation', async () => {
@@ -278,6 +286,90 @@ describe.skipIf(!testDb.url)('learner invitations (PostgreSQL)', () => {
     expect(mocks.sendEmail.mock.calls[1][0].html).toContain('Accept invitation')
     expect(mocks.sendEmail.mock.calls[1][0].text).toContain('https://app.test.invalid/invite#token=')
     expect((await request(app).get('/api/admin/invitations/dev-mailbox').set('Authorization', bearer(admin))).status).toBe(404)
+  })
+
+  it('shows the full invited address when the wrong Google account is used', async () => {
+    const email = addr('fulladdr')
+    await invite(email)
+    const res = await accept(tokenFor(email), google(addr('not-me')))
+    expect(res.body.invitedEmail).toBe(email)
+    expect(res.body.message).toContain(email)
+  })
+
+  it('writes a content-free Admin audit row when an invitation is accepted', async () => {
+    const email = addr('audited')
+    const created = await invite(email)
+    const token = tokenFor(email)
+    const res = await accept(token, google(email))
+    const row = await prisma.adminAction.findFirstOrThrow({ where: { action: 'invitation_accepted', targetResource: `invitation:${created.body.invitation.id}` } })
+    expect(row).toMatchObject({ adminId: admin.id, targetUserId: res.body.user.id })
+    expect(row.metadata).toEqual({ actor: 'recipient', newAccount: true, signupsPausedBypass: false })
+    expect(JSON.stringify(row)).not.toContain(email)
+    expect(JSON.stringify(row)).not.toContain(token)
+  })
+
+  it.each(['revoked', 'expired'] as const)('removes an account created for an invitation that was %s mid-sign-in', async (change) => {
+    const email = addr(`midway-${change}`)
+    const created = await invite(email)
+    const id = created.body.invitation.id
+    mocks.onPauseCheck = async () => {
+      mocks.onPauseCheck = null
+      await prisma.userInvitation.update({ where: { id }, data: change === 'revoked'
+        ? { status: 'REVOKED', pendingKey: null, revokedAt: new Date() }
+        : { expiresAt: new Date(Date.now() - 1000) } })
+    }
+    const res = await accept(tokenFor(email), google(email))
+    expect(res.status).toBe(409)
+    expect(res.body.error).toBe('invitation_changed')
+    expect(await prisma.user.count({ where: { email } })).toBe(0)
+  })
+
+  it('removes invitations with the account when an Admin deletes a user', async () => {
+    const email = addr('to-delete')
+    const first = await invite(email)
+    const accepted = await accept(tokenFor(email), google(email))
+    const userId = accepted.body.user.id
+    // A later pending invitation for the same address goes too.
+    await invite(email, { confirmExistingUser: true })
+    expect(await prisma.userInvitation.count({ where: { email } })).toBe(2)
+    const del = await request(app).delete(`/api/admin/users/${userId}`).set('Authorization', bearer(admin))
+    expect(del.status).toBe(200)
+    expect(await prisma.userInvitation.count({ where: { OR: [{ email }, { acceptedUserId: userId }] } })).toBe(0)
+    expect(await prisma.user.count({ where: { id: userId } })).toBe(0)
+    const audit = await prisma.adminAction.findFirstOrThrow({ where: { action: 'user_deleted', targetUserId: userId } })
+    expect(audit.metadata).toEqual({ removedInvitations: 2 })
+    expect(first.body.invitation.id).toBeTruthy()
+  })
+
+  it('purges closed invitations past retention and never purges pending ones', async () => {
+    process.env.INVITATION_RETENTION_DAYS = '30'
+    const old = new Date(Date.now() - 40 * 86_400_000)
+    const make = (name: string, data: Record<string, unknown>) => prisma.userInvitation.create({ data: {
+      email: addr(name), tokenHash: hashInvitationToken(`${tag}-${name}`), invitedById: admin.id, expiresAt: old, ...data,
+    } })
+    const ids = await Promise.all([
+      make('old-accepted', { status: 'ACCEPTED', acceptedAt: old }),
+      make('old-revoked', { status: 'REVOKED', revokedAt: old }),
+      make('old-expired', { status: 'EXPIRED' }),
+      make('stale-pending', { status: 'PENDING', pendingKey: addr('stale-pending') }),
+      make('recent-revoked', { status: 'REVOKED', revokedAt: new Date(), expiresAt: new Date() }),
+      make('live-pending', { status: 'PENDING', pendingKey: addr('live-pending'), expiresAt: new Date(Date.now() + 86_400_000) }),
+    ]).then((rows) => rows.map((r) => r.id))
+    await purgeClosedInvitations()
+    const left = await prisma.userInvitation.findMany({ where: { id: { in: ids } }, select: { email: true } })
+    expect(left.map((r) => r.email).sort()).toEqual([addr('live-pending'), addr('recent-revoked')].sort())
+  })
+
+  it('refuses capture delivery and hides the dev mailbox in production', async () => {
+    process.env.NODE_ENV = 'production'
+    process.env.INVITATION_EMAIL_DELIVERY = 'capture'
+    expect(invitationDeliveryMode()).toBe('smtp')
+    expect((await request(app).get('/api/admin/invitations/dev-mailbox').set('Authorization', bearer(admin))).status).toBe(404)
+    expect(capturedInvitationEmails()).toEqual([])
+    const config = await request(app).get('/api/admin/invitations/email-config').set('Authorization', bearer(admin))
+    expect(config.body).toMatchObject({ mode: 'smtp', captureRefused: true })
+    const res = await invite(addr('prod-no-smtp'))
+    expect(res.body.invitation).toMatchObject({ deliveryStatus: 'FAILED', deliveryError: 'smtp_not_configured' })
   })
 
   it('lists with status filter, search, pagination and per-status counts', async () => {

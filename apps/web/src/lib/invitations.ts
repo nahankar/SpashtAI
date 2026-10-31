@@ -107,3 +107,14 @@ export function invitationDisplayName(inv: Pick<Invitation, 'recipientName' | 'e
 export function formatDate(iso: string | null) {
   return iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
 }
+
+/** What will actually happen to the email, stated before the Admin confirms. */
+export function sendConsequence(recipient: string, config: Pick<InvitationEmailConfig, 'mode' | 'smtpReady'> | null) {
+  if (config?.mode === 'dev_capture') {
+    return `Development mode: the invitation email to ${recipient} will be captured locally and not sent.`
+  }
+  if (config && !config.smtpReady) {
+    return `This creates a real invitation for ${recipient}, but email is not configured on the server, so it will be saved as not sent until email is set up and you resend it.`
+  }
+  return `This sends a real invitation email to ${recipient}.`
+}
