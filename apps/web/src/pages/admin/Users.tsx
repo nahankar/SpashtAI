@@ -276,7 +276,8 @@ function PlatformUsers() {
             <div>
               <CardTitle className="text-lg">Registration</CardTitle>
               <CardDescription>
-                Pause new signups while you test. Existing accounts can still log in.
+                Pause new signups while you test. Existing accounts can still log in. Exception: a valid
+                invitation still lets the invited address create a learner account while signups are paused.
               </CardDescription>
             </div>
             <Badge variant={signupsPaused ? 'secondary' : 'default'}>

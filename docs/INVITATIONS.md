@@ -15,6 +15,20 @@ invitation email goes to the recipient (or, in development, that it is captured 
 - Accepting requires Google sign-in. Gmail, Google Workspace and other addresses registered as a Google Account
   all work; we never judge this from the email domain. Email-code / magic-link sign-in is not implemented.
 
+## Policy exception: invitations bypass paused signups
+
+**Yes — a valid invitation bypasses paused public signups.** This is a deliberate, product-approved exception.
+While "Pause signups" is on, the invited address can still create an ordinary learner (`USER`) account, but only:
+
+- through invitation acceptance (`POST /api/invitations/accept`), never through `/api/auth/register` or
+  `/api/auth/google`, which stay blocked;
+- for a pending, unexpired, unrevoked invitation, checked under the row lock;
+- with a verified Google identity whose email exactly matches the invited address.
+
+Onboarding and terms stay mandatory. Every bypass is audited without content (`signupsPausedBypass: true` on
+the `invitation_accepted` UserActivity and AdminAction rows). The Users page (Registration card) and the
+Invitations page both state this exception.
+
 ## Flow
 
 1. Admin enters an email (and optionally a name), reviews the confirmation and sends.

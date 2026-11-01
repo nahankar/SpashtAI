@@ -120,6 +120,9 @@ export function Invitations() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Invitations</h1>
           <p className="text-muted-foreground">Learner invitations to SpashtAI. Pending invitations are not user accounts.</p>
+          <p className="text-xs text-muted-foreground">
+            Policy exception: a valid invitation lets the invited address create a learner account even while public signups are paused.
+          </p>
         </div>
         <Button onClick={() => setInviteOpen(true)}><MailPlus className="mr-2 h-4 w-4" /> Invite user</Button>
       </div>
