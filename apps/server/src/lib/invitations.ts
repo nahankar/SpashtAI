@@ -174,12 +174,21 @@ async function deliver(inv: UserInvitation, token: string): Promise<{ deliverySt
   }
 }
 
-async function recordDelivery(inv: UserInvitation, token: string, now: Date) {
+/**
+ * Sends one attempt and records its outcome only if that attempt's token is still current. A resend replaces the
+ * token, so an older send that finishes late is ignored instead of overwriting the newer attempt's status.
+ * Attempts are counted when they start (sendCount/lastSentAt), so ignoring a stale outcome loses no accounting.
+ */
+async function recordDelivery(inv: UserInvitation, token: string) {
   const outcome = await deliver(inv, token)
-  return prisma.userInvitation.update({
-    where: { id: inv.id },
-    data: { ...outcome, sendCount: { increment: 1 }, lastSentAt: now },
+  const { count } = await prisma.userInvitation.updateMany({
+    where: { id: inv.id, tokenHash: hashInvitationToken(token) },
+    data: outcome,
   })
+  if (count === 0) logger.info({ event: 'invitations.stale_delivery_ignored', invitationId: inv.id, deliveryStatus: outcome.deliveryStatus }, 'Ignored delivery outcome of a superseded send')
+  const current = await prisma.userInvitation.findUnique({ where: { id: inv.id } })
+  // Deleted meanwhile (e.g. the account was removed): report this attempt's own outcome.
+  return { inv: current ?? { ...inv, ...outcome }, outcome, stale: count === 0 }
 }
 
 // ---------------------------------------------------------------- admin actions
@@ -244,15 +253,16 @@ export async function createInvitation(adminId: string, input: z.infer<typeof in
   let inv: UserInvitation
   try {
     inv = await prisma.userInvitation.create({
-      data: { email, recipientName: name ?? null, pendingKey: email, tokenHash, expiresAt: expiryFrom(now), invitedById: adminId, existingUserAtInvite: Boolean(existing) },
+      data: { email, recipientName: name ?? null, pendingKey: email, tokenHash, expiresAt: expiryFrom(now), invitedById: adminId, existingUserAtInvite: Boolean(existing), sendCount: 1, lastSentAt: now },
     })
   } catch (err) {
     if (isUniqueViolation(err)) throw new InvitationError('duplicate_pending', 409, 'A pending invitation already exists for this email. Resend it instead.')
     throw err
   }
-  inv = await recordDelivery(inv, token, now)
-  await audit(adminId, 'invitation_create', inv, { deliveryStatus: inv.deliveryStatus, existingUser: inv.existingUserAtInvite, expiresAt: inv.expiresAt.toISOString() })
-  return inv
+  const sent = await recordDelivery(inv, token)
+  // The audit keeps this attempt's own outcome, even if a newer send superseded it.
+  await audit(adminId, 'invitation_create', sent.inv, { deliveryStatus: sent.outcome.deliveryStatus, superseded: sent.stale, existingUser: inv.existingUserAtInvite, expiresAt: inv.expiresAt.toISOString() })
+  return sent.inv
 }
 
 /** Issues a fresh token (the previous link stops working) and a fresh expiry, then sends again. */
@@ -267,7 +277,7 @@ export async function resendInvitation(adminId: string, id: string, now = new Da
   try {
     const updated = await prisma.userInvitation.updateMany({
       where: { id, status: { in: ['PENDING', 'EXPIRED'] } },
-      data: { status: 'PENDING', pendingKey: current.email, tokenHash, expiresAt: expiryFrom(now), deliveryStatus: 'SENDING', deliveryError: null },
+      data: { status: 'PENDING', pendingKey: current.email, tokenHash, expiresAt: expiryFrom(now), deliveryStatus: 'SENDING', deliveryError: null, sendCount: { increment: 1 }, lastSentAt: now },
     })
     if (updated.count === 0) throw new InvitationError('not_resendable', 409, 'This invitation changed while resending. Refresh and try again.')
     inv = await prisma.userInvitation.findUniqueOrThrow({ where: { id } })
@@ -275,9 +285,9 @@ export async function resendInvitation(adminId: string, id: string, now = new Da
     if (isUniqueViolation(err)) throw new InvitationError('duplicate_pending', 409, 'Another pending invitation exists for this email.')
     throw err
   }
-  inv = await recordDelivery(inv, token, now)
-  await audit(adminId, 'invitation_resend', inv, { deliveryStatus: inv.deliveryStatus, sendCount: inv.sendCount, expiresAt: inv.expiresAt.toISOString() })
-  return inv
+  const sent = await recordDelivery(inv, token)
+  await audit(adminId, 'invitation_resend', sent.inv, { deliveryStatus: sent.outcome.deliveryStatus, superseded: sent.stale, sendCount: inv.sendCount, expiresAt: inv.expiresAt.toISOString() })
+  return sent.inv
 }
 
 export async function revokeInvitation(adminId: string, id: string, now = new Date()) {

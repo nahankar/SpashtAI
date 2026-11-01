@@ -46,6 +46,9 @@ invitation email goes to the recipient (or, in development, that it is captured 
 - Invitation status: `pending`, `accepted`, `expired` (derived from `expiresAt`), `revoked`.
 - Delivery status is separate: `SENT` (accepted by the mail server — not proof of inbox delivery), `FAILED`
   (invitation stays pending; fix email and Resend), `DEV_CAPTURED` (local only, nothing sent).
+  Each send attempt is fenced by its own token: an outcome is recorded only while that attempt's token is still
+  current, so an older send finishing after a resend cannot overwrite the newer status. Attempts are counted
+  (`sendCount`, `lastSentAt`) when they start; audit rows keep each attempt's own outcome with a `superseded` flag.
 - Tokens: 32 random bytes, stored only as SHA-256, single use. **Resend** issues a new token and expiry, so the
   previous link stops working. **Revoke** stops the link; accepted invitations cannot be revoked.
 - Expiry: `INVITATION_EXPIRY_DAYS` (1–30, default 7).

@@ -44,7 +44,7 @@ import { signToken } from '../src/lib/jwt'
 import adminInvitationsRouter from '../src/routes/admin/invitations'
 import adminUsersRouter from '../src/routes/admin/users'
 import invitationsRouter from '../src/routes/invitations'
-import { capturedInvitationEmails, clearCapturedInvitationEmails, createInvitation, hashInvitationToken, invitationDeliveryMode, purgeClosedInvitations } from '../src/lib/invitations'
+import { capturedInvitationEmails, clearCapturedInvitationEmails, createInvitation, hashInvitationToken, invitationDeliveryMode, purgeClosedInvitations, resendInvitation } from '../src/lib/invitations'
 
 const app = express(); app.use(express.json())
 app.use('/api/admin/invitations', requireAuth, requireCurrentAdmin, adminInvitationsRouter)
@@ -502,6 +502,51 @@ describe.skipIf(!testDb.url)('learner invitations (PostgreSQL)', () => {
       expect(await prisma.user.count({ where: { email: existing.email } })).toBe(1)
     })
 
+  })
+
+  describe('delivery status fencing', () => {
+    const deferred = <T,>() => {
+      let resolve!: (value: T) => void
+      const promise = new Promise<T>((r) => { resolve = r })
+      return { promise, resolve }
+    }
+    type SendResult = { sent: boolean; reason?: string }
+
+    // The first send (create) is still in flight when a resend starts and finishes; then the first completes.
+    async function lateFirstSend(email: string, first: SendResult, second: SendResult) {
+      process.env.INVITATION_EMAIL_DELIVERY = 'smtp'
+      Object.assign(process.env, { SMTP_HOST: 'smtp.test.invalid', SMTP_USER: 'u', SMTP_PASS: 'p', FRONTEND_URL: 'https://app.test.invalid' })
+      const d1 = deferred<SendResult>()
+      const d2 = deferred<SendResult>()
+      mocks.sendEmail.mockReset()
+      mocks.sendEmail.mockImplementationOnce(() => d1.promise).mockImplementationOnce(() => d2.promise)
+      const creating = createInvitation(admin.id, { email })
+      await vi.waitFor(() => expect(mocks.sendEmail).toHaveBeenCalledTimes(1))
+      const { id } = await prisma.userInvitation.findFirstOrThrow({ where: { email } })
+      const resending = resendInvitation(admin.id, id)
+      await vi.waitFor(() => expect(mocks.sendEmail).toHaveBeenCalledTimes(2))
+      d2.resolve(second)
+      await resending
+      d1.resolve(first)
+      await creating
+      const row = await prisma.userInvitation.findUniqueOrThrow({ where: { id } })
+      const audits = await prisma.adminAction.findMany({ where: { targetResource: `invitation:${id}` }, orderBy: { timestamp: 'asc' } })
+      return { row, audits: Object.fromEntries(audits.map((a) => [a.action, a.metadata as Record<string, unknown>])) }
+    }
+
+    it('ignores an older failed send that finishes after a newer successful resend', async () => {
+      const { row, audits } = await lateFirstSend(addr('late-fail'), { sent: false, reason: 'send_failed' }, { sent: true })
+      expect(row).toMatchObject({ deliveryStatus: 'SENT', deliveryError: null, sendCount: 2 })
+      expect(audits.invitation_create).toMatchObject({ deliveryStatus: 'FAILED', superseded: true })
+      expect(audits.invitation_resend).toMatchObject({ deliveryStatus: 'SENT', superseded: false })
+    })
+
+    it('ignores an older successful send that finishes after a newer failed resend', async () => {
+      const { row, audits } = await lateFirstSend(addr('late-ok'), { sent: true }, { sent: false, reason: 'send_failed' })
+      expect(row).toMatchObject({ deliveryStatus: 'FAILED', deliveryError: 'send_failed', sendCount: 2 })
+      expect(audits.invitation_create).toMatchObject({ deliveryStatus: 'SENT', superseded: true })
+      expect(audits.invitation_resend).toMatchObject({ deliveryStatus: 'FAILED', superseded: false })
+    })
   })
 
   it('lists with status filter, search, pagination and per-status counts', async () => {
