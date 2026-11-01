@@ -7,7 +7,7 @@ const testDb = vi.hoisted(() => {
   if (url && url !== 'postgresql://postgres@127.0.0.1:55441/simple_bank') throw new Error('Invitation tests use only the isolated simple_bank database')
   return { url }
 })
-const mocks = vi.hoisted(() => ({ signupsPaused: false, sendEmail: vi.fn(), onPauseCheck: null as null | (() => Promise<void>) }))
+const mocks = vi.hoisted(() => ({ signupsPaused: false, sendEmail: vi.fn(), onPauseCheck: null as null | (() => Promise<void>), auditFailures: 0 }))
 vi.mock('../src/lib/prisma', async () => {
   const { PrismaClient } = await import('@prisma/client')
   return { prisma: new PrismaClient({ datasourceUrl: testDb.url || 'postgresql://postgres@127.0.0.1:55441/simple_bank' }) }
@@ -20,6 +20,16 @@ vi.mock('../src/lib/platformSettings', () => ({
   areRewardPointsEnabled: async () => false,
 }))
 vi.mock('../src/lib/email', () => ({ sendEmail: mocks.sendEmail }))
+// Lets a test make audit persistence fail inside the acceptance transaction.
+vi.mock('../src/lib/invitationAudit', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../src/lib/invitationAudit')>()
+  return {
+    writeAcceptanceAudit: async (...args: Parameters<typeof real.writeAcceptanceAudit>) => {
+      if (mocks.auditFailures > 0) { mocks.auditFailures--; throw new Error('audit store unavailable') }
+      return real.writeAcceptanceAudit(...args)
+    },
+  }
+})
 // A test credential is the JSON of the Google identity it stands for.
 vi.mock('../src/lib/google-auth', () => ({
   verifyGoogleIdToken: async (credential: string) => {
@@ -66,6 +76,7 @@ describe.skipIf(!testDb.url)('learner invitations (PostgreSQL)', () => {
   afterEach(() => {
     mocks.signupsPaused = false
     mocks.onPauseCheck = null
+    mocks.auditFailures = 0
     process.env.NODE_ENV = 'test'
     delete process.env.INVITATION_EMAIL_DELIVERY
     delete process.env.INVITATION_RETENTION_DAYS
@@ -308,7 +319,7 @@ describe.skipIf(!testDb.url)('learner invitations (PostgreSQL)', () => {
     expect(JSON.stringify(row)).not.toContain(token)
   })
 
-  it.each(['revoked', 'expired'] as const)('removes an account created for an invitation that was %s mid-sign-in', async (change) => {
+  it.each(['revoked', 'expired'] as const)('never creates an account for an invitation %s after Google verification', async (change) => {
     const email = addr(`midway-${change}`)
     const created = await invite(email)
     const id = created.body.invitation.id
@@ -319,8 +330,8 @@ describe.skipIf(!testDb.url)('learner invitations (PostgreSQL)', () => {
         : { expiresAt: new Date(Date.now() - 1000) } })
     }
     const res = await accept(tokenFor(email), google(email))
-    expect(res.status).toBe(409)
-    expect(res.body.error).toBe('invitation_changed')
+    expect(res.status).toBe(410)
+    expect(res.body.error).toBe(`invitation_${change}`)
     expect(await prisma.user.count({ where: { email } })).toBe(0)
   })
 
@@ -370,6 +381,127 @@ describe.skipIf(!testDb.url)('learner invitations (PostgreSQL)', () => {
     expect(config.body).toMatchObject({ mode: 'smtp', captureRefused: true })
     const res = await invite(addr('prod-no-smtp'))
     expect(res.body.invitation).toMatchObject({ deliveryStatus: 'FAILED', deliveryError: 'smtp_not_configured' })
+  })
+
+  describe('concurrency and atomic acceptance', () => {
+    const acceptanceAudits = (invitationId: string) => prisma.adminAction.count({ where: { action: 'invitation_accepted', targetResource: `invitation:${invitationId}` } })
+
+    it('accepts the same invitation twice at once with one account and one audit', async () => {
+      const email = addr('double')
+      const created = await invite(email)
+      const token = tokenFor(email)
+      const [a, b] = await Promise.all([accept(token, google(email)), accept(token, google(email))])
+      expect([a.status, b.status]).toEqual([200, 200])
+      expect(a.body.user.id).toBe(b.body.user.id)
+      expect([a.body.alreadyAccepted, b.body.alreadyAccepted].sort()).toEqual([false, true])
+      expect(await prisma.user.count({ where: { email } })).toBe(1)
+      expect(await acceptanceAudits(created.body.invitation.id)).toBe(1)
+    })
+
+    it('keeps revoke and acceptance consistent whichever wins', async () => {
+      for (let i = 0; i < 6; i++) {
+        const email = addr(`race-revoke-${i}`)
+        const created = await invite(email)
+        const id = created.body.invitation.id
+        const [acc, rev] = await Promise.all([
+          accept(tokenFor(email), google(email)),
+          request(app).post(`/api/admin/invitations/${id}/revoke`).set('Authorization', bearer(admin)),
+        ])
+        const inv = await prisma.userInvitation.findUniqueOrThrow({ where: { id } })
+        const users = await prisma.user.count({ where: { email } })
+        if (inv.status === 'ACCEPTED') {
+          expect([acc.status, rev.status]).toEqual([200, 409])
+          expect(users).toBe(1)
+          expect(await acceptanceAudits(id)).toBe(1)
+        } else {
+          expect(inv.status).toBe('REVOKED')
+          expect([acc.status, rev.status]).toEqual([410, 200])
+          expect(users).toBe(0)
+          expect(await acceptanceAudits(id)).toBe(0)
+        }
+      }
+    })
+
+    it('keeps resend and acceptance consistent whichever wins', async () => {
+      for (let i = 0; i < 6; i++) {
+        const email = addr(`race-resend-${i}`)
+        const created = await invite(email)
+        const id = created.body.invitation.id
+        const oldToken = tokenFor(email)
+        const [acc, resend] = await Promise.all([
+          accept(oldToken, google(email)),
+          request(app).post(`/api/admin/invitations/${id}/resend`).set('Authorization', bearer(admin)),
+        ])
+        const inv = await prisma.userInvitation.findUniqueOrThrow({ where: { id } })
+        if (inv.status === 'ACCEPTED') {
+          expect([acc.status, resend.status]).toEqual([200, 409])
+          expect(await prisma.user.count({ where: { email } })).toBe(1)
+        } else {
+          // The resend replaced the token first, so the old link is rejected and nothing was created.
+          expect([acc.status, resend.status]).toEqual([404, 200])
+          expect(inv.tokenHash).not.toBe(hashInvitationToken(oldToken))
+          expect(await prisma.user.count({ where: { email } })).toBe(0)
+          expect((await accept(tokenFor(email), google(email))).status).toBe(200)
+        }
+        expect(await prisma.user.count({ where: { email } })).toBe(1)
+      }
+    })
+
+    it('never duplicates an account when normal Google sign-in races acceptance', async () => {
+      const { signInWithGoogleUser } = await import('../src/lib/googleSignIn')
+      const req = { ip: '127.0.0.1', headers: {} } as unknown as express.Request
+      for (let i = 0; i < 6; i++) {
+        const email = addr(`race-google-${i}`)
+        const created = await invite(email)
+        const g = JSON.parse(google(email))
+        const [acc, login] = await Promise.all([
+          accept(tokenFor(email), google(email)),
+          signInWithGoogleUser({ googleId: g.sub, email, emailVerified: true, firstName: null, lastName: null, avatar: null }, req),
+        ])
+        const users = await prisma.user.findMany({ where: { email } })
+        expect(users).toHaveLength(1)
+        expect(acc.status).toBe(200)
+        expect(acc.body.user.id).toBe(users[0].id)
+        expect(login).toMatchObject({ ok: true })
+        if (login.ok) expect(login.user.id).toBe(users[0].id)
+        const inv = await prisma.userInvitation.findUniqueOrThrow({ where: { id: created.body.invitation.id } })
+        expect(inv).toMatchObject({ status: 'ACCEPTED', acceptedUserId: users[0].id })
+        expect(await acceptanceAudits(inv.id)).toBe(1)
+      }
+    })
+
+    it('rolls back everything when audit persistence fails, and a retry then succeeds', async () => {
+      const email = addr('audit-fail')
+      const created = await invite(email)
+      const token = tokenFor(email)
+      mocks.auditFailures = 1
+      const failed = await accept(token, google(email))
+      expect(failed.status).toBe(500)
+      expect(await prisma.user.count({ where: { email } })).toBe(0)
+      expect(await prisma.userInvitation.findUniqueOrThrow({ where: { id: created.body.invitation.id } })).toMatchObject({ status: 'PENDING', acceptedUserId: null })
+      expect(await acceptanceAudits(created.body.invitation.id)).toBe(0)
+
+      const retry = await accept(token, google(email))
+      expect(retry.status).toBe(200)
+      expect(retry.body.newAccount).toBe(true)
+      expect(await prisma.user.count({ where: { email } })).toBe(1)
+      expect(await acceptanceAudits(created.body.invitation.id)).toBe(1)
+    })
+
+    it('leaves an existing account and its data untouched when audit persistence fails', async () => {
+      const existing = await prisma.user.create({ data: { email: addr('audit-fail-existing'), loginCount: 3, rewardPoints: 7 } })
+      await prisma.session.create({ data: { userId: existing.id, module: 'elevate' } })
+      await invite(existing.email, { confirmExistingUser: true })
+      mocks.auditFailures = 1
+      expect((await accept(tokenFor(existing.email), google(existing.email))).status).toBe(500)
+      const after = await prisma.user.findUniqueOrThrow({ where: { id: existing.id }, include: { _count: { select: { sessions: true } } } })
+      // Even the login bookkeeping rolled back; nothing was deleted.
+      expect(after).toMatchObject({ loginCount: 3, rewardPoints: 7, googleId: null })
+      expect(after._count.sessions).toBe(1)
+      expect((await accept(tokenFor(existing.email), google(existing.email))).status).toBe(200)
+      expect(await prisma.user.count({ where: { email: existing.email } })).toBe(1)
+    })
+
   })
 
   it('lists with status filter, search, pagination and per-status counts', async () => {

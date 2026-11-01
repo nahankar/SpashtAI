@@ -322,14 +322,6 @@ export async function findInvitationByToken(token: string) {
   return prisma.userInvitation.findUnique({ where: { tokenHash: hashInvitationToken(token) } })
 }
 
-/** Marks the invitation accepted by this account. Returns false when it is no longer pending. */
-export async function markInvitationAccepted(inv: UserInvitation, userId: string, now = new Date()) {
-  const updated = await prisma.userInvitation.updateMany({
-    where: { id: inv.id, tokenHash: inv.tokenHash, status: 'PENDING', expiresAt: { gt: now } },
-    data: { status: 'ACCEPTED', pendingKey: null, acceptedAt: now, acceptedUserId: userId },
-  })
-  return updated.count === 1
-}
 
 // ---------------------------------------------------------------- retention
 

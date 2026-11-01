@@ -30,9 +30,16 @@ invitation email goes to the recipient (or, in development, that it is captured 
      signups are paused, but only for a pending, unexpired, unrevoked invitation accepted through this flow
      with the exact verified invited address. Every other signup (register, `/api/auth/google`) stays blocked.
      The bypass is audited without content as `UserActivity` `invitation_accepted` with metadata
-     `{ newAccount: true, signupsPausedBypass: true }`. If the invitation is revoked or expires mid-sign-in,
-     an account created only for it is removed again.
+     `{ newAccount: true, signupsPausedBypass: true }`.
 5. Accepting again with the same account is idempotent.
+6. **Atomic acceptance** (`lib/invitationAcceptance.ts`): after the Google credential is verified, one database
+   transaction locks the invitation row, re-checks token, address, status and expiry, resolves or creates the
+   account, marks the invitation accepted and writes both audit rows. Any failure (including audit
+   persistence) rolls all of it back, so no account is ever created and then deleted, and an acceptance never
+   exists unaudited. Revoke and resend update the same row, so they either wait for an acceptance (and then
+   refuse) or win first (and the acceptance sees a revoked invitation or a superseded link). A normal Google
+   sign-in racing the acceptance for the same address hits the unique email/Google ID constraint; the losing
+   transaction retries and finds the account instead of duplicating it. Retries are safe.
 
 ## Statuses and safeguards
 
