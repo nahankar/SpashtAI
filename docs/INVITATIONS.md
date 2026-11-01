@@ -88,6 +88,11 @@ Optional: `SMTP_PORT` (default 587; 465 uses TLS), `SMTP_FROM` (default `noreply
 `INVITATION_EXPIRY_DAYS` (default 7). If any required value is missing, invitations are saved with delivery
 `FAILED / smtp_not_configured`, and the Invitations page lists the missing variable names (never values).
 
+To check a server's setup without exposing anything, run from `apps/server` with its env loaded:
+`npx tsx scripts/check-invitation-email.ts`. It prints only which variables are set, then verifies the SMTP
+connection and login without sending mail. `--send-test <address>` additionally sends one plain test message
+(not an invitation) to that address only.
+
 Outside production (`NODE_ENV !== 'production'`) invitations are **captured in memory and not sent**, unless
 `INVITATION_EMAIL_DELIVERY=smtp` is set explicitly. Captured messages appear on the Invitations page under
 "Captured invitation emails (development only)" and at `GET /api/admin/invitations/dev-mailbox`.
