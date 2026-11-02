@@ -77,6 +77,9 @@ import {
 } from '../lib/aws-transcribe'
 // DEV-ONLY: streaming transcription — remove before production
 import { transcribeStreamingFromFile } from '../lib/aws-transcribe-streaming'
+import { currentDataScope } from '../lib/dataScope'
+import { activityMediaDir, mediaPathAllowed, workspaceMediaPrefix } from '../lib/mediaStorage'
+import { workspacePlan } from '../workspaces/productAccess'
 
 const isDev = process.env.NODE_ENV !== 'production'
 
@@ -159,8 +162,13 @@ function buildFallbackSignals(
 
 // ── Transcription cache helpers ──
 
+/** Personal replays keep the historical flat folder; organization replays live under their workspace prefix. */
+function replayDir(sessionId: string, scope = currentDataScope()): string {
+  return activityMediaDir(UPLOAD_DIR, 'replay', sessionId, scope)
+}
+
 function transcriptionCachePath(sessionId: string): string {
-  return path.join(UPLOAD_DIR, `${sessionId}_transcription.json`)
+  return path.join(replayDir(sessionId), `${sessionId}_transcription.json`)
 }
 
 async function loadCachedTranscription(sessionId: string, cacheKey: string): Promise<TranscriptionResult | null> {
@@ -206,11 +214,15 @@ const UPLOAD_DIR = path.resolve(
 )
 
 const storage = multer.diskStorage({
-  destination: async (_req, _file, cb) => {
-    if (!existsSync(UPLOAD_DIR)) {
-      await mkdir(UPLOAD_DIR, { recursive: true })
+  // Multer runs outside the request's async context, so the verified scope comes from the request.
+  destination: async (req, _file, cb) => {
+    try {
+      const dir = replayDir(String(req.params.id), req.dataScope)
+      if (!existsSync(dir)) await mkdir(dir, { recursive: true })
+      cb(null, dir)
+    } catch (error) {
+      cb(error as Error, '')
     }
-    cb(null, UPLOAD_DIR)
   },
   filename: (_req, file, cb) => {
     const unique = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -318,7 +330,12 @@ router.get('/sessions/:id/media/:uploadId', async (req: Request, res: Response) 
     const input = session.result?.deliveryEvidence as unknown as ReplayEvidenceInput | null
     const file = session.uploadedFiles.find(f => f.id === req.params.uploadId && (f.fileType === 'audio' || f.fileType === 'video'))
     if (!file || input?.recording?.uploadId !== file.id) return res.status(404).json({ error: 'Recording evidence unavailable' })
-    if (!isPrivilegedRole(req.user?.role)) {
+    if (!mediaPathAllowed(path.resolve(file.storedPath), undefined, UPLOAD_DIR)) return res.status(404).json({ error: 'Recording evidence unavailable' })
+    const scope = currentDataScope()
+    if (scope) {
+      const plan = workspacePlan(scope.features)
+      if (!(file.fileType === 'video' ? plan === 'ultra' : plan !== 'standard')) return exportDenied(res, `Your organization's plan does not include this recording`)
+    } else if (!isPrivilegedRole(req.user?.role)) {
       const user = await prisma.user.findUnique({ where: { id: req.user!.userId }, select: { enablePro: true, enableUltra: true } })
       if (!(file.fileType === 'video' ? user?.enableUltra : user?.enablePro || user?.enableUltra)) return exportDenied(res, 'Your plan does not include this recording')
     }
@@ -427,7 +444,14 @@ router.post(
       const { id } = req.params
       const pastedText = typeof req.body.text === 'string' ? req.body.text.trim() : ''
       const media = files?.audio?.[0]
-      if (media && !isPrivilegedRole(req.user?.role)) {
+      const scope = currentDataScope()
+      if (media && scope && workspacePlan(scope.features) === 'standard') {
+        return res.status(403).json({
+          error: `Your organization's plan does not include audio or video upload.`,
+          code: 'REPLAY_AUDIO_UPLOAD_DISABLED',
+        })
+      }
+      if (media && !scope && !isPrivilegedRole(req.user?.role)) {
         const u = await prisma.user.findUnique({
           where: { id: req.user!.userId },
           select: { enableReplayAudioUpload: true },
@@ -445,8 +469,8 @@ router.post(
           originalName: f.originalname, storedPath: f.path, fileSize: f.size, mimeType: f.mimetype })
       }
       if (pastedText) {
-        await mkdir(UPLOAD_DIR, { recursive: true })
-        const textPath = path.join(UPLOAD_DIR, `${id}_${randomUUID()}_pasted.txt`)
+        await mkdir(replayDir(id), { recursive: true })
+        const textPath = path.join(replayDir(id), `${id}_${randomUUID()}_pasted.txt`)
         cleanupPaths.push(textPath)
         await writeFile(textPath, pastedText, 'utf8')
         prepared.push({ fileType: 'text', originalName: 'pasted_text.txt', storedPath: textPath, fileSize: Buffer.byteLength(pastedText), mimeType: 'text/plain' })
@@ -656,7 +680,8 @@ async function processReplaySession(sessionId: string): Promise<void> {
       }
     } else {
       // Production: upload to S3 and use AWS Transcribe
-      const s3Key = `replay/${sessionId}/${path.basename(audioFile.storedPath)}`
+      const scope = currentDataScope()
+      const s3Key = `${scope ? workspaceMediaPrefix(scope.workspaceId, 'replay', sessionId) : `replay/${sessionId}`}/${path.basename(audioFile.storedPath)}`
       const mediaFormat = mediaFormatFromMime(audioFile.mimeType)
 
       try {
@@ -1163,7 +1188,7 @@ router.get('/sessions/:id/download/:fileId', async (req: Request, res: Response)
       return exportDenied(res, 'Transcript export is disabled for your account')
     }
 
-    if (!existsSync(file.storedPath)) {
+    if (!existsSync(file.storedPath) || !mediaPathAllowed(path.resolve(file.storedPath), undefined, UPLOAD_DIR)) {
       return res.status(404).json({ error: 'File no longer exists on disk' })
     }
 
@@ -1191,7 +1216,8 @@ router.delete('/sessions/:id', async (req: Request, res: Response) => {
         where: { replaySessionId: id },
         create: {
           replaySessionId: id,
-          filePaths: [...session.uploadedFiles.map((file) => file.storedPath), replayTranscriptionCachePath(id)],
+          workspaceId: currentDataScope()?.workspaceId ?? null,
+          filePaths: [...session.uploadedFiles.map((file) => file.storedPath), transcriptionCachePath(id)],
         },
         update: {},
       })

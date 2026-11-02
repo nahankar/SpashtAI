@@ -3,6 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { prisma } from './prisma'
 import { logger } from './logger'
+import { activityMediaDir } from './mediaStorage'
 
 const activeJobs = new Set<string>()
 let sweepTimer: NodeJS.Timeout | null = null
@@ -16,7 +17,7 @@ const REPLAY_UPLOAD_DIR = path.resolve(
 )
 
 export function replayTranscriptionCachePath(replaySessionId: string): string {
-  return path.join(REPLAY_UPLOAD_DIR, `${replaySessionId}_transcription.json`)
+  return path.join(activityMediaDir(REPLAY_UPLOAD_DIR, 'replay', replaySessionId), `${replaySessionId}_transcription.json`)
 }
 
 function retryDelayMs(attempt: number): number {
