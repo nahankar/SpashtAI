@@ -1,4 +1,5 @@
 import { useId, useState } from 'react'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ProfileDetailsRow } from '@/components/auth/ProfileDetailsRow'
@@ -45,7 +46,7 @@ export function RecipientExperiencePreview({ workspaceName, fields, emailContent
     catch (e) { setError(e instanceof Error ? e.message : 'Could not load email preview') }
     finally { setBusy(false) }
   }
-  return <details className="rounded-lg border p-4"><summary className="cursor-pointer font-semibold">Preview recipient experience</summary>
+  return <Accordion type="single" collapsible className="rounded-lg border px-4"><AccordionItem value="preview" className="border-b-0"><AccordionTrigger className="font-semibold">Preview recipient experience</AccordionTrigger><AccordionContent forceMount>
     <div className="space-y-4 pt-4">
       <div className="flex flex-wrap gap-2" role="group" aria-label="Preview view">
         <Button type="button" variant={tab === 'email' ? 'default' : 'outline'} onClick={() => setTab('email')}>Invitation email</Button>
@@ -55,8 +56,8 @@ export function RecipientExperiencePreview({ workspaceName, fields, emailContent
         <p>Uses the same template as the received email, with a sample recipient and expiry. No email is sent and the acceptance link is inactive.</p>
         <Button type="button" variant="outline" disabled={busy} onClick={load}>{busy ? 'Loading preview…' : 'Generate email preview'}</Button>
         {error && <p role="alert" className="text-red-700">{error}</p>}
-        {email && <><p className="break-words"><strong>Subject:</strong> {email.subject}</p><iframe title="Invitation email preview" sandbox="" referrerPolicy="no-referrer" srcDoc={email.html} className="w-full h-[620px] rounded border bg-white" /><details><summary>Plain text version</summary><pre className="whitespace-pre-wrap break-words text-sm">{email.text}</pre></details></>}
+        {email && <><p className="break-words"><strong>Subject:</strong> {email.subject}</p><iframe title="Invitation email preview" sandbox="" referrerPolicy="no-referrer" srcDoc={email.html} className="w-full h-[620px] rounded border bg-white" /><Accordion type="single" collapsible><AccordionItem value="text"><AccordionTrigger>Plain text version</AccordionTrigger><AccordionContent><pre className="whitespace-pre-wrap break-words text-sm">{email.text}</pre></AccordionContent></AccordionItem></Accordion></>}
       </div> : <SignupFieldsPreview workspaceName={workspaceName} fields={fields} />}
     </div>
-  </details>
+  </AccordionContent></AccordionItem></Accordion>
 }

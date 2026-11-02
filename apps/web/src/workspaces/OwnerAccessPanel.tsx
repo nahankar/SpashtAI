@@ -1,4 +1,7 @@
 import { useState } from 'react'
+import {
+  AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 export interface WorkspaceOwner { id: string; email: string; state: 'INVITED' | 'ACTIVE' | 'SUSPENDED' }
 export function OwnerAccessPanel({ name, slug, owners, disabled, onSend }: { name: string; slug: string; owners: WorkspaceOwner[]; disabled: boolean; onSend: (membershipId: string) => Promise<{ deliveryStatus: string }> }) {
@@ -7,7 +10,7 @@ export function OwnerAccessPanel({ name, slug, owners, disabled, onSend }: { nam
   const origin = typeof window === 'undefined' ? 'https://spasht.ai' : window.location.origin
   const url = `${origin}/w/${encodeURIComponent(slug)}`
   function instructions(owner: WorkspaceOwner) {
-    return `Your ${name} workspace\nLogin email: ${owner.email}\nWorkspace: ${url}\nSign in with the Google Account for this email. There is no separate workspace password. If shown, select Accept invitation. As Owner you can invite learners and workspace administrators and manage this workspace. Personal history stays separate. Organization practices and analytics are not enabled yet.`
+    return `Your ${name} workspace\nLogin email: ${owner.email}\nWorkspace: ${url}\nSign in with the Google Account for this email. There is no separate workspace password. If shown, select Accept invitation. As Owner you can invite learners and workspace administrators and manage this workspace. Personal history stays separate. Workspace analytics are available to Owners and Admins; practice products appear as they become available for your organization.`
   }
   async function send() {
     if (!confirm) return
@@ -30,7 +33,13 @@ export function OwnerAccessPanel({ name, slug, owners, disabled, onSend }: { nam
       <div className="flex flex-wrap gap-2"><Button type="button" variant="outline" disabled={disabled || sending} onClick={async () => { setError(''); try { await navigator.clipboard.writeText(instructions(owner)); setNotice('Access instructions copied.') } catch { setError('Copy is unavailable. Select and copy the instructions above.') } }}>Copy access instructions</Button>
       <Button type="button" disabled={disabled || sending || owner.state === 'SUSPENDED'} onClick={() => { setConfirm(owner); setError(''); setNotice('') }}>Send access email</Button></div>
     </div>)}
-    {confirm && <div role="dialog" aria-label="Confirm Owner access email" className="rounded border p-4 space-y-3"><p>Send access instructions for {name} to <strong>{confirm.email}</strong>? Production sends a real email. Development mode sends nothing.</p><p>This link requires their existing membership and Google sign-in. It is not a password or a public access grant.</p><Button disabled={sending || disabled} onClick={send}>{sending ? 'Sending…' : 'Confirm and send access email'}</Button><Button variant="outline" disabled={sending} onClick={() => setConfirm(null)}>Cancel</Button></div>}
+    <AlertDialog open={Boolean(confirm)} onOpenChange={open => { if (!open && !sending) setConfirm(null) }}>
+      <AlertDialogContent>{confirm && <><AlertDialogHeader><AlertDialogTitle>Confirm Owner access email</AlertDialogTitle>
+        <AlertDialogDescription>Send access instructions for {name} to <strong>{confirm.email}</strong>? Production sends a real email. Development mode sends nothing.</AlertDialogDescription></AlertDialogHeader>
+        <p className="text-sm">This link requires their existing membership and Google sign-in. It is not a password or a public access grant.</p>
+        <AlertDialogFooter><AlertDialogCancel disabled={sending}>Cancel</AlertDialogCancel><Button disabled={sending || disabled} onClick={send}>{sending ? 'Sending…' : 'Confirm and send access email'}</Button></AlertDialogFooter></>}
+      </AlertDialogContent>
+    </AlertDialog>
     {notice && <p role="status">{notice}</p>}{error && <p role="alert" className="text-red-700">{error}</p>}
   </section>
 }

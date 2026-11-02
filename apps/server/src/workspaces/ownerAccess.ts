@@ -13,7 +13,7 @@ export function buildOwnerAccessEmail(workspace: { name: string; slug: string },
     'Sign in with the Google Account for this email address. There is no separate workspace password.',
     'If your membership is pending, select Accept invitation on the workspace page.',
     'As Owner you can invite learners and workspace administrators, manage memberships, and configure workspace signup fields and invitation messages.',
-    'Your Personal history stays separate. Organization practices and analytics are not available yet.', '',
+    'Your Personal history stays separate. Workspace analytics are available to Owners and Admins; practice products appear as they become available for your organization.', '',
     'If this was unexpected, contact the administrator who assigned your access.', '',
     'Replies to this mailbox are not routinely monitored and may not receive a response.',
   ].join('\n') }

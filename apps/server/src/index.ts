@@ -1,7 +1,7 @@
 import 'dotenv/config'
 import { assertSafeWorkspaceStartup } from './workspaces/databaseSafety'
 import { workspaceRouter, platformWorkspacesRouter } from './workspaces/routes'
-import { bindWorkspaceRequest, reenterDataScope } from './workspaces/requestScope'
+import { bindWorkspaceRequest, reenterDataScope, requireWorkspaceProduct } from './workspaces/requestScope'
 import express from 'express'
 import cors from 'cors'
 import { createServer } from 'http'
@@ -260,7 +260,7 @@ app.use('/api/events', requireAuth, eventsRouter)
 
 // Protected: user feedback
 app.use('/api/feedback', requireAuth, feedbackRouter)
-app.use('/api/coach', requireAuth, coachRouter)
+app.use('/api/coach', requireAuth, requireWorkspaceProduct('coach'), coachRouter)
 // Session-level chat ("Ask AI Coach about this session"). Flag-gated inside the
 // router (session_chat, disabled by default); ownership-checked per request.
 app.use('/api/session-chat', requireAuth, sessionChatRouter)

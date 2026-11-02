@@ -55,7 +55,7 @@ suite('organization Elevate voice path', () => {
     scopes = await import('../src/lib/dataScope')
     subscriptions = await import('../src/lib/sessionSubscriptions')
     jobs = await import('../src/workspaces/jobScopes')
-    const { bindWorkspaceRequest, reenterDataScope } = await import('../src/workspaces/requestScope')
+    const { bindWorkspaceRequest, reenterDataScope, requireWorkspaceProduct } = await import('../src/workspaces/requestScope')
     const { requireAuth, requireAuthOrMediaToken } = await import('../src/middleware/auth')
     const { createSessionSegment } = await import('../src/routes/session-segments')
     const recordings = await import('../src/routes/recordings')
@@ -66,6 +66,7 @@ suite('organization Elevate voice path', () => {
     app.post('/sessions/:sessionId/recording/ticket', requireAuth, recordings.createSessionRecordingTicket)
     app.get('/sessions/:sessionId/recording/stream', requireAuthOrMediaToken, recordings.streamSessionRecording)
     app.post('/internal/sessions/:sessionId/messages', conversations.addConversationMessageForAgent)
+    app.get('/api/coach/threads', requireAuth, requireWorkspaceProduct('coach'), (_req, res) => { res.json({ personal: true }) })
     const user = async (suffix: string) => (await admin.user.create({ data: { email: `${tag}-${suffix}@example.invalid`, emailVerified: true } })).id
     learner = await user('learner'); other = await user('other'); suspended = await user('suspended')
     for (const name of ['alpha', 'beta']) {
@@ -132,6 +133,13 @@ suite('organization Elevate voice path', () => {
     } finally {
       await admin.workspaceMember.update({ where: { id: members[`${alpha}:${learner}`] }, data: { state: 'ACTIVE' } })
     }
+  })
+
+  it('keeps Personal-only Coach closed inside an organization', async () => {
+    const inside = await request(app).get('/api/coach/threads').set(headers(alpha, learner))
+    expect(inside.status).toBe(403)
+    expect(inside.body.code).toBe('WORKSPACE_FEATURE_UNAVAILABLE')
+    expect((await request(app).get('/api/coach/threads').set(headers(null, learner))).body).toEqual({ personal: true })
   })
 
   it('refuses organization playback of a stored path outside its workspace prefix', async () => {

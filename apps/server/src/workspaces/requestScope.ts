@@ -157,6 +157,14 @@ export function requireWorkspaceFeature(feature: WorkspaceFeatureId, scope = cur
   }
 }
 
+/** Route guard: inside an organization the product must be allowed for this member; Personal requests pass. */
+export function requireWorkspaceProduct(feature: WorkspaceFeatureId) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    try { requireWorkspaceFeature(feature, req.dataScope) } catch (error) { return fail(res, error) }
+    next()
+  }
+}
+
 /**
  * Background work for one organization learner. Returns null without running when
  * the membership or workspace is no longer active.

@@ -11,7 +11,9 @@ const fields: EnrollmentField[] = [
 describe('workspace signup fields', () => {
   it('renders each control, preserves choices, and safely renders plain messages', () => {
     const html = renderToStaticMarkup(<EnrollmentFields fields={fields} values={{ roll: '42', department: 'ECE', shift: 'PM', skills: ['Python'] }} onChange={() => {}} />)
-    expect(html).toContain('value="42"'); expect(html).toContain('selected=""'); expect(html).toContain('type="radio"'); expect(html).toContain('type="checkbox"')
+    expect(html).toContain('value="42"'); expect(html).toContain('role="combobox"'); expect(html).toContain('name="enrollment-department"')
+    expect(html).toMatch(/role="radio" aria-checked="true"[^>]*value="PM"/); expect(html).toMatch(/role="checkbox" aria-checked="true"[^>]*value="Python"/)
+    expect(html).toContain('type="radio"'); expect(html).toContain('type="checkbox"'); expect(html).not.toMatch(/<select(?![^>]*aria-hidden)/)
     expect(html).toContain('&lt;script&gt;Welcome&lt;/script&gt;'); expect(html).not.toContain('<script>')
   })
   it('requires a checkbox choice as a group, rather than requiring all options', () => {
