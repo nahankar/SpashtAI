@@ -19,7 +19,7 @@ Worktree: `VI/worktrees/spashtai-tenancy`. Separate from Claude's invitation/dem
 
 ## Validation
 
-Final checks: 594 server tests passed (124 database/optional checks skipped); all 325 web tests passed.
+Foundation checkpoint checks: 594 server tests passed (124 database/optional checks skipped); all 325 web tests passed.
 Server/web type checks, changed-file web lint, the production build and schema validation passed.
 The tenancy integration tests are included in the 594 and run against the restricted real database role. No production changes.
 
@@ -29,10 +29,28 @@ The tenancy integration tests are included in the 594 and run against the restri
 - Browser walkthrough uses only fictional local accounts: platform setup, Personal/organization choices,
   pending membership and self-acceptance, organization overview and disabled product access.
 
+## Session and recording checkpoint (November 2)
+
+- All 62 schema models classified in `TENANCY-DATA-INVENTORY.md`.
+- Session plus transcript/metrics/segment/turn/recording ownership is immutable and protected by forced RLS.
+- Safe, learner-only archive metadata/transcript/local audio routes behind a separate default-off gate.
+- Namespaced media keys, byte ranges, foreign-path/symlink rejection and current membership checks.
+- Personal live updates require authenticated ownership, including revalidation before each broadcast.
+- Unsafe runtime database roles rejected; unscoped product links to organization sessions rejected.
+- Existing-session upgrade/backfill verified, including accounts that never opened the workspace chooser.
+
+Validation: 629 server tests passed (124 optional checks skipped), 325 web tests passed. Build, type checks
+and changed-hook lint passed. Real restricted-role database/API tests and a local WebSocket network
+test cover two organizations plus Personal. One initial full-suite integration timeout did not recur on
+the full repeat; no timeout was increased. Upgrade verification confirms eleven tables enforce RLS.
+
+This is an API/database checkpoint: there is no archive player UI, remote-object playback or organization
+practice creation. Raw content remains private to its learner. No production data or real invitations used.
+
 ## Remaining before KLSVDIT learner access
 
-1. Classify every product table and derived record, then add workspace ownership and composite references.
-   This includes sessions, conversations, recordings, segments, Replay, Prepare, Interviews, scores, feedback and usage.
+1. Extend the completed model inventory and Session aggregate boundary to the remaining product roots.
+   This includes Replay, Prepare, Interviews, scores, feedback and usage.
 2. Replace implicit global user ownership in every applicable API/raw SQL query, signed media URL, upload,
    LiveKit room/dispatch/agent call, WebSocket subscription, cache key, job payload and browser recovery key.
    Add two-organization + Personal leakage tests at each boundary. Enable products individually only after verification.

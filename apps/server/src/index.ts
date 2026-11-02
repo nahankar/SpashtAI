@@ -1,3 +1,4 @@
+import { assertSafeWorkspaceStartup } from './workspaces/databaseSafety'
 import { workspaceRouter, platformWorkspacesRouter } from './workspaces/routes'
 import 'dotenv/config'
 import express from 'express'
@@ -403,7 +404,7 @@ const port = process.env.PORT ? Number(process.env.PORT) : 4000
 
 // Create HTTP server and WebSocket server for real-time updates
 const server = createServer(app)
-const wss = new WebSocketServer({ server })
+const wss = new WebSocketServer({ server, maxPayload: 16 * 1024 })
 
 // Without an 'error' listener the WebSocketServer (attached to the HTTP server)
 // rethrows a fatal listen error (e.g. EADDRINUSE), crashing the process. Handle
@@ -418,14 +419,15 @@ setWebSocketServer(wss)
 wss.on('connection', (ws) => {
   console.log('WebSocket client connected')
   
-  ws.on('message', (message) => {
+  ws.on('message', async (message) => {
     try {
       const data = JSON.parse(message.toString())
       if (data.type === 'subscribe' && data.sessionId) {
-        subscribeClientToSession(ws, data.sessionId)
+        const allowed = await subscribeClientToSession(ws, data.sessionId, data.accessToken)
+        if (ws.readyState === 1) ws.send(JSON.stringify({ type: allowed ? 'subscribed' : 'subscription_error', code: allowed ? undefined : 'ACCESS_UNAVAILABLE' }))
       }
     } catch (error) {
-      console.error('Invalid WebSocket message:', error)
+      console.warn('Invalid WebSocket subscription message')
     }
   })
   
@@ -439,6 +441,7 @@ async function startServer() {
     throw new Error('INTERNAL_AGENT_TOKEN must be set in production')
   }
 
+  await assertSafeWorkspaceStartup()
   await ensureAdminExists()
   try {
     await ensureFeatureFlags()

@@ -1,7 +1,6 @@
 import { z } from 'zod'
 import type { Workspace } from '@prisma/client'
 import { Prisma } from '@prisma/client'
-import { getFeatureFlagsMap } from '../lib/featureFlags'
 import { signWorkspaceToken } from '../lib/jwt'
 import {
   brandingSchema, createWorkspaceSchema, effectiveWorkspaceFeature, featureSettingsSchema,
@@ -112,15 +111,19 @@ export function updatePlatformWorkspace(actorId: string, workspaceId: string, in
 
 export async function workspaceSnapshot(tx: WorkspaceTx, scope: Awaited<ReturnType<typeof establishWorkspace>>) {
   const { workspace, member } = scope
-  const flags = await getFeatureFlagsMap()
+  const flags = await tx.platformFeatureFlag.findMany()
+  const grants = await tx.userFeatureGrant.findMany({ where: { userId: member.userId }, select: { feature: true } })
   const policies = await tx.workspaceFeature.findMany({ where: { workspaceId: workspace.id } })
   const overrides = await tx.workspaceMemberFeature.findMany({ where: { workspaceId: workspace.id, memberId: member.id } })
   const features = WORKSPACE_FEATURES.map(feature => {
-    const platform = flags[feature as keyof typeof flags]
+    const platform = flags.find(row => row.feature === feature)
+    const platformAllowed = platform
+      ? !platform.hidden && !platform.disabled && (platform.audience === 'EVERYONE' || grants.some(grant => grant.feature === feature))
+      : !['interviews', 'prepare'].includes(feature)
     const policy = policies.find(row => row.feature === feature)
     const decision = effectiveWorkspaceFeature({ workspaceActive: workspace.state === 'ACTIVE', memberActive: member.state === 'ACTIVE',
       // No organization product route is certified by this foundation. A setting cannot bypass this boundary.
-      tenantReady: false, platformAllowed: !platform || (!platform.hidden && !platform.disabled && platform.audience === 'EVERYONE'),
+      tenantReady: false, platformAllowed,
       policy, memberOverride: overrides.find(row => row.feature === feature)?.allowed })
     return { feature, entitled: policy?.entitled ?? false, enabled: policy?.enabled ?? false,
       memberDefault: policy?.memberDefault ?? true, ...decision }

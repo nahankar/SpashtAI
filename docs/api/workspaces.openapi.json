@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "SpashtAI workspace foundation",
-    "version": "0.1.0",
-    "description": "Local contract. Feature flag WORKSPACES_ENABLED defaults false. This is control-plane administration only, not tenant product readiness. Workspace JWTs cannot authorize legacy Personal/Admin APIs."
+    "version": "0.2.0",
+    "description": "Local contract. Feature flag WORKSPACES_ENABLED defaults false. This is control-plane administration only, not tenant product readiness. Workspace JWTs cannot authorize legacy Personal/Admin APIs. Read-only own-session archive additionally requires WORKSPACE_SESSION_ARCHIVE_ENABLED. Organization practice creation remains disabled."
   },
   "servers": [
     {
@@ -729,6 +729,246 @@
           }
         }
       }
+    },
+    "/api/workspaces/current/sessions": {
+      "get": {
+        "summary": "List own workspace sessions in stable ID order (50 per page)",
+        "description": "Requires active organization membership and both rollout gates. Owner/Admin cannot read another learner's raw content. Workspace bearer token must be in Authorization, never the URL.",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 160
+            },
+            "description": "Previous response nextCursor; null means no further page."
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          },
+          "410": {
+            "description": "Owned session was discarded"
+          },
+          "200": {
+            "description": "Safe archive DTO; no provider or storage identifiers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/current/sessions/{sessionId}": {
+      "get": {
+        "summary": "Read own session metadata and safe recording descriptors",
+        "description": "Requires active organization membership and both rollout gates. Owner/Admin cannot read another learner's raw content. Workspace bearer token must be in Authorization, never the URL.",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 160
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          },
+          "410": {
+            "description": "Owned session was discarded"
+          },
+          "200": {
+            "description": "Safe archive DTO; no provider or storage identifiers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/current/sessions/{sessionId}/transcript": {
+      "get": {
+        "summary": "Read own transcript, honoring account viewing restrictions",
+        "description": "Requires active organization membership and both rollout gates. Owner/Admin cannot read another learner's raw content. Workspace bearer token must be in Authorization, never the URL.",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 160
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          },
+          "410": {
+            "description": "Owned session was discarded"
+          },
+          "200": {
+            "description": "Safe archive DTO; no provider or storage identifiers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveTranscript"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/current/sessions/{sessionId}/recordings/{recordingId}/stream": {
+      "get": {
+        "summary": "Stream own namespaced local recording with header authentication",
+        "description": "Requires active organization membership and both rollout gates. Owner/Admin cannot read another learner's raw content. Workspace bearer token must be in Authorization, never the URL.",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 160
+            }
+          },
+          {
+            "name": "recordingId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 160
+            }
+          },
+          {
+            "name": "Range",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "One bytes range; suffix and open-ended ranges supported."
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          },
+          "410": {
+            "description": "Owned session was discarded"
+          },
+          "200": {
+            "description": "Private no-store recording bytes; Content-Type reflects the allowed media extension",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "Private no-store recording bytes; Content-Type reflects the allowed media extension",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "416": {
+            "description": "Invalid or unsatisfiable byte range; Content-Range includes complete size"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -996,6 +1236,158 @@
           }
         },
         "required": []
+      },
+      "ArchiveSession": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "module": {
+            "type": "string"
+          },
+          "purpose": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "durationSeconds": {
+            "type": "integer",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "module",
+          "purpose",
+          "startedAt",
+          "endedAt",
+          "durationSeconds"
+        ]
+      },
+      "ArchiveRecording": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "duration": {
+            "type": "integer"
+          },
+          "recordingType": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "duration",
+          "recordingType",
+          "status"
+        ]
+      },
+      "ArchiveMessage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "nullable": true
+          },
+          "role": {
+            "type": "string",
+            "nullable": true
+          },
+          "content": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "content",
+          "timestamp"
+        ]
+      },
+      "ArchiveList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArchiveSession"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ]
+      },
+      "ArchiveDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/ArchiveSession"
+          },
+          "recordings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArchiveRecording"
+            }
+          }
+        },
+        "required": [
+          "session",
+          "recordings"
+        ]
+      },
+      "ArchiveTranscript": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArchiveMessage"
+            }
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "required": [
+          "messages",
+          "updatedAt"
+        ]
       }
     },
     "responses": {

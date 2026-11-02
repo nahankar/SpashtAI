@@ -1,3 +1,5 @@
+import type { Prisma } from '@prisma/client'
+import { SessionSubscriptions } from '../lib/sessionSubscriptions'
 import type { Request, Response } from 'express'
 import { prisma } from '../lib/prisma'
 import { logger } from '../lib/logger'
@@ -17,7 +19,7 @@ import {
 
 let wss: WebSocketServer | null = null
 
-const clientSessions = new WeakMap<WebSocket, Set<string>>()
+const subscriptions = new SessionSubscriptions()
 const INTERNAL_AGENT_TOKEN =
   process.env.INTERNAL_AGENT_TOKEN?.trim() ||
   (process.env.NODE_ENV !== 'production' ? 'dev-internal-agent-token' : '')
@@ -26,31 +28,12 @@ export function setWebSocketServer(webSocketServer: WebSocketServer) {
   wss = webSocketServer
 }
 
-export function subscribeClientToSession(client: WebSocket, sessionId: string) {
-  let sessions = clientSessions.get(client)
-  if (!sessions) {
-    sessions = new Set()
-    clientSessions.set(client, sessions)
-  }
-  sessions.add(sessionId)
+export function subscribeClientToSession(client: WebSocket, sessionId: unknown, accessToken: unknown) {
+  return subscriptions.subscribe(client, sessionId, accessToken)
 }
 
-function broadcastToSession(sessionId: string, message: any) {
-  if (!wss) return
-  
-  const data = JSON.stringify({
-    type: 'conversation_update',
-    sessionId,
-    ...message
-  })
-  
-  wss.clients.forEach((client: WebSocket) => {
-    if (client.readyState !== WebSocket.OPEN) return
-    const sessions = clientSessions.get(client)
-    if (sessions && sessions.has(sessionId)) {
-      client.send(data)
-    }
-  })
+async function broadcastToSession(sessionId: string, message: unknown, tx?: Prisma.TransactionClient) {
+  if (wss) await subscriptions.publish(wss.clients, sessionId, message, tx)
 }
 
 export async function addConversationMessage(req: Request, res: Response) {
@@ -116,7 +99,7 @@ export async function addConversationMessage(req: Request, res: Response) {
     })
     
     // Broadcast to WebSocket clients for real-time updates
-    broadcastToSession(sessionId, {
+    await broadcastToSession(sessionId, {
       action: 'message_added',
       message: messageData
     })
@@ -292,12 +275,12 @@ export async function updateSessionState(req: Request, res: Response) {
       await lockWritableSession(tx, sessionId)
       // Keep the row lock through the broadcast so state cannot be emitted
       // after a discard has already won the serialization race.
-      broadcastToSession(sessionId, {
+      await broadcastToSession(sessionId, {
         action: 'session_state_changed',
         state,
         metadata,
         timestamp: new Date().toISOString()
-      })
+      }, tx)
     })
     
     res.json({ success: true })

@@ -1,8 +1,10 @@
+import { archiveSessionDetail, archiveSessionTranscript, listArchiveSessions } from './sessionArchive'
+import { streamWorkspaceRecording } from './sessionMedia'
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { ZodError } from 'zod'
 import { Prisma } from '@prisma/client'
 import { requireAuth } from '../middleware/auth'
-import { prisma } from '../lib/prisma'
+import { assertWorkspaceDatabaseSafety } from './databaseSafety'
 import { verifyWorkspaceToken } from '../lib/jwt'
 import { idSchema, WorkspaceError, workspacesEnabled } from './contracts'
 import { withWorkspaceAccess } from './context'
@@ -21,10 +23,7 @@ function route(handler: Handler) {
 async function gate(_req: Request, _res: Response, next: NextFunction) {
   if (!workspacesEnabled()) return next(new WorkspaceError(404, 'WORKSPACES_DISABLED', 'Workspaces are not available yet'))
   try {
-    const roles = await prisma.$queryRaw<Array<{ bypass: boolean }>>`SELECT (rolsuper OR rolbypassrls OR EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN ('Workspace','WorkspaceMember','WorkspaceFeature','WorkspaceMemberFeature','WorkspaceAudit') AND pg_has_role(current_user,c.relowner,'MEMBER'))) AS bypass FROM pg_roles WHERE rolname=current_user`
-    if (roles[0]?.bypass !== false) throw new WorkspaceError(503, 'WORKSPACE_DATABASE_ROLE_UNSAFE', 'Workspaces require a non-owner database role that enforces row isolation')
-    const tables = await prisma.$queryRaw<Array<{ count: bigint }>>`SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN ('Workspace','WorkspaceMember','WorkspaceFeature','WorkspaceMemberFeature','WorkspaceAudit') AND c.relrowsecurity AND c.relforcerowsecurity`
-    if (Number(tables[0]?.count) !== 5) throw new WorkspaceError(503, 'WORKSPACE_POLICIES_UNAVAILABLE', 'Workspace row isolation is not installed')
+    await assertWorkspaceDatabaseSafety()
     next()
   } catch (error) { next(error) }
 }
@@ -46,6 +45,10 @@ function scoped(handler: (tx: Parameters<Parameters<typeof withWorkspaceAccess>[
     return withWorkspaceAccess(claims, (tx, scope) => handler(tx, scope, req))
   })
 }
+workspaceRouter.get('/current/sessions', scoped((tx, scope, req) => listArchiveSessions(tx, scope, req.query)))
+workspaceRouter.get('/current/sessions/:sessionId', scoped((tx, scope, req) => archiveSessionDetail(tx, scope, idSchema.parse(req.params.sessionId))))
+workspaceRouter.get('/current/sessions/:sessionId/transcript', scoped((tx, scope, req) => archiveSessionTranscript(tx, scope, idSchema.parse(req.params.sessionId))))
+workspaceRouter.get('/current/sessions/:sessionId/recordings/:recordingId/stream', streamWorkspaceRecording)
 workspaceRouter.get('/current', scoped((tx, scope) => service.workspaceSnapshot(tx, scope)))
 workspaceRouter.get('/current/members', scoped((tx, scope) => service.listWorkspaceMembers(tx, scope)))
 workspaceRouter.post('/current/members', scoped((tx, scope, req) => service.addExistingMember(tx, scope, req.body)))

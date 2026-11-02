@@ -238,9 +238,11 @@ model Workspace {
   databaseKey      String                  @default("primary")
   createdAt        DateTime                @default(now())
   updatedAt        DateTime                @updatedAt
+  sessions         Session[]
   members          WorkspaceMember[]
   features         WorkspaceFeature[]
   audit            WorkspaceAudit[]
+  @@unique([id, kind])
 }
 
 model WorkspaceMember {
@@ -562,6 +564,10 @@ model ReplayDeletion {
 }
 
 model Session {
+  // Legacy inserts use a database trigger to resolve the learner's Personal workspace.
+  workspaceId   String @default("")
+  workspaceKind WorkspaceKind @default(PERSONAL)
+  workspace     Workspace @relation(fields: [workspaceId, workspaceKind], references: [id, kind], onDelete: Cascade, onUpdate: NoAction)
   interviewRun         InterviewRun?
   bankFollowUpJobs      BankFollowUpJob[]
   id                   String    @id @default(cuid())
@@ -627,6 +633,7 @@ model Session {
   turns               SessionTurn[]
   preparationPractice PreparationPractice?
 
+  @@index([workspaceId, userId, startedAt])
   @@index([userId, startedAt])
   @@index([userId, module, endedAt])
   @@index([userId, retainedAt])

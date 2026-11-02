@@ -194,7 +194,7 @@ export function useConversationPersistence(): ConversationState & ConversationAP
       
       websocket.onopen = () => {
         console.log('🔌 Connected to conversation WebSocket');
-        websocket.send(JSON.stringify({ type: 'subscribe', sessionId }));
+        websocket.send(JSON.stringify({ type: 'subscribe', sessionId, accessToken: localStorage.getItem('spashtai_token') }));
         setWs(websocket);
       };
 

@@ -17,7 +17,7 @@ Base: `8e438a3`. No production changes or real invitations are part of this work
 
 ## Delivery boundaries
 
-1. **Foundation (this checkpoint):** tenant/membership/feature/audit schema, Personal backfill, current-role
+1. **Foundation (completed):** tenant/membership/feature/audit schema, Personal backfill, current-role
    platform administration, verified membership entry, membership acceptance, branding, feature delegation,
    safe path-based UI, short-lived workspace-only tokens, and two-tenant isolation checks.
 2. **Data plane:** classify all models; migrate each enabled product's records, raw SQL, media access,
@@ -30,7 +30,7 @@ Base: `8e438a3`. No production changes or real invitations are part of this work
 **Foundation is not product-data isolation.** Organization records are created in `FOUNDATION_ONLY` state.
 No API in this checkpoint changes that state; organization product features always report unavailable.
 The new UI does not mount existing Personal components or call global Admin analytics. Do not activate
-organization practices by flipping a feature setting. That requires checkpoint 2.
+organization practices by flipping a feature setting. That requires certification of each complete product data plane.
 
 ## Storage and authorization
 
@@ -67,3 +67,19 @@ are visible in the signed-in workspace list, with no claim that an email was sen
 
 After the tenancy decision, return to Feature Usage/UX timezone alignment and the Interviews reliability
 microphone/privacy/release work. They are independent from enabling multi-tenant customer data.
+
+## Session boundary checkpoint (implemented, not deployed)
+
+Session and its five child tables now enforce immutable workspace ownership and RLS. Existing activity
+stays Personal; legacy queries cannot see organization sessions. The optional read-only archive requires
+`WORKSPACE_SESSION_ARCHIVE_ENABLED=true` as well as workspace rollout. It returns only the current
+learner's content, even for tenant Owners/Admins. It does not create practices or enable voice.
+
+Personal WebSocket subscriptions now require authentication and recheck ownership before broadcasts.
+Deploy the web and server changes together when this branch is eventually approved for release.
+Runtime credentials must enforce RLS; startup refuses unsafe roles when workspace mode is enabled or
+organization sessions exist. Turning off the flag is not a substitute for a restricted runtime role.
+
+See [Session contract](TENANCY-SESSION-CONTRACT.md), [complete model inventory](TENANCY-DATA-INVENTORY.md)
+and [status](TENANCY-STATUS.md). Voice dispatch, storage upload/remote playback, workers, remaining product
+roots, analytics, recovery/cache scoping and invitation integration still require implementation.
