@@ -36,7 +36,7 @@ describe('organization scope access rules', () => {
 
   it('derives export actions from the workspace decision only', async () => {
     const none = await runWithDataScope(scope({}), () => getEffectiveExportFlags('learner'))
-    expect(none).toMatchObject({ enableTxtExport: false, enableAudioExport: false, enableReprocess: false, hideAudioDownload: true })
+    expect(none).toMatchObject({ enableTxtExport: false, enableAudioExport: false, enableReprocess: false, hideAudioDownload: false, hideTranscriptText: false })
     const all = await runWithDataScope(scope({ text_export: true, audio_export: true, reprocess: true }), () => getEffectiveExportFlags('learner'))
     expect(all).toMatchObject({ enableTxtExport: true, enableJsonExport: true, enableAudioExport: true, enableReprocess: true, hideAudioDownload: false })
   })

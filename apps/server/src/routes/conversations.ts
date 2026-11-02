@@ -31,8 +31,8 @@ export function setWebSocketServer(webSocketServer: WebSocketServer) {
   wss = webSocketServer
 }
 
-export function subscribeClientToSession(client: WebSocket, sessionId: unknown, accessToken: unknown) {
-  return subscriptions.subscribe(client, sessionId, accessToken)
+export function subscribeClientToSession(client: WebSocket, sessionId: unknown, accessToken: unknown, workspaceToken?: unknown) {
+  return subscriptions.subscribe(client, sessionId, accessToken, undefined, workspaceToken)
 }
 
 async function broadcastToSession(sessionId: string, message: unknown, tx?: Prisma.TransactionClient) {

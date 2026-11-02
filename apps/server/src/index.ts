@@ -1,7 +1,7 @@
 import 'dotenv/config'
 import { assertSafeWorkspaceStartup } from './workspaces/databaseSafety'
 import { workspaceRouter, platformWorkspacesRouter } from './workspaces/routes'
-import { bindWorkspaceRequest } from './workspaces/requestScope'
+import { bindWorkspaceRequest, reenterDataScope } from './workspaces/requestScope'
 import express from 'express'
 import cors from 'cors'
 import { createServer } from 'http'
@@ -335,6 +335,7 @@ app.post(
   '/sessions/:sessionId/recording/upload',
   requireAuth,
   recordingUpload.single('audio'),
+  reenterDataScope,
   uploadSessionRecording,
 )
 app.get('/sessions/:sessionId/recording/stream', requireAuthOrMediaToken, streamSessionRecording)
@@ -373,8 +374,13 @@ app.use('/api/downloads', requireAuth, downloadsRouter)
 app.use('/api/replay', requireAuth, requireFeature('replay'), replayRouter)
 
 // local audio serving for development
-app.get('/audio/local/:date/:sessionId/:filename', (req, res) => {
+app.get('/audio/local/:date/:sessionId/:filename', async (req, res) => {
   const { date, sessionId, filename } = req.params
+  // Unauthenticated legacy path: serve only Personal activity. Organization
+  // sessions are invisible here and their media is never served by path.
+  if (req.dataScope || !(await prisma.session.count({ where: { id: sessionId } }))) {
+    return res.status(404).json({ error: 'Audio file not found' })
+  }
   const filePath = path.join(date, sessionId, filename)
   const audioPath = path.join(process.env.LOCAL_AUDIO_PATH || './audio_storage', filePath)
   
@@ -434,7 +440,7 @@ wss.on('connection', (ws) => {
     try {
       const data = JSON.parse(message.toString())
       if (data.type === 'subscribe' && data.sessionId) {
-        const allowed = await subscribeClientToSession(ws, data.sessionId, data.accessToken)
+        const allowed = await subscribeClientToSession(ws, data.sessionId, data.accessToken, data.workspaceToken)
         if (ws.readyState === 1) ws.send(JSON.stringify({ type: allowed ? 'subscribed' : 'subscription_error', code: allowed ? undefined : 'ACCESS_UNAVAILABLE' }))
       }
     } catch (error) {

@@ -3,10 +3,11 @@ import { createHash, randomUUID } from 'crypto'
 import { execFile } from 'child_process'
 import { join, dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
-import { rename, unlink, writeFile } from 'fs/promises'
+import { mkdir, rename, unlink, writeFile } from 'fs/promises'
 import { promisify } from 'util'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
+import { activityMediaDir, mediaPathAllowed } from '../../lib/mediaStorage'
 
 const RECORDING_PRIORITY = ['user', 'room_composite', 'merged_audio', 'agent'] as const
 
@@ -198,6 +199,7 @@ function resolveFilePath(storedPath: string): string | null {
   } else if (!storedPath.startsWith('/') && !storedPath.match(/^[A-Za-z]:\\/)) {
     local = join(audioRoot, storedPath)
   }
+  if (!mediaPathAllowed(local, undefined, audioRoot)) return null
 
   return existsSync(local) ? local : null
 }
@@ -286,7 +288,9 @@ export async function resolveElevateSessionAudio(
       .update(segmentFiles.map((f) => `${f.audioPath}:${f.updatedAt.toISOString()}`).join('|'))
       .digest('hex')
       .slice(0, 16)
-    const mergedPath = join(audioRoot, `elevate-merged-${sessionId}-${signature}.webm`)
+    const mergedDir = activityMediaDir(audioRoot, 'sessions', sessionId)
+    await mkdir(mergedDir, { recursive: true })
+    const mergedPath = join(mergedDir, `elevate-merged-${sessionId}-${signature}.webm`)
     await ensureMergedRecording(
       mergedPath,
       segmentFiles.map((file) => file.audioPath),

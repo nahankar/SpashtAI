@@ -104,6 +104,7 @@ logger.setLevel(logging.INFO)
 SERVER_URL = os.getenv("SERVER_URL", "http://localhost:4000")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 INTERNAL_AGENT_TOKEN = os.getenv("INTERNAL_AGENT_TOKEN", "dev-internal-agent-token")
+from agent_scope import agent_headers, set_workspace_scope
 
 # Timezone configuration - Indian Standard Time
 IST = pytz.timezone('Asia/Kolkata')
@@ -187,7 +188,7 @@ async def fetch_session_history(session_id: str, max_messages: int = 60) -> list
         async with aiohttp.ClientSession() as session:
             async with session.get(
                 url,
-                headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
+                headers=agent_headers(),
                 timeout=aiohttp.ClientTimeout(total=5.0),
             ) as response:
                 if response.status != 200:
@@ -217,7 +218,7 @@ async def fetch_session_lifecycle(session_id: str) -> str:
         async with aiohttp.ClientSession() as session:
             async with session.get(
                 url,
-                headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
+                headers=agent_headers(),
                 timeout=aiohttp.ClientTimeout(total=5.0),
             ) as response:
                 if response.status == 410:
@@ -263,7 +264,7 @@ async def fetch_coaching_context(session_id: str, focus_area: str, max_retries: 
                 async with session.get(
                     url,
                     params={"sessionId": session_id, "focusArea": focus_area},
-                    headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
+                    headers=agent_headers(),
                     timeout=aiohttp.ClientTimeout(total=5.0),
                 ) as response:
                     _debug_log(f"Response status: {response.status} (attempt {attempt+1}/{max_retries})")
@@ -372,7 +373,7 @@ async def fetch_agent_prompt(key: str) -> str | None:
         async with aiohttp.ClientSession() as session:
             async with session.get(
                 url,
-                headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
+                headers=agent_headers(),
                 timeout=aiohttp.ClientTimeout(total=5.0),
             ) as response:
                 if response.status != 200:
@@ -869,7 +870,7 @@ class ConversationLogger:
             
             async with self.session.post(
                 f"{SERVER_URL}/internal/sessions/{self.session_id}/messages",
-                headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
+                headers=agent_headers(),
                 json=payload,
                 timeout=aiohttp.ClientTimeout(total=5.0)
             ) as response:
@@ -1053,7 +1054,7 @@ class EgressRecorder:
                 async with session.post(
                     url,
                     json=payload,
-                    headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
+                    headers=agent_headers(),
                     timeout=aiohttp.ClientTimeout(total=5.0)
                 ) as response:
                     if response.status in [200, 201]:
@@ -1215,7 +1216,7 @@ class TrackEgressRecorder:
                 async with session.post(
                     url,
                     json=payload,
-                    headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
+                    headers=agent_headers(),
                     timeout=aiohttp.ClientTimeout(total=5.0)
                 ) as response:
                     if response.status in [200, 201]:
@@ -1366,7 +1367,7 @@ class RoomCompositeEgressRecorder:
                 async with session.post(
                     url,
                     json=payload,
-                    headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
+                    headers=agent_headers(),
                     timeout=aiohttp.ClientTimeout(total=5.0)
                 ) as response:
                     if response.status in [200, 201]:
@@ -1494,7 +1495,7 @@ class AudioMerger:
                 async with session.post(
                     f"{SERVER_URL}/sessions/{self.session_id}/recording",
                     json=payload,
-                    headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
+                    headers=agent_headers(),
                     timeout=aiohttp.ClientTimeout(total=5.0)
                 ) as response:
                     if response.status in [200, 201]:
@@ -1549,6 +1550,14 @@ async def entrypoint(ctx: JobContext):
                 logger.info(f"📦 Session ID loaded from room metadata: {session_id}")
     except Exception as e:
         logger.warning(f"⚠️ Failed to parse room metadata: {e}")
+
+    job_meta: dict = {}
+    try:
+        if hasattr(ctx, 'job') and getattr(ctx.job, 'metadata', None):
+            job_meta = json.loads(ctx.job.metadata)
+    except Exception:
+        job_meta = {}
+    set_workspace_scope(room_meta, job_meta)
 
     # 2) Try job metadata as backup
     if not session_id:
@@ -2763,7 +2772,7 @@ async def entrypoint(ctx: JobContext):
                             async with session.post(
                                 end_url,
                                 json=end_payload,
-                                headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
+                                headers=agent_headers(),
                                 timeout=aiohttp.ClientTimeout(total=5.0),
                             ) as response:
                                 if response.status == 200:
@@ -2820,7 +2829,7 @@ async def entrypoint(ctx: JobContext):
                             async with _ts.post(
                                 turns_url,
                                 json=post_body,
-                                headers={"x-internal-agent-token": INTERNAL_AGENT_TOKEN},
+                                headers=agent_headers(),
                                 timeout=aiohttp.ClientTimeout(total=10.0),
                             ) as resp:
                                 if resp.status not in (200, 201):
@@ -2866,7 +2875,7 @@ async def entrypoint(ctx: JobContext):
                 if not segment_id:
                     await asyncio.sleep(3)
                 async with aiohttp.ClientSession() as _as:
-                    headers = {"x-internal-agent-token": INTERNAL_AGENT_TOKEN}
+                    headers = agent_headers()
                     analyze_url = f"{SERVER_URL}/sessions/{session_id}/analyze"
                     async with _as.post(
                         analyze_url,

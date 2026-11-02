@@ -2,6 +2,8 @@ import type { Request, Response } from 'express'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/prisma'
 import { isPrivilegedRole } from '../lib/userExportFlags'
+import { reserveWorkspaceVoiceSlot } from '../workspaces/quotas'
+import { WorkspaceError } from '../workspaces/contracts'
 import {
   activeSegmentDurationSec,
   mergeSegmentAudioStatus,
@@ -81,6 +83,7 @@ export async function createSessionSegment(req: Request, res: Response) {
               },
             })
           }
+          await reserveWorkspaceVoiceSlot(tx)
           const latest = await tx.sessionSegment.findFirst({
             where: { sessionId },
             orderBy: { segmentIndex: 'desc' },
@@ -110,6 +113,12 @@ export async function createSessionSegment(req: Request, res: Response) {
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       )
     } catch (error) {
+      if (error instanceof WorkspaceError) {
+        return res.status(error.status).json({ error: error.message, code: error.code })
+      }
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') {
+        return res.status(409).json({ error: 'Live practice is starting elsewhere. Try again.', code: 'SEGMENT_RETRY' })
+      }
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         const raced = await prisma.sessionSegment.findUnique({ where: { id } })
         if (raced?.sessionId === sessionId && raced.roomName === roomName) {
@@ -125,7 +134,7 @@ export async function createSessionSegment(req: Request, res: Response) {
     if (error instanceof SessionDiscardedError || error instanceof SessionMissingError) {
       return res.status(error.status).json({ error: error.message })
     }
-    console.error('Error creating session segment:', error)
+    console.error('Error creating session segment:', error instanceof Error ? error.message : error)
     return res.status(500).json({ error: 'Failed to create session segment' })
   }
 }

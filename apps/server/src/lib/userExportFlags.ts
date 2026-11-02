@@ -37,11 +37,12 @@ export function isPrivilegedRole(role?: string): boolean {
  * decision; a platform role or Personal account switch grants nothing there.
  */
 export function organizationExportFlags(scope: DataScope): UserExportFlags {
+  // Learners always review their own transcript and playback; only exports are entitlements.
   const text = Boolean(scope.features.text_export)
   return {
     hideTranscriptText: false,
-    hideTranscriptJsonExport: !text,
-    hideAudioDownload: !scope.features.audio_export,
+    hideTranscriptJsonExport: false,
+    hideAudioDownload: false,
     enableTxtExport: text,
     enableJsonExport: text,
     enableAudioExport: Boolean(scope.features.audio_export),

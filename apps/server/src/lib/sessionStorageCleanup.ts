@@ -5,6 +5,7 @@ import { readdir, unlink } from 'fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { awsCredentialsConfig } from './awsCredentials'
+import { activityMediaDir } from './mediaStorage'
 
 const moduleDir = dirname(fileURLToPath(import.meta.url))
 const serverAudioRoot = process.env.LOCAL_AUDIO_PATH
@@ -201,7 +202,7 @@ export async function deleteRecordingArtifact(storedPath: string): Promise<void>
 async function generatedMergedFiles(sessionId: string): Promise<string[]> {
   const prefix = `elevate-merged-${sessionId}-`
   const files: string[] = []
-  for (const root of [serverAudioRoot, agentAudioRoot]) {
+  for (const root of [serverAudioRoot, agentAudioRoot, activityMediaDir(serverAudioRoot, 'sessions', sessionId)]) {
     if (!existsSync(root)) continue
     const names = await readdir(root)
     names

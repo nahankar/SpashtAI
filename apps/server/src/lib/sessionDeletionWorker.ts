@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto'
 import { prisma } from './prisma'
 import { logger } from './logger'
 import { deleteSessionStorage, stopSessionEgress } from './sessionStorageCleanup'
+import { sweepAllScopes } from '../workspaces/jobScopes'
 
 const activeJobs = new Set<string>()
 const retryTimers = new Map<string, NodeJS.Timeout>()
@@ -256,14 +257,11 @@ export async function sweepPendingDeletions(): Promise<void> {
 }
 
 export function startSessionDeletionWorker(): void {
-  void sweepPendingDeletions().catch((error) => {
+  const sweep = () => sweepAllScopes('session_deletion', sweepPendingDeletions).catch((error) => {
     logger.error({ err: error }, 'Failed to sweep pending session deletions')
   })
+  void sweep()
   if (sweepTimer) return
-  sweepTimer = setInterval(() => {
-    void sweepPendingDeletions().catch((error) => {
-      logger.error({ err: error }, 'Failed to sweep pending session deletions')
-    })
-  }, 60_000)
+  sweepTimer = setInterval(() => { void sweep() }, 60_000)
   sweepTimer.unref()
 }

@@ -13,6 +13,7 @@ import { LIVE_RECORDING_CLOCK_VERSION, mapLiveRecordingEvidence, readStreamClock
 import { calculateSkillScores, type TextSignals } from '../analytics/skillScores'
 import { assessPaceEvidence } from '../analytics/pace'
 import { liveEvidenceSummary } from '../analytics/liveDeliveryEvidence'
+import { sweepAllScopes } from '../workspaces/jobScopes'
 
 const LEASE_MS = 20 * 60_000
 const JOB_TIMEOUT_MS = 15 * 60_000
@@ -314,7 +315,9 @@ export async function sweepDeliveryAlignment(sessionId?: string): Promise<void> 
 
 export function startDeliveryAlignmentWorker(): void {
   if (timer) return
-  void sweepDeliveryAlignment()
-  timer = setInterval(() => { void sweepDeliveryAlignment() }, 60_000)
+  const sweep = () => sweepAllScopes('delivery_alignment', () => sweepDeliveryAlignment())
+    .catch((error) => console.error('[delivery-alignment] sweep failed:', error))
+  void sweep()
+  timer = setInterval(() => { void sweep() }, 60_000)
   timer.unref?.()
 }

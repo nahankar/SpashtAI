@@ -1,4 +1,5 @@
 """Voice adapter for the gated bank-question pilot. No communication profile/LLM."""
+from agent_scope import agent_headers
 import asyncio
 import json
 import logging
@@ -26,7 +27,7 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
             for attempt in range(3):
                 try:
                     async with http.request(method, base+path, json=body,
-                        headers={"x-internal-agent-token": token}) as response:
+                        headers=agent_headers()) as response:
                         if response.status < 400:
                             return await response.json()
                         if response.status < 500 and response.status != 429:
@@ -46,7 +47,7 @@ async def run_interview_voice(ctx, participant, session_id: str, segment_id: str
             for attempt in range(3):
                 try:
                     async with http.request(method, base+path, json=body,
-                        headers={"x-internal-agent-token": token}) as response:
+                        headers=agent_headers()) as response:
                         try:
                             payload = await response.json()
                         except (aiohttp.ContentTypeError, json.JSONDecodeError, ValueError):

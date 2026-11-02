@@ -1,4 +1,6 @@
 import type { Request, Response } from 'express'
+import { currentDataScope } from '../lib/dataScope'
+import { signAgentScopeToken } from '../lib/jwt'
 import { AccessToken, RoomServiceClient, AgentDispatchClient } from 'livekit-server-sdk'
 import { prisma } from '../lib/prisma'
 import { resolveLivekitAccess } from '../lib/livekitAccess'
@@ -61,6 +63,12 @@ function parseRoomMetadata(value: string | undefined): Record<string, unknown> {
   }
 }
 
+function agentWorkspaceScope(sessionId: string): string | undefined {
+  const scope = currentDataScope()
+  if (!scope) return undefined
+  return signAgentScopeToken({ sessionId, userId: scope.actorId, workspaceId: scope.workspaceId, membershipId: scope.membershipId })
+}
+
 function normalizeHushEnabled(value: unknown): boolean {
   return value === true || (typeof value === 'string' && ['1', 'true', 'yes'].includes(value.trim().toLowerCase()))
 }
@@ -102,6 +110,8 @@ export async function getLivekitToken(req: Request, res: Response) {
     const roomService = new RoomServiceClient(httpUrl, apiKey, apiSecret)
     const roomMeta: Record<string, string | boolean | undefined | null> = {
       sessionId,
+      // Organization sessions: the agent echoes this signed scope on every callback.
+      workspaceScope: agentWorkspaceScope(sessionId!),
       segmentId,
       interviewRunId: session.interviewRun?.id,
       userName,
@@ -186,7 +196,7 @@ export async function getLivekitToken(req: Request, res: Response) {
           console.log(`ℹ️ Agent already active in room ${room}; skipping new dispatch`)
         } else {
           await agentClient.createDispatch(room, '', {
-            metadata: JSON.stringify({ sessionId })
+            metadata: JSON.stringify({ sessionId, workspaceScope: agentWorkspaceScope(sessionId!) })
           })
           const staleCount = existingDispatches?.length || 0
           if (staleCount > 0) {
@@ -248,7 +258,7 @@ export async function dispatchAgent(req: Request, res: Response) {
     // createDispatch(roomName, agentName, options)
     const dispatches = await agentClient.listDispatch(room!)
     if (hasActiveDispatchJobs(dispatches as any[])) return res.json({ alreadyActive: true })
-    const dispatch = await agentClient.createDispatch(room!, '', { metadata: JSON.stringify({ sessionId }) })
+    const dispatch = await agentClient.createDispatch(room!, '', { metadata: JSON.stringify({ sessionId, workspaceScope: agentWorkspaceScope(sessionId!) }) })
     console.log(`✅ Agent dispatched:`, dispatch)
     
     res.json({ success: true, dispatch })

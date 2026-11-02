@@ -148,6 +148,14 @@ CREATE POLICY platform_feedback_update ON "UserFeedback" FOR UPDATE USING (
   WITH CHECK (coalesce(current_setting('app.workspace_platform_admin',true),'')='true');
 CREATE POLICY session_cleanup_boundary ON "Session" FOR ALL USING (
   "discardedAt" IS NOT NULL AND public.workspace_cleanup_reads("workspaceId"));
+-- Cleanup removes only Pulse evidence of a discarded voice session in the same workspace
+-- (DELETE with a filter also requires the rows to be selectable).
+CREATE FUNCTION public.workspace_pulse_cleanup(p_workspace text, p_source text, p_session text) RETURNS boolean
+LANGUAGE sql STABLE AS $$
+  SELECT public.workspace_cleanup_reads(p_workspace) AND p_source='elevate' AND EXISTS (
+    SELECT 1 FROM public."Session" s WHERE s.id=p_session AND s."workspaceId"=p_workspace AND s."discardedAt" IS NOT NULL) $$;
+CREATE POLICY pulse_cleanup_read ON "ProgressPulse" FOR SELECT USING (public.workspace_pulse_cleanup("workspaceId", source, "sessionId"));
+CREATE POLICY pulse_cleanup_delete ON "ProgressPulse" FOR DELETE USING (public.workspace_pulse_cleanup("workspaceId", source, "sessionId"));
 
 -- Children inherit visibility through their unique parent. Manager aggregate reads expose
 -- parents only, so raw child content (transcripts, turns, recordings, answers) is never

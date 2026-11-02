@@ -6,6 +6,7 @@ import {
   selectBestPaceEvidence,
 } from '../analytics/pace'
 import { lockWritableSession } from './sessionDiscard'
+import { sweepAllScopes } from '../workspaces/jobScopes'
 
 const SWEEP_INTERVAL_MS = 5 * 60 * 1000
 export const PACE_RECONCILIATION_BATCH_SIZE = 100
@@ -257,9 +258,9 @@ export function queuePaceReconciliation(sessionId: string): void {
 
 export function startPaceReconciliationWorker(): void {
   if (sweepTimer) return
-  void sweepEndedSessionPace()
-  sweepTimer = setInterval(() => {
-    void sweepEndedSessionPace()
-  }, SWEEP_INTERVAL_MS)
+  const sweep = () => sweepAllScopes('pace_reconciliation', sweepEndedSessionPace)
+    .catch((error) => console.error('Pace reconciliation sweep failed:', error))
+  void sweep()
+  sweepTimer = setInterval(() => { void sweep() }, SWEEP_INTERVAL_MS)
   sweepTimer.unref?.()
 }

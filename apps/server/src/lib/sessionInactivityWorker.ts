@@ -9,6 +9,7 @@ import { queuePaceReconciliation, requeuePaceReconciliationData } from './paceRe
 import { awardSessionActivePoints } from './points'
 import { runSessionAnalysis } from '../routes/analytics'
 import { recordProductEvent } from '../analytics/recordProductEvent'
+import { sweepAllScopes } from '../workspaces/jobScopes'
 
 export const SESSION_INACTIVITY_TIMEOUT_MS = 24 * 60 * 60 * 1000
 const SWEEP_INTERVAL_MS = 15 * 60 * 1000
@@ -228,9 +229,9 @@ export async function sweepInactiveSessions(now = new Date()): Promise<number> {
 
 export function startSessionInactivityWorker(): void {
   if (sweepTimer) return
-  void sweepInactiveSessions().catch((err) => logger.error({ err }, 'inactive session sweep failed'))
-  sweepTimer = setInterval(() => {
-    void sweepInactiveSessions().catch((err) => logger.error({ err }, 'inactive session sweep failed'))
-  }, SWEEP_INTERVAL_MS)
+  const sweep = () => sweepAllScopes('session_inactivity', () => sweepInactiveSessions())
+    .catch((err) => logger.error({ err }, 'inactive session sweep failed'))
+  void sweep()
+  sweepTimer = setInterval(() => { void sweep() }, SWEEP_INTERVAL_MS)
   sweepTimer.unref?.()
 }

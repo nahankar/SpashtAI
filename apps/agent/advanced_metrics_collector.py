@@ -411,7 +411,8 @@ class AdvancedMetricsCollector:
             SERVER_URL = os.getenv("SERVER_URL", "http://localhost:4000")
             INTERNAL_AGENT_TOKEN = os.getenv("INTERNAL_AGENT_TOKEN", "dev-internal-agent-token")
             # Server's `requireAuthOrAgent` accepts this header in lieu of a user JWT.
-            agent_headers = {"x-internal-agent-token": INTERNAL_AGENT_TOKEN}
+            from agent_scope import agent_headers as _scoped_headers
+            agent_headers = _scoped_headers()
             
             async with aiohttp.ClientSession() as http_session:
                 # 1. Save basic metrics first (includes token counts for billing)

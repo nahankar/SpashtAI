@@ -35,6 +35,7 @@ import {
   SessionDiscardedError,
   SessionMissingError,
 } from '../lib/sessionDiscard'
+import { activityMediaDir } from '../lib/mediaStorage'
 
 // Absolute base dir for client-uploaded recordings. Stored as an absolute
 // filePath so resolveElevateSessionAudio's absolute-path branch finds it.
@@ -197,9 +198,10 @@ export async function uploadSessionRecording(req: Request, res: Response) {
       })
     }
 
-    mkdirSync(AUDIO_ROOT, { recursive: true })
+    const mediaDir = activityMediaDir(AUDIO_ROOT, 'sessions', sessionId)
+    mkdirSync(mediaDir, { recursive: true })
     const filename = segmentRecordingFilename(segmentId)
-    const absPath = path.join(AUDIO_ROOT, filename)
+    const absPath = path.join(mediaDir, filename)
     const tempPath = `${absPath}.${randomUUID()}.tmp`
     await writeFile(tempPath, file.buffer, { flag: 'wx' })
     const decodedDurationSec = await measureDecodedAudioDuration(tempPath)

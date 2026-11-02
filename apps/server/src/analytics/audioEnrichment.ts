@@ -13,6 +13,7 @@ import {
 } from './audioStatus'
 import { lockWritableSession } from '../lib/sessionDiscard'
 import { calculateSkillScores, type TextSignals } from './skillScores'
+import { sweepAllScopes } from '../workspaces/jobScopes'
 
 const SIGNAL_API_URL = process.env.SIGNAL_API_URL || 'http://localhost:4001'
 const INTERNAL_AGENT_TOKEN =
@@ -588,9 +589,9 @@ async function claimAudioEnrichmentRetry(
 
 export function startAudioEnrichmentRetryWorker(): void {
   if (retryTimer) return
-  void sweepAudioEnrichmentRetries()
-  retryTimer = setInterval(() => {
-    void sweepAudioEnrichmentRetries()
-  }, 60_000)
+  const sweep = () => sweepAllScopes('audio_enrichment', () => sweepAudioEnrichmentRetries())
+    .catch((error) => console.error('Audio enrichment retry sweep failed:', error))
+  void sweep()
+  retryTimer = setInterval(() => { void sweep() }, 60_000)
   retryTimer.unref?.()
 }
