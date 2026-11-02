@@ -8,6 +8,13 @@ export type GoogleSignInResult =
   | { ok: true; user: User; created: boolean }
   | { ok: false; status: number; body: { error: string; message?: string } }
 
+/** Signup controls read once, before any transaction, so nothing inside it borrows a second pool connection. */
+export interface SignupPolicy { paused: boolean; message: string }
+export async function loadSignupPolicy(): Promise<SignupPolicy> {
+  const [paused, message] = await Promise.all([areSignupsPaused(), getSignupsPausedMessage()])
+  return { paused, message }
+}
+
 export function isUniqueViolation(err: unknown) {
   return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002'
 }
@@ -22,11 +29,15 @@ export async function resolveGoogleAccount(
   db: Prisma.TransactionClient,
   googleUser: GoogleUserInfo,
   req: Request,
-  /**
-   * Only for accepting a valid invitation whose verified Google email matched: a new learner (USER) account may
-   * be created while signups are paused. Every other signup path must leave this unset.
-   */
-  opts: { invitationBypassesSignupPause?: boolean } = {},
+  opts: {
+    /** Loaded by the caller outside the transaction (see loadSignupPolicy); only `db` is used in here. */
+    policy: SignupPolicy
+    /**
+     * Only for accepting a valid invitation whose verified Google email matched: a new learner (USER) account may
+     * be created while signups are paused. Every other signup path must leave this unset.
+     */
+    invitationBypassesSignupPause?: boolean
+  },
 ): Promise<GoogleSignInResult> {
   let user = await db.user.findFirst({
     where: {
@@ -53,12 +64,8 @@ export async function resolveGoogleAccount(
       },
     })
   } else {
-    if (!opts.invitationBypassesSignupPause && (await areSignupsPaused())) {
-      return {
-        ok: false,
-        status: 403,
-        body: { error: 'signups_paused', message: await getSignupsPausedMessage() },
-      }
+    if (!opts.invitationBypassesSignupPause && opts.policy.paused) {
+      return { ok: false, status: 403, body: { error: 'signups_paused', message: opts.policy.message } }
     }
 
     user = await db.user.create({
@@ -112,6 +119,7 @@ export async function withAccountRaceRetry<T>(fn: (tx: Prisma.TransactionClient)
 }
 
 /** `POST /api/auth/google`: one transaction per attempt, so a racing signup of the same address never duplicates. */
-export function signInWithGoogleUser(googleUser: GoogleUserInfo, req: Request): Promise<GoogleSignInResult> {
-  return withAccountRaceRetry((tx) => resolveGoogleAccount(tx, googleUser, req))
+export async function signInWithGoogleUser(googleUser: GoogleUserInfo, req: Request): Promise<GoogleSignInResult> {
+  const policy = await loadSignupPolicy()
+  return withAccountRaceRetry((tx) => resolveGoogleAccount(tx, googleUser, req, { policy }))
 }

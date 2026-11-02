@@ -1,10 +1,9 @@
 import type { Request } from 'express'
 import type { User } from '@prisma/client'
 import type { GoogleUserInfo } from './google-auth'
-import { resolveGoogleAccount, withAccountRaceRetry } from './googleSignIn'
+import { loadSignupPolicy, resolveGoogleAccount, withAccountRaceRetry } from './googleSignIn'
 import { effectiveStatus } from './invitations'
 import { writeAcceptanceAudit } from './invitationAudit'
-import { areSignupsPaused } from './platformSettings'
 
 export type AcceptanceFailure = { ok: false; status: number; body: { error: string; message?: string; invitedEmail?: string } }
 export type AcceptanceResult =
@@ -34,9 +33,9 @@ export async function acceptInvitation(
   googleUser: GoogleUserInfo,
   req: Request,
 ): Promise<AcceptanceResult> {
-  // Read once, outside the transaction: the flag only labels the audit row. Whether an invitation may create an
-  // account while paused depends on the invitation being pending, which is checked under the lock.
-  const signupsPaused = await areSignupsPaused()
+  // Read once, outside the transaction, so the transaction never needs a second pool connection. Whether an
+  // invitation may create an account while paused depends on the invitation being pending, checked under the lock.
+  const policy = await loadSignupPolicy()
   try {
     return await withAccountRaceRetry(async (tx) => {
       await tx.$queryRaw`SELECT 1 FROM "UserInvitation" WHERE "id" = ${invitation.id} FOR UPDATE`
@@ -57,7 +56,7 @@ export async function acceptInvitation(
 
       if (status === 'accepted') {
         // Idempotent repeat: plain sign-in for the account that accepted it.
-        const account = await resolveGoogleAccount(tx, googleUser, req)
+        const account = await resolveGoogleAccount(tx, googleUser, req, { policy })
         if (!account.ok) return account
         if (account.user.id !== inv.acceptedUserId) throw new Abort(fail(409, { error: 'invitation_used', message: 'This invitation has already been used.' }))
         return { ok: true, user: account.user, newAccount: false, alreadyAccepted: true, signupsPausedBypass: false }
@@ -65,9 +64,9 @@ export async function acceptInvitation(
 
       // Pending and unexpired under the lock: this exact invited address may get a USER account even while
       // signups are paused (deliberate policy exception; see docs/INVITATIONS.md).
-      const account = await resolveGoogleAccount(tx, googleUser, req, { invitationBypassesSignupPause: true })
+      const account = await resolveGoogleAccount(tx, googleUser, req, { policy, invitationBypassesSignupPause: true })
       if (!account.ok) return account
-      const bypassed = account.created && signupsPaused
+      const bypassed = account.created && policy.paused
       await tx.userInvitation.update({
         where: { id: inv.id },
         data: { status: 'ACCEPTED', pendingKey: null, acceptedAt: new Date(), acceptedUserId: account.user.id },
