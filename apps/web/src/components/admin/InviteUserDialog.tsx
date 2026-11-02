@@ -32,6 +32,7 @@ export function InviteUserDialog({
   const [step, setStep] = useState<Step>('form')
   const [email, setEmail] = useState('')
   const [name, setName] = useState('')
+  const [subject, setSubject] = useState(''), [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<{ invitation: Invitation; notice: string } | null>(null)
@@ -42,7 +43,7 @@ export function InviteUserDialog({
   }, [open])
 
   const reset = () => {
-    setStep('form'); setEmail(''); setName(''); setError(''); setBusy(false); setResult(null)
+    setStep('form'); setEmail(''); setName(''); setSubject(''); setMessage(''); setError(''); setBusy(false); setResult(null)
   }
   const close = (next: boolean) => {
     if (!next) reset()
@@ -53,7 +54,7 @@ export function InviteUserDialog({
     setBusy(true)
     setError('')
     try {
-      const res = await createInvitation({ email: email.trim(), name: name.trim() || undefined, confirmExistingUser })
+      const res = await createInvitation({ email: email.trim(), name: name.trim() || undefined, confirmExistingUser, emailContent: { subject, message } })
       setResult(res)
       setStep('done')
       onSent?.(res.invitation)
@@ -105,6 +106,9 @@ export function InviteUserDialog({
               <Label htmlFor="invite-name">Name (optional)</Label>
               <Input id="invite-name" value={name} maxLength={120} onChange={(e) => setName(e.target.value)} placeholder="Recipient's name" />
             </div>
+            <label className="block text-sm">Email subject (optional)<Input maxLength={150} value={subject} onChange={e => setSubject(e.target.value)} /></label>
+            <label className="block text-sm">Email message (optional)<textarea className="w-full rounded border p-2" rows={4} maxLength={5000} value={message} onChange={e => setMessage(e.target.value)} /></label>
+            <p className="text-xs text-muted-foreground">The acceptance link, expiry and sign-in instructions are always included.</p>
             <p className="text-xs text-muted-foreground">
               The recipient signs in with Google using this address, so it must be a Google Account (Gmail, Google Workspace, or
               another address registered with Google). Email code and magic-link sign-in are not available yet.

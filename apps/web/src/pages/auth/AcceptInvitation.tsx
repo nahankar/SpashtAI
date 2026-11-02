@@ -1,3 +1,5 @@
+import { EnrollmentFields, type EnrollmentField, type EnrollmentResponses } from '@/workspaces/EnrollmentForm'
+import { Button } from '@/components/ui/button'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Loader2, MailCheck, TriangleAlert, UserRoundCog } from 'lucide-react'
@@ -16,6 +18,7 @@ interface Lookup {
   invitedEmail: string
   workspaceInvitation?: boolean
   proposedRole?: string
+  enrollmentFields?: EnrollmentField[]
   expiresAt: string
 }
 
@@ -43,6 +46,8 @@ export function AcceptInvitation() {
   const [loadError, setLoadError] = useState(token ? '' : 'This invitation link is incomplete. Open the link from your invitation email again.')
   const [problem, setProblem] = useState<Problem | null>(null)
   const [accepting, setAccepting] = useState(false)
+  const [responses, setResponses] = useState<EnrollmentResponses>({})
+  const [detailsReady, setDetailsReady] = useState(false)
   const { fetchCurrentUser } = useAuth()
 
   useEffect(() => {
@@ -57,7 +62,7 @@ export function AcceptInvitation() {
     setProblem(null)
     setAccepting(true)
     try {
-      const { ok, data } = await post<{ token: string; user: { needsProfileCompletion?: boolean }; workspacePath?: string }>('/api/invitations/accept', { token, credential })
+      const { ok, data } = await post<{ token: string; user: { needsProfileCompletion?: boolean }; workspacePath?: string }>('/api/invitations/accept', { token, credential, enrollmentResponses: responses })
       if (!ok) {
         const kind = data.error === 'wrong_account' ? 'wrong_account' : data.error ? 'blocked' : 'error'
         setProblem({ kind, message: data.message || data.error || 'Could not accept this invitation.' })
@@ -119,7 +124,8 @@ export function AcceptInvitation() {
                 <p className="flex gap-2 rounded-md bg-destructive/10 p-3 text-sm text-destructive"><TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />{problem.message}</p>
               )}
 
-              {accepting ? (
+              {!!lookup.enrollmentFields?.length && <form className="space-y-3" onSubmit={e => { e.preventDefault(); setDetailsReady(true) }}><h2 className="font-semibold">Workspace details</h2><p className="text-sm">Shared with this workspace’s administrators. Your regular profile details are completed separately if needed.</p><EnrollmentFields fields={lookup.enrollmentFields} values={responses} onChange={v => { setResponses(v); setDetailsReady(false) }} /><Button type="submit" disabled={accepting}>{detailsReady ? 'Details ready' : 'Continue with these details'}</Button></form>}
+              {lookup.enrollmentFields?.length && !detailsReady ? <p className="text-sm">Complete the workspace details above to continue with Google.</p> : accepting ? (
                 <div className="flex items-center justify-center gap-2 py-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Accepting invitation…</div>
               ) : (
                 <GoogleSignInButton label="signin_with" onCredential={handleCredential} onError={(message) => setProblem({ kind: 'error', message })} />

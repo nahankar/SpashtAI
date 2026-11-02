@@ -26,6 +26,7 @@ router.post('/lookup', invitationAcceptLimiter, async (req: Request, res: Respon
       expiresAt: inv.expiresAt,
       workspaceInvitation: Boolean(inv.workspaceId),
       proposedRole: inv.proposedRole,
+      enrollmentFields: inv.status === 'PENDING' && effectiveStatus(inv) === 'pending' ? inv.enrollmentFields : [],
     })
   } catch (err) {
     logger.error({ err }, 'Invitation lookup failed')

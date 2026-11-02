@@ -1,4 +1,6 @@
 import crypto from 'crypto'
+import { reserveInvitationSend } from './invitationBatch'
+import { emailContentSchema } from '../workspaces/enrollment'
 import { Prisma, type InvitationDeliveryStatus, type UserInvitation } from '@prisma/client'
 import { z } from 'zod'
 import { prisma } from './prisma'
@@ -41,6 +43,7 @@ export const invitationInputSchema = z.object({
   email: z.string().trim().toLowerCase().email().max(254),
   name: z.string().trim().max(120).optional().transform((v) => v || undefined),
   confirmExistingUser: z.boolean().optional(),
+  emailContent: emailContentSchema.optional(),
 })
 
 /** Stored PENDING rows past their expiry are reported as expired. */
@@ -130,15 +133,16 @@ function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
 }
 
-export function buildInvitationEmail(opts: { recipientName?: string | null; acceptUrl: string; expiresAt: Date; workspaceName?: string }) {
+export function buildInvitationEmail(opts: { recipientName?: string | null; acceptUrl: string; expiresAt: Date; workspaceName?: string; emailSubject?: string | null; emailMessage?: string | null }) {
   const greeting = opts.recipientName ? `Hi ${opts.recipientName},` : 'Hi,'
   const expires = opts.expiresAt.toUTCString()
-  const subject = opts.workspaceName ? `You're invited to ${opts.workspaceName} on SpashtAI` : "You're invited to SpashtAI"
+  const subject = opts.emailSubject || (opts.workspaceName ? `You're invited to ${opts.workspaceName} on SpashtAI` : "You're invited to SpashtAI")
   const introduction = opts.workspaceName ? `You have been invited to join the ${opts.workspaceName} workspace on SpashtAI. Your Personal history stays separate.` : 'You have been invited to join SpashtAI, the AI communication coach, as a learner.'
   const text = [
     greeting,
     '',
     introduction,
+    ...(opts.emailMessage ? ['', opts.emailMessage] : []),
     '',
     'Accept your invitation:',
     opts.acceptUrl,
@@ -156,7 +160,7 @@ export function buildInvitationEmail(opts: { recipientName?: string | null; acce
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 16px">
 <table role="presentation" width="100%" style="max-width:520px;background:#ffffff;border-radius:12px;padding:32px" cellpadding="0" cellspacing="0">
 <tr><td style="font-size:22px;font-weight:700;color:#4f46e5;padding-bottom:16px">SpashtAI</td></tr>
-<tr><td style="font-size:16px;line-height:24px">${escapeHtml(greeting)}<br><br>${escapeHtml(introduction)}</td></tr>
+<tr><td style="font-size:16px;line-height:24px">${escapeHtml(greeting)}<br><br>${escapeHtml(introduction)}${opts.emailMessage ? `<br><br>${escapeHtml(opts.emailMessage).replace(/\n/g, '<br>')}` : ''}</td></tr>
 <tr><td style="padding:24px 0"><a href="${escapeHtml(opts.acceptUrl)}" style="background:#4f46e5;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block">Accept invitation</a></td></tr>
 <tr><td style="font-size:14px;line-height:21px;color:#4b5563">Sign in with the Google Account for this email address. SpashtAI currently requires a Google Account; this can be a Gmail or Google Workspace address, or another address you have registered as a Google Account.<br><br>This link works once and expires on ${escapeHtml(expires)}. If you weren't expecting this invitation, you can ignore this email.<br><br>Replies to this mailbox are not routinely monitored and may not receive a response.</td></tr>
 </table></td></tr></table></body></html>`
@@ -165,7 +169,7 @@ export function buildInvitationEmail(opts: { recipientName?: string | null; acce
 
 async function deliver(inv: UserInvitation, token: string, workspaceName?: string): Promise<{ deliveryStatus: InvitationDeliveryStatus; deliveryError: string | null }> {
   const acceptUrl = acceptUrlFor(token)
-  const email = buildInvitationEmail({ recipientName: inv.recipientName, acceptUrl, expiresAt: inv.expiresAt, workspaceName })
+  const email = buildInvitationEmail({ recipientName: inv.recipientName, acceptUrl, expiresAt: inv.expiresAt, workspaceName, emailSubject: inv.emailSubject, emailMessage: inv.emailMessage })
   if (devMailboxAvailable()) {
     devMailbox.unshift({ workspaceId: inv.workspaceId, id: inv.id, to: inv.email, subject: email.subject, text: email.text, acceptUrl, capturedAt: new Date().toISOString(), developmentOnly: true })
     devMailbox.length = Math.min(devMailbox.length, 25)
@@ -219,6 +223,7 @@ export type InvitationErrorCode = 'duplicate_pending' | 'existing_user' | 'not_f
 export class InvitationError extends Error {
   constructor(public code: InvitationErrorCode, public status: number, message: string, public details: Record<string, unknown> = {}) {
     super(message)
+    this.name = 'InvitationError'
   }
 }
 
@@ -254,6 +259,7 @@ export const invitationTestHooks: { afterResendUpdate?: () => Promise<void> } = 
  * audit failure therefore leaves no invitation and sends nothing.
  */
 export async function createInvitation(adminId: string, input: z.infer<typeof invitationInputSchema>, now = new Date()) {
+  reserveInvitationSend(adminId)
   const { email, name, confirmExistingUser } = input
   const { token, tokenHash } = newToken()
   let invitation: UserInvitation
@@ -270,7 +276,7 @@ export async function createInvitation(adminId: string, input: z.infer<typeof in
         throw new InvitationError('existing_user', 409, 'This email already has a SpashtAI account. Accepting will sign them in without changing their account.')
       }
       const inv = await tx.userInvitation.create({
-        data: { email, recipientName: name ?? null, pendingKey: email, tokenHash, expiresAt: expiryFrom(now), invitedById: adminId, existingUserAtInvite: Boolean(existing), sendCount: 1, lastSentAt: now },
+        data: { emailSubject: input.emailContent?.subject || null, emailMessage: input.emailContent?.message || null, email, recipientName: name ?? null, pendingKey: email, tokenHash, expiresAt: expiryFrom(now), invitedById: adminId, existingUserAtInvite: Boolean(existing), sendCount: 1, lastSentAt: now },
       })
       await writeInvitationAudit(tx, adminId, 'invitation_create', inv.id, { attempt: 1, existingUser: inv.existingUserAtInvite, expiresAt: inv.expiresAt.toISOString() })
       return inv
@@ -288,6 +294,7 @@ export async function createInvitation(adminId: string, input: z.infer<typeof in
  * email is sent afterwards, outside the transaction.
  */
 export async function resendInvitation(adminId: string, id: string, now = new Date()) {
+  reserveInvitationSend(adminId)
   const { token, tokenHash } = newToken()
   let invitation: UserInvitation
   try {

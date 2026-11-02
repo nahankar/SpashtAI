@@ -1,4 +1,6 @@
 import * as invitations from './invitations'
+import { saveManagedEnrollment, saveEnrollmentSettings } from './enrollment'
+import { withPlatformWorkspaceAdmin } from './context'
 import { workspaceInvitationSendLimiter } from '../middleware/rate-limit'
 import { archiveSessionDetail, archiveSessionTranscript, listArchiveSessions } from './sessionArchive'
 import { streamWorkspaceRecording } from './sessionMedia'
@@ -49,6 +51,8 @@ function scoped(handler: (tx: Parameters<Parameters<typeof withWorkspaceAccess>[
     return withWorkspaceAccess(claims, (tx, scope) => handler(tx, scope, req))
   })
 }
+workspaceRouter.put('/current/enrollment', scoped((tx, scope, req) => saveManagedEnrollment(tx, scope, req.body)))
+workspaceRouter.post('/current/invitations/bulk', workspaceInvitationSendLimiter, route(req => invitations.createWorkspaceInvitationBatch(workspaceClaims(req), req.body)))
 workspaceRouter.get('/current/invitations', scoped((tx, scope, req) => invitations.listWorkspaceInvitations(tx, scope, req.query)))
 workspaceRouter.post('/current/invitations', workspaceInvitationSendLimiter, route(req => invitations.createWorkspaceInvitation(workspaceClaims(req), req.body)))
 workspaceRouter.post('/current/invitations/:id/resend', workspaceInvitationSendLimiter, route(req => invitations.changeWorkspaceInvitation(workspaceClaims(req), idSchema.parse(req.params.id), 'resend')))
@@ -64,6 +68,7 @@ workspaceRouter.patch('/current/branding', scoped((tx, scope, req) => service.up
 workspaceRouter.put('/current/features/:feature', scoped((tx, scope, req) => service.configureWorkspaceFeature(tx, scope, String(req.params.feature), req.body)))
 workspaceRouter.patch('/current/members/:memberId', scoped((tx, scope, req) => service.changeWorkspaceMember(tx, scope, idSchema.parse(req.params.memberId), req.body)))
 workspaceRouter.put('/current/members/:memberId/features/:feature', scoped((tx, scope, req) => service.configureMemberFeature(tx, scope, idSchema.parse(req.params.memberId), String(req.params.feature), req.body)))
+platformWorkspacesRouter.put('/:workspaceId/enrollment', route(req => withPlatformWorkspaceAdmin(req.user!.userId, tx => saveEnrollmentSettings(tx, idSchema.parse(req.params.workspaceId), req.user!.userId, req.body))))
 platformWorkspacesRouter.get('/', route(req => service.listPlatformWorkspaces(req.user!.userId)))
 platformWorkspacesRouter.post('/', route(req => service.createOrganization(req.user!.userId, req.body)))
 platformWorkspacesRouter.patch('/:workspaceId', route(req => service.updatePlatformWorkspace(req.user!.userId, idSchema.parse(req.params.workspaceId), req.body)))

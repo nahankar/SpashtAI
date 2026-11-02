@@ -61,7 +61,7 @@ export function listInvitations(params: { status?: InvitationStatus; q?: string;
   return apiClient<InvitationList>(`/api/admin/invitations?${search}`)
 }
 
-export function createInvitation(body: { email: string; name?: string; confirmExistingUser?: boolean }) {
+export function createInvitation(body: { email: string; name?: string; confirmExistingUser?: boolean; emailContent?: { subject: string; message: string } }) {
   return apiClient<{ invitation: Invitation; notice: string }>('/api/admin/invitations', { method: 'POST', body: JSON.stringify(body) })
 }
 

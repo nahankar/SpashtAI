@@ -144,3 +144,7 @@ voice-session guard or enable organization products to make a deployment pass.
 SMTP sender is `info@spasht.ai`; messages state replies are not routinely monitored. Zoho's exact account
 server and app password must be entered in production `apps/server/.env`; secrets are never committed.
 Real Google acceptance and email delivery remain human/provider checks, separate from local test identities.
+
+## Workspace invitation enrollment — 3 November 2026
+
+Workspace-specific form fields, custom email messages and private bulk invitation delivery are implemented. See [signup and invitation guide](WORKSPACE-SIGNUP-AND-INVITATIONS.md) for validation, limits and behavior. Product-plane isolation remains unfinished; these changes do not enable organization practices or analytics.

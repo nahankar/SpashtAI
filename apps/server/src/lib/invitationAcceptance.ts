@@ -1,4 +1,5 @@
 import { lockInvitationTarget, acceptInvitedMembership } from '../workspaces/invitationMembership'
+import { validateEnrollmentResponses } from '../workspaces/enrollment'
 import { WorkspaceError } from '../workspaces/contracts'
 import type { Request } from 'express'
 import type { User } from '@prisma/client'
@@ -70,12 +71,13 @@ export async function acceptInvitation(
         return { ok: true, user: account.user, newAccount: false, alreadyAccepted: true, signupsPausedBypass: false, workspacePath }
       }
 
+      const responses = workspace ? validateEnrollmentResponses(inv.enrollmentFields, req.body?.enrollmentResponses) : {}
       // The approved paused-signup exception applies only to platform invitations. Organization invitations
       // respect the public pause for new identities; see docs/INVITATIONS.md.
       const account = await resolveGoogleAccount(tx, googleUser, req, { policy, invitationBypassesSignupPause: !workspace })
       if (!account.ok) return account
       const bypassed = account.created && policy.paused
-      if (workspace) await acceptInvitedMembership(tx, inv, account.user.id, workspace.maxMembers, false)
+      if (workspace) await acceptInvitedMembership(tx, inv, account.user.id, workspace.maxMembers, false, responses)
       await tx.userInvitation.update({
         where: { id: inv.id },
         data: { status: 'ACCEPTED', pendingKey: null, acceptedAt: new Date(), acceptedUserId: account.user.id },

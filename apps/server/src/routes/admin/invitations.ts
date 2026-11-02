@@ -1,5 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod'
+import { batchEmailsSchema, runInvitationBatch } from '../../lib/invitationBatch'
+import { WorkspaceError } from '../../workspaces/contracts'
 import { logger } from '../../lib/logger'
 import { invitationSendLimiter } from '../../middleware/rate-limit'
 import {
@@ -30,6 +32,7 @@ const listQuery = z.object({
 function handle(fn: (req: Request, res: Response) => Promise<void>) {
   return (req: Request, res: Response, next: NextFunction) => {
     fn(req, res).catch((err) => {
+      if (err instanceof WorkspaceError) { res.status(err.status).json({ error: err.code, message: err.message }); return }
       if (err instanceof InvitationError) {
         res.status(err.status).json({ error: err.code, code: err.code, message: err.message, ...err.details })
         return
@@ -78,6 +81,13 @@ router.post('/', invitationSendLimiter, handle(async (req, res) => {
   }
   const inv = await createInvitation(req.user!.userId, parsed.data)
   res.status(201).json({ invitation: serializeInvitation(inv), notice: deliveryNotice(inv.deliveryStatus) })
+}))
+
+router.post('/bulk', invitationSendLimiter, handle(async (req, res) => {
+  const parsed = invitationInputSchema.omit({ email: true, name: true }).extend({ emails: batchEmailsSchema }).strict().safeParse(req.body)
+  if (!parsed.success) { res.status(400).json({ error: 'invalid_batch', message: 'Enter up to 20 unique, valid email addresses and check the message.' }); return }
+  const { emails, ...settings } = parsed.data
+  res.json(await runInvitationBatch(emails, async email => serializeInvitation(await createInvitation(req.user!.userId, { ...settings, email }))))
 }))
 
 router.post('/:id/resend', invitationSendLimiter, handle(async (req, res) => {

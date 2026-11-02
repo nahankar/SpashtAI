@@ -1,3 +1,4 @@
+import { BulkInvitations, type BatchResult } from '@/components/admin/BulkInvitations'
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import { identityToken, workspaceRequest, type Entry, type Feature, type Membership } from './client'
@@ -6,7 +7,7 @@ import type { Invitation, InvitationStatus } from '@/lib/invitations'
 type Row = Invitation & { role: Membership['role'] }
 type Page = { items: Row[]; total: number; page: number; totalPages: number; counts: Record<InvitationStatus, number> }
 const inputClass = 'rounded-md border px-3 py-2 min-w-0 w-full bg-background'
-export function WorkspaceInvitations({ slug, role, features }: { slug: string; role: Membership['role']; features: Feature[] }) {
+export function WorkspaceInvitations({ slug, role, features, emailContent }: { slug: string; role: Membership['role']; features: Feature[]; emailContent?: { subject: string; message: string } }) {
   const [rows, setRows] = useState<Page | null>(null), [page, setPage] = useState(1)
   const [status, setStatus] = useState('pending'), [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false)
   const [draft, setDraft] = useState<{ email: string; name: string; role: string; memberFeatures: Record<string, boolean> } | null>(null)
@@ -35,6 +36,7 @@ export function WorkspaceInvitations({ slug, role, features }: { slug: string; r
     <p>Invite someone to this workspace with their Google Account email. Their Personal history stays separate. New accounts cannot be created while public signups are paused.</p>
     {error && <p role="alert" className="text-red-700">{error}</p>}{notice && <p role="status">{notice}</p>}
     {rows && <div className="grid grid-cols-2 sm:grid-cols-4 gap-3" aria-label="Invitation overview">{Object.entries(rows.counts).map(([label, count]) => <div key={label} className="border rounded p-3"><p className="capitalize">{label}</p><strong>{count}</strong></div>)}</div>}
+    <BulkInvitations key={JSON.stringify(emailContent)} workspace emailContent={emailContent} send={async body => { const result = await call<BatchResult>('/bulk', 'POST', body); await load(); return result }} />
     <form onSubmit={prepare} className="space-y-3"><div className="grid sm:grid-cols-3 gap-3">
       <label>Email<input name="email" type="email" required maxLength={254} className={inputClass} /></label>
       <label>Name (optional)<input name="name" maxLength={120} className={inputClass} /></label>

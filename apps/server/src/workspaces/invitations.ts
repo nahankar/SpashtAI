@@ -1,4 +1,6 @@
 import { z } from 'zod'
+import { batchEmailsSchema, reserveInvitationSend, runInvitationBatch } from '../lib/invitationBatch'
+import { emailContentSchema, readEnrollmentSettings } from './enrollment'
 import type { Prisma } from '@prisma/client'
 import type { WorkspaceTokenPayload } from '../lib/jwt'
 import { deliverAttempt, effectiveStatus, expiryFrom, INVITATION_VIEWS, newToken, serializeInvitation, viewWhere } from '../lib/invitations'
@@ -10,6 +12,7 @@ export const workspaceInvitationInput = z.object({
   email: z.string().trim().toLowerCase().email().max(254), name: z.string().trim().max(120).optional(),
   role: z.enum(['OWNER', 'ADMIN', 'LEARNER']).default('LEARNER'),
   memberFeatures: z.record(featureSchema, z.boolean()).default({}),
+  emailContent: emailContentSchema.optional(),
 }).strict()
 export const workspaceInvitationQuery = z.object({
   status: z.enum(['pending', 'accepted', 'expired', 'revoked']).optional(),
@@ -45,6 +48,7 @@ export async function createWorkspaceInvitation(claims: WorkspaceTokenPayload, i
   const body = workspaceInvitationInput.parse(input), { token, tokenHash } = newToken(), now = new Date()
   const attempt = await withWorkspaceAccess(claims, async (tx, scope) => {
     mayManage(scope, body.role)
+    reserveInvitationSend(claims.userId)
     const existing = await tx.user.findUnique({ where: { email: body.email }, select: { id: true } })
     const member = existing && await tx.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: scope.workspace.id, userId: existing.id } } })
     if (member?.state === 'SUSPENDED') throw new WorkspaceError(409, 'MEMBER_SUSPENDED', 'Reactivate the suspended membership instead of inviting again')
@@ -57,7 +61,10 @@ export async function createWorkspaceInvitation(claims: WorkspaceTokenPayload, i
     for (const [feature, allowed] of Object.entries(body.memberFeatures)) {
       if (allowed && !(await tx.workspaceFeature.findUnique({ where: { workspaceId_feature: { workspaceId: scope.workspace.id, feature } } }))?.entitled) throw new WorkspaceError(403, 'NOT_ENTITLED', 'Member settings cannot exceed workspace entitlements')
     }
+    const settings = readEnrollmentSettings(scope.workspace.enrollmentSettings)
+    const email = body.emailContent ?? settings.email
     const invitation = await tx.userInvitation.create({ data: { workspaceId: scope.workspace.id, email: body.email, recipientName: body.name || null,
+      enrollmentFields: settings.fields, emailSubject: email.subject || null, emailMessage: email.message || null,
       proposedRole: body.role, memberFeatures: body.memberFeatures, pendingKey: key, tokenHash, expiresAt: expiryFrom(now), invitedById: scope.member.userId,
       existingUserAtInvite: Boolean(existing), sendCount: 1, lastSentAt: now } })
     await audit(tx, scope, 'invitation_create', invitation.id, { role: body.role, attempt: 1 })
@@ -74,6 +81,7 @@ export async function changeWorkspaceInvitation(claims: WorkspaceTokenPayload, i
     const current = await tx.userInvitation.findFirst({ where: { id, workspaceId: scope.workspace.id } })
     if (!current) throw new WorkspaceError(404, 'INVITATION_NOT_FOUND', 'Invitation not found')
     mayManage(scope, current.proposedRole!)
+    if (action === 'resend') reserveInvitationSend(claims.userId)
     if (current.status === 'ACCEPTED' || action === 'resend' && current.status === 'REVOKED') throw new WorkspaceError(409, 'INVITATION_CLOSED', 'This invitation cannot be changed')
     if (action === 'revoke' && current.status === 'REVOKED') return { invitation: current, token, workspaceName: scope.workspace.name }
     if (action === 'resend' && effectiveStatus(current) !== 'pending' && await reservedWorkspaceSeats(tx, scope.workspace.id) >= scope.workspace.maxMembers) throw new WorkspaceError(409, 'SEAT_LIMIT', 'This workspace has no available seats')
@@ -84,4 +92,12 @@ export async function changeWorkspaceInvitation(claims: WorkspaceTokenPayload, i
     return { invitation, token, workspaceName: scope.workspace.name }
   })
   return presentWorkspaceInvitation(action === 'revoke' ? attempt.invitation : await deliverAttempt(claims.userId, attempt, work => withWorkspaceAccess(claims, tx => work(tx))))
+}
+
+export const workspaceInvitationBatchInput = workspaceInvitationInput.omit({ email: true, name: true }).extend({ emails: batchEmailsSchema })
+export async function createWorkspaceInvitationBatch(claims: WorkspaceTokenPayload, input: unknown) {
+  const { emails, ...settings } = workspaceInvitationBatchInput.parse(input)
+  // Authorize before starting a batch, then recheck membership/seat limits per recipient.
+  await withWorkspaceAccess(claims, async (_tx, scope) => mayManage(scope, settings.role))
+  return runInvitationBatch(emails, email => createWorkspaceInvitation(claims, { ...settings, email }))
 }

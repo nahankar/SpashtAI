@@ -238,6 +238,7 @@ model Workspace {
   databaseKey      String                  @default("primary")
   createdAt        DateTime                @default(now())
   updatedAt        DateTime                @updatedAt
+  enrollmentSettings Json @default("{}")
   invitations UserInvitation[]
   sessions         Session[]
   members          WorkspaceMember[]
@@ -254,6 +255,8 @@ model WorkspaceMember {
   user        User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
   role        WorkspaceMemberRole      @default(LEARNER)
   state       WorkspaceMemberState     @default(INVITED)
+  enrollmentResponses Json @default("{}")
+  enrollmentFields Json @default("[]")
   acceptedAt  DateTime?
   createdAt   DateTime                 @default(now())
   updatedAt   DateTime                 @updatedAt
@@ -1540,6 +1543,9 @@ model UserInvitation {
   workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   proposedRole WorkspaceMemberRole?
   memberFeatures Json @default("{}")
+  enrollmentFields Json @default("[]")
+  emailSubject String?
+  emailMessage String?
   id                   String           @id @default(cuid())
   email                String
   recipientName        String?

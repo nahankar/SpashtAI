@@ -1,3 +1,4 @@
+import { readEnrollmentSettings } from './enrollment'
 import { reservedWorkspaceSeats } from './invitations'
 import { z } from 'zod'
 import type { Workspace } from '@prisma/client'
@@ -13,7 +14,7 @@ export const WORKSPACE_INTEGRATION_NOTICE = 'Organization practices and analytic
 
 export function presentWorkspace(workspace: Workspace) {
   return { id: workspace.id, slug: workspace.kind === 'PERSONAL' ? 'personal' : workspace.slug,
-    name: workspace.kind === 'PERSONAL' ? 'Personal' : workspace.name, kind: workspace.kind, state: workspace.state,
+    enrollmentSettings: readEnrollmentSettings(workspace.enrollmentSettings), name: workspace.kind === 'PERSONAL' ? 'Personal' : workspace.name, kind: workspace.kind, state: workspace.state,
     logoDataUrl: workspace.logoDataUrl, accentColor: workspace.accentColor, timeZone: workspace.timeZone,
     isolationStage: workspace.isolationStage, limits: { maxMembers: workspace.maxMembers,
       dailyEvaluations: workspace.dailyEvaluations, concurrentVoice: workspace.concurrentVoice } }
@@ -143,7 +144,7 @@ export async function listWorkspaceMembers(tx: WorkspaceTx, scope: Awaited<Retur
   const rows = await tx.workspaceMember.findMany({ where: { workspaceId: scope.workspace.id },
     include: { user: { select: { firstName: true, lastName: true, email: true } }, features: true }, orderBy: { createdAt: 'asc' }, take: 100 })
   return rows.map(row => ({ id: row.id, role: row.role, state: row.state, acceptedAt: row.acceptedAt,
-    name: [row.user.firstName, row.user.lastName].filter(Boolean).join(' '), email: row.user.email, features: row.features.map(f => ({ feature: f.feature, allowed: f.allowed })) }))
+    enrollmentResponses: row.enrollmentResponses, enrollmentFields: row.enrollmentFields, name: [row.user.firstName, row.user.lastName].filter(Boolean).join(' '), email: row.user.email, features: row.features.map(f => ({ feature: f.feature, allowed: f.allowed })) }))
 }
 
 export async function configureWorkspaceFeature(tx: WorkspaceTx, scope: Awaited<ReturnType<typeof establishWorkspace>>, feature: string, input: unknown) {

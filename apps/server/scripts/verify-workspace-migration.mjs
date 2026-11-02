@@ -38,6 +38,8 @@ try {
   await db.$executeRaw`INSERT INTO "Session" (id,"userId",module) VALUES ('later-personal-session','after-foundation','elevate')`
   execute(resolve(root, 'apps/server/prisma/migrations/20261102140000_workspace_session_boundary/migration.sql'))
   execute(resolve(root, 'apps/server/prisma/migrations/20261102160000_workspace_invitations/migration.sql'))
+  execute(resolve(root, 'apps/server/prisma/migrations/20261102190000_workspace_enrollment/migration.sql'))
+  assert.deepEqual((await db.userInvitation.findUniqueOrThrow({ where: { id: 'old-platform-invite' } })).enrollmentFields, [])
   assert.equal((await db.userInvitation.findUniqueOrThrow({ where: { id: 'old-platform-invite' } })).workspaceId, null)
   const workspaces = await db.workspace.findMany({ where: { personalOwnerId: 'preexisting-user' } })
   assert.equal(workspaces.length, 1)

@@ -199,4 +199,55 @@ suite('workspace email invitation boundaries with a restricted runtime role', ()
     expect(await purgeClosedInvitations()).toBeGreaterThan(0)
     expect(await admin.userInvitation.findUnique({ where: { id: created.body.id } })).toBeNull()
   })
+  it('restricts configuration to managers, snapshots invitation forms and atomically stores workspace-only responses', async () => {
+    const settings = { fields: [
+      { id: 'department', type: 'dropdown', label: 'Department', required: true, options: ['CS', 'ECE'] },
+      { id: 'skills', type: 'checkbox', label: 'Skills', required: true, options: ['Java', 'Python'] },
+      { id: 'roll', type: 'text', label: 'Roll number', required: true, options: [] },
+      { id: 'welcome', type: 'message', label: 'Welcome to the college', required: false, options: [] },
+    ], email: { subject: 'Welcome to our college', message: 'Please complete your department details.' } }
+    const endpoint = '/api/workspaces/current/enrollment'
+    expect((await request(app).put(endpoint).set(bearer(tokenLearner)).send(settings)).status).toBe(403)
+    expect((await request(app).put(endpoint).set(bearer(tokenManager)).send(settings)).status).toBe(200)
+    const email = addr('custom'), created = await post(tokenA, { email }); expect(created.status).toBe(200)
+    const token = mailToken(alpha, email), mail = captured(alpha).find(m => m.to === email)!
+    expect(mail.subject).toBe(settings.email.subject); expect(mail.text).toContain(settings.email.message)
+    // Editing defaults cannot change a form or email somebody has already received.
+    expect((await request(app).put(`/api/admin/workspaces/${alpha}/enrollment`).set(bearer(platformToken)).send({ fields: [], email: {} })).status).toBe(200)
+    const lookup = await request(app).post('/api/invitations/lookup').send({ token })
+    expect(lookup.body.enrollmentFields).toEqual(settings.fields)
+    expect((await accept(token, email)).status).toBe(400)
+    expect(await admin.user.findUnique({ where: { email } })).toBeNull()
+    const responses = { department: 'CS', skills: ['Java', 'Python'], roll: 'CS-42' }
+    const accepted = await request(app).post('/api/invitations/accept').send({ token, credential: JSON.stringify({ email }), enrollmentResponses: responses })
+    expect(accepted.status, JSON.stringify(accepted.body)).toBe(200)
+    const user = await admin.user.findUniqueOrThrow({ where: { email } })
+    const m = await admin.workspaceMember.findUniqueOrThrow({ where: { workspaceId_userId: { workspaceId: alpha, userId: user.id } } })
+    expect(m.enrollmentResponses).toEqual(responses); expect(m.enrollmentFields).toEqual(settings.fields)
+    const managers = await request(app).get('/api/workspaces/current/members').set(bearer(tokenManager))
+    expect(managers.body.find((row: { id: string }) => row.id === m.id).enrollmentResponses).toEqual(responses)
+    expect((await request(app).get('/api/workspaces/current/members').set(bearer(tokenLearner))).status).toBe(403)
+    expect(await db.workspaceMember.findUnique({ where: { id: m.id } })).toBeNull()
+    expect((await accept(token, email)).body.alreadyAccepted).toBe(true)
+    expect((await admin.workspaceMember.findUniqueOrThrow({ where: { id: m.id } })).enrollmentResponses).toEqual(responses)
+    const snap = await admin.userInvitation.findUniqueOrThrow({ where: { id: created.body.id } })
+    await expect(admin.userInvitation.update({ where: { id: snap.id }, data: { emailMessage: 'changed' } })).rejects.toThrow()
+  })
+  it('sends bulk recipients privately, isolates tenant scope, and returns duplicates without resending', async () => {
+    const emails = [addr('bulk-a'), addr('bulk-b')]
+    const body = { emails, emailContent: { subject: 'Bulk welcome', message: 'Welcome, learner.' } }
+    expect((await request(app).post(`${base}/bulk`).set(bearer(tokenLearner)).send(body)).status).toBe(403)
+    expect((await request(app).post(`${base}/bulk`).set(bearer(tokenA)).send({ ...body, emails: [emails[0], emails[0]] })).status).toBe(400)
+    const sent = await request(app).post(`${base}/bulk`).set(bearer(tokenA)).send(body)
+    expect(sent.status).toBe(200); expect(sent.body.results.every((r: { ok: boolean }) => r.ok)).toBe(true)
+    const tokens = emails.map(email => mailToken(alpha, email)); expect(tokens[0]).not.toBe(tokens[1])
+    for (const email of emails) expect(captured(alpha).find(m => m.to === email)?.subject).toBe('Bulk welcome')
+    const repeat = await request(app).post(`${base}/bulk`).set(bearer(tokenA)).send(body)
+    expect(repeat.body.results.every((r: { ok: boolean }) => !r.ok)).toBe(true)
+    expect(emails.map(email => mailToken(alpha, email))).toEqual(tokens)
+    const platformBatch = await request(app).post('/api/admin/invitations/bulk').set(bearer(platformToken)).send({ emails: [addr('platform-bulk')], emailContent: { subject: 'Platform welcome', message: '<b>plain text</b>' } })
+    expect(platformBatch.status).toBe(200); expect(platformBatch.body.results[0].ok).toBe(true)
+    expect(captured().find(m => m.to === addr('platform-bulk'))?.subject).toBe('Platform welcome')
+  })
+
 })

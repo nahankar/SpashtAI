@@ -1,3 +1,5 @@
+import { BulkInvitations, type BatchResult } from '@/components/admin/BulkInvitations'
+import { apiClient } from '@/lib/api-client'
 import { useCallback, useEffect, useState } from 'react'
 import { MailPlus, Inbox, TriangleAlert, FlaskConical } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -122,6 +124,7 @@ export function Invitations() {
       </div>
 
       <EmailSetupNotice config={config} />
+      <BulkInvitations send={async body => { const result = await apiClient<BatchResult>('/api/admin/invitations/bulk', { method: 'POST', body: JSON.stringify(body) }); refresh(); return result }} />
 
       <div className="flex flex-wrap items-center gap-2">
         {filters.map((f) => (

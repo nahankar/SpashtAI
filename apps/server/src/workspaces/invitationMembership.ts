@@ -14,7 +14,7 @@ export async function lockInvitationTarget(tx: Prisma.TransactionClient, inv: Us
   if (workspace.storageMode !== 'SHARED' || workspace.databaseKey !== 'primary') throw new WorkspaceError(503, 'WORKSPACE_PLACEMENT_UNAVAILABLE', 'This workspace is not available yet')
   return workspace
 }
-export async function acceptInvitedMembership(tx: Prisma.TransactionClient, inv: UserInvitation, userId: string, maxMembers: number, alreadyAccepted: boolean) {
+export async function acceptInvitedMembership(tx: Prisma.TransactionClient, inv: UserInvitation, userId: string, maxMembers: number, alreadyAccepted: boolean, responses: Prisma.InputJsonObject = {}) {
   const workspaceId = inv.workspaceId!
   await tx.$queryRaw`SELECT set_config('app.workspace_actor_id', ${userId}, true)`
   const current = await tx.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId, userId } } })
@@ -34,8 +34,8 @@ export async function acceptInvitedMembership(tx: Prisma.TransactionClient, inv:
     if (allowed && !(await tx.workspaceFeature.findUnique({ where: { workspaceId_feature: { workspaceId, feature } } }))?.entitled) throw new WorkspaceError(403, 'NOT_ENTITLED', 'Workspace entitlements changed. Ask an Owner for a new invitation')
   }
   const member = await tx.workspaceMember.upsert({ where: { workspaceId_userId: { workspaceId, userId } },
-    create: { workspaceId, userId, role: inv.proposedRole!, state: 'ACTIVE', acceptedAt: new Date() },
-    update: { state: 'ACTIVE', acceptedAt: new Date() } })
+    create: { workspaceId, userId, role: inv.proposedRole!, state: 'ACTIVE', acceptedAt: new Date(), enrollmentResponses: responses, enrollmentFields: inv.enrollmentFields as Prisma.InputJsonArray },
+    update: { state: 'ACTIVE', acceptedAt: new Date(), enrollmentResponses: responses, enrollmentFields: inv.enrollmentFields as Prisma.InputJsonArray } })
   for (const [feature, allowed] of Object.entries(features)) await tx.workspaceMemberFeature.upsert({ where: { workspaceId_memberId_feature: { workspaceId, memberId: member.id, feature } },
     create: { workspaceId, memberId: member.id, feature, allowed }, update: { allowed } })
   await tx.workspaceAudit.create({ data: { workspaceId, actorUserId: userId, action: 'invitation_accepted', subjectId: inv.id, metadata: { role: inv.proposedRole, membershipId: member.id } } })
