@@ -1,5 +1,8 @@
 # Tenancy implementation status
 
+Current production status: reviewed control-plane release deployed November 2, 2026 (code `cd2acd5`).
+See `TENANCY-RELEASE-2026-11-02.md`. Earlier checkpoint notes below describe their status at the time.
+
 Branch: `codex/multi-tenant-workspaces` from `8e438a3`.
 Worktree: `VI/worktrees/spashtai-tenancy`. Separate from Claude's invitation/demo checkout.
 
