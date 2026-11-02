@@ -3,6 +3,8 @@ import type { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { prisma } from '../../lib/prisma'
 import { BankError } from '../bank/csv'
+import { currentDataScope } from '../../lib/dataScope'
+import { workspacePlan } from '../../workspaces/productAccess'
 
 export const voiceProfileSchema = z.object({
   backend: z.literal('pipeline-bedrock'), sttProvider: z.literal('transcribe'), ttsProvider: z.literal('polly'),
@@ -11,9 +13,18 @@ export const voiceProfileSchema = z.object({
   hushEnabled: z.boolean(),
 }).strict()
 export async function practiceExecutionAccess(ownerId: string, tx: Prisma.TransactionClient = prisma) {
+  // Inside an organization the verified workspace decision replaces Personal pilot grants.
+  const scope = currentDataScope()
+  if (scope && (scope.actorId !== ownerId || !scope.features.interviews)) {
+    throw new BankError(403, 'Interview voice practice is not available')
+  }
   for (const feature of ['interviews', 'interview_voice']) {
     await tx.$queryRaw`SELECT feature FROM "PlatformFeatureFlag" WHERE feature=${feature} FOR SHARE`
     const flag = await tx.platformFeatureFlag.findUnique({ where: { feature } })
+    if (scope) {
+      if (!flag || flag.hidden || flag.disabled) throw new BankError(403, 'Interview voice practice is not available')
+      continue
+    }
     await tx.$queryRaw`SELECT id FROM "UserFeatureGrant" WHERE "userId"=${ownerId} AND feature=${feature} FOR SHARE`
     const grant = await tx.userFeatureGrant.findUnique({ where: { userId_feature: { userId: ownerId, feature } } })
     if (!flag || flag.hidden || flag.disabled || (flag.audience === 'SELECTED_USERS' && !grant)) {
@@ -35,6 +46,11 @@ export function practiceDurations(user: { role?: string | null; enablePro?: bool
   return { plan: 'standard', allowed: [5, 10, 15], default: 10 }
 }
 export async function ownerPracticeDurations(ownerId: string, tx: Prisma.TransactionClient = prisma) {
+  const scope = currentDataScope()
+  if (scope) {
+    const plan = workspacePlan(scope.features)
+    return practiceDurations({ enableUltra: plan === 'ultra', enablePro: plan === 'pro' })
+  }
   const user = await tx.user.findUniqueOrThrow({ where: { id: ownerId }, select: { role: true, enablePro: true, enableUltra: true } })
   return practiceDurations(user)
 }
@@ -43,7 +59,7 @@ export async function conversationAccess(ownerId: string, tx: Prisma.Transaction
   await tx.$queryRaw`SELECT feature FROM "PlatformFeatureFlag" WHERE feature='interview_conversation' FOR SHARE`
   const flag = await tx.platformFeatureFlag.findUnique({ where: { feature: 'interview_conversation' } })
   if (!flag || flag.hidden || flag.disabled) return false
-  if (flag.audience !== 'SELECTED_USERS') return true
+  if (currentDataScope() || flag.audience !== 'SELECTED_USERS') return true
   await tx.$queryRaw`SELECT id FROM "UserFeatureGrant" WHERE "userId"=${ownerId} AND feature='interview_conversation' FOR SHARE`
   return Boolean(await tx.userFeatureGrant.findUnique({ where: { userId_feature: { userId: ownerId, feature: 'interview_conversation' } } }))
 }

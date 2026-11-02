@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express'
 import { prisma } from './prisma'
+import { currentDataScope, type DataScope } from './dataScope'
 
 export interface UserExportFlags {
   hideTranscriptText: boolean
@@ -25,8 +26,27 @@ export const DEFAULT_EXPORT_FLAGS: UserExportFlags = {
   enableReprocess: true,
 }
 
+/** Platform staff privileges never apply inside an organization workspace. */
 export function isPrivilegedRole(role?: string): boolean {
+  if (currentDataScope()) return false
   return role === 'ADMIN' || role === 'SUPER_ADMIN'
+}
+
+/**
+ * Inside an organization, export and reprocess actions come only from the workspace
+ * decision; a platform role or Personal account switch grants nothing there.
+ */
+export function organizationExportFlags(scope: DataScope): UserExportFlags {
+  const text = Boolean(scope.features.text_export)
+  return {
+    hideTranscriptText: false,
+    hideTranscriptJsonExport: !text,
+    hideAudioDownload: !scope.features.audio_export,
+    enableTxtExport: text,
+    enableJsonExport: text,
+    enableAudioExport: Boolean(scope.features.audio_export),
+    enableReprocess: Boolean(scope.features.reprocess),
+  }
 }
 
 export async function fetchUserExportFlags(userId: string): Promise<UserExportFlags> {
@@ -69,6 +89,8 @@ export async function getEffectiveExportFlags(
   userId: string,
   role?: string,
 ): Promise<UserExportFlags> {
+  const scope = currentDataScope()
+  if (scope) return organizationExportFlags(scope)
   if (isPrivilegedRole(role)) return DEFAULT_EXPORT_FLAGS
   return fetchUserExportFlags(userId)
 }
@@ -112,6 +134,12 @@ export async function resolveRequestExportFlags(
       },
       accessDenied: false,
     }
+  }
+
+  const scope = currentDataScope()
+  if (scope) {
+    const denied = Boolean(ownerUserId && ownerUserId !== scope.actorId)
+    return { flags: organizationExportFlags(scope), accessDenied: denied }
   }
 
   if (isPrivilegedRole(req.user.role)) {

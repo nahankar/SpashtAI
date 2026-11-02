@@ -40,6 +40,33 @@ export function signWorkspaceToken(input: Omit<WorkspaceTokenPayload, 'tokenUse'
   })
 }
 
+export interface AgentScopeTokenPayload {
+  tokenUse: 'agent-scope'
+  sessionId: string
+  userId: string
+  workspaceId: string
+  membershipId: string
+}
+
+/**
+ * Binds one organization voice session to its workspace and learner. It is only
+ * honoured together with the internal agent secret; on its own it grants nothing.
+ */
+export function signAgentScopeToken(input: Omit<AgentScopeTokenPayload, 'tokenUse'>): string {
+  return jwt.sign({ ...input, tokenUse: 'agent-scope' }, JWT_SECRET, {
+    expiresIn: '36h', audience: 'agent-callback', issuer: 'spashtai-workspace',
+  })
+}
+
+export function verifyAgentScopeToken(token: string): AgentScopeTokenPayload {
+  const payload = jwt.verify(token, JWT_SECRET, { audience: 'agent-callback', issuer: 'spashtai-workspace' })
+  if (typeof payload === 'string' || payload.tokenUse !== 'agent-scope'
+    || ![payload.sessionId, payload.userId, payload.workspaceId, payload.membershipId].every(v => typeof v === 'string' && v.length > 0)) {
+    throw new Error('An agent scope token is required')
+  }
+  return payload as AgentScopeTokenPayload
+}
+
 export function verifyWorkspaceToken(token: string): WorkspaceTokenPayload {
   const payload = jwt.verify(token, JWT_SECRET, { audience: 'workspace-api', issuer: 'spashtai-workspace' })
   if (typeof payload === 'string' || payload.tokenUse !== 'workspace'

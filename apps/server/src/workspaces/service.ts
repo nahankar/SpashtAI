@@ -8,9 +8,10 @@ import {
   brandingSchema, createWorkspaceSchema, effectiveWorkspaceFeature, featureSettingsSchema,
   featureSchema, limitsSchema, platformFeatureSchema, updateMemberSchema, WORKSPACE_FEATURES, WorkspaceError,
 } from './contracts'
+import { memberFeatureDecisions } from './productAccess'
 import { establishWorkspace, requireWorkspaceManager, withPlatformWorkspaceAdmin, withWorkspaceActor, type WorkspaceTx } from './context'
 
-export const WORKSPACE_INTEGRATION_NOTICE = 'Organization practices and analytics are not enabled yet. Personal history remains separate.'
+export const WORKSPACE_PRIVACY_NOTICE = 'Organization activity stays in this workspace. Your Personal history remains separate and private.'
 
 export function presentWorkspace(workspace: Workspace) {
   return { id: workspace.id, slug: workspace.kind === 'PERSONAL' ? 'personal' : workspace.slug,
@@ -51,7 +52,7 @@ export function enterWorkspace(userId: string, slug: string) {
     const member = scope.member
     return { workspace: presentWorkspace(scope.workspace), membership: { id: member.id, role: member.role, state: member.state },
       accessToken: member.state === 'ACTIVE' ? signWorkspaceToken({ userId, workspaceId: scope.workspace.id, membershipId: member.id }) : null,
-      expiresInSeconds: member.state === 'ACTIVE' ? 900 : 0, notice: WORKSPACE_INTEGRATION_NOTICE }
+      expiresInSeconds: member.state === 'ACTIVE' ? 900 : 0, notice: WORKSPACE_PRIVACY_NOTICE }
   })
 }
 
@@ -89,7 +90,7 @@ export function createOrganization(actorId: string, input: unknown) {
       members: { create: { userId: owner.id, role: 'OWNER', state: 'INVITED' } },
       features: { create: WORKSPACE_FEATURES.map(feature => ({ feature, entitled: false, enabled: false })) } } })
     await audit(tx, row.id, actorId, 'workspace_created', owner.id, { membershipState: 'INVITED', emailSent: false })
-    return { workspace: presentWorkspace(row), ownerMembershipState: 'INVITED', emailSent: false, notice: WORKSPACE_INTEGRATION_NOTICE }
+    return { workspace: presentWorkspace(row), ownerMembershipState: 'INVITED', emailSent: false, notice: WORKSPACE_PRIVACY_NOTICE }
   })
 }
 
@@ -113,30 +114,20 @@ export function updatePlatformWorkspace(actorId: string, workspaceId: string, in
 
 export async function workspaceSnapshot(tx: WorkspaceTx, scope: Awaited<ReturnType<typeof establishWorkspace>>) {
   const { workspace, member } = scope
-  const flags = await tx.platformFeatureFlag.findMany()
-  const grants = await tx.userFeatureGrant.findMany({ where: { userId: member.userId }, select: { feature: true } })
-  const policies = await tx.workspaceFeature.findMany({ where: { workspaceId: workspace.id } })
-  const overrides = await tx.workspaceMemberFeature.findMany({ where: { workspaceId: workspace.id, memberId: member.id } })
-  const features = WORKSPACE_FEATURES.map(feature => {
-    const platform = flags.find(row => row.feature === feature)
-    const platformAllowed = platform
-      ? !platform.hidden && !platform.disabled && (platform.audience === 'EVERYONE' || grants.some(grant => grant.feature === feature))
-      : !['interviews', 'prepare'].includes(feature)
-    const policy = policies.find(row => row.feature === feature)
-    const decision = effectiveWorkspaceFeature({ workspaceActive: workspace.state === 'ACTIVE', memberActive: member.state === 'ACTIVE',
-      // No organization product route is certified by this foundation. A setting cannot bypass this boundary.
-      tenantReady: false, platformAllowed,
-      policy, memberOverride: overrides.find(row => row.feature === feature)?.allowed })
-    return { feature, entitled: policy?.entitled ?? false, enabled: policy?.enabled ?? false,
-      memberDefault: policy?.memberDefault ?? true, ...decision }
-  })
+  const features = await memberFeatureDecisions(tx, workspace, member)
   const counts = member.role === 'LEARNER' ? null : {
     active: await tx.workspaceMember.count({ where: { workspaceId: workspace.id, state: 'ACTIVE' } }),
     invited: await tx.workspaceMember.count({ where: { workspaceId: workspace.id, state: 'INVITED' } }),
     suspended: await tx.workspaceMember.count({ where: { workspaceId: workspace.id, state: 'SUSPENDED' } }),
   }
   return { workspace: presentWorkspace(workspace), membership: { id: member.id, role: member.role, state: member.state },
-    counts, features, notice: WORKSPACE_INTEGRATION_NOTICE, emailInvitationsReady: true }
+    counts, features, notice: workspaceNotice(features), emailInvitationsReady: true }
+}
+
+/** Truthful status line: which entitled products are still waiting for certified isolation. */
+export function workspaceNotice(features: Array<{ feature: string; entitled: boolean; ready: boolean }>) {
+  const pending = features.filter(f => f.entitled && !f.ready).map(f => f.feature.replaceAll('_', ' '))
+  return pending.length ? `${WORKSPACE_PRIVACY_NOTICE} Not yet available in organizations: ${pending.join(', ')}.` : WORKSPACE_PRIVACY_NOTICE
 }
 
 export async function listWorkspaceMembers(tx: WorkspaceTx, scope: Awaited<ReturnType<typeof establishWorkspace>>) {

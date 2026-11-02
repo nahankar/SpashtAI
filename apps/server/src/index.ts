@@ -1,6 +1,7 @@
 import 'dotenv/config'
 import { assertSafeWorkspaceStartup } from './workspaces/databaseSafety'
 import { workspaceRouter, platformWorkspacesRouter } from './workspaces/routes'
+import { bindWorkspaceRequest } from './workspaces/requestScope'
 import express from 'express'
 import cors from 'cors'
 import { createServer } from 'http'
@@ -178,6 +179,9 @@ app.use('/api/admin/interview-evaluator', express.json({ limit: '100kb' }))
 app.use(express.json())
 
 app.use('/api/', apiLimiter)
+// Organization requests and agent callbacks bind a verified workspace scope before
+// any product middleware queries the database.
+app.use(bindWorkspaceRequest)
 app.use(discardedSessionGuard)
 
 // Liveness: process is up. Cheap, dependency-free (kept as-is for uptime pings).

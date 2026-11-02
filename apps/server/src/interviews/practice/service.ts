@@ -84,8 +84,8 @@ export async function startPractice(input: unknown, ownerId: string) {
       purpose: 'INTERVIEW', contextScope: 'SESSION_ONLY', sessionName: `${body.track.join(', ')} interview practice`,
       configurationSnapshot: { capturePolicy: 'committed-turns-1', answerCompletion: 'explicit', technicalFeedback: 'pending' } } })
     // Recording provenance: the per-practice checkbox, or the account's current acknowledgment (never inferred).
-    const acknowledgment = body.recordingConsent ? null : await tx.recordingAcknowledgment.findUnique({
-      where: { userId_version: { userId: ownerId, version: RECORDING_ACKNOWLEDGMENT.version } } })
+    const acknowledgment = body.recordingConsent ? null : await tx.recordingAcknowledgment.findFirst({
+      where: { userId: ownerId, version: RECORDING_ACKNOWLEDGMENT.version } })
     if (!body.recordingConsent && !acknowledgment) throw new BankError(409, 'Review and accept the Interviews recording notice before starting', 'RECORDING_ACKNOWLEDGMENT_REQUIRED')
     const evaluationPolicy = await learnerPolicy(ownerId, tx)
     const conversation = await conversationAccess(ownerId, tx)
@@ -319,7 +319,7 @@ export const historyQuerySchema = z.object({
 /** One page of the owner's practices. Search, status and sort apply to the whole history, not just the page. */
 /** The current Interviews recording acknowledgment and whether this account accepted it (never inferred). */
 export async function recordingAcknowledgment(ownerId: string) {
-  const accepted = await prisma.recordingAcknowledgment.findUnique({ where: { userId_version: { userId: ownerId, version: RECORDING_ACKNOWLEDGMENT.version } },
+  const accepted = await prisma.recordingAcknowledgment.findFirst({ where: { userId: ownerId, version: RECORDING_ACKNOWLEDGMENT.version },
     select: { version: true, acceptedAt: true } })
   return { current: { version: RECORDING_ACKNOWLEDGMENT.version, scope: RECORDING_ACKNOWLEDGMENT.scope, text: RECORDING_ACKNOWLEDGMENT.text }, accepted }
 }
@@ -328,8 +328,8 @@ export async function acceptRecordingAcknowledgment(ownerId: string, input: unkn
   const body = acknowledgmentSchema.parse(input)
   if (body.version !== RECORDING_ACKNOWLEDGMENT.version) throw new BankError(409, 'The recording notice changed. Review the current version', 'ACKNOWLEDGMENT_VERSION_CHANGED')
   await practiceExecutionAccess(ownerId)
-  const key = { userId_version: { userId: ownerId, version: RECORDING_ACKNOWLEDGMENT.version } }
-  const existing = await prisma.recordingAcknowledgment.findUnique({ where: key })
+  // Row isolation confines this to the current workspace; Personal acceptance never carries over.
+  const existing = await prisma.recordingAcknowledgment.findFirst({ where: { userId: ownerId, version: RECORDING_ACKNOWLEDGMENT.version } })
   const row = existing ?? await prisma.recordingAcknowledgment.create({ data: { userId: ownerId, version: RECORDING_ACKNOWLEDGMENT.version,
     scope: [...RECORDING_ACKNOWLEDGMENT.scope], textHash: hash(RECORDING_ACKNOWLEDGMENT.text), source: 'INTERVIEWS_PAGE' } })
   return { version: row.version, acceptedAt: row.acceptedAt, reused: Boolean(existing) }

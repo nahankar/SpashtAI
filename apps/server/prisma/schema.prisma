@@ -241,6 +241,16 @@ model Workspace {
   enrollmentSettings Json @default("{}")
   invitations UserInvitation[]
   sessions         Session[]
+  replaySessions   ReplaySession[]
+  preparations     Preparation[]
+  progressPulses   ProgressPulse[]
+  featureUsage     FeatureUsage[]
+  coachThreads     CoachThread[]
+  coachReceipts    CoachHomeResultReceipt[]
+  feedback         UserFeedback[]
+  recordingAcknowledgments RecordingAcknowledgment[]
+  evaluatorUsage   InterviewEvaluatorUsage[]
+  analyticsQueries WorkspaceAnalyticsQuery[]
   members          WorkspaceMember[]
   features         WorkspaceFeature[]
   audit            WorkspaceAudit[]
@@ -292,6 +302,25 @@ model WorkspaceMemberFeature {
   @@id([workspaceId, memberId, feature])
 }
 
+// Saved AI Analytics plans owned by one organization; never shared with platform Admin plans.
+model WorkspaceAnalyticsQuery {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  authorId    String
+  question    String
+  title       String
+  plan        Json
+  planHash    String
+  pinned      Boolean   @default(false)
+  lastRunAt   DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([workspaceId, planHash])
+  @@index([workspaceId, pinned, lastRunAt])
+}
+
 model WorkspaceAudit {
   id          String    @id @default(cuid())
   workspaceId String
@@ -306,6 +335,9 @@ model WorkspaceAudit {
 }
 
 model FeatureUsage {
+  workspaceId   String        @default("")
+  workspaceKind WorkspaceKind @default(PERSONAL)
+  workspace     Workspace     @relation(fields: [workspaceId, workspaceKind], references: [id, kind], onDelete: Cascade, onUpdate: NoAction)
   id     String @id @default(cuid())
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -332,6 +364,8 @@ model FeatureUsage {
   @@index([userId, timestamp])
   @@index([feature, timestamp])
   @@index([feature, action, timestamp])
+  @@index([workspaceId, timestamp])
+  @@index([workspaceId, feature, timestamp])
 }
 
 model UserActivity {
@@ -406,6 +440,9 @@ model SystemMetrics {
 }
 
 model Preparation {
+  workspaceId   String        @default("")
+  workspaceKind WorkspaceKind @default(PERSONAL)
+  workspace     Workspace     @relation(fields: [workspaceId, workspaceKind], references: [id, kind], onDelete: Cascade, onUpdate: NoAction)
   id          String            @id @default(cuid())
   userId      String
   user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -427,6 +464,7 @@ model Preparation {
 
   @@index([userId])
   @@index([userId, status])
+  @@index([workspaceId, userId])
 }
 
 model InterviewPreparation {
@@ -556,6 +594,7 @@ model PreparationRecording {
 model ReplayDeletion {
   id              String   @id @default(cuid())
   replaySessionId String   @unique
+  workspaceId     String?
   filePaths       Json
   status          String   @default("pending") // pending | retrying | failed
   attempts        Int      @default(0)
@@ -808,6 +847,9 @@ model SessionRecording {
 // ── Replay Feature ──
 
 model ReplaySession {
+  workspaceId   String        @default("")
+  workspaceKind WorkspaceKind @default(PERSONAL)
+  workspace     Workspace     @relation(fields: [workspaceId, workspaceKind], references: [id, kind], onDelete: Cascade, onUpdate: NoAction)
   id     String @id @default(cuid())
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId String
@@ -845,6 +887,7 @@ model ReplaySession {
   @@index([userId, createdAt])
   @@index([userId, status, createdAt])
   @@index([userId, purpose, createdAt])
+  @@index([workspaceId, userId, createdAt])
 }
 
 model ReplayUpload {
@@ -926,6 +969,9 @@ model ReplayResult {
 // ── My Progress Pulse ──
 
 model ProgressPulse {
+  workspaceId   String        @default("")
+  workspaceKind WorkspaceKind @default(PERSONAL)
+  workspace     Workspace     @relation(fields: [workspaceId, workspaceKind], references: [id, kind], onDelete: Cascade, onUpdate: NoAction)
   id     String @id @default(cuid())
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -943,6 +989,7 @@ model ProgressPulse {
   @@index([userId, recordedAt])
   @@index([recordedAt])
   @@index([source, recordedAt])
+  @@index([workspaceId, recordedAt])
 }
 
 // ── Platform feature flags (global until multi-tenant) ──
@@ -1056,6 +1103,9 @@ enum FeedbackPriority {
 }
 
 model UserFeedback {
+  workspaceId   String        @default("")
+  workspaceKind WorkspaceKind @default(PERSONAL)
+  workspace     Workspace     @relation(fields: [workspaceId, workspaceKind], references: [id, kind], onDelete: Cascade, onUpdate: NoAction)
   id             String                   @id @default(cuid())
   feedbackNumber String                   @unique
   userId         String
@@ -1079,6 +1129,7 @@ model UserFeedback {
   @@index([status])
   @@index([status, priority])
   @@index([sessionId])
+  @@index([workspaceId, createdAt])
 }
 
 model UserFeedbackAttachment {
@@ -1159,6 +1210,9 @@ model LegalDocument {
 }
 
 model CoachThread {
+  workspaceId   String        @default("")
+  workspaceKind WorkspaceKind @default(PERSONAL)
+  workspace     Workspace     @relation(fields: [workspaceId, workspaceKind], references: [id, kind], onDelete: Cascade, onUpdate: NoAction)
   id            String        @id @default(cuid())
   user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId        String
@@ -1177,6 +1231,7 @@ model CoachThread {
   @@index([userId, status, updatedAt])
   @@index([preparationId])
   @@index([userId, focusArea])
+  @@index([workspaceId, userId])
 }
 
 model CoachTurn {
@@ -1206,6 +1261,9 @@ model CoachAction {
 }
 
 model CoachHomeResultReceipt {
+  workspaceId   String        @default("")
+  workspaceKind WorkspaceKind @default(PERSONAL)
+  workspace     Workspace     @relation(fields: [workspaceId, workspaceKind], references: [id, kind], onDelete: Cascade, onUpdate: NoAction)
   id       String   @id @default(cuid())
   userId   String
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1417,6 +1475,9 @@ model InterviewAssessment {
 // Content-free invocation accounting survives deletion, with its link removed.
 model InterviewEvaluatorUsage {
   id            String @id @default(cuid())
+  // Organization accounting scope; null for Personal and platform evaluator tests.
+  workspaceId   String?
+  workspace     Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   invocationKey String @unique
   assessmentId  String?
   assessment    InterviewAssessment? @relation(fields: [assessmentId], references: [id], onDelete: SetNull)
@@ -1429,6 +1490,7 @@ model InterviewEvaluatorUsage {
   createdAt     DateTime @default(now())
 
   @@index([createdAt, modelId])
+  @@index([workspaceId, createdAt])
 }
 
 // Short-lived content-free counters; deleting a test cannot reset its quota.
@@ -1493,6 +1555,9 @@ model QuestionImportRow {
 // One-time, account-level Interviews recording and AI-processing acknowledgment. Append-only: a new text needs
 // a new version, and rows are never inferred for accounts that did not explicitly accept.
 model RecordingAcknowledgment {
+  workspaceId   String        @default("")
+  workspaceKind WorkspaceKind @default(PERSONAL)
+  workspace     Workspace     @relation(fields: [workspaceId, workspaceKind], references: [id, kind], onDelete: Cascade, onUpdate: NoAction)
   id         String   @id @default(cuid())
   userId     String
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1502,7 +1567,7 @@ model RecordingAcknowledgment {
   source     String
   acceptedAt DateTime @default(now())
 
-  @@unique([userId, version])
+  @@unique([workspaceId, userId, version])
 }
 
 // Append-only transcript-integrity events for one answer and segment (see migration 20261028090000).

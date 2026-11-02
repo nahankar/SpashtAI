@@ -51,9 +51,24 @@ try {
   assert.equal(session.userId, 'preexisting-user'); assert.equal(session.workspaceId, workspaces[0].id); assert.equal(session.workspaceKind, 'PERSONAL')
   assert.equal((await db.workspace.findUniqueOrThrow({ where: { personalOwnerId: 'after-foundation' } })).kind, 'PERSONAL')
   assert.equal((await db.sessionTranscript.findUniqueOrThrow({ where: { sessionId: session.id } })).conversationData.messages[0].content, 'preserved answer')
-  const policies = await db.$queryRaw`SELECT count(*) AS count FROM pg_class WHERE relname IN ('Workspace','WorkspaceMember','WorkspaceFeature','WorkspaceMemberFeature','WorkspaceAudit','Session','SessionMetrics','SessionTranscript','SessionSegment','SessionTurn','SessionRecording','UserInvitation') AND relrowsecurity AND relforcerowsecurity`
-  assert.equal(Number(policies[0].count), 12)
-  console.log('Upgrade/backfill passed: Personal ownership preserved; twelve workspace/session/invitation tables enforce RLS.')
+  // Product roots created before the product plane must backfill into the owner's Personal workspace.
+  await db.$executeRaw`INSERT INTO "ReplaySession" (id,"userId","meetingType","userRole","focusAreas","updatedAt") VALUES ('old-replay','preexisting-user','standup','participant','{}',CURRENT_TIMESTAMP)`
+  await db.$executeRaw`INSERT INTO "ProgressPulse" (id,"userId",skill,score,source) VALUES ('old-pulse','after-foundation','clarity',7,'elevate')`
+  await db.$executeRaw`INSERT INTO "FeatureUsage" (id,"userId",feature,action) VALUES ('old-usage','preexisting-user','replay','view')`
+  await db.$executeRaw`INSERT INTO "RecordingAcknowledgment" (id,"userId",version,scope,"textHash",source) VALUES ('old-ack','preexisting-user','v1','{}','h','test')`
+  execute(resolve(root, 'apps/server/prisma/migrations/20261103090000_workspace_product_plane/migration.sql'))
+  const personalOf = async user => (await db.workspace.findUniqueOrThrow({ where: { personalOwnerId: user } })).id
+  for (const [table, id, user] of [['ReplaySession', 'old-replay', 'preexisting-user'], ['ProgressPulse', 'old-pulse', 'after-foundation'], ['FeatureUsage', 'old-usage', 'preexisting-user'], ['RecordingAcknowledgment', 'old-ack', 'preexisting-user']]) {
+    const [row] = await db.$queryRawUnsafe(`SELECT "workspaceId","workspaceKind"::text AS kind FROM "${table}" WHERE id=$1`, id)
+    assert.deepEqual(row, { workspaceId: await personalOf(user), kind: 'PERSONAL' }, `${table} backfilled to Personal`)
+  }
+  const isolated = ['Workspace','WorkspaceMember','WorkspaceFeature','WorkspaceMemberFeature','WorkspaceAudit','Session','SessionMetrics','SessionTranscript','SessionSegment','SessionTurn','SessionRecording','UserInvitation',
+    'ReplaySession','ReplayUpload','ReplayResult','Preparation','InterviewPreparation','PreparationStage','InterviewQuestion','StageReflection','PreparationPractice','PreparationRecording',
+    'ProgressPulse','FeatureUsage','CoachThread','CoachTurn','CoachAction','CoachHomeResultReceipt','UserFeedback','UserFeedbackAttachment','UserFeedbackNote','RecordingAcknowledgment',
+    'InterviewRun','InterviewAttempt','InterviewCaptureReceipt','InterviewAnswerChunk','InterviewTranscriptIssue','InterviewAnswerSnapshot','InterviewAssessment','InterviewEvaluatorUsage','BankFollowUpJob','WorkspaceAnalyticsQuery']
+  const policies = await db.$queryRawUnsafe(`SELECT relname FROM pg_class WHERE relname = ANY($1) AND relrowsecurity AND relforcerowsecurity`, isolated)
+  assert.deepEqual(policies.map(p => p.relname).sort(), [...isolated].sort())
+  console.log(`Upgrade/backfill passed: Personal ownership preserved; ${isolated.length} workspace, session, product and invitation tables enforce RLS.`)
 } finally {
   await db?.$disconnect()
   await admin.$executeRawUnsafe(`DROP DATABASE IF EXISTS "${name}"`)

@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from 'express'
 import { prisma } from './prisma'
+import { currentDataScope, type DataScope } from './dataScope'
 
 /** Product modules that may be shown in navigation and counted in Pulse. */
 export type PlatformFeature = 'elevate' | 'replay' | 'prepare' | 'interviews' | 'quick_try'
@@ -210,9 +211,29 @@ export async function getFeatureFlagsMap(): Promise<FeatureFlagsMap> {
   return map
 }
 
+const ORGANIZATION_PRODUCTS: Partial<Record<ConfigurableFeature, string>> = {
+  elevate: 'elevate', replay: 'replay', prepare: 'prepare', interviews: 'interviews',
+  interview_voice: 'interviews', interview_adaptive: 'interviews', interview_conversation: 'interviews',
+}
+
+/**
+ * Inside an organization the workspace decision (entitlement, setting, member
+ * override, readiness) replaces Personal audience grants. Admin-only pilots and
+ * selected-user capabilities have no tenant selection model and stay off.
+ */
+function organizationAccessible(feature: ConfigurableFeature, state: FeatureFlagPublicState, scope: DataScope): boolean {
+  if (state.hidden || state.disabled) return false
+  const product = ORGANIZATION_PRODUCTS[feature]
+  if (product) return Boolean(scope.features[product])
+  if (feature === 'quick_try' || feature === 'interview_evaluator') return false
+  return state.audience !== 'SELECTED_USERS'
+}
+
 export async function isFeatureAccessible(feature: ConfigurableFeature, userId?: string): Promise<boolean> {
   const map = await getFeatureFlagsMap()
   const s = map[feature]
+  const scope = currentDataScope()
+  if (scope) return organizationAccessible(feature, s, scope)
   if (s.hidden || s.disabled) return false
   if (s.audience !== 'SELECTED_USERS') return true
   if (!userId) return false
@@ -222,6 +243,8 @@ export async function isFeatureAccessible(feature: ConfigurableFeature, userId?:
 export async function isFeatureVisible(feature: ConfigurableFeature, userId?: string): Promise<boolean> {
   const map = await getFeatureFlagsMap()
   const state = map[feature]
+  const scope = currentDataScope()
+  if (scope) return organizationAccessible(feature, state, scope)
   if (state.hidden) return false
   if (state.audience !== 'SELECTED_USERS') return true
   if (!userId) return false
