@@ -1,3 +1,4 @@
+import { workspaceRouter, platformWorkspacesRouter } from './workspaces/routes'
 import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
@@ -218,6 +219,9 @@ app.use('/api/auth', authRouter)
 // Browser remote logs → S3 (operational only; gated by CLIENT_LOGS_ENABLED).
 // Fail-safe: never blocks or errors the app; no-ops when disabled.
 app.post('/api/client-logs', clientLogsLimiter, requireAuth, ingestClientLogs)
+
+app.use('/api/workspaces', workspaceRouter)
+app.use('/api/admin/workspaces', platformWorkspacesRouter)
 
 // Admin routes
 app.use('/api/admin/users', requireAuth, requireAdmin, adminUsersRouter)

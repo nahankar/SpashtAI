@@ -1,0 +1,1064 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "SpashtAI workspace foundation",
+    "version": "0.1.0",
+    "description": "Local contract. Feature flag WORKSPACES_ENABLED defaults false. This is control-plane administration only, not tenant product readiness. Workspace JWTs cannot authorize legacy Personal/Admin APIs."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:4041",
+      "description": "Isolated development preview; never production"
+    }
+  ],
+  "paths": {
+    "/api/workspaces/config": {
+      "get": {
+        "summary": "Workspace rollout availability",
+        "description": "",
+        "security": [],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "JSON result. See docs/TENANCY.md for DTO and rollout boundaries."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      }
+    },
+    "/api/workspaces": {
+      "get": {
+        "summary": "List own Personal and organization memberships",
+        "description": "",
+        "security": [
+          {
+            "identity": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "JSON result. See docs/TENANCY.md for DTO and rollout boundaries."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      }
+    },
+    "/api/workspaces/entry/{slug}": {
+      "post": {
+        "summary": "Resolve workspace entry and issue a workspace token only for active membership",
+        "description": "Invited membership returns accessToken=null; active token expires after 900 seconds. Slug never grants membership. Placement is resolved on the server.",
+        "security": [
+          {
+            "identity": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result. See docs/TENANCY.md for DTO and rollout boundaries."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      }
+    },
+    "/api/workspaces/entry/{slug}/accept": {
+      "post": {
+        "summary": "Accept own pending membership with verified email",
+        "description": "",
+        "security": [
+          {
+            "identity": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result. See docs/TENANCY.md for DTO and rollout boundaries."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      }
+    },
+    "/api/workspaces/current": {
+      "get": {
+        "summary": "Read token-bound workspace configuration and overview",
+        "description": "Foundation-only organizations always have all effective feature access denied; no global session or analytics records returned.",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "JSON result. See docs/TENANCY.md for DTO and rollout boundaries."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      }
+    },
+    "/api/workspaces/current/members": {
+      "get": {
+        "summary": "List workspace members (Owner/Admin only, first 100)",
+        "description": "",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "JSON result. See docs/TENANCY.md for DTO and rollout boundaries."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      },
+      "post": {
+        "summary": "Propose membership for existing verified account; no email sent",
+        "description": "",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "JSON result. See docs/TENANCY.md for DTO and rollout boundaries."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExistingMember"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/current/branding": {
+      "patch": {
+        "summary": "Update own organization branding (Owner/Admin)",
+        "description": "",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "JSON result. See docs/TENANCY.md for DTO and rollout boundaries."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Branding"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/current/features/{feature}": {
+      "put": {
+        "summary": "Set enabled/default within platform entitlement",
+        "description": "",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "feature",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "coach",
+                "elevate",
+                "replay",
+                "interviews",
+                "prepare",
+                "progress_pulse",
+                "feedback",
+                "pro",
+                "ultra",
+                "audio_export",
+                "text_export",
+                "reprocess"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result. See docs/TENANCY.md for DTO and rollout boundaries."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeatureSettings"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/current/members/{memberId}": {
+      "patch": {
+        "summary": "Change workspace role or suspend/reactivate; Owner manages administrators",
+        "description": "",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "memberId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result. See docs/TENANCY.md for DTO and rollout boundaries."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemberChange"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/current/members/{memberId}/features/{feature}": {
+      "put": {
+        "summary": "Set per-member override; null restores organization default",
+        "description": "",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "memberId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "feature",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "coach",
+                "elevate",
+                "replay",
+                "interviews",
+                "prepare",
+                "progress_pulse",
+                "feedback",
+                "pro",
+                "ultra",
+                "audio_export",
+                "text_export",
+                "reprocess"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result. See docs/TENANCY.md for DTO and rollout boundaries."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemberFeature"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/workspaces": {
+      "get": {
+        "summary": "List organizations (current platform Admin only, first 100)",
+        "description": "",
+        "security": [
+          {
+            "identity": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "JSON result. See docs/TENANCY.md for DTO and rollout boundaries."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create reusable foundation-only organization with pending Owner",
+        "description": "",
+        "security": [
+          {
+            "identity": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "JSON result. See docs/TENANCY.md for DTO and rollout boundaries."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOrganization"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/workspaces/{workspaceId}": {
+      "patch": {
+        "summary": "Set branding, suspension and configured limits",
+        "description": "",
+        "security": [
+          {
+            "identity": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result. See docs/TENANCY.md for DTO and rollout boundaries."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlatformSettings"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/workspaces/{workspaceId}/features/{feature}": {
+      "put": {
+        "summary": "Set organization entitlement",
+        "description": "",
+        "security": [
+          {
+            "identity": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "feature",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "coach",
+                "elevate",
+                "replay",
+                "interviews",
+                "prepare",
+                "progress_pulse",
+                "feedback",
+                "pro",
+                "ultra",
+                "audio_export",
+                "text_export",
+                "reprocess"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result. See docs/TENANCY.md for DTO and rollout boundaries."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Entitlement"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "identity": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "Identity JWT"
+      },
+      "workspace": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "Workspace JWT (workspace-api audience, 15 minutes)"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "code"
+        ]
+      },
+      "Branding": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 100
+          },
+          "timeZone": {
+            "type": "string",
+            "example": "Asia/Kolkata"
+          },
+          "accentColor": {
+            "type": "string",
+            "pattern": "^#[0-9a-fA-F]{6}$"
+          },
+          "logoDataUrl": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 90000,
+            "description": "Inline PNG/JPEG/WebP with verified magic bytes; decoded maximum 64 KB."
+          }
+        },
+        "required": []
+      },
+      "Limits": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "maxMembers": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100000
+          },
+          "dailyEvaluations": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000
+          },
+          "concurrentVoice": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          }
+        },
+        "required": [
+          "maxMembers",
+          "dailyEvaluations",
+          "concurrentVoice"
+        ]
+      },
+      "FeatureSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "memberDefault": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "memberDefault"
+        ]
+      },
+      "Entitlement": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "entitled": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "memberDefault": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "entitled",
+          "enabled",
+          "memberDefault"
+        ]
+      },
+      "MemberChange": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "OWNER",
+              "ADMIN",
+              "LEARNER"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED"
+            ]
+          }
+        },
+        "required": [],
+        "anyOf": [
+          {
+            "required": [
+              "role"
+            ]
+          },
+          {
+            "required": [
+              "state"
+            ]
+          }
+        ]
+      },
+      "ExistingMember": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "OWNER",
+              "ADMIN",
+              "LEARNER"
+            ]
+          }
+        },
+        "required": [
+          "email",
+          "role"
+        ]
+      },
+      "MemberFeature": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "type": "boolean",
+            "nullable": true
+          }
+        },
+        "required": [
+          "allowed"
+        ]
+      },
+      "CreateOrganization": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 100
+          },
+          "timeZone": {
+            "type": "string",
+            "example": "Asia/Kolkata"
+          },
+          "accentColor": {
+            "type": "string",
+            "pattern": "^#[0-9a-fA-F]{6}$"
+          },
+          "logoDataUrl": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 90000,
+            "description": "Inline PNG/JPEG/WebP with verified magic bytes; decoded maximum 64 KB."
+          },
+          "slug": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 48,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "ownerEmail": {
+            "type": "string",
+            "format": "email"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/Limits"
+          }
+        },
+        "required": [
+          "name",
+          "slug",
+          "ownerEmail"
+        ]
+      },
+      "PlatformSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 100
+          },
+          "timeZone": {
+            "type": "string",
+            "example": "Asia/Kolkata"
+          },
+          "accentColor": {
+            "type": "string",
+            "pattern": "^#[0-9a-fA-F]{6}$"
+          },
+          "logoDataUrl": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 90000,
+            "description": "Inline PNG/JPEG/WebP with verified magic bytes; decoded maximum 64 KB."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED"
+            ]
+          },
+          "limits": {
+            "$ref": "#/components/schemas/Limits"
+          }
+        },
+        "required": []
+      }
+    },
+    "responses": {
+      "400": {
+        "description": "Invalid settings",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "401": {
+        "description": "Wrong, invalid or expired token",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "403": {
+        "description": "Current role, membership or entitlement does not permit this action",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "404": {
+        "description": "Disabled rollout or unavailable workspace/member",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "409": {
+        "description": "Conflict, seat limit, acceptance or last active Owner constraint",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "503": {
+        "description": "Unsafe database role, missing row isolation or unavailable placement",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    }
+  }
+}

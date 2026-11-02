@@ -1,3 +1,4 @@
+import { OrganizationWorkspace, PlatformWorkspaces, WorkspaceLink, WorkspaceList } from '@/workspaces/Workspaces'
 import { useState, useRef, useEffect } from 'react'
 import { BrowserRouter, Link, Navigate, Route, Routes, useLocation, useSearchParams } from 'react-router-dom'
 import { Menu, RotateCcw, X } from 'lucide-react'
@@ -483,12 +484,14 @@ function ElevateRoute() {
 }
 
 function AppRoutes() {
+  const location = useLocation()
   const { user, loading } = useAuth()
   usePageTracking()
 
   return (
     <>
-      <Navbar />
+      {!location.pathname.startsWith('/w/') && <Navbar />}
+      {user && !location.pathname.startsWith('/w/') && <WorkspaceLink />}
       <div className="flex min-h-[calc(100vh-4rem)] flex-col">
         <div className="flex-1">
       <Routes>
@@ -615,11 +618,17 @@ function AppRoutes() {
           } />
         </Route>
 
+        <Route element={<ProtectedRoute />}>
+          <Route path="/workspaces" element={<WorkspaceList />} />
+          <Route path="/w/:slug/*" element={<OrganizationWorkspace />} />
+        </Route>
+
         {/* Protected admin routes */}
         <Route element={<ProtectedRoute requireAdmin />}>
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<AdminDashboard />} />
             <Route path="users" element={<AdminUsers />} />
+            <Route path="workspaces" element={<PlatformWorkspaces />} />
             <Route path="users/:id" element={<AdminUserDetail />} />
             <Route path="feedback" element={<AdminFeedback />} />
             <Route path="feedback/:id" element={<AdminFeedbackDetail />} />

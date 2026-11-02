@@ -254,6 +254,10 @@ router.delete('/:id', async (req: Request, res: Response) => {
 
     res.json({ message: 'User deleted' })
   } catch (err) {
+    if (err && typeof err === 'object' && 'code' in err && err.code === 'P2003') {
+      res.status(409).json({ error: 'Transfer workspace ownership or resolve protected records before deleting this account' })
+      return
+    }
     console.error('Delete user error:', err)
     res.status(500).json({ error: 'Failed to delete user' })
   }

@@ -7,6 +7,8 @@ const ALLOWED_PREFIXES = [
   '/progress',
   '/history',
   '/feedback',
+  '/w',
+  '/workspaces',
 ]
 
 /** Relative in-app path only. Blocks open redirects and auth loops. */

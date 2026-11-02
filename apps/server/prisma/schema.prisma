@@ -155,6 +155,8 @@ model User {
   enableUltra Boolean @default(true)
 
   // Relations
+  personalWorkspace Workspace? @relation("PersonalWorkspaceOwner")
+  workspaceMemberships WorkspaceMember[]
   recordingAcknowledgments RecordingAcknowledgment[]
   sessions                Session[]
   replaySessions          ReplaySession[]
@@ -181,6 +183,120 @@ model User {
   @@index([role, pincode])
   @@index([role, gender])
   @@index([role, state])
+}
+
+// Identity stays global; organization roles live only on WorkspaceMember.
+enum WorkspaceKind {
+  PERSONAL
+  ORGANIZATION
+}
+
+enum WorkspaceState {
+  ACTIVE
+  SUSPENDED
+}
+
+enum WorkspaceMemberRole {
+  OWNER
+  ADMIN
+  LEARNER
+}
+
+enum WorkspaceMemberState {
+  INVITED
+  ACTIVE
+  SUSPENDED
+}
+
+enum WorkspaceIsolationStage {
+  PERSONAL_LEGACY
+  FOUNDATION_ONLY
+  TENANT_READY
+}
+
+enum WorkspaceStorageMode {
+  SHARED
+  DEDICATED_DATABASE
+}
+
+model Workspace {
+  id               String                  @id @default(cuid())
+  kind             WorkspaceKind
+  slug             String                  @unique
+  name             String
+  state            WorkspaceState          @default(ACTIVE)
+  isolationStage   WorkspaceIsolationStage @default(FOUNDATION_ONLY)
+  personalOwnerId  String?                 @unique
+  personalOwner    User?                   @relation("PersonalWorkspaceOwner", fields: [personalOwnerId], references: [id], onDelete: Cascade)
+  logoDataUrl      String?                 @db.Text
+  accentColor      String                  @default("#2563eb")
+  timeZone         String                  @default("Asia/Kolkata")
+  maxMembers       Int                     @default(25)
+  dailyEvaluations Int                     @default(30)
+  concurrentVoice  Int                     @default(2)
+  storageMode      WorkspaceStorageMode    @default(SHARED)
+  databaseKey      String                  @default("primary")
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+  members          WorkspaceMember[]
+  features         WorkspaceFeature[]
+  audit            WorkspaceAudit[]
+}
+
+model WorkspaceMember {
+  id          String                   @id @default(cuid())
+  workspaceId String
+  workspace   Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        WorkspaceMemberRole      @default(LEARNER)
+  state       WorkspaceMemberState     @default(INVITED)
+  acceptedAt  DateTime?
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+  features    WorkspaceMemberFeature[]
+
+  @@unique([workspaceId, userId])
+  @@unique([workspaceId, id])
+  @@index([userId, state])
+}
+
+model WorkspaceFeature {
+  workspaceId   String
+  workspace     Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  feature       String
+  entitled      Boolean                  @default(false)
+  enabled       Boolean                  @default(false)
+  memberDefault Boolean                  @default(true)
+  updatedAt     DateTime                 @updatedAt
+  members       WorkspaceMemberFeature[]
+
+  @@id([workspaceId, feature])
+}
+
+model WorkspaceMemberFeature {
+  workspaceId String
+  memberId    String
+  member      WorkspaceMember  @relation(fields: [workspaceId, memberId], references: [workspaceId, id], onDelete: Cascade)
+  feature     String
+  entitlement WorkspaceFeature @relation(fields: [workspaceId, feature], references: [workspaceId, feature], onDelete: Cascade)
+  allowed     Boolean
+  updatedAt   DateTime         @updatedAt
+
+  @@id([workspaceId, memberId, feature])
+}
+
+model WorkspaceAudit {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actorUserId String
+  action      String
+  subjectId   String?
+  metadata    Json      @default("{}")
+  createdAt   DateTime  @default(now())
+
+  @@index([workspaceId, createdAt])
 }
 
 model FeatureUsage {

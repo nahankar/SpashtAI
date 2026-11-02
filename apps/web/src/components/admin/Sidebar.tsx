@@ -1,3 +1,4 @@
+import { useWorkspacesEnabled } from '@/workspaces/useWorkspacesEnabled'
 import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
@@ -28,6 +29,7 @@ const groups = [
     links: [
       { to: '/admin', label: 'Dashboard', end: true, icon: LayoutDashboard },
       { to: '/admin/users', label: 'Users', end: false, icon: Users },
+      { to: '/admin/workspaces', label: 'Workspaces', end: false, icon: Building2 },
       { to: '/admin/feedback', label: 'Feedback', end: false, icon: MessageSquareText },
     ],
   },
@@ -61,6 +63,7 @@ const groups = [
 ]
 
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
+  const workspacesEnabled = useWorkspacesEnabled()
   return (
     <>
       {groups.map((group) => (
@@ -69,7 +72,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
             {group.label}
           </p>
           <div className="flex flex-col gap-1">
-            {group.links.map((link) => {
+            {group.links.filter(link => link.to !== '/admin/workspaces' || workspacesEnabled).map((link) => {
               const Icon = link.icon
               return (
                 <NavLink

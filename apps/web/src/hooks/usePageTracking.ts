@@ -1,3 +1,4 @@
+import { isWorkspacePath } from '@/workspaces/paths'
 import { useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
@@ -11,7 +12,7 @@ export function usePageTracking() {
   const userId = user?.id
 
   useEffect(() => {
-    if (!userId) return
+    if (!userId || isWorkspacePath(location.pathname)) return
     const path = location.pathname
     const clock = new EngagementClock()
     trackProductEvent({ feature: 'app', action: 'page_view', path, outcome: 'viewed', metadata: { path } })

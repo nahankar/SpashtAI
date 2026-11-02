@@ -1,3 +1,4 @@
+import { isWorkspacePath } from '@/workspaces/paths'
 import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
@@ -8,7 +9,7 @@ export function AnalyticsConsent() {
   const { pathname } = useLocation()
   const { user, isAdmin } = useAuth()
   const [consent, setConsent] = useState(readClarityConsent)
-  const show = Boolean(user) && !isAdmin && !pathname.startsWith('/admin') && consent == null && import.meta.env.PROD && Boolean(clarityProjectId())
+  const show = Boolean(user) && !isAdmin && !pathname.startsWith('/admin') && !pathname.startsWith('/auth') && !isWorkspacePath(pathname) && consent == null && import.meta.env.PROD && Boolean(clarityProjectId())
 
   useEffect(() => {
     if (!user || isAdmin || !canUseClarity(pathname)) return

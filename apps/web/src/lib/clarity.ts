@@ -1,3 +1,4 @@
+import { isWorkspacePath } from '@/workspaces/paths'
 export const CLARITY_CONSENT_KEY = 'spashtai_analytics_consent'
 
 type ClarityConsent = 'granted' | 'denied'
@@ -35,7 +36,7 @@ export function clarityDashboardUrl() {
 }
 
 export function canUseClarity(pathname: string) {
-  return import.meta.env.PROD && Boolean(clarityProjectId()) && !pathname.startsWith('/admin') && readClarityConsent() === 'granted'
+  return import.meta.env.PROD && Boolean(clarityProjectId()) && !pathname.startsWith('/admin') && !pathname.startsWith('/auth') && !isWorkspacePath(pathname) && readClarityConsent() === 'granted'
 }
 
 export function loadClarity(projectId: string) {

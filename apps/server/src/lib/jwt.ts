@@ -19,5 +19,32 @@ export function signToken(payload: TokenPayload): string {
 }
 
 export function verifyToken(token: string): TokenPayload {
-  return jwt.verify(token, JWT_SECRET) as TokenPayload
+  const payload = jwt.verify(token, JWT_SECRET)
+  if (typeof payload === 'string' || (payload.tokenUse && payload.tokenUse !== 'identity')) {
+    throw new Error('An identity token is required')
+  }
+  return payload as TokenPayload
+}
+
+export interface WorkspaceTokenPayload {
+  tokenUse: 'workspace'
+  userId: string
+  workspaceId: string
+  membershipId: string
+}
+
+/** Deliberately separate from identity tokens: legacy product/Admin routes reject these. */
+export function signWorkspaceToken(input: Omit<WorkspaceTokenPayload, 'tokenUse'>): string {
+  return jwt.sign({ ...input, tokenUse: 'workspace' }, JWT_SECRET, {
+    expiresIn: '15m', audience: 'workspace-api', issuer: 'spashtai-workspace',
+  })
+}
+
+export function verifyWorkspaceToken(token: string): WorkspaceTokenPayload {
+  const payload = jwt.verify(token, JWT_SECRET, { audience: 'workspace-api', issuer: 'spashtai-workspace' })
+  if (typeof payload === 'string' || payload.tokenUse !== 'workspace'
+    || ![payload.userId, payload.workspaceId, payload.membershipId].every(v => typeof v === 'string' && v.length > 0)) {
+    throw new Error('A workspace token is required')
+  }
+  return payload as WorkspaceTokenPayload
 }
