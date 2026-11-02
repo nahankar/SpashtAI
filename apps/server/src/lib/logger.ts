@@ -23,6 +23,7 @@ export const logger = pino({
       'req.headers.cookie',
       'req.headers["x-internal-agent-token"]',
       'req.query.access_token',
+      'req.query.workspace_media',
       'res.headers["set-cookie"]',
     ],
     censor: '[redacted]',

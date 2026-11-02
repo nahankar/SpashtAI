@@ -1,3 +1,4 @@
+import { appPath } from '@/workspaces/activeWorkspace'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowLeft, Trash2 } from 'lucide-react'
@@ -66,7 +67,7 @@ export function InterviewHistory() {
   }
   return <div className="mx-auto max-w-5xl space-y-5">
     <header className="space-y-1">
-      <Link to="/interviews" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Interviews</Link>
+      <Link to={appPath('/interviews')} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Interviews</Link>
       <h1 className="text-3xl font-semibold">Interview history</h1>
       <p className="text-muted-foreground">Your interview practices only. Resume an unfinished practice or review a finished one. Separate from Elevate, Replay and Progress Pulse.</p>
     </header>
@@ -77,7 +78,7 @@ export function InterviewHistory() {
     {state === 'ready' && page.ownerTotal === 0 && <Card><CardContent className="space-y-3 py-16 text-center">
       <h2 className="text-lg font-medium">No interview practices yet</h2>
       <p className="text-sm text-muted-foreground">Practices you start appear here with their answered and skipped questions.</p>
-      <Button asChild><Link to="/interviews">Start a practice</Link></Button>
+      <Button asChild><Link to={appPath('/interviews')}>Start a practice</Link></Button>
     </CardContent></Card>}
     {state === 'ready' && page.ownerTotal > 0 && <>
       <SessionFilters search={search} onSearchChange={setSearch} searchPlaceholder="Search by track, difficulty or experience…"

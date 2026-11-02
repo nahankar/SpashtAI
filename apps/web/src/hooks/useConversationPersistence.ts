@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { getAuthHeaders } from '@/lib/api-client';
+import { getActiveWorkspace, WORKSPACE_HEADER, workspaceHeadersFor } from '@/workspaces/activeWorkspace';
 
 interface ConversationMessage {
   id: string;
@@ -191,10 +192,16 @@ export function useConversationPersistence(): ConversationState & ConversationAP
 
     try {
       const websocket = new WebSocket(WS_BASE_URL);
+      const origin = getActiveWorkspace();
+      let resubscribed = false;
+      const subscribe = () => {
+        const workspaceToken = workspaceHeadersFor(origin)[WORKSPACE_HEADER];
+        websocket.send(JSON.stringify({ type: 'subscribe', sessionId, accessToken: localStorage.getItem('spashtai_token'), ...(workspaceToken ? { workspaceToken } : {}) }));
+      };
       
       websocket.onopen = () => {
         console.log('🔌 Connected to conversation WebSocket');
-        websocket.send(JSON.stringify({ type: 'subscribe', sessionId, accessToken: localStorage.getItem('spashtai_token') }));
+        subscribe();
         setWs(websocket);
       };
 
@@ -202,7 +209,14 @@ export function useConversationPersistence(): ConversationState & ConversationAP
         try {
           const data = JSON.parse(event.data);
           
+          // A workspace grant ends when its short-lived token expires; renew it once with the current token.
+          if (data.type === 'subscription_error' && data.sessionId === sessionId && origin && !resubscribed) {
+            resubscribed = true;
+            subscribe();
+            return;
+          }
           if (data.type === 'conversation_update' && data.sessionId === sessionId) {
+            resubscribed = false;
             if (data.action === 'message_added') {
               setState(prev => {
                 const exists = prev.messages.some(

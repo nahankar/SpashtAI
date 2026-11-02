@@ -1,3 +1,4 @@
+import { appPath } from '@/workspaces/activeWorkspace'
 import type { ReactNode } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { useFeatureFlags, type PlatformFeature } from '@/contexts/FeatureFlagsContext'
@@ -30,7 +31,7 @@ export function FeatureGate({
   }
 
   if (!isVisible(feature)) {
-    return <Navigate to="/coach" replace />
+    return <Navigate to={appPath('/coach')} replace />
   }
 
   if (!isAccessible(feature)) {
@@ -46,7 +47,7 @@ export function FeatureGate({
             <CardDescription>{message}</CardDescription>
           </CardHeader>
           <CardContent>
-            <Link to="/coach">
+            <Link to={appPath('/coach')}>
               <Button variant="outline" className="w-full">
                 Back to Coach
               </Button>

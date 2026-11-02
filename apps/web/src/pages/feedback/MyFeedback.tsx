@@ -1,3 +1,4 @@
+import { appPath } from '@/workspaces/activeWorkspace'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiClient } from '@/lib/api-client'
@@ -46,7 +47,7 @@ export function MyFeedback() {
             Track submissions and admin responses (earn points). Edit while status is Open.
           </p>
         </div>
-        <Link to="/feedback/new">
+        <Link to={appPath('/feedback/new')}>
           <Button>
             <MessageSquarePlus className="mr-2 h-4 w-4" /> Provide Feedback (earn points)
           </Button>
@@ -87,7 +88,7 @@ export function MyFeedback() {
                     <p className="text-xs text-primary">Admin has responded — view details</p>
                   )}
                   <div className="flex gap-2">
-                    <Link to={`/feedback/${item.id}`}>
+                    <Link to={appPath(`/feedback/${item.id}`)}>
                       <Button size="sm" variant="outline">
                         {canEdit ? (
                           <>

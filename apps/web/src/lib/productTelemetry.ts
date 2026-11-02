@@ -1,3 +1,4 @@
+import { workspaceHeaders } from '@/workspaces/activeWorkspace'
 const API_BASE = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:4000'
 const VISIT_KEY = 'spashtai_visit_id'
 
@@ -32,7 +33,7 @@ export function trackProductEvent(input: TrackInput) {
     const eventId = crypto.randomUUID()
     void fetch(`${API_BASE}/api/events/track`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...workspaceHeaders() },
       body: JSON.stringify({ ...input, eventId, visitId: visitId() }),
       keepalive: true,
     }).catch(() => {})

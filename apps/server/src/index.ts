@@ -46,6 +46,7 @@ import {
   recordingUpload,
   uploadSessionRecording,
   streamSessionRecording,
+  createSessionRecordingTicket,
 } from './routes/recordings'
 import { createSessionSegment, closeSessionSegment } from './routes/session-segments'
 import {
@@ -160,8 +161,8 @@ app.use(
     // URL of media routes — strip it there so playback tokens never hit the logs.
     serializers: {
       req: pino.stdSerializers.wrapRequestSerializer((req) => {
-        if (typeof req.url === 'string' && req.url.includes('access_token=')) {
-          req.url = req.url.replace(/([?&]access_token=)[^&]+/gi, '$1[redacted]')
+        if (typeof req.url === 'string' && /(access_token|workspace_media)=/.test(req.url)) {
+          req.url = req.url.replace(/([?&](?:access_token|workspace_media)=)[^&]+/gi, '$1[redacted]')
         }
         return req
       }),
@@ -338,6 +339,7 @@ app.post(
   reenterDataScope,
   uploadSessionRecording,
 )
+app.post('/sessions/:sessionId/recording/ticket', requireAuth, createSessionRecordingTicket)
 app.get('/sessions/:sessionId/recording/stream', requireAuthOrMediaToken, streamSessionRecording)
 app.post('/sessions/:sessionId/segments', requireAuth, createSessionSegment)
 app.patch('/sessions/:sessionId/segments/:segmentId', requireAuth, closeSessionSegment)

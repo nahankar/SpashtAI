@@ -1,3 +1,4 @@
+import { workspaceHeaders, appPath } from '@/workspaces/activeWorkspace'
 import { useState, useEffect, useCallback, useContext } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -103,6 +104,7 @@ export function FeedbackDetail() {
       const token = localStorage.getItem('spashtai_token')
       const headers: Record<string, string> = {}
       if (token) headers.Authorization = `Bearer ${token}`
+      Object.assign(headers, workspaceHeaders())
 
       const res = await fetch(`${API}/api/feedback/${id}`, {
         method: 'PUT',
@@ -137,7 +139,7 @@ export function FeedbackDetail() {
     return (
       <div>
         <Link
-          to="/feedback"
+          to={appPath('/feedback')}
           className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="h-3.5 w-3.5" /> Back to Feedback
@@ -158,7 +160,7 @@ export function FeedbackDetail() {
   return (
     <div>
       <Link
-        to="/feedback"
+        to={appPath('/feedback')}
         className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="h-3.5 w-3.5" /> Back to Feedback
@@ -268,7 +270,7 @@ export function FeedbackDetail() {
                   {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                   Save changes
                 </Button>
-                <Button variant="outline" onClick={() => navigate('/feedback')}>
+                <Button variant="outline" onClick={() => navigate(appPath('/feedback'))}>
                   Cancel
                 </Button>
               </div>

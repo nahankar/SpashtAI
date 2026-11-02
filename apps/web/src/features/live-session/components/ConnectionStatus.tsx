@@ -1,3 +1,5 @@
+import { productPathname } from '@/workspaces/activeWorkspace'
+import { activeSessionKey } from '@/lib/api-client'
 import { useEffect, useRef, useState } from 'react'
 import { useConnectionState, useRoomContext } from '@livekit/components-react'
 import { RoomEvent } from 'livekit-client'
@@ -12,9 +14,9 @@ export function ConnectionStatus({ assistantState }: { assistantState: 'restarti
   useEffect(() => {
     if (!isConnected || connectedSent.current) return
     connectedSent.current = true
-    const path = window.location.pathname
+    const path = productPathname(window.location.pathname)
     const feature = path.startsWith('/interviews') ? 'interviews' : 'elevate'
-    const sessionId = localStorage.getItem('spashtai_active_session')
+    const sessionId = localStorage.getItem(activeSessionKey())
     trackProductEvent({ feature, action: 'rtc_connected', sessionId, outcome: 'completed' })
   }, [isConnected])
 

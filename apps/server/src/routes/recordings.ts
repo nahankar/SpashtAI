@@ -36,6 +36,7 @@ import {
   SessionMissingError,
 } from '../lib/sessionDiscard'
 import { activityMediaDir } from '../lib/mediaStorage'
+import { signWorkspaceMediaToken } from '../lib/jwt'
 
 // Absolute base dir for client-uploaded recordings. Stored as an absolute
 // filePath so resolveElevateSessionAudio's absolute-path branch finds it.
@@ -345,6 +346,21 @@ export async function uploadSessionRecording(req: Request, res: Response) {
  * Stream the best Elevate session recording with HTTP Range support so the
  * replay player can seek. Audio 0:00 corresponds to Session.recordingStartedAt.
  */
+/** Organization playback ticket for the learner's own session; Personal playback keeps `access_token`. */
+export async function createSessionRecordingTicket(req: Request, res: Response) {
+  const scope = req.dataScope
+  if (!scope || !req.user) return res.status(400).json({ error: 'Playback tickets are issued inside a workspace', code: 'WORKSPACE_TOKEN_REQUIRED' })
+  const session = await prisma.session.findFirst({
+    where: { id: req.params.sessionId, userId: req.user.userId, workspaceId: scope.workspaceId, discardedAt: null },
+    select: { id: true },
+  })
+  if (!session) return res.status(404).json({ error: 'Session not found' })
+  const ticket = signWorkspaceMediaToken({
+    userId: req.user.userId, workspaceId: scope.workspaceId, membershipId: scope.membershipId, sessionId: session.id,
+  })
+  return res.json({ ticket })
+}
+
 export async function streamSessionRecording(req: Request, res: Response) {
   try {
     const { sessionId } = req.params

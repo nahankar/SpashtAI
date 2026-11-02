@@ -1,3 +1,4 @@
+import { appPath } from '@/workspaces/activeWorkspace'
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
@@ -1532,7 +1533,7 @@ export function Coach() {
         coach: '1',
       })
       if (recommendation.threadId) search.set('thread', recommendation.threadId)
-      navigate(`/elevate?${search.toString()}`)
+      navigate(appPath(`/elevate?${search.toString()}`))
       return
     }
     if (recommendation.kind === 'result') {
@@ -1552,7 +1553,7 @@ export function Coach() {
     }
     if (recommendation.kind === 'onboarding') return
     if (recommendation.kind === 'pulse' && !recommendation.practiceAvailable) {
-      navigate('/progress')
+      navigate(appPath('/progress'))
       return
     }
     if (!isAccessible('elevate')) throw new Error('Elevate is not currently available.')

@@ -75,3 +75,30 @@ export function verifyWorkspaceToken(token: string): WorkspaceTokenPayload {
   }
   return payload as WorkspaceTokenPayload
 }
+
+export interface WorkspaceMediaTokenPayload {
+  tokenUse: 'workspace-media'
+  userId: string
+  workspaceId: string
+  membershipId: string
+  sessionId: string
+}
+
+/**
+ * Playback ticket for `<audio src>`, which cannot send the workspace header. It names one
+ * session and outlives a long playback; membership is still re-resolved on every range request.
+ */
+export function signWorkspaceMediaToken(input: Omit<WorkspaceMediaTokenPayload, 'tokenUse'>): string {
+  return jwt.sign({ ...input, tokenUse: 'workspace-media' }, JWT_SECRET, {
+    expiresIn: '2h', audience: 'workspace-media', issuer: 'spashtai-workspace',
+  })
+}
+
+export function verifyWorkspaceMediaToken(token: string): WorkspaceMediaTokenPayload {
+  const payload = jwt.verify(token, JWT_SECRET, { audience: 'workspace-media', issuer: 'spashtai-workspace' })
+  if (typeof payload === 'string' || payload.tokenUse !== 'workspace-media'
+    || ![payload.userId, payload.workspaceId, payload.membershipId, payload.sessionId].every(v => typeof v === 'string' && v.length > 0)) {
+    throw new Error('A workspace media token is required')
+  }
+  return payload as WorkspaceMediaTokenPayload
+}

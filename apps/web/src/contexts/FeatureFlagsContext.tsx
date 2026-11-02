@@ -1,6 +1,6 @@
 import { getAuthHeaders } from '@/lib/api-client'
 import { useAuth } from '@/hooks/useAuth'
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 
 export type PlatformFeature = 'elevate' | 'replay' | 'prepare' | 'interviews' | 'quick_try'
 
@@ -102,6 +102,27 @@ export function FeatureFlagsProvider({ children }: { children: ReactNode }) {
       {children}
     </FeatureFlagsContext.Provider>
   )
+}
+
+const WORKSPACE_PRODUCTS: PlatformFeature[] = ['elevate', 'replay', 'interviews']
+
+/**
+ * Flags inside an organization come only from the member's workspace decisions (entitlement,
+ * enabled setting, member override, readiness). Personal flags never leak in, and products the
+ * organization path does not offer stay hidden.
+ */
+export function WorkspaceFeatureFlagsProvider({ allowed, children }: { allowed: Partial<Record<string, boolean>>; children: ReactNode }) {
+  const value = useMemo<FeatureFlagsContextType>(() => {
+    const flags = Object.fromEntries((Object.keys(DEFAULT_FLAGS) as PlatformFeature[]).map(feature => [
+      feature, { ...DEFAULT_FLAG, hidden: !(WORKSPACE_PRODUCTS.includes(feature) && allowed[feature] === true) },
+    ])) as FeatureFlags
+    const isAccessible = (feature: PlatformFeature) => !flags[feature].hidden
+    return {
+      flags, loading: false, isVisible: isAccessible, isAccessible, isEnabled: isAccessible,
+      getFlag: feature => flags[feature], refresh: async () => {},
+    }
+  }, [allowed])
+  return <FeatureFlagsContext.Provider value={value}>{children}</FeatureFlagsContext.Provider>
 }
 
 // This hook is the context's public consumer API and intentionally stays with its provider.

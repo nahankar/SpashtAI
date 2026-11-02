@@ -1,3 +1,4 @@
+import { appPath } from '@/workspaces/activeWorkspace'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Lightbulb, Play, Target, TrendingUp, Loader2 } from 'lucide-react'
@@ -163,7 +164,7 @@ export function SnapshotReveal({
 
       <div className="flex flex-col gap-2 sm:flex-row">
         <Button asChild className="sm:flex-1">
-          <Link to={`/elevate?focus=${encodeURIComponent(practiceFocus)}&newSession=true`}>
+          <Link to={appPath(`/elevate?focus=${encodeURIComponent(practiceFocus)}&newSession=true`)}>
             Practice {getFocusAreaLabel(practiceFocus)}
           </Link>
         </Button>

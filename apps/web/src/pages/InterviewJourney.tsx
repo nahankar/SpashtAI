@@ -1,3 +1,4 @@
+import { appPath } from '@/workspaces/activeWorkspace'
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
@@ -73,17 +74,17 @@ function practiceHref(preparationId: string, stageId?: string | null) {
     preparationId,
   })
   if (stageId) params.set('stageId', stageId)
-  return `/elevate?${params.toString()}`
+  return appPath(`/elevate?${params.toString()}`)
 }
 
 function recordingHref(preparationId: string, stageId?: string | null) {
   const params = new URLSearchParams({ new: 'true', preparationId })
   if (stageId) params.set('stageId', stageId)
-  return `/replay?${params.toString()}`
+  return appPath(`/replay?${params.toString()}`)
 }
 
 function practiceResultHref(preparationId: string, sessionId: string) {
-  return `/elevate?${new URLSearchParams({ session: sessionId, preparationId }).toString()}`
+  return appPath(`/elevate?${new URLSearchParams({ session: sessionId, preparationId }).toString()}`)
 }
 
 const STAGE_PIPELINE_STATUSES: PreparationStageStatus[] = [
@@ -311,7 +312,7 @@ export function InterviewJourney() {
       <Card>
         <CardContent className="py-10 text-center">
           <p className="text-sm text-destructive">{error || 'Journey not found'}</p>
-          <Link to="/prepare"><Button className="mt-4" variant="outline">Back to interviews</Button></Link>
+          <Link to={appPath('/prepare')}><Button className="mt-4" variant="outline">Back to interviews</Button></Link>
         </CardContent>
       </Card>
     )
@@ -324,7 +325,7 @@ export function InterviewJourney() {
   return (
     <div className="space-y-6">
       <Link
-        to="/prepare"
+        to={appPath('/prepare')}
         className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="h-4 w-4" /> Your interviews
@@ -584,8 +585,8 @@ export function InterviewJourney() {
                         )}
                       </div>
                       {(completed || !readOnly) && <Link to={completed
-                        ? `/replay/${encodeURIComponent(recording.replaySessionId)}?preparationId=${encodeURIComponent(journey.id)}`
-                        : `/replay?session=${encodeURIComponent(recording.replaySessionId)}&preparationId=${encodeURIComponent(journey.id)}`}>
+                        ? appPath(`/replay/${encodeURIComponent(recording.replaySessionId)}?preparationId=${encodeURIComponent(journey.id)}`)
+                        : appPath(`/replay?session=${encodeURIComponent(recording.replaySessionId)}&preparationId=${encodeURIComponent(journey.id)}`)}>
                         <Button size="sm" variant="outline">{completed ? 'View results' : 'Continue upload'}</Button>
                       </Link>}
                     </CardContent>

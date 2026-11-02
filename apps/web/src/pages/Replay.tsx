@@ -1,3 +1,4 @@
+import { appPath } from '@/workspaces/activeWorkspace'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useNavigate, Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -216,7 +217,7 @@ export function Replay() {
       const threadId = searchParams.get('thread')
       if (threadId) params.set('thread', threadId)
       const query = params.toString()
-      return `/replay/${encodeURIComponent(id)}${query ? `?${query}` : ''}`
+      return appPath(`/replay/${encodeURIComponent(id)}${query ? `?${query}` : ''}`)
     },
     [searchParams],
   )
@@ -584,7 +585,7 @@ export function Replay() {
           <button
             onClick={() => {
               if (preparationId) {
-                navigate(`/prepare/interviews/${encodeURIComponent(preparationId)}`)
+                navigate(appPath(`/prepare/interviews/${encodeURIComponent(preparationId)}`))
               } else {
                 setStep('history')
               }
@@ -830,13 +831,13 @@ export function Replay() {
                   {/* Actions */}
                   <div className="flex items-center gap-1.5">
                     {hasResult ? (
-                      <Link to={`/replay/${s.id}`}>
+                      <Link to={appPath(`/replay/${s.id}`)}>
                         <Button size="sm" variant="outline">
                           View Results <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
                         </Button>
                       </Link>
                     ) : s.status === 'failed' ? (
-                      <Link to={`/replay/${s.id}`}>
+                      <Link to={appPath(`/replay/${s.id}`)}>
                         <Button size="sm" variant="outline">
                           Details <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
                         </Button>
@@ -847,7 +848,7 @@ export function Replay() {
                       </Button>
                     ) : null}
                     <Link
-                      to={`/feedback/new?module=replay&session=${encodeURIComponent(s.id)}`}
+                      to={appPath(`/feedback/new?module=replay&session=${encodeURIComponent(s.id)}`)}
                       title="Report an issue with this session"
                     >
                       <Button

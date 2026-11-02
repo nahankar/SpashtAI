@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from 'express'
 import { currentDataScope, runWithDataScope, type DataScope } from '../lib/dataScope'
-import { verifyAgentScopeToken, verifyToken, verifyWorkspaceToken, type WorkspaceTokenPayload } from '../lib/jwt'
+import { verifyAgentScopeToken, verifyToken, verifyWorkspaceMediaToken, verifyWorkspaceToken, type WorkspaceTokenPayload } from '../lib/jwt'
 import { isValidInternalAgentRequest } from '../middleware/auth'
 import { WorkspaceError, workspacesEnabled } from './contracts'
 import { establishWorkspace, withWorkspaceActor, type WorkspaceTx } from './context'
@@ -9,6 +9,9 @@ import { featureMap, memberFeatureDecisions, type WorkspaceFeatureId } from './p
 
 /** Organization product requests carry the short-lived workspace token here; Authorization stays the identity token. */
 export const WORKSPACE_HEADER = 'x-spasht-workspace'
+/** `<audio src>` playback of organization media carries a session-bound ticket in this query parameter. */
+export const WORKSPACE_MEDIA_PARAM = 'workspace_media'
+const MEDIA_ROUTE = /^\/sessions\/([^/]+)\/recording\/stream$/
 /** Agent callbacks for organization sessions echo the room's signed scope here. */
 export const AGENT_SCOPE_HEADER = 'x-spasht-workspace-scope'
 
@@ -70,6 +73,8 @@ const CONTROL_PLANE = [/^\/api\/workspaces(\/|$)/, /^\/api\/auth(\/|$)/, /^\/api
 export async function bindWorkspaceRequest(req: Request, res: Response, next: NextFunction) {
   const agentScope = headerValue(req, AGENT_SCOPE_HEADER)
   if (agentScope) return bindAgentRequest(req, res, next, agentScope)
+  const media = req.query[WORKSPACE_MEDIA_PARAM]
+  if (media !== undefined) return bindMediaRequest(req, res, next, media)
   const raw = headerValue(req, WORKSPACE_HEADER)
   if (!raw) return next()
   const path = req.path
@@ -86,6 +91,29 @@ export async function bindWorkspaceRequest(req: Request, res: Response, next: Ne
     try { identity = verifyToken(bearer(req)) } catch { throw new WorkspaceError(401, 'IDENTITY_REQUIRED', 'Sign in again to continue') }
     if (identity.userId !== claims.userId) throw new WorkspaceError(403, 'WORKSPACE_IDENTITY_MISMATCH', 'Open the workspace again to continue')
     const scope = await resolveRequestScope(claims)
+    req.dataScope = scope
+    runWithDataScope(scope, next)
+  } catch (error) {
+    fail(res, error)
+  }
+}
+
+async function bindMediaRequest(req: Request, res: Response, next: NextFunction, ticket: unknown) {
+  try {
+    const sessionId = MEDIA_ROUTE.exec(req.path)?.[1]
+    if (req.method !== 'GET' || !sessionId || typeof ticket !== 'string' || headerValue(req, WORKSPACE_HEADER)) {
+      throw new WorkspaceError(400, 'WORKSPACE_MEDIA_REJECTED', 'This playback link is not valid here')
+    }
+    if (!workspacesEnabled()) throw new WorkspaceError(404, 'WORKSPACES_DISABLED', 'Workspaces are not available yet')
+    await assertWorkspaceDatabaseSafety()
+    let claims
+    try { claims = verifyWorkspaceMediaToken(ticket) } catch { throw new WorkspaceError(401, 'WORKSPACE_TOKEN_REQUIRED', 'Open the workspace again to continue') }
+    if (decodeURIComponent(sessionId) !== claims.sessionId) throw new WorkspaceError(403, 'WORKSPACE_MEDIA_REJECTED', 'This playback link is not valid here')
+    const access = typeof req.query.access_token === 'string' ? req.query.access_token : bearer(req)
+    let identity
+    try { identity = verifyToken(access) } catch { throw new WorkspaceError(401, 'IDENTITY_REQUIRED', 'Sign in again to continue') }
+    if (identity.userId !== claims.userId) throw new WorkspaceError(403, 'WORKSPACE_IDENTITY_MISMATCH', 'Open the workspace again to continue')
+    const scope = await resolveDataScope(claims, 'request')
     req.dataScope = scope
     runWithDataScope(scope, next)
   } catch (error) {

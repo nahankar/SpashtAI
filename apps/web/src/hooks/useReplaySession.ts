@@ -1,3 +1,4 @@
+import { workspaceHeaders } from '@/workspaces/activeWorkspace'
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { getAuthHeaders } from '@/lib/api-client'
 import type { ReplayEvidence } from '@/components/replay/evidence-contract'
@@ -210,7 +211,7 @@ export function useReplaySession() {
         const token = localStorage.getItem('spashtai_token')
         const res = await fetch(`${API_BASE_URL}/api/replay/sessions/${sid}/upload`, {
           method: 'POST',
-          headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+          headers: { ...(token ? { 'Authorization': `Bearer ${token}` } : {}), ...workspaceHeaders() },
           body: form,
         })
         if (!res.ok) throw new Error((await res.json()).error || 'Upload failed')

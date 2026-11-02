@@ -1,3 +1,4 @@
+import { appPath } from '@/workspaces/activeWorkspace'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -300,7 +301,7 @@ export function ProgressPulseCard() {
                   </div>
                 )}
                 <Link
-                  to={`/elevate?focus=${item.skill}&newSession=true`}
+                  to={appPath(`/elevate?focus=${item.skill}&newSession=true`)}
                   className="flex items-center justify-center gap-1.5 rounded-md border border-primary/20 bg-primary/5 px-2 py-1.5 text-xs font-medium text-primary hover:bg-primary/10 transition-colors"
                 >
                   <Mic className="h-3 w-3" /> Practice in Elevate

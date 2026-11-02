@@ -4,6 +4,7 @@ import { ConnectionState, RoomEvent, Track } from 'livekit-client'
 import { useAudioRecording } from '@/hooks/useAudioRecording'
 import { describeAudioCapture } from '@/lib/audioCapture'
 import { createMicRecordingSource, type MicRecordingSource } from '@/lib/micRecordingSource'
+import { getActiveWorkspace, workspaceHeadersFor } from '@/workspaces/activeWorkspace'
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:4000'
@@ -71,6 +72,7 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
     const startMsRef = useRef<number>(0)
     const durationSecRef = useRef<number>(0)
     const uploadedRef = useRef(false)
+    const originWorkspaceRef = useRef(getActiveWorkspace())
     const discardRef = useRef(false)
     const capturedBlobRef = useRef<Blob | null>(null)
     const captureSettingsRef = useRef<ReturnType<typeof describeAudioCapture> | null>(null)
@@ -118,6 +120,7 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
 
           const headers: Record<string, string> = {}
           if (token) headers.Authorization = `Bearer ${token}`
+          Object.assign(headers, workspaceHeadersFor(originWorkspaceRef.current))
 
           const response = await fetch(`${API_BASE_URL}/sessions/${id}/recording/upload`, {
             method: 'POST',

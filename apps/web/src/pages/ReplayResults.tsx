@@ -1,3 +1,4 @@
+import { appPath } from '@/workspaces/activeWorkspace'
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -1013,7 +1014,7 @@ export function ReplayResults() {
     ? coachBackParams.size > 0
       ? `/coach?${coachBackParams.toString()}`
       : '/coach'
-    : '/replay'
+    : appPath('/replay')
   const defaultBackLabel = cameFromCoach
     ? 'Back to Coach'
     : 'Back to Replay'
@@ -1033,7 +1034,7 @@ export function ReplayResults() {
     if (!id || !preparationId || searchParams.get('preparationId')) return
     const params = new URLSearchParams(searchParams)
     params.set('preparationId', preparationId)
-    navigate(`/replay/${encodeURIComponent(id)}?${params.toString()}`, { replace: true })
+    navigate(appPath(`/replay/${encodeURIComponent(id)}?${params.toString()}`), { replace: true })
   }, [id, navigate, preparationId, searchParams])
 
   const loadResults = useCallback(() => {
@@ -1498,11 +1499,11 @@ export function ReplayResults() {
                     </div>
                     {!isInterviewRecording && (
                       <Link
-                        to={`/elevate?focus=${
+                        to={appPath(`/elevate?focus=${
                           inferFocusArea(data.coachingInsights.primaryImprovement)
                         }&context=${encodeURIComponent(
                           data.coachingInsights.practicePlan?.[0]?.description || data.coachingInsights.practiceExercise || data.coachingInsights.primaryImprovement
-                        )}&newSession=true`}
+                        )}&newSession=true`)}
                         className="shrink-0"
                       >
                         <Button>
@@ -1690,7 +1691,7 @@ export function ReplayResults() {
                         )}
                         {!isInterviewRecording && (
                           <Link
-                            to={`/elevate?focus=${focus}&context=${ctx}&newSession=true`}
+                            to={appPath(`/elevate?focus=${focus}&context=${ctx}&newSession=true`)}
                             className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
                           >
                             <Mic className="h-3 w-3" /> Practice this in Elevate <ArrowRight className="h-3 w-3" />
@@ -1727,13 +1728,13 @@ export function ReplayResults() {
                 <Mic className="h-4 w-4 text-primary" />
                 <span>Practice your areas for improvement with a live AI coaching session</span>
               </div>
-              <Link to={`/elevate?focus=${
+              <Link to={appPath(`/elevate?focus=${
                 data.coachingInsights?.primaryImprovement
                   ? inferFocusArea(data.coachingInsights.primaryImprovement)
                   : 'clarity'
               }&context=${encodeURIComponent(
                 data.coachingInsights?.practiceExercise || 'Practice areas from Replay analysis'
-              )}&newSession=true`}>
+              )}&newSession=true`)}>
                 <Button size="sm">
                   Open Elevate <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
                 </Button>
@@ -1872,7 +1873,7 @@ export function ReplayResults() {
                       </div>
                       {!isInterviewRecording && f.rating === 'needs_work' && (
                         <Link
-                          to={`/elevate?focus=${focus}&context=${ctx}&newSession=true`}
+                          to={appPath(`/elevate?focus=${focus}&context=${ctx}&newSession=true`)}
                           className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
                         >
                           <Mic className="h-3 w-3" /> Practice this in Elevate <ArrowRight className="h-3 w-3" />
@@ -1914,7 +1915,7 @@ export function ReplayResults() {
                 <Mic className="h-4 w-4 text-primary" />
                 <span>Work on these insights with a live AI coaching session</span>
               </div>
-              <Link to={`/elevate?focus=clarity&context=${encodeURIComponent('Work on insights from Replay')}&newSession=true`}>
+              <Link to={appPath(`/elevate?focus=clarity&context=${encodeURIComponent('Work on insights from Replay')}&newSession=true`)}>
                 <Button size="sm" variant="default">
                   Open Elevate <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
                 </Button>

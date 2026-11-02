@@ -56,14 +56,15 @@ suite('organization Elevate voice path', () => {
     subscriptions = await import('../src/lib/sessionSubscriptions')
     jobs = await import('../src/workspaces/jobScopes')
     const { bindWorkspaceRequest, reenterDataScope } = await import('../src/workspaces/requestScope')
-    const { requireAuth } = await import('../src/middleware/auth')
+    const { requireAuth, requireAuthOrMediaToken } = await import('../src/middleware/auth')
     const { createSessionSegment } = await import('../src/routes/session-segments')
     const recordings = await import('../src/routes/recordings')
     const conversations = await import('../src/routes/conversations')
     app = express(); app.use(express.json()); app.use(bindWorkspaceRequest)
     app.post('/sessions/:sessionId/segments', requireAuth, createSessionSegment)
     app.post('/sessions/:sessionId/recording/upload', requireAuth, recordings.recordingUpload.single('audio'), reenterDataScope, recordings.uploadSessionRecording)
-    app.get('/sessions/:sessionId/recording/stream', requireAuth, recordings.streamSessionRecording)
+    app.post('/sessions/:sessionId/recording/ticket', requireAuth, recordings.createSessionRecordingTicket)
+    app.get('/sessions/:sessionId/recording/stream', requireAuthOrMediaToken, recordings.streamSessionRecording)
     app.post('/internal/sessions/:sessionId/messages', conversations.addConversationMessageForAgent)
     const user = async (suffix: string) => (await admin.user.create({ data: { email: `${tag}-${suffix}@example.invalid`, emailVerified: true } })).id
     learner = await user('learner'); other = await user('other'); suspended = await user('suspended')
@@ -106,6 +107,31 @@ suite('organization Elevate voice path', () => {
     expect((await request(app).get(`/sessions/${session.id}/recording/stream`).set(headers(null, learner))).status).toBe(404)
     expect((await request(app).get(`/sessions/${session.id}/recording/stream`).set(headers(beta, learner))).status).toBe(404)
     expect((await request(app).get(`/sessions/${session.id}/recording/stream`).set(headers(alpha, other))).status).toBe(404)
+
+    // <audio src> playback: a session-bound ticket, with membership rechecked on every range request.
+    expect((await request(app).post(`/sessions/${session.id}/recording/ticket`).set(headers(null, learner))).status).toBe(400)
+    expect((await request(app).post(`/sessions/${session.id}/recording/ticket`).set(headers(alpha, other))).status).toBe(404)
+    expect((await request(app).post(`/sessions/${session.id}/recording/ticket`).set(headers(beta, learner))).status).toBe(404)
+    const issued = await request(app).post(`/sessions/${session.id}/recording/ticket`).set(headers(alpha, learner))
+    expect(issued.status).toBe(200)
+    const media = (userId: string, ticket: string, id = session.id) =>
+      request(app).get(`/sessions/${id}/recording/stream`).query({ access_token: identity(userId), workspace_media: ticket }).set('Range', 'bytes=0-15')
+    const ranged = await media(learner, issued.body.ticket)
+    expect(ranged.status).toBe(206)
+    expect(ranged.headers['content-type']).toContain('audio')
+    expect((await media(other, issued.body.ticket)).status).toBe(403)
+    expect((await media(learner, issued.body.ticket, (await orgSession(alpha, learner)).id)).status).toBe(403)
+    expect((await media(learner, issued.body.ticket.slice(0, -2) + 'xx')).status).toBe(401)
+    expect((await media(learner, signWorkspaceToken({ userId: learner, workspaceId: alpha, membershipId: members[`${alpha}:${learner}`] }))).status).toBe(401)
+    expect((await media(learner, issued.body.ticket).set('x-spasht-workspace', 'x')).status).toBe(400)
+    await admin.workspaceMember.update({ where: { id: members[`${alpha}:${learner}`] }, data: { state: 'SUSPENDED' } })
+    try {
+      const revoked = await media(learner, issued.body.ticket)
+      expect(revoked.status).toBe(404)
+      expect(revoked.body.code).toMatch(/^WORKSPACE_|^MEMBERSHIP_/)
+    } finally {
+      await admin.workspaceMember.update({ where: { id: members[`${alpha}:${learner}`] }, data: { state: 'ACTIVE' } })
+    }
   })
 
   it('refuses organization playback of a stored path outside its workspace prefix', async () => {

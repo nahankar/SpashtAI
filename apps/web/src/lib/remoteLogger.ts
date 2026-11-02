@@ -1,3 +1,4 @@
+import { activeSessionKey } from '@/lib/api-client'
 /**
  * Browser remote logger → POST /api/client-logs (the server writes per-batch
  * JSONL to S3, browsable from your Mac).
@@ -57,7 +58,7 @@ function token(): string | null {
 
 function sessionId(): string | undefined {
   try {
-    return localStorage.getItem('spashtai_active_session') || undefined
+    return localStorage.getItem(activeSessionKey()) || undefined
   } catch {
     return undefined
   }

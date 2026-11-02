@@ -1,3 +1,4 @@
+import { appPath } from '@/workspaces/activeWorkspace'
 import { useLiveSession } from '@/features/live-session/useLiveSession'
 import { elevateAdapter } from '@/features/live-session/adapters/elevate'
 import { prepareAdapter } from '@/features/live-session/adapters/prepare'
@@ -24,7 +25,7 @@ import { useRealTimeMetrics, useSessionMetrics, useSessionTurns } from '@/hooks/
 import { useConversationPersistence } from '@/hooks/useConversationPersistence'
 import { SessionStatusBar } from '@/components/layout/AgentVisualizer'
 import { toast } from 'sonner'
-import { getAuthHeaders } from '@/lib/api-client'
+import { getAuthHeaders, activeSessionKey, sessionTimestampKey } from '@/lib/api-client'
 import { shouldReturnToElevateList } from '@/lib/elevateNavigation'
 import { isReadOnlySession, liveResultLocation, resumeLaunchLocation } from '@/features/live-session/navigation'
 import { logEvent } from '@/lib/remoteLogger'
@@ -128,8 +129,8 @@ export function Elevate() {
     messages: () => messagesRef.current, addMessage: (...args) => addMessage(...args),
     upsertStreamingMessage: (...args) => upsertStreamingMessage(...args), rewardPoints: points => updateUser({ rewardPoints: points }),
     clearActiveSession: () => {
-      localStorage.removeItem('spashtai_active_session')
-      localStorage.removeItem('spashtai_session_timestamp')
+      localStorage.removeItem(activeSessionKey())
+      localStorage.removeItem(sessionTimestampKey())
     },
     left: (id, track) => onSessionLeft(id, track), discarded: id => onDiscarded(id), discardFinished: () => onDiscardFinished(),
   }, sessionId)
@@ -158,11 +159,11 @@ export function Elevate() {
   // browser's unfinished practice for the same journey instead of offering a
   // second launch (standalone Elevate refreshes to its history list).
   const [resumeCheckPending, setResumeCheckPending] = useState(
-    () => Boolean(inboundNewSession && inboundPreparationId && !viewSessionId && localStorage.getItem('spashtai_active_session')),
+    () => Boolean(inboundNewSession && inboundPreparationId && !viewSessionId && localStorage.getItem(activeSessionKey())),
   )
   useEffect(() => {
     if (!resumeCheckPending) return
-    const activeId = localStorage.getItem('spashtai_active_session')
+    const activeId = localStorage.getItem(activeSessionKey())
     if (!activeId || !user?.id) {
       setResumeCheckPending(false)
       return
@@ -816,9 +817,9 @@ export function Elevate() {
           // Stale/foreign session pointer (deleted, or not owned): clear it so
           // we don't keep trying to resume a session we can't access.
           if (response.status === 403 || response.status === 404) {
-            if (localStorage.getItem('spashtai_active_session') === viewSessionId) {
-              localStorage.removeItem('spashtai_active_session')
-              localStorage.removeItem('spashtai_session_timestamp')
+            if (localStorage.getItem(activeSessionKey()) === viewSessionId) {
+              localStorage.removeItem(activeSessionKey())
+              localStorage.removeItem(sessionTimestampKey())
             }
           }
           return
@@ -847,7 +848,7 @@ export function Elevate() {
           if (session.preparationPractice.stageId) {
             params.set('stageId', session.preparationPractice.stageId)
           }
-          navigate(`/elevate?${params.toString()}`, { replace: true })
+          navigate(appPath(`/elevate?${params.toString()}`), { replace: true })
         }
 
         if (isReadOnlySession(session, user?.id)) {
@@ -869,8 +870,8 @@ export function Elevate() {
 
           await live.controller.resume(viewSessionId, controller.signal, true)
           if (cancelled) return
-          localStorage.setItem('spashtai_active_session', viewSessionId)
-          localStorage.setItem('spashtai_session_timestamp', Date.now().toString())
+          localStorage.setItem(activeSessionKey(), viewSessionId)
+          localStorage.setItem(sessionTimestampKey(), Date.now().toString())
         }
       } catch (error) {
         if (cancelled || (error instanceof DOMException && error.name === 'AbortError')) return
@@ -902,8 +903,8 @@ export function Elevate() {
       loadConversation(sessionId)
       
       // Save to localStorage for resume capability
-      localStorage.setItem('spashtai_active_session', sessionId)
-      localStorage.setItem('spashtai_session_timestamp', Date.now().toString())
+      localStorage.setItem(activeSessionKey(), sessionId)
+      localStorage.setItem(sessionTimestampKey(), Date.now().toString())
     }
   }, [sessionId, loadConversation])
 
@@ -1001,7 +1002,7 @@ export function Elevate() {
         preparationId: prepareLaunch?.preparationId, stageId: prepareLaunch?.stageId }))
     } else {
       setShowHistory(true)
-      navigate('/elevate')
+      navigate(appPath('/elevate'))
     }
   }
   const activityAdapter = () => {
@@ -1031,10 +1032,10 @@ export function Elevate() {
   }
   const onDiscardFinished = () => {
     if (prepareLaunch) {
-      navigate(`/prepare/interviews/${encodeURIComponent(prepareLaunch.preparationId)}`)
+      navigate(appPath(`/prepare/interviews/${encodeURIComponent(prepareLaunch.preparationId)}`))
     } else {
       setShowHistory(true)
-      navigate('/elevate')
+      navigate(appPath('/elevate'))
     }
   }
   const handleDiscard = async () => {
@@ -1061,7 +1062,7 @@ export function Elevate() {
     setShowHistory(true)
     clearMessages()
     resetMetrics()
-    navigate('/elevate')
+    navigate(appPath('/elevate'))
   }, [clearMessages, resetMetrics, navigate])
 
   // ── Session history view ──
@@ -1276,14 +1277,14 @@ export function Elevate() {
                           In progress
                         </Button>
                       ) : (
-                        <Link to={`/elevate?session=${s.id}`}>
+                        <Link to={appPath(`/elevate?session=${s.id}`)}>
                           <Button size="sm" variant="outline">
                             {done ? 'View Results' : 'Resume'}
                           </Button>
                         </Link>
                       )}
                       <Link
-                        to={`/feedback/new?module=elevate&session=${encodeURIComponent(s.id)}`}
+                        to={appPath(`/feedback/new?module=elevate&session=${encodeURIComponent(s.id)}`)}
                         title="Report an issue with this session"
                       >
                         <Button
@@ -1369,14 +1370,14 @@ export function Elevate() {
       {/* Back navigation */}
       {!joined && prepareLaunch ? (
         <Link
-          to={`/prepare/interviews/${encodeURIComponent(prepareLaunch.preparationId)}`}
+          to={appPath(`/prepare/interviews/${encodeURIComponent(prepareLaunch.preparationId)}`)}
           className="text-sm text-muted-foreground hover:text-foreground w-fit"
         >
           &larr; Back to {prepareLaunch.journeyTitle}
         </Link>
       ) : !joined && prepareLaunchError && inboundPreparationId ? (
         <Link
-          to="/prepare/interviews"
+          to={appPath('/prepare/interviews')}
           className="text-sm text-muted-foreground hover:text-foreground w-fit"
         >
           &larr; Back to interview journeys
@@ -1561,7 +1562,7 @@ export function Elevate() {
                 params.set('full', '1')
                 params.delete('demo')
                 params.delete('newSession')
-                navigate(`/elevate?${params.toString()}`)
+                navigate(appPath(`/elevate?${params.toString()}`))
               }}
               onPlayClip={() => {
                 setResultsTab('playback')
@@ -1570,7 +1571,7 @@ export function Elevate() {
                 params.set('full', '1')
                 params.delete('demo')
                 params.delete('newSession')
-                navigate(`/elevate?${params.toString()}`)
+                navigate(appPath(`/elevate?${params.toString()}`))
               }}
             />
           ) : !joined && viewSessionId && isCompletedSessionView ? (
@@ -1595,7 +1596,7 @@ export function Elevate() {
                   onClick={() => {
                     const params = new URLSearchParams(searchParams)
                     params.delete('full')
-                    navigate(`/elevate?${params.toString()}`)
+                    navigate(appPath(`/elevate?${params.toString()}`))
                   }}
                 >
                   &larr; Back to snapshot

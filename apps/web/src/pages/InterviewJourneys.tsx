@@ -1,3 +1,4 @@
+import { appPath } from '@/workspaces/activeWorkspace'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, Bug, Calendar, Loader2, Plus, Trash2 } from 'lucide-react'
@@ -74,12 +75,12 @@ function JourneyRow({
         </div>
 
         <div className="flex w-full shrink-0 items-center justify-end gap-2 sm:w-auto">
-          <Link to={`/prepare/interviews/${journey.id}`}>
+          <Link to={appPath(`/prepare/interviews/${journey.id}`)}>
             <Button size="sm" variant="outline">
               {finished ? 'View journey' : 'Continue'} <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
             </Button>
           </Link>
-          <Link to="/feedback/new" title="Report an issue with this interview journey">
+          <Link to={appPath('/feedback/new')} title="Report an issue with this interview journey">
             <Button
               size="icon"
               variant="ghost"
@@ -195,7 +196,7 @@ export function InterviewJourneys() {
             Keep every interview process, practice, recording, and next round in one place.
           </p>
         </div>
-        <Link to="/prepare/new">
+        <Link to={appPath('/prepare/new')}>
           <Button className="w-full sm:w-auto"><Plus className="mr-2 h-4 w-4" /> New interview journey</Button>
         </Link>
       </div>
@@ -216,7 +217,7 @@ export function InterviewJourneys() {
             <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
               Track each process and always know which conversation is next.
             </p>
-            <Link to="/prepare/new">
+            <Link to={appPath('/prepare/new')}>
               <Button className="mt-5">Create interview journey</Button>
             </Link>
           </CardContent>

@@ -1,3 +1,4 @@
+import { appPath } from '@/workspaces/activeWorkspace'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -187,7 +188,7 @@ export function Interviews() {
   // Only states that need attention are shown: loading, missing access, or no matching questions.
   const setupMessage=!optionsLoaded ? 'Loading practice options…' : !options ? 'Practice becomes available once your pilot access and voice pipeline are enabled.' : matching ? '' : 'No reviewed questions are ready for this selection. Choose another combination or ask an administrator to confirm a pilot set.'
   return <div className="mx-auto max-w-5xl space-y-6">
-    <header className="space-y-2"><div className="flex flex-wrap items-center justify-between gap-2"><h1 className="text-3xl font-semibold">Interviews</h1><Button asChild variant="outline" size="sm"><Link to="/interviews/history" onClick={guardHistory}>Interview history</Link></Button></div><p className="text-muted-foreground">Practice technical questions aloud, at your own pace.</p></header>
+    <header className="space-y-2"><div className="flex flex-wrap items-center justify-between gap-2"><h1 className="text-3xl font-semibold">Interviews</h1><Button asChild variant="outline" size="sm"><Link to={appPath('/interviews/history')} onClick={guardHistory}>Interview history</Link></Button></div><p className="text-muted-foreground">Practice technical questions aloud, at your own pace.</p></header>
     {accessError && <p role="alert" className="rounded-lg border p-4">{accessError} Your saved interview history is still available below.</p>}
     {error && <p role="alert" className="text-destructive">{error}</p>}
     {loading && <p role="status">Loading interview…</p>}
@@ -207,7 +208,7 @@ export function Interviews() {
       {history.some(h=>!h.endedAt) && <p className="text-sm text-muted-foreground">Resume or end your unfinished interview below before starting another.</p>}
     </section>}
     {detail && <section className="space-y-4">
-      <div className="flex min-w-0 flex-wrap justify-between gap-3"><PracticeTitle as="h2" track={detail.track} suffix=" practice" className="text-xl font-semibold" /><Link className="text-sm underline" to="/interviews/history" onClick={guardHistory}>Interview history</Link></div>
+      <div className="flex min-w-0 flex-wrap justify-between gap-3"><PracticeTitle as="h2" track={detail.track} suffix=" practice" className="text-xl font-semibold" /><Link className="text-sm underline" to={appPath('/interviews/history')} onClick={guardHistory}>Interview history</Link></div>
       {detail.conversationMode && !detail.endedAt && <p className="text-sm text-muted-foreground">Automatic conversation: after you finish, stay quiet for about 5 seconds and the interviewer moves on. Finish answer, Skip and More time are always available.</p>}
       {current && !detail.endedAt && <p className="text-sm text-muted-foreground">Spoken requests such as “repeat the question” or “skip this one” are not supported yet; use the buttons below. A spoken request is never graded as not knowing the answer.</p>}
       {live.token && live.url && current && <LiveSessionRoom {...live} token={live.token} url={live.url} recorderRef={recorderRef}
@@ -237,7 +238,7 @@ export function Interviews() {
     {!selected && <section className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-xl font-semibold">Recent practice</h2>
         {/* Opens full Interview history (pagination, filters, deletion); it does not add rows here. */}
-        {historyTotal>3 && <Button asChild variant="outline" size="sm"><Link to="/interviews/history" onClick={guardHistory}>Load more</Link></Button>}</div>
+        {historyTotal>3 && <Button asChild variant="outline" size="sm"><Link to={appPath('/interviews/history')} onClick={guardHistory}>Load more</Link></Button>}</div>
       <p className="text-sm text-muted-foreground">Unfinished practice closes after 24 hours without activity. Retain one interview to keep it open.</p>
       {!history.length && <p className="text-sm text-muted-foreground">Your interviews will appear here.</p>}
       <InterviewHistoryList runs={history.slice(0,3)} onRetain={(run,result)=>setHistory(rows=>applyRetain(rows,run,result))} onDelete={run=>void removePractice(run)} />

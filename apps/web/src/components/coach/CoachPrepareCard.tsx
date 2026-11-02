@@ -1,3 +1,4 @@
+import { appPath } from '@/workspaces/activeWorkspace'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, Calendar, Loader2, Mic } from 'lucide-react'
@@ -203,7 +204,7 @@ export function CoachPrepareCard({
             )
           ) : (
             <Button asChild size="sm" className="gap-2">
-              <Link to="/prepare">
+              <Link to={appPath('/prepare')}>
                 {error ? 'Open Prepare' : 'Start a journey'}
                 <ArrowRight className="h-4 w-4" />
               </Link>

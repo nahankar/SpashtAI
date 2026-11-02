@@ -1,3 +1,4 @@
+import { appPath } from '@/workspaces/activeWorkspace'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useFeatureMilestone } from '@/hooks/useFeatureMilestone'
@@ -24,7 +25,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { SessionChat } from '@/components/session/SessionChat'
-import { getAuthHeaders, getAuthenticatedMediaUrl } from '@/lib/api-client'
+import { getAuthHeaders, getSessionRecordingUrl } from '@/lib/api-client'
 import { COACH_BUBBLE, USER_BUBBLE } from '@/lib/conversation'
 import { KaraokeText, type PlaybackWord as TurnWord } from '@/components/session/KaraokeText'
 import { interviewPlaybackWords } from '@/lib/interview-playback-words'
@@ -413,7 +414,7 @@ export function SessionReplay({
   const isInterview = variant === 'interview' || sessionInfo?.purpose === 'INTERVIEW'
   // Technical feedback for each answer, keyed by attempt id (one read; polled only while one is pending).
   const interviewFindings = useInterviewFindings({ sessionId: isInterview ? sessionId : undefined })
-  const backPath = isInterview ? '/interviews' : '/elevate'
+  const backPath = appPath(isInterview ? '/interviews' : '/elevate')
   const backLabel = isInterview ? 'Interviews' : 'Elevate'
   const assistantLabel = isInterview ? 'Interviewer' : 'Coach'
   const [canonicalPaceAvailable, setCanonicalPaceAvailable] = useState(false)
@@ -578,17 +579,19 @@ export function SessionReplay({
     setAudioUrl(null)
     setAudioSessionId(null)
     setAudioLoading(true)
-    const url = getAuthenticatedMediaUrl(`/sessions/${sessionId}/recording/stream`)
-    if (!url) {
-      setAudioUrl(null)
-      setAudioAvailable(false)
-      setAudioLoading(false)
-      return
-    }
+    let resolvedUrl: Promise<string | null> | null = null
+    const mediaUrl = () => (resolvedUrl ??= getSessionRecordingUrl(sessionId).catch(() => {
+      resolvedUrl = null
+      return null
+    }))
 
     const probe = (silent: boolean) =>
-      fetch(url, { headers: { Range: 'bytes=0-0' } })
-        .then((res) => {
+      mediaUrl()
+        .then((url) => {
+          if (!url) throw new Error('Recording unavailable')
+          return fetch(url, { headers: { Range: 'bytes=0-0' } }).then((res) => ({ res, url }))
+        })
+        .then(({ res, url }) => {
           if (cancelled) return
           if (res.ok || res.status === 206) {
             found = true

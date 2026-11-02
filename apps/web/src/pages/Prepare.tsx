@@ -1,3 +1,4 @@
+import { appPath } from '@/workspaces/activeWorkspace'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
@@ -149,7 +150,7 @@ export function Prepare() {
         interviewerProfileText: interviewerProfileText.trim() || null,
       })
       toast.success('Interview journey created')
-      navigate(`/prepare/interviews/${preparation.id}`)
+      navigate(appPath(`/prepare/interviews/${preparation.id}`))
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not create journey')
     } finally {
@@ -175,7 +176,7 @@ export function Prepare() {
       })
       if (preparation.nextStage?.id) params.set('stageId', preparation.nextStage.id)
       toast.success('Practice context saved')
-      navigate(`/elevate?${params.toString()}`)
+      navigate(appPath(`/elevate?${params.toString()}`))
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not start practice')
     } finally {
@@ -193,7 +194,7 @@ export function Prepare() {
             Tell us what is coming up. We will organise the interview journey underneath.
           </p>
         </div>
-        <Link to="/prepare">
+        <Link to={appPath('/prepare')}>
           <Button variant="outline">Your interviews</Button>
         </Link>
       </div>

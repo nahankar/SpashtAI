@@ -1,3 +1,4 @@
+import { workspaceHeaders, appPath } from '@/workspaces/activeWorkspace'
 import { useState, useRef, useMemo } from 'react'
 import { useFeatureMilestone } from '@/hooks/useFeatureMilestone'
 import { useNavigate, Link, useSearchParams } from 'react-router-dom'
@@ -91,7 +92,7 @@ export function NewFeedback() {
       const token = localStorage.getItem('spashtai_token')
       const res = await fetch(`${API}/api/feedback`, {
         method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...workspaceHeaders() },
         body: form,
       })
       if (!res.ok) {
@@ -99,7 +100,7 @@ export function NewFeedback() {
         throw new Error(data.error || 'Failed to submit feedback')
       }
       const data = await res.json()
-      navigate(`/feedback/${data.feedback.id}`)
+      navigate(appPath(`/feedback/${data.feedback.id}`))
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to submit')
     } finally {
@@ -110,7 +111,7 @@ export function NewFeedback() {
   return (
     <div>
       <Link
-        to="/feedback"
+        to={appPath('/feedback')}
         className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="h-3.5 w-3.5" /> Back to Feedback

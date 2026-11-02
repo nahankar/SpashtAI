@@ -1,3 +1,4 @@
+import { appPath } from '@/workspaces/activeWorkspace'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -364,7 +365,7 @@ export function History() {
   return (
     <div>
       <div className="mb-6">
-        <Link to="/coach" className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+        <Link to={appPath('/coach')} className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-3.5 w-3.5" /> Coach
         </Link>
         <h1 className="text-2xl font-bold">Sessions</h1>
@@ -470,7 +471,7 @@ export function History() {
                 <p className="mt-1 text-sm text-muted-foreground">
                   Upload a transcript to get AI analysis.
                 </p>
-                <Link to="/replay">
+                <Link to={appPath('/replay')}>
                   <Button className="mt-4">Go to Replay</Button>
                 </Link>
               </CardContent>
@@ -552,14 +553,14 @@ export function History() {
                       </div>
                       <div className="flex items-center gap-1.5">
                         {hasResult && (
-                          <Link to={`/replay/${s.id}?from=history`}>
+                          <Link to={appPath(`/replay/${s.id}?from=history`)}>
                             <Button size="sm" variant="outline">
                               View Results <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
                             </Button>
                           </Link>
                         )}
                         <Link
-                          to={`/feedback/new?module=replay&session=${encodeURIComponent(s.id)}`}
+                          to={appPath(`/feedback/new?module=replay&session=${encodeURIComponent(s.id)}`)}
                           title="Report an issue with this session"
                         >
                           <Button
@@ -649,7 +650,7 @@ export function History() {
                 <p className="mt-1 text-sm text-muted-foreground">
                   Start a live AI coaching session.
                 </p>
-                <Link to="/elevate">
+                <Link to={appPath('/elevate')}>
                   <Button className="mt-4">Go to Elevate</Button>
                 </Link>
               </CardContent>
@@ -739,13 +740,13 @@ export function History() {
                       </div>
 
                       <div className="flex items-center gap-1.5">
-                        <Link to={`/elevate?session=${session.id}&from=history`}>
+                        <Link to={appPath(`/elevate?session=${session.id}&from=history`)}>
                           <Button size="sm" variant="outline">
                             {isCompleted ? 'View' : 'Resume'} <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
                           </Button>
                         </Link>
                         <Link
-                          to={`/feedback/new?module=elevate&session=${encodeURIComponent(session.id)}`}
+                          to={appPath(`/feedback/new?module=elevate&session=${encodeURIComponent(session.id)}`)}
                           title="Report an issue with this session"
                         >
                           <Button

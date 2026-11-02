@@ -1,3 +1,4 @@
+import { appPath } from '@/workspaces/activeWorkspace'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, Loader2, Mic } from 'lucide-react'
@@ -142,7 +143,7 @@ export function CoachPulseCard({
           {weakest ? (
             <>
               <Button asChild size="sm" className="gap-2">
-                <Link to={`/elevate?${practiceSearch.toString()}`}>
+                <Link to={appPath(`/elevate?${practiceSearch.toString()}`)}>
                   <Mic className="h-4 w-4" />
                   Practice {getFocusAreaLabel(weakest.skill)}
                 </Link>
