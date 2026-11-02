@@ -6,6 +6,8 @@ import { prisma } from '../lib/prisma'
 import { generateFeedbackNumber, isFeedbackEditable } from '../lib/feedback'
 import { resolveFeedbackSessionLink } from '../lib/feedbackSession'
 import { recordFeatureUsage } from '../middleware/tracking'
+import { reenterDataScope } from '../workspaces/requestScope'
+import { mediaPathAllowed } from '../lib/mediaStorage'
 
 const router = Router()
 
@@ -18,7 +20,13 @@ if (!fs.existsSync(uploadDir)) {
 }
 
 const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadDir),
+  // Organization attachments live under their workspace prefix, never beside Personal files.
+  destination: (req, _file, cb) => {
+    const scope = (req as Request).dataScope
+    if (!scope) return cb(null, uploadDir)
+    const dir = path.join(uploadDir, 'workspaces', scope.workspaceId, 'feedback')
+    fs.mkdir(dir, { recursive: true }, error => cb(error, dir))
+  },
   filename: (_req, file, cb) => {
     const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')
     cb(null, `${Date.now()}_${safe}`)
@@ -30,12 +38,23 @@ const upload = multer({
   limits: { fileSize: 8 * 1024 * 1024, files: 5 },
 })
 
+/** Inside an organization, feedback is a workspace feature; checked before any file is written. */
+function requireFeedbackFeature(req: Request, res: Response, next: () => void) {
+  if (req.dataScope && !req.dataScope.features.feedback) {
+    res.status(403).json({ error: 'This feature is not available in this workspace', code: 'WORKSPACE_FEATURE_UNAVAILABLE' })
+    return
+  }
+  next()
+}
+
+router.use(requireFeedbackFeature)
+
 function userId(req: Request): string {
   return (req as Request & { user?: { userId: string } }).user!.userId
 }
 
 // POST /api/feedback
-router.post('/', upload.array('attachments', 5), async (req: Request, res: Response) => {
+router.post('/', upload.array('attachments', 5), reenterDataScope, async (req: Request, res: Response) => {
   try {
     const uid = userId(req)
     const { type, subject, body, sessionModule, sessionId } = req.body as {
@@ -138,7 +157,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 })
 
 // PUT /api/feedback/:id — user edit while status is OPEN
-router.put('/:id', upload.array('attachments', 5), async (req: Request, res: Response) => {
+router.put('/:id', upload.array('attachments', 5), reenterDataScope, async (req: Request, res: Response) => {
   try {
     const uid = userId(req)
     const existing = await prisma.userFeedback.findUnique({
@@ -213,7 +232,7 @@ router.get('/:id/attachments/:attachmentId', async (req: Request, res: Response)
       where: { id: req.params.attachmentId },
       include: { feedback: true },
     })
-    if (!attachment || attachment.feedback.userId !== uid) {
+    if (!attachment || attachment.feedback.userId !== uid || !mediaPathAllowed(attachment.storedPath, req.dataScope, uploadDir)) {
       return res.status(404).json({ error: 'Not found' })
     }
     res.sendFile(path.resolve(attachment.storedPath))

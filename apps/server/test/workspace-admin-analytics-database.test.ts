@@ -4,7 +4,10 @@ import { PrismaClient } from '@prisma/client'
 import express from 'express'
 import supertest from 'supertest'
 import { randomUUID } from 'node:crypto'
-import { signWorkspaceToken } from '../src/lib/jwt'
+import { signToken, signWorkspaceToken } from '../src/lib/jwt'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 
 const url = process.env.WORKSPACE_TEST_DATABASE_URL
 if (url && url !== 'postgresql://postgres@127.0.0.1:55443/postgres') throw new Error('Use only the isolated tenancy container')
@@ -15,7 +18,9 @@ vi.mock('../src/workspaces/analyticsModel', () => ({ completeWorkspaceAnalytics:
 
 suite('organization admin reports and AI Analytics', () => {
   const admin = new PrismaClient({ datasourceUrl: url || 'postgresql://unused:5432/unused' })
-  const env = { database: process.env.DATABASE_URL, enabled: process.env.WORKSPACES_ENABLED }
+  const env = { database: process.env.DATABASE_URL, enabled: process.env.WORKSPACES_ENABLED, feedback: process.env.FEEDBACK_UPLOAD_DIR }
+  let uploads = ''
+  let readiness: Record<string, boolean>
   const tag = 'an-' + randomUUID().replaceAll('-', '').slice(0, 10)
   const tz = 'Pacific/Kiritimati'
   let db: PrismaClient
@@ -37,8 +42,15 @@ suite('organization admin reports and AI Analytics', () => {
     process.env.WORKSPACES_ENABLED = 'true'
     db = (await import('../src/lib/prisma')).prisma
     scopes = await import('../src/lib/dataScope')
+    uploads = await mkdtemp(path.join(tmpdir(), 'spasht-feedback-'))
+    process.env.FEEDBACK_UPLOAD_DIR = uploads
+    readiness = (await import('../src/workspaces/productAccess')).WORKSPACE_FEATURE_READINESS
     const routes = await import('../src/workspaces/routes')
+    const { bindWorkspaceRequest } = await import('../src/workspaces/requestScope')
+    const { requireAuth } = await import('../src/middleware/auth')
+    const feedback = (await import('../src/routes/feedback')).default
     const app = express(); app.use(express.json()); app.use('/api/workspaces', routes.workspaceRouter)
+    app.use(bindWorkspaceRequest); app.use('/api/feedback', requireAuth, feedback)
     api = supertest(app)
     for (const who of ['owner', 'admin', 'learner', 'second', 'betaOwner', 'outsider']) {
       users[who] = (await admin.user.create({ data: { email: `${tag}-${who}@example.invalid`, firstName: who, emailVerified: true } })).id
@@ -84,7 +96,9 @@ suite('organization admin reports and AI Analytics', () => {
     await admin.workspace.deleteMany({ where: { OR: [{ id: { in: [alpha, beta].filter(Boolean) } }, { personalOwnerId: { in: ids } }] } })
     await admin.user.deleteMany({ where: { id: { in: ids } } })
     await db?.$disconnect(); await admin.$disconnect()
-    for (const [key, value] of Object.entries({ DATABASE_URL: env.database, WORKSPACES_ENABLED: env.enabled })) {
+    if (readiness) readiness.feedback = false
+    if (uploads) await rm(uploads, { recursive: true, force: true })
+    for (const [key, value] of Object.entries({ DATABASE_URL: env.database, WORKSPACES_ENABLED: env.enabled, FEEDBACK_UPLOAD_DIR: env.feedback })) {
       if (value === undefined) delete process.env[key]; else process.env[key] = value
     }
   })
@@ -199,6 +213,33 @@ suite('organization admin reports and AI Analytics', () => {
     expect((await api.post(`/api/workspaces/current/admin/analytics/saved/${id}/run`).set(token(alpha, 'admin'))).status).toBe(400)
     expect((await api.delete(`/api/workspaces/current/admin/analytics/saved/${id}`).set(token(betaId(), 'betaOwner'))).status).toBe(404)
     expect((await api.delete(`/api/workspaces/current/admin/analytics/saved/${id}`).set(token(alpha, 'admin'))).status).toBe(200)
+  })
+
+  it('accepts organization feedback only where enabled, numbers it globally and stores attachments under the workspace', async () => {
+    const learnerHeaders = (workspaceId: string | null) => ({ Authorization: `Bearer ${signToken({ userId: users.learner, email: `${tag}-learner@example.invalid`, role: 'USER' })}`,
+      ...(workspaceId ? { 'x-spasht-workspace': signWorkspaceToken({ userId: users.learner, workspaceId, membershipId: members[`${workspaceId}:learner`] }) } : {}) })
+    const submit = (workspaceId: string | null, body: string) => api.post('/api/feedback').set(learnerHeaders(workspaceId))
+      .field('body', body).attach('attachments', Buffer.from('screenshot'), { filename: 'shot.png', contentType: 'image/png' })
+    expect((await submit(alpha, 'Blocked')).status).toBe(403)
+    readiness.feedback = true
+    await admin.workspaceFeature.create({ data: { workspaceId: alpha, feature: 'feedback', entitled: true, enabled: true } })
+    const org = await submit(alpha, 'Organization feedback')
+    expect(org.status).toBe(201)
+    const personal = await submit(null, 'Personal feedback')
+    expect(personal.status).toBe(201)
+    expect(org.body.feedback.feedbackNumber).toMatch(/^FB-\d{5,}$/)
+    expect(personal.body.feedback.feedbackNumber).not.toBe(org.body.feedback.feedbackNumber)
+    const stored = await admin.userFeedbackAttachment.findFirstOrThrow({ where: { feedbackId: org.body.feedback.id } })
+    expect(stored.storedPath.startsWith(path.join(uploads, 'workspaces', alpha, 'feedback') + path.sep)).toBe(true)
+    const personalFile = await admin.userFeedbackAttachment.findFirstOrThrow({ where: { feedbackId: personal.body.feedback.id } })
+    expect(personalFile.storedPath.includes(`${path.sep}workspaces${path.sep}`)).toBe(false)
+    const attachmentId = stored.id
+    expect((await api.get(`/api/feedback/${org.body.feedback.id}/attachments/${attachmentId}`).set(learnerHeaders(alpha))).status).toBe(200)
+    expect((await api.get(`/api/feedback/${org.body.feedback.id}/attachments/${attachmentId}`).set(learnerHeaders(null))).status).toBe(404)
+    expect((await api.get('/api/feedback/mine').set(learnerHeaders(null))).body.feedback.map((f: { body: string }) => f.body)).not.toContain('Organization feedback')
+    const listed = await api.get('/api/workspaces/current/admin/feedback').set(token(alpha, 'owner'))
+    expect(listed.body.items.map((row: { body: string }) => row.body)).toEqual(expect.arrayContaining(['Organization feedback']))
+    expect(listed.body.items.map((row: { body: string }) => row.body)).not.toContain('Personal feedback')
   })
 
   const betaId = () => beta

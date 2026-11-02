@@ -7,8 +7,8 @@ export const FEEDBACK_PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as cons
 export type FeedbackPriority = (typeof FEEDBACK_PRIORITIES)[number]
 
 export async function generateFeedbackNumber(): Promise<string> {
-  const count = await prisma.userFeedback.count()
-  return `FB-${String(count + 1).padStart(5, '0')}`
+  const [row] = await prisma.$queryRaw<Array<{ number: string }>>`SELECT public.next_feedback_number() AS number`
+  return row.number
 }
 
 export function isFeedbackEditable(status: string): boolean {

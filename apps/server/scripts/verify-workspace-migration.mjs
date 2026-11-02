@@ -56,12 +56,15 @@ try {
   await db.$executeRaw`INSERT INTO "ProgressPulse" (id,"userId",skill,score,source) VALUES ('old-pulse','after-foundation','clarity',7,'elevate')`
   await db.$executeRaw`INSERT INTO "FeatureUsage" (id,"userId",feature,action) VALUES ('old-usage','preexisting-user','replay','view')`
   await db.$executeRaw`INSERT INTO "RecordingAcknowledgment" (id,"userId",version,scope,"textHash",source) VALUES ('old-ack','preexisting-user','v1','{}','h','test')`
+  await db.$executeRaw`INSERT INTO "UserFeedback" (id,"feedbackNumber","userId",body,"updatedAt") VALUES ('old-feedback','FB-00042','preexisting-user','Earlier feedback',CURRENT_TIMESTAMP)`
   execute(resolve(root, 'apps/server/prisma/migrations/20261103090000_workspace_product_plane/migration.sql'))
   const personalOf = async user => (await db.workspace.findUniqueOrThrow({ where: { personalOwnerId: user } })).id
   for (const [table, id, user] of [['ReplaySession', 'old-replay', 'preexisting-user'], ['ProgressPulse', 'old-pulse', 'after-foundation'], ['FeatureUsage', 'old-usage', 'preexisting-user'], ['RecordingAcknowledgment', 'old-ack', 'preexisting-user']]) {
     const [row] = await db.$queryRawUnsafe(`SELECT "workspaceId","workspaceKind"::text AS kind FROM "${table}" WHERE id=$1`, id)
     assert.deepEqual(row, { workspaceId: await personalOf(user), kind: 'PERSONAL' }, `${table} backfilled to Personal`)
   }
+  const [next] = await db.$queryRaw`SELECT public.next_feedback_number() AS number`
+  assert.equal(next.number, 'FB-00043', 'Feedback numbering continues after existing numbers')
   const isolated = ['Workspace','WorkspaceMember','WorkspaceFeature','WorkspaceMemberFeature','WorkspaceAudit','Session','SessionMetrics','SessionTranscript','SessionSegment','SessionTurn','SessionRecording','UserInvitation',
     'ReplaySession','ReplayUpload','ReplayResult','Preparation','InterviewPreparation','PreparationStage','InterviewQuestion','StageReflection','PreparationPractice','PreparationRecording',
     'ProgressPulse','FeatureUsage','CoachThread','CoachTurn','CoachAction','CoachHomeResultReceipt','UserFeedback','UserFeedbackAttachment','UserFeedbackNote','RecordingAcknowledgment',

@@ -371,3 +371,13 @@ ALTER TABLE "WorkspaceAnalyticsQuery" FORCE ROW LEVEL SECURITY;
 CREATE POLICY workspace_analytics_managers ON "WorkspaceAnalyticsQuery" FOR ALL
 USING (public.workspace_manager_reads("workspaceId"))
 WITH CHECK (public.workspace_manager_reads("workspaceId") AND "authorId"=current_setting('app.workspace_actor_id',true));
+
+-- Feedback numbers come from one sequence: a row count is wrong once row isolation
+-- hides other workspaces' feedback, and would collide on the unique number.
+CREATE SEQUENCE public.user_feedback_number_seq;
+SELECT setval('public.user_feedback_number_seq', coalesce((SELECT max(substring("feedbackNumber" from '^FB-([0-9]+)$')::bigint)
+  FROM public."UserFeedback"), 0) + 1, false);
+CREATE FUNCTION public.next_feedback_number() RETURNS text
+LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+ SELECT 'FB-'||lpad(nextval('public.user_feedback_number_seq')::text, 5, '0');
+$$;
