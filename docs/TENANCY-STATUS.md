@@ -121,3 +121,23 @@ npm run build
 ```
 
 API contract: `docs/api/workspaces.openapi.json`. No Postman/cloud publishing is needed to use it.
+
+## Reviewed control-plane release (November 2)
+
+The user authorized merging and EC2 deployment of the control plane; this is not approval to enable tenant
+practices or analytics. The release enables workspace administration only after twelve forced-RLS tables
+and a non-owner/non-bypass runtime role are installed. Archive remains off and product readiness stays false.
+
+Release review fixed environment initialization order, cross-user conversation mutation/search, secret-link
+logging and SMTP transport safeguards, and transactional account-deletion audit. Regression checks: 679 server
+tests passed (124 optional skipped), 332 web tests passed; build/type checks and deployment shell syntax pass.
+The restricted-role helper was exercised twice against the isolated database. It keeps migration credentials
+in a separate mode-600 deployment file and verifies runtime privileges before replacing the API env file.
+
+Deployment uses a verified PostgreSQL archive backup, stops API/agent for pending migrations, preserves
+production overlays, and installs restricted runtime credentials before restarting. Never bypass the active
+voice-session guard or enable organization products to make a deployment pass.
+
+SMTP sender is `info@spasht.ai`; messages state replies are not routinely monitored. Zoho's exact account
+server and app password must be entered in production `apps/server/.env`; secrets are never committed.
+Real Google acceptance and email delivery remain human/provider checks, separate from local test identities.

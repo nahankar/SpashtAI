@@ -91,7 +91,7 @@ Production sends through the existing SMTP service (`lib/email.ts`). Required on
 | `SMTP_PASS` | SMTP password |
 | `FRONTEND_URL` | Public web origin used in the accept link (e.g. `https://spasht.ai`) |
 
-Optional: `SMTP_PORT` (default 587; 465 uses TLS), `SMTP_FROM` (default `noreply@spashtai.com`),
+Optional: `SMTP_PORT` (default 587; 465 uses TLS), `SMTP_FROM` (default `info@spasht.ai`),
 `INVITATION_EXPIRY_DAYS` (default 7). If any required value is missing, invitations are saved with delivery
 `FAILED / smtp_not_configured`, and the Invitations page lists the missing variable names (never values).
 
@@ -181,3 +181,16 @@ organization invitation. It is not a membership capability: entering the path re
 an organization's initial Owner by email before they have an account. Initial provisioning currently retains
 its verified-existing-Owner requirement. Organization practices and tenant analytics remain disabled until
 those data planes are certified. Email-code / magic-link sign-in is not implemented.
+
+## Reviewed production email settings
+
+The approved sender is `info@spasht.ai`; invitation and password-reset messages explain that replies are
+not routinely monitored. SMTP requires implicit TLS on 465 or STARTTLS on other configured ports, with
+bounded connection/greeting/socket timeouts. Production failures never log secret-link bodies or raw SMTP
+server replies. Get the exact Zoho hostname from the account's server-configuration details; never use a
+URL such as `://zoho.com`. Zoho may require an application-specific password when two-factor auth is on.
+
+Enter `SMTP_PASS` only in `/opt/spashtai/apps/server/.env` using a secure editor, never a command containing
+the password or a chat message. The sender and credentials must refer to the same authorized Zoho mailbox.
+After editing, run the no-mail check script, reload the API with the configured environment, and send a real
+test only to an explicitly approved recipient. Configuration checks do not establish inbox delivery.

@@ -1,6 +1,6 @@
+import 'dotenv/config'
 import { assertSafeWorkspaceStartup } from './workspaces/databaseSafety'
 import { workspaceRouter, platformWorkspacesRouter } from './workspaces/routes'
-import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
 import { createServer } from 'http'

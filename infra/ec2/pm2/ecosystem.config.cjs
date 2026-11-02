@@ -2,6 +2,12 @@
 const path = require('path')
 
 const root = path.resolve(__dirname, '../../..')
+// Explicitly refresh runtime tenancy settings from the protected file on every deploy.
+// Never load the separate deployment/migration credential file into an API process.
+const fs = require('fs')
+const serverEnv = require('dotenv').parse(fs.readFileSync(path.join(root, 'apps/server/.env')))
+const workspaceRuntimeEnv = Object.fromEntries(['DATABASE_URL', 'WORKSPACES_ENABLED', 'WORKSPACE_SESSION_ARCHIVE_ENABLED']
+  .filter(key => Object.hasOwn(serverEnv, key)).map(key => [key, serverEnv[key]]))
 
 module.exports = {
   apps: [
@@ -15,6 +21,7 @@ module.exports = {
       exec_mode: 'fork',
       env: {
         NODE_ENV: 'production',
+        ...workspaceRuntimeEnv,
       },
       max_memory_restart: '512M',
       error_file: path.join(root, 'logs/spashtai-api-error.log'),

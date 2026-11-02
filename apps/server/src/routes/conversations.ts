@@ -1,3 +1,6 @@
+import { z } from 'zod'
+import { hasCurrentAdminRole } from '../middleware/admin'
+import { fetchUserExportFlags } from '../lib/userExportFlags'
 import type { Prisma } from '@prisma/client'
 import { SessionSubscriptions } from '../lib/sessionSubscriptions'
 import type { Request, Response } from 'express'
@@ -37,6 +40,9 @@ async function broadcastToSession(sessionId: string, message: unknown, tx?: Pris
 }
 
 export async function addConversationMessage(req: Request, res: Response) {
+  return persistConversationMessage(req, res, false)
+}
+async function persistConversationMessage(req: Request, res: Response, internalAgent: boolean) {
   try {
     const { sessionId } = req.params
     const { role, content, timestamp, audio_url } = req.body
@@ -52,6 +58,7 @@ export async function addConversationMessage(req: Request, res: Response) {
     if (!session) {
       return res.status(404).json({ error: 'Create the session before logging messages' })
     }
+    if (!internalAgent && (!req.user || session.userId !== req.user.userId)) return res.status(403).json({ error: 'Access denied' })
     
     const messageData = {
       id: `${role}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -137,7 +144,7 @@ export async function addConversationMessageForAgent(req: Request, res: Response
   if (!token || token !== INTERNAL_AGENT_TOKEN) {
     return res.status(401).json({ error: 'Unauthorized internal agent request' })
   }
-  return addConversationMessage(req, res)
+  return persistConversationMessage(req, res, true)
 }
 
 export async function getConversation(req: Request, res: Response) {
@@ -271,6 +278,10 @@ export async function updateSessionState(req: Request, res: Response) {
     const { sessionId } = req.params
     const { state, metadata } = req.body
     
+    const session = await prisma.session.findUnique({ where: { id: sessionId }, select: { userId: true } })
+    if (!session) return res.status(404).json({ error: 'Session not found' })
+    if (!req.user || session.userId !== req.user.userId) return res.status(403).json({ error: 'Access denied' })
+
     await prisma.$transaction(async (tx) => {
       await lockWritableSession(tx, sessionId)
       // Keep the row lock through the broadcast so state cannot be emitted
@@ -295,18 +306,17 @@ export async function updateSessionState(req: Request, res: Response) {
 
 export async function searchConversations(req: Request, res: Response) {
   try {
-    const { userId, query, module, limit = 10, offset = 0 } = req.query
-    
-    const whereConditions: any = {
-      session: { discardedAt: null },
-    }
-    
-    if (userId) {
-      whereConditions.session = {
-        ...whereConditions.session,
-        userId: userId as string
-      }
-    }
+    const parsed = z.object({ userId: z.string().min(1).max(160).optional(), query: z.string().max(1000).optional(),
+      module: z.string().max(80).optional(), limit: z.coerce.number().int().min(1).max(100).default(10),
+      offset: z.coerce.number().int().min(0).max(10000).default(0) }).strict().safeParse(req.query)
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid conversation search' })
+    if (!req.user) return res.status(401).json({ error: 'Sign in required' })
+    const { userId, query, module, limit, offset } = parsed.data
+    const target = userId || req.user.userId
+    if (target !== req.user.userId && !await hasCurrentAdminRole(req.user.userId)) return res.status(403).json({ error: 'Access denied' })
+    const flags = await fetchUserExportFlags(target)
+    if (flags.hideTranscriptText) return res.json({ conversations: [], pagination: { limit, offset, total: 0 } })
+    const whereConditions: any = { session: { userId: target, workspaceKind: 'PERSONAL', discardedAt: null } }
     
     if (module) {
       whereConditions.session = {

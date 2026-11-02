@@ -221,6 +221,24 @@ suite('workspace Session aggregate and media isolation', () => {
       await new Promise<void>(resolve => socketServer.close(() => resolve()))
     }
   })
+  it('rejects foreign Personal conversation writes, state changes and searches before exposing content', async () => {
+    const { addConversationMessage, addConversationMessageForAgent, updateSessionState, searchConversations } = await import('../src/routes/conversations')
+    const { requireAuth } = await import('../src/middleware/auth')
+    const app = express(); app.use(express.json()); app.post('/sessions/:sessionId/messages', requireAuth, addConversationMessage)
+    app.post('/sessions/:sessionId/state', requireAuth, updateSessionState); app.get('/conversations/search', requireAuth, searchConversations)
+    app.post('/internal/sessions/:sessionId/messages', addConversationMessageForAgent)
+    const body = { role: 'user', content: 'foreign injection attempt' }
+    expect((await request(app).post(`/sessions/${personal}/messages`).set(bearer(operatorIdentity)).send(body)).status).toBe(403)
+    expect((await request(app).post(`/sessions/${personal}/state`).set(bearer(operatorIdentity)).send({ state: 'ended' })).status).toBe(403)
+    expect((await request(app).get(`/conversations/search?userId=${operator}`).set(bearer(identity))).status).toBe(403)
+    expect((await request(app).get('/conversations/search?limit=100000').set(bearer(identity))).status).toBe(400)
+    const own = await request(app).get('/conversations/search').set(bearer(identity))
+    expect(own.status).toBe(200); expect(own.body.conversations.every((s: {sessionId: string}) => s.sessionId === personal)).toBe(true)
+    await admin.user.update({ where: { id: learner }, data: { hideTranscriptText: true } })
+    expect((await request(app).get('/conversations/search').set(bearer(identity))).body.conversations).toEqual([])
+    await admin.user.update({ where: { id: learner }, data: { hideTranscriptText: false } })
+    expect((await request(app).post(`/internal/sessions/${personal}/messages`).set('x-internal-agent-token','dev-internal-agent-token').send({ role: 'assistant', content: 'authorized agent response' })).status).toBe(201)
+  })
   it('authenticates Personal subscriptions and rechecks discard before sending content', async () => {
     const registry = new SessionSubscriptions(), sent: string[] = []
     const client = { readyState: 1, send: (message: unknown) => { sent.push(String(message)) } }

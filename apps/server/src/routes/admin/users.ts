@@ -248,20 +248,16 @@ router.delete('/:id', async (req: Request, res: Response) => {
       return
     }
     // Invitations hold the address and name, so they go with the account.
-    const removedInvitations = await prisma.$transaction(async (tx) => {
-      const count = await deleteInvitationsForUser(tx, target, req.user!.userId)
+    await prisma.$transaction(async (tx) => {
+      const removedInvitations = await deleteInvitationsForUser(tx, target, req.user!.userId)
       await tx.user.delete({ where: { id: target.id } })
-      return count
-    })
-
-    await prisma.adminAction.create({
-      data: {
-        adminId: req.user!.userId,
-        action: 'user_deleted',
-        targetUserId: req.params.id,
-        reason: req.body.reason || null,
-        metadata: removedInvitations ? { removedInvitations } : undefined,
-      },
+      await tx.adminAction.create({
+        data: {
+          adminId: req.user!.userId, action: 'user_deleted', targetUserId: req.params.id,
+          reason: req.body.reason || null,
+          metadata: removedInvitations ? { removedInvitations } : undefined,
+        },
+      })
     })
 
     res.json({ message: 'User deleted' })

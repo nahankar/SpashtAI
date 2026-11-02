@@ -150,6 +150,7 @@ export function buildInvitationEmail(opts: { recipientName?: string | null; acce
     "If you weren't expecting this invitation, you can ignore this email.",
     '',
     '— SpashtAI',
+    'Replies to this mailbox are not routinely monitored and may not receive a response.',
   ].join('\n')
   const html = `<!doctype html><html><body style="margin:0;background:#f6f7fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 16px">
@@ -157,7 +158,7 @@ export function buildInvitationEmail(opts: { recipientName?: string | null; acce
 <tr><td style="font-size:22px;font-weight:700;color:#4f46e5;padding-bottom:16px">SpashtAI</td></tr>
 <tr><td style="font-size:16px;line-height:24px">${escapeHtml(greeting)}<br><br>${escapeHtml(introduction)}</td></tr>
 <tr><td style="padding:24px 0"><a href="${escapeHtml(opts.acceptUrl)}" style="background:#4f46e5;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block">Accept invitation</a></td></tr>
-<tr><td style="font-size:14px;line-height:21px;color:#4b5563">Sign in with the Google Account for this email address. SpashtAI currently requires a Google Account; this can be a Gmail or Google Workspace address, or another address you have registered as a Google Account.<br><br>This link works once and expires on ${escapeHtml(expires)}. If you weren't expecting this invitation, you can ignore this email.</td></tr>
+<tr><td style="font-size:14px;line-height:21px;color:#4b5563">Sign in with the Google Account for this email address. SpashtAI currently requires a Google Account; this can be a Gmail or Google Workspace address, or another address you have registered as a Google Account.<br><br>This link works once and expires on ${escapeHtml(expires)}. If you weren't expecting this invitation, you can ignore this email.<br><br>Replies to this mailbox are not routinely monitored and may not receive a response.</td></tr>
 </table></td></tr></table></body></html>`
   return { subject, text, html }
 }

@@ -8,6 +8,7 @@
 # Env:
 #   SKIP_GIT_PULL=1     skip `git pull origin main`
 #   SKIP_HEALTH_WAIT=1  skip waiting for /health after PM2 reload
+#   CONFIGURE_WORKSPACE_RUNTIME=1 provision restricted runtime after migrations (maintenance required)
 #   FORCE_MAINTENANCE=1 stop for pending migrations even if voice sessions look active
 #
 # Pending migrations run in a maintenance window (API, workers and voice agent
@@ -231,9 +232,20 @@ sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t
 sudo systemctl reload nginx
 
+# Runtime uses restricted credentials; DDL uses the separately configured migrator.
+# Values are never printed or passed as command arguments.
+MIGRATION_DATABASE_URL="${MIGRATION_DATABASE_URL:-$(load_env_val "${ROOT}/.deploy-migration.env" MIGRATION_DATABASE_URL)}"
+run_prisma_migration() {
+  if [[ -n "${MIGRATION_DATABASE_URL}" ]]; then
+    (cd apps/server && DATABASE_URL="${MIGRATION_DATABASE_URL}" npx prisma migrate "$@")
+  else
+    (cd apps/server && npx prisma migrate "$@")
+  fi
+}
+
 echo "==> Migration status"
 set +e
-MIGRATION_STATUS="$(cd apps/server && npx prisma migrate status 2>&1)"
+MIGRATION_STATUS="$(run_prisma_migration status 2>&1)"
 set -e
 if grep -q "Database schema is up to date" <<<"${MIGRATION_STATUS}"; then
   PENDING_MIGRATIONS=0
@@ -271,11 +283,20 @@ if [[ "${PENDING_MIGRATIONS}" -eq 1 ]]; then
       pm2 stop "$app"
     fi
   done
-  if ! (cd apps/server && npx prisma migrate deploy); then
+  if ! run_prisma_migration deploy; then
     MIGRATION_FAILED=1
     echo "Migration failed. API and agent remain stopped. Inspect and resolve the migration before restarting." >&2
     exit 1
   fi
+fi
+
+if [[ "${CONFIGURE_WORKSPACE_RUNTIME:-}" == "1" ]]; then
+  if [[ "${PROCESSES_STOPPED}" -ne 1 ]]; then
+    echo "Runtime credential transition requires migration maintenance; no configuration changed." >&2
+    exit 1
+  fi
+  echo "==> Configure restricted workspace runtime"
+  node apps/server/scripts/configure-workspace-runtime.mjs apps/server/.env --migration-env "${ROOT}/.deploy-migration.env" --apply
 fi
 
 echo "==> Sync web dist to /var/www/spashtai"

@@ -28,6 +28,8 @@ async function main() {
     host: process.env.SMTP_HOST!.trim(),
     port,
     secure: port === 465,
+    requireTLS: port !== 465,
+    connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 30000,
     auth: { user: process.env.SMTP_USER!.trim(), pass: process.env.SMTP_PASS!.trim() },
   })
   try {
@@ -50,7 +52,7 @@ async function main() {
     return
   }
   const info = await transport.sendMail({
-    from: process.env.SMTP_FROM?.trim() || 'noreply@spashtai.com',
+    from: process.env.SMTP_FROM?.trim() || 'info@spasht.ai',
     to,
     subject: 'SpashtAI invitation email test',
     text: 'This is a one-off configuration test from SpashtAI. It is not an invitation and needs no action.',

@@ -10,12 +10,12 @@ export async function sendEmail(opts: {
   /** False for messages carrying a secret link: failures and the console fallback omit the body. */
   logBody?: boolean
 }): Promise<{ sent: boolean; reason?: string }> {
-  const logBody = opts.logBody !== false
+  const logBody = process.env.NODE_ENV !== 'production' && opts.logBody === true
   const host = process.env.SMTP_HOST?.trim()
   const port = parseInt(process.env.SMTP_PORT || '587', 10)
   const user = process.env.SMTP_USER?.trim()
   const pass = process.env.SMTP_PASS?.trim()
-  const from = process.env.SMTP_FROM?.trim() || 'noreply@spashtai.com'
+  const from = process.env.SMTP_FROM?.trim() || 'info@spasht.ai'
 
   if (!host || !user || !pass) {
     console.log('📧 Email (SMTP not configured — console only)')
@@ -31,6 +31,8 @@ export async function sendEmail(opts: {
       host,
       port,
       secure: port === 465,
+      requireTLS: port !== 465,
+      connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 30000,
       auth: { user, pass },
     })
 
@@ -44,7 +46,7 @@ export async function sendEmail(opts: {
 
     return { sent: true }
   } catch (err) {
-    console.error('Email send failed:', err)
+    console.error('Email send failed:', { code: (err as { code?: string }).code || 'SEND_FAILED' })
     if (logBody) console.log(`   Fallback — reset link text:\n${opts.text}`)
     return { sent: false, reason: 'send_failed' }
   }
@@ -62,6 +64,7 @@ export function buildPasswordResetEmail(resetUrl: string): { subject: string; te
       'If you did not request this, you can safely ignore this email.',
       '',
       '— SpashtAI',
+      'Replies to this mailbox are not routinely monitored and may not receive a response.',
     ].join('\n'),
   }
 }

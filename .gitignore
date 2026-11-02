@@ -56,3 +56,11 @@ costs.csv
 
 # Security review register (kept local; documents unpatched exploits)
 docs/SECURITY-ISSUES.md
+
+# Protected deployment credentials and database backups
+.env.pre-workspace-*
+.env.workspace-tmp
+.env.bak
+.deploy-migration.env
+backups/
+infra/ec2/env/postgres.env
