@@ -57,3 +57,26 @@ export const apiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 })
+
+/** Invitation sends and resends, per admin account (production only, like the auth limiter). */
+export const invitationSendLimiter = authRateLimitDisabled
+  ? passthrough
+  : rateLimit({
+      windowMs: 60 * 60 * 1000,
+      max: 60,
+      keyGenerator: (req) => `invite-send:${req.user?.userId ?? 'anonymous'}`,
+      message: { error: 'Too many invitations sent, please try again later' },
+      standardHeaders: true,
+      legacyHeaders: false,
+    })
+
+/** Public invitation lookup and acceptance: allows a few retries (e.g. switching Google account). */
+export const invitationAcceptLimiter = authRateLimitDisabled
+  ? passthrough
+  : rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 20,
+      message: { error: 'Too many attempts, please try again later' },
+      standardHeaders: true,
+      legacyHeaders: false,
+    })

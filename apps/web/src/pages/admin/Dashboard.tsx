@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiClient } from '@/lib/api-client'
 import { MetricCard } from '@/components/admin/MetricCard'
+import { InvitationOverview } from '@/components/admin/InvitationOverview'
 import { BrandName } from '@/components/brand/BrandName'
 
 interface Overview {
@@ -123,6 +124,8 @@ export function Dashboard() {
           </p>
         </div>
       </div>
+
+      <InvitationOverview />
     </div>
   )
 }

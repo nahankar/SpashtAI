@@ -7,7 +7,10 @@ export async function sendEmail(opts: {
   subject: string
   text: string
   html?: string
+  /** False for messages carrying a secret link: failures and the console fallback omit the body. */
+  logBody?: boolean
 }): Promise<{ sent: boolean; reason?: string }> {
+  const logBody = opts.logBody !== false
   const host = process.env.SMTP_HOST?.trim()
   const port = parseInt(process.env.SMTP_PORT || '587', 10)
   const user = process.env.SMTP_USER?.trim()
@@ -18,7 +21,7 @@ export async function sendEmail(opts: {
     console.log('📧 Email (SMTP not configured — console only)')
     console.log(`   To: ${opts.to}`)
     console.log(`   Subject: ${opts.subject}`)
-    console.log(`   Body:\n${opts.text}`)
+    if (logBody) console.log(`   Body:\n${opts.text}`)
     return { sent: false, reason: 'smtp_not_configured' }
   }
 
@@ -42,7 +45,7 @@ export async function sendEmail(opts: {
     return { sent: true }
   } catch (err) {
     console.error('Email send failed:', err)
-    console.log(`   Fallback — reset link text:\n${opts.text}`)
+    if (logBody) console.log(`   Fallback — reset link text:\n${opts.text}`)
     return { sent: false, reason: 'send_failed' }
   }
 }

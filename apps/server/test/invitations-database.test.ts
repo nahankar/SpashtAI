@@ -1,0 +1,650 @@
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import express from 'express'
+import request from 'supertest'
+import { randomUUID } from 'crypto'
+const testDb = vi.hoisted(() => {
+  const url = process.env.BANK_TEST_DATABASE_URL
+  if (url && url !== 'postgresql://postgres@127.0.0.1:55441/simple_bank') throw new Error('Invitation tests use only the isolated simple_bank database')
+  return { url }
+})
+const mocks = vi.hoisted(() => ({ signupsPaused: false, sendEmail: vi.fn(), onPauseCheck: null as null | (() => Promise<void>), auditFailures: 0, failAdminAudit: null as null | string }))
+vi.mock('../src/lib/prisma', async () => {
+  const { PrismaClient } = await import('@prisma/client')
+  return { prisma: new PrismaClient({ datasourceUrl: testDb.url || 'postgresql://postgres@127.0.0.1:55441/simple_bank' }) }
+})
+vi.mock('../src/lib/platformSettings', () => ({
+  // The acceptance route checks the pause just before resolving the account, so tests can change the
+  // invitation "mid-sign-in" from here.
+  areSignupsPaused: async () => { await mocks.onPauseCheck?.(); return mocks.signupsPaused },
+  getSignupsPausedMessage: async () => 'Signups are paused',
+  areRewardPointsEnabled: async () => false,
+}))
+vi.mock('../src/lib/email', () => ({ sendEmail: mocks.sendEmail }))
+// Lets a test make audit persistence fail inside the acceptance transaction.
+vi.mock('../src/lib/invitationAudit', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../src/lib/invitationAudit')>()
+  return {
+    writeAcceptanceAudit: async (...args: Parameters<typeof real.writeAcceptanceAudit>) => {
+      if (mocks.auditFailures > 0) { mocks.auditFailures--; throw new Error('audit store unavailable') }
+      return real.writeAcceptanceAudit(...args)
+    },
+    writeInvitationAudit: async (...args: Parameters<typeof real.writeInvitationAudit>) => {
+      if (mocks.failAdminAudit === args[2]) { mocks.failAdminAudit = null; throw new Error('audit store unavailable') }
+      return real.writeInvitationAudit(...args)
+    },
+  }
+})
+// A test credential is the JSON of the Google identity it stands for.
+vi.mock('../src/lib/google-auth', () => ({
+  verifyGoogleIdToken: async (credential: string) => {
+    const g = JSON.parse(credential)
+    return { googleId: g.sub, email: g.email, emailVerified: g.verified ?? true, firstName: 'Invited', lastName: 'Learner', avatar: null }
+  },
+}))
+import { prisma } from '../src/lib/prisma'
+import { requireAuth } from '../src/middleware/auth'
+import { requireCurrentAdmin } from '../src/middleware/admin'
+import { signToken } from '../src/lib/jwt'
+import adminInvitationsRouter from '../src/routes/admin/invitations'
+import adminUsersRouter from '../src/routes/admin/users'
+import invitationsRouter from '../src/routes/invitations'
+import { capturedInvitationEmails, clearCapturedInvitationEmails, createInvitation, hashInvitationToken, invitationDeliveryMode, purgeClosedInvitations, resendInvitation, invitationTestHooks } from '../src/lib/invitations'
+
+const app = express(); app.use(express.json())
+app.use('/api/admin/invitations', requireAuth, requireCurrentAdmin, adminInvitationsRouter)
+app.use('/api/invitations', invitationsRouter)
+app.use('/api/admin/users', requireAuth, requireCurrentAdmin, adminUsersRouter)
+
+const tag = `inv_${randomUUID().replaceAll('-', '').slice(0, 12)}`
+const addr = (name: string) => `${tag}_${name}@example.invalid`
+const bearer = (u: { id: string; email: string; role: string }) => `Bearer ${signToken({ userId: u.id, email: u.email, role: u.role })}`
+const google = (email: string, extra: Record<string, unknown> = {}) => JSON.stringify({ sub: `g-${tag}-${email}`, email, ...extra })
+let admin: { id: string; email: string; role: string }
+let learner: { id: string; email: string; role: string }
+
+async function invite(email: string, body: Record<string, unknown> = {}) {
+  return request(app).post('/api/admin/invitations').set('Authorization', bearer(admin)).send({ email, ...body })
+}
+function tokenFor(email: string) {
+  const mail = capturedInvitationEmails().find((m) => m.to === email)
+  if (!mail) throw new Error(`no captured invitation for ${email}`)
+  return new URL(mail.acceptUrl).hash.replace('#token=', '')
+}
+const accept = (token: string, credential: string) => request(app).post('/api/invitations/accept').send({ token, credential })
+
+describe.skipIf(!testDb.url)('learner invitations (PostgreSQL)', () => {
+  beforeAll(async () => {
+    admin = await prisma.user.create({ data: { email: addr('admin'), role: 'ADMIN' } })
+    learner = await prisma.user.create({ data: { email: addr('learner') } })
+  })
+  afterEach(() => {
+    mocks.signupsPaused = false
+    mocks.onPauseCheck = null
+    mocks.auditFailures = 0
+    mocks.failAdminAudit = null
+    invitationTestHooks.afterResendUpdate = undefined
+    process.env.NODE_ENV = 'test'
+    delete process.env.INVITATION_EMAIL_DELIVERY
+    delete process.env.INVITATION_RETENTION_DAYS
+    for (const key of ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS', 'FRONTEND_URL']) delete process.env[key]
+  })
+  afterAll(async () => {
+    clearCapturedInvitationEmails()
+    await prisma.userInvitation.deleteMany({ where: { email: { startsWith: tag } } })
+    await prisma.adminAction.deleteMany({ where: { adminId: admin.id } })
+    await prisma.user.deleteMany({ where: { email: { startsWith: tag } } })
+    await prisma.$disconnect()
+  })
+
+  it('refuses anonymous callers, learners and admins whose current role was removed', async () => {
+    expect((await request(app).get('/api/admin/invitations')).status).toBe(401)
+    expect((await request(app).get('/api/admin/invitations').set('Authorization', bearer(learner))).status).toBe(403)
+    expect((await request(app).post('/api/admin/invitations').set('Authorization', bearer(learner)).send({ email: addr('x') })).status).toBe(403)
+    const demoted = await prisma.user.create({ data: { email: addr('demoted') } })
+    const staleAdminToken = bearer({ ...demoted, role: 'ADMIN' })
+    expect((await request(app).get('/api/admin/invitations').set('Authorization', staleAdminToken)).status).toBe(403)
+  })
+
+  it('stores only a token hash, captures development mail and writes a content-free audit row', async () => {
+    const email = addr('new')
+    const res = await invite(email, { name: 'Priya New', role: 'ADMIN' })
+    expect(res.status).toBe(201)
+    expect(res.body.invitation).toMatchObject({ status: 'pending', deliveryStatus: 'DEV_CAPTURED', recipientName: 'Priya New' })
+    expect(res.body.notice).toMatch(/development only/i)
+    const token = tokenFor(email)
+    const row = await prisma.userInvitation.findFirstOrThrow({ where: { email } })
+    expect(row.tokenHash).toBe(hashInvitationToken(token))
+    expect(JSON.stringify(row)).not.toContain(token)
+    const days = (row.expiresAt.getTime() - row.createdAt.getTime()) / 86_400_000
+    expect(days).toBeCloseTo(7, 1)
+    const audit = await prisma.adminAction.findFirstOrThrow({ where: { adminId: admin.id, action: 'invitation_create', targetResource: `invitation:${row.id}` } })
+    expect(audit.metadata).toMatchObject({ attempt: 1, existingUser: false })
+    expect(JSON.stringify(audit)).not.toContain(email)
+    expect(JSON.stringify(audit)).not.toContain(token)
+    const mail = capturedInvitationEmails().find((m) => m.to === email)!
+    expect(mail.developmentOnly).toBe(true)
+    expect(mail.text).toContain('invited to join SpashtAI')
+    expect(mail.text).toMatch(/requires a Google Account/)
+  })
+
+  it('rejects invalid email and a second pending invitation for the same address', async () => {
+    expect((await invite('not-an-email')).status).toBe(400)
+    const email = addr('dupe')
+    expect((await invite(email)).status).toBe(201)
+    const again = await invite(email.toUpperCase())
+    expect(again.status).toBe(409)
+    expect(again.body.error).toBe('duplicate_pending')
+  })
+
+  it('needs explicit confirmation before inviting an address that already has an account', async () => {
+    const first = await invite(learner.email)
+    expect(first.status).toBe(409)
+    expect(first.body.error).toBe('existing_user')
+    const confirmed = await invite(learner.email, { confirmExistingUser: true })
+    expect(confirmed.status).toBe(201)
+    expect(confirmed.body.invitation.existingUserAtInvite).toBe(true)
+  })
+
+  it('rejects a different or unverified Google identity and leaves the invitation pending', async () => {
+    const email = addr('wrong')
+    await invite(email)
+    const token = tokenFor(email)
+    const other = await accept(token, google(addr('someone-else')))
+    expect(other.status).toBe(403)
+    expect(other.body.error).toBe('wrong_account')
+    expect(other.body.message).toMatch(/Switch Google account/)
+    expect(other.body.token).toBeUndefined()
+    const unverified = await accept(token, google(email, { verified: false }))
+    expect(unverified.status).toBe(403)
+    expect((await prisma.userInvitation.findFirstOrThrow({ where: { email } })).status).toBe('PENDING')
+    expect(await prisma.user.count({ where: { email } })).toBe(0)
+  })
+
+  it('creates an ordinary learner who still has to complete onboarding, and repeat acceptance is idempotent', async () => {
+    const email = addr('joiner')
+    await invite(email, { role: 'SUPER_ADMIN' })
+    const token = tokenFor(email)
+    const lookup = await request(app).post('/api/invitations/lookup').send({ token })
+    expect(lookup.body).toMatchObject({ status: 'pending' })
+    // The link holder sees exactly which address to sign in with.
+    expect(lookup.body.invitedEmail).toBe(email)
+
+    const first = await accept(token, google(email))
+    expect(first.status).toBe(200)
+    expect(first.body).toMatchObject({ alreadyAccepted: false, newAccount: true })
+    expect(first.body.user).toMatchObject({ email, role: 'USER', needsProfileCompletion: true })
+    const second = await accept(token, google(email))
+    expect(second.status).toBe(200)
+    expect(second.body).toMatchObject({ alreadyAccepted: true, newAccount: false })
+    expect(second.body.user.id).toBe(first.body.user.id)
+    expect(await prisma.user.count({ where: { email } })).toBe(1)
+    const row = await prisma.userInvitation.findFirstOrThrow({ where: { email } })
+    expect(row).toMatchObject({ status: 'ACCEPTED', acceptedUserId: first.body.user.id, pendingKey: null })
+  })
+
+  it('signs an existing account in without changing its role, permissions or history', async () => {
+    const existing = await prisma.user.create({ data: {
+      email: addr('veteran'), role: 'USER', rewardPoints: 12, enableReprocess: true, enablePro: false, firstName: 'Vee',
+      phone: '9999999999', dateOfBirth: new Date('1990-01-01'), gender: 'FEMALE', pincode: '560001',
+    } })
+    await prisma.session.create({ data: { userId: existing.id, module: 'elevate' } })
+    await invite(existing.email, { confirmExistingUser: true })
+    const res = await accept(tokenFor(existing.email), google(existing.email))
+    expect(res.status).toBe(200)
+    expect(res.body.newAccount).toBe(false)
+    const after = await prisma.user.findUniqueOrThrow({ where: { id: existing.id }, include: { _count: { select: { sessions: true } } } })
+    expect(after).toMatchObject({ role: 'USER', rewardPoints: 12, enableReprocess: true, enablePro: false, firstName: 'Vee', createdAt: existing.createdAt })
+    expect(after._count.sessions).toBe(1)
+    expect(await prisma.user.count({ where: { email: existing.email } })).toBe(1)
+  })
+
+  it('invalidates the previous link on resend', async () => {
+    const email = addr('resend')
+    const created = await invite(email)
+    const oldToken = tokenFor(email)
+    const resent = await request(app).post(`/api/admin/invitations/${created.body.invitation.id}/resend`).set('Authorization', bearer(admin))
+    expect(resent.status).toBe(200)
+    expect(resent.body.invitation.sendCount).toBe(2)
+    const newToken = tokenFor(email)
+    expect(newToken).not.toBe(oldToken)
+    expect((await accept(oldToken, google(email))).status).toBe(404)
+    expect((await accept(newToken, google(email))).status).toBe(200)
+    const actions = await prisma.adminAction.findMany({ where: { targetResource: `invitation:${created.body.invitation.id}` }, select: { action: true } })
+    expect(actions.map((a) => a.action).sort()).toEqual(['invitation_accepted', 'invitation_create', 'invitation_delivery', 'invitation_delivery', 'invitation_resend'])
+  })
+
+  it('blocks acceptance after revocation and refuses to revoke an accepted invitation', async () => {
+    const email = addr('revoked')
+    const created = await invite(email)
+    const token = tokenFor(email)
+    const id = created.body.invitation.id
+    expect((await request(app).post(`/api/admin/invitations/${id}/revoke`).set('Authorization', bearer(admin))).body.invitation.status).toBe('revoked')
+    const res = await accept(token, google(email))
+    expect(res.status).toBe(410)
+    expect(res.body.error).toBe('invitation_revoked')
+    expect(await prisma.user.count({ where: { email } })).toBe(0)
+    expect((await request(app).post(`/api/admin/invitations/${id}/resend`).set('Authorization', bearer(admin))).status).toBe(409)
+
+    const acceptedEmail = addr('accepted-then-revoke')
+    const acceptedInvite = await invite(acceptedEmail)
+    await accept(tokenFor(acceptedEmail), google(acceptedEmail))
+    const revokeAccepted = await request(app).post(`/api/admin/invitations/${acceptedInvite.body.invitation.id}/revoke`).set('Authorization', bearer(admin))
+    expect(revokeAccepted.status).toBe(409)
+  })
+
+  it('expires invitations, reports them as expired and lets a new invitation replace them', async () => {
+    const email = addr('expired')
+    await createInvitation(admin.id, { email }, new Date(Date.now() - 8 * 86_400_000))
+    const res = await accept(tokenFor(email), google(email))
+    expect(res.status).toBe(410)
+    expect(res.body.error).toBe('invitation_expired')
+    const list = await request(app).get(`/api/admin/invitations?status=expired&q=${encodeURIComponent(email)}`).set('Authorization', bearer(admin))
+    expect(list.body.items).toHaveLength(1)
+    expect(list.body.items[0].status).toBe('expired')
+    expect((await invite(email)).status).toBe(201)
+  })
+
+  it('lets only a valid invitation for the verified invited address create a learner while signups are paused', async () => {
+    const email = addr('paused')
+    await invite(email)
+    mocks.signupsPaused = true
+    const token = tokenFor(email)
+
+    // A different Google identity gets nothing, even though the link itself is valid.
+    expect((await accept(token, google(addr('paused-other')))).status).toBe(403)
+    expect(await prisma.user.count({ where: { email: addr('paused-other') } })).toBe(0)
+
+    const res = await accept(token, google(email))
+    expect(res.status).toBe(200)
+    expect(res.body.user).toMatchObject({ email, role: 'USER', needsProfileCompletion: true })
+    const activity = await prisma.userActivity.findFirstOrThrow({ where: { userId: res.body.user.id, action: 'invitation_accepted' } })
+    expect(activity.metadata).toEqual({ newAccount: true, signupsPausedBypass: true })
+    expect(JSON.stringify(activity)).not.toContain(email)
+    expect(JSON.stringify(activity)).not.toContain(token)
+
+    // Ordinary Google signup stays blocked while paused.
+    const { signInWithGoogleUser } = await import('../src/lib/googleSignIn')
+    const req = { ip: '127.0.0.1', headers: {} } as unknown as express.Request
+    const outsider = addr('paused-outsider')
+    const blocked = await signInWithGoogleUser({ googleId: `g-${outsider}`, email: outsider, emailVerified: true, firstName: null, lastName: null, avatar: null }, req)
+    expect(blocked).toMatchObject({ ok: false, status: 403, body: { error: 'signups_paused' } })
+    expect(await prisma.user.count({ where: { email: outsider } })).toBe(0)
+  })
+
+  it('does not bypass paused signups for expired or revoked invitations', async () => {
+    mocks.signupsPaused = true
+    const expiredEmail = addr('paused-expired')
+    await createInvitation(admin.id, { email: expiredEmail }, new Date(Date.now() - 8 * 86_400_000))
+    expect((await accept(tokenFor(expiredEmail), google(expiredEmail))).status).toBe(410)
+    const revokedEmail = addr('paused-revoked')
+    const created = await invite(revokedEmail)
+    await request(app).post(`/api/admin/invitations/${created.body.invitation.id}/revoke`).set('Authorization', bearer(admin))
+    expect((await accept(tokenFor(revokedEmail), google(revokedEmail))).status).toBe(410)
+    expect(await prisma.user.count({ where: { email: { in: [expiredEmail, revokedEmail] } } })).toBe(0)
+  })
+
+  it('never reports a failed or unconfigured send as delivered', async () => {
+    process.env.INVITATION_EMAIL_DELIVERY = 'smtp'
+    const unconfigured = await invite(addr('no-smtp'))
+    expect(unconfigured.body.invitation).toMatchObject({ status: 'pending', deliveryStatus: 'FAILED', deliveryError: 'smtp_not_configured' })
+    expect(unconfigured.body.notice).toMatch(/could not be sent/)
+    expect(mocks.sendEmail).not.toHaveBeenCalled()
+    const config = await request(app).get('/api/admin/invitations/email-config').set('Authorization', bearer(admin))
+    expect(config.body.missing).toEqual(['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS', 'FRONTEND_URL'])
+
+    Object.assign(process.env, { SMTP_HOST: 'smtp.test.invalid', SMTP_USER: 'u', SMTP_PASS: 'p', FRONTEND_URL: 'https://app.test.invalid' })
+    mocks.sendEmail.mockResolvedValueOnce({ sent: false, reason: 'send_failed' })
+    const failed = await invite(addr('bounce'))
+    expect(failed.body.invitation).toMatchObject({ status: 'pending', deliveryStatus: 'FAILED', deliveryError: 'send_failed' })
+    expect(mocks.sendEmail.mock.calls[0][0]).toMatchObject({ logBody: false })
+    mocks.sendEmail.mockResolvedValueOnce({ sent: true })
+    const sent = await invite(addr('ok'))
+    expect(sent.body.invitation.deliveryStatus).toBe('SENT')
+    expect(mocks.sendEmail.mock.calls[1][0].html).toContain('Accept invitation')
+    expect(mocks.sendEmail.mock.calls[1][0].text).toContain('https://app.test.invalid/invite#token=')
+    expect((await request(app).get('/api/admin/invitations/dev-mailbox').set('Authorization', bearer(admin))).status).toBe(404)
+  })
+
+  it('shows the full invited address when the wrong Google account is used', async () => {
+    const email = addr('fulladdr')
+    await invite(email)
+    const res = await accept(tokenFor(email), google(addr('not-me')))
+    expect(res.body.invitedEmail).toBe(email)
+    expect(res.body.message).toContain(email)
+  })
+
+  it('writes a content-free Admin audit row when an invitation is accepted', async () => {
+    const email = addr('audited')
+    const created = await invite(email)
+    const token = tokenFor(email)
+    const res = await accept(token, google(email))
+    const row = await prisma.adminAction.findFirstOrThrow({ where: { action: 'invitation_accepted', targetResource: `invitation:${created.body.invitation.id}` } })
+    expect(row).toMatchObject({ adminId: admin.id, targetUserId: res.body.user.id })
+    expect(row.metadata).toEqual({ actor: 'recipient', newAccount: true, signupsPausedBypass: false })
+    expect(JSON.stringify(row)).not.toContain(email)
+    expect(JSON.stringify(row)).not.toContain(token)
+  })
+
+  it.each(['revoked', 'expired'] as const)('never creates an account for an invitation %s after Google verification', async (change) => {
+    const email = addr(`midway-${change}`)
+    const created = await invite(email)
+    const id = created.body.invitation.id
+    mocks.onPauseCheck = async () => {
+      mocks.onPauseCheck = null
+      await prisma.userInvitation.update({ where: { id }, data: change === 'revoked'
+        ? { status: 'REVOKED', pendingKey: null, revokedAt: new Date() }
+        : { expiresAt: new Date(Date.now() - 1000) } })
+    }
+    const res = await accept(tokenFor(email), google(email))
+    expect(res.status).toBe(410)
+    expect(res.body.error).toBe(`invitation_${change}`)
+    expect(await prisma.user.count({ where: { email } })).toBe(0)
+  })
+
+  it('removes invitations with the account when an Admin deletes a user', async () => {
+    const email = addr('to-delete')
+    const first = await invite(email)
+    const accepted = await accept(tokenFor(email), google(email))
+    const userId = accepted.body.user.id
+    // A later pending invitation for the same address goes too.
+    await invite(email, { confirmExistingUser: true })
+    expect(await prisma.userInvitation.count({ where: { email } })).toBe(2)
+    const del = await request(app).delete(`/api/admin/users/${userId}`).set('Authorization', bearer(admin))
+    expect(del.status).toBe(200)
+    expect(await prisma.userInvitation.count({ where: { OR: [{ email }, { acceptedUserId: userId }] } })).toBe(0)
+    expect(await prisma.user.count({ where: { id: userId } })).toBe(0)
+    const audit = await prisma.adminAction.findFirstOrThrow({ where: { action: 'user_deleted', targetUserId: userId } })
+    expect(audit.metadata).toEqual({ removedInvitations: 2 })
+    expect(first.body.invitation.id).toBeTruthy()
+  })
+
+  it('purges closed invitations past retention and never purges pending ones', async () => {
+    process.env.INVITATION_RETENTION_DAYS = '30'
+    const old = new Date(Date.now() - 40 * 86_400_000)
+    const make = (name: string, data: Record<string, unknown>) => prisma.userInvitation.create({ data: {
+      email: addr(name), tokenHash: hashInvitationToken(`${tag}-${name}`), invitedById: admin.id, expiresAt: old, ...data,
+    } })
+    const ids = await Promise.all([
+      make('old-accepted', { status: 'ACCEPTED', acceptedAt: old }),
+      make('old-revoked', { status: 'REVOKED', revokedAt: old }),
+      make('old-expired', { status: 'EXPIRED' }),
+      make('stale-pending', { status: 'PENDING', pendingKey: addr('stale-pending') }),
+      make('recent-revoked', { status: 'REVOKED', revokedAt: new Date(), expiresAt: new Date() }),
+      make('live-pending', { status: 'PENDING', pendingKey: addr('live-pending'), expiresAt: new Date(Date.now() + 86_400_000) }),
+    ]).then((rows) => rows.map((r) => r.id))
+    await purgeClosedInvitations()
+    const left = await prisma.userInvitation.findMany({ where: { id: { in: ids } }, select: { email: true } })
+    expect(left.map((r) => r.email).sort()).toEqual([addr('live-pending'), addr('recent-revoked')].sort())
+  })
+
+  it('refuses capture delivery and hides the dev mailbox in production', async () => {
+    process.env.NODE_ENV = 'production'
+    process.env.INVITATION_EMAIL_DELIVERY = 'capture'
+    expect(invitationDeliveryMode()).toBe('smtp')
+    expect((await request(app).get('/api/admin/invitations/dev-mailbox').set('Authorization', bearer(admin))).status).toBe(404)
+    expect(capturedInvitationEmails()).toEqual([])
+    const config = await request(app).get('/api/admin/invitations/email-config').set('Authorization', bearer(admin))
+    expect(config.body).toMatchObject({ mode: 'smtp', captureRefused: true })
+    const res = await invite(addr('prod-no-smtp'))
+    expect(res.body.invitation).toMatchObject({ deliveryStatus: 'FAILED', deliveryError: 'smtp_not_configured' })
+  })
+
+  describe('concurrency and atomic acceptance', () => {
+    const acceptanceAudits = (invitationId: string) => prisma.adminAction.count({ where: { action: 'invitation_accepted', targetResource: `invitation:${invitationId}` } })
+
+    it('accepts the same invitation twice at once with one account and one audit', async () => {
+      const email = addr('double')
+      const created = await invite(email)
+      const token = tokenFor(email)
+      const [a, b] = await Promise.all([accept(token, google(email)), accept(token, google(email))])
+      expect([a.status, b.status]).toEqual([200, 200])
+      expect(a.body.user.id).toBe(b.body.user.id)
+      expect([a.body.alreadyAccepted, b.body.alreadyAccepted].sort()).toEqual([false, true])
+      expect(await prisma.user.count({ where: { email } })).toBe(1)
+      expect(await acceptanceAudits(created.body.invitation.id)).toBe(1)
+    })
+
+    it('keeps revoke and acceptance consistent whichever wins', async () => {
+      for (let i = 0; i < 6; i++) {
+        const email = addr(`race-revoke-${i}`)
+        const created = await invite(email)
+        const id = created.body.invitation.id
+        const [acc, rev] = await Promise.all([
+          accept(tokenFor(email), google(email)),
+          request(app).post(`/api/admin/invitations/${id}/revoke`).set('Authorization', bearer(admin)),
+        ])
+        const inv = await prisma.userInvitation.findUniqueOrThrow({ where: { id } })
+        const users = await prisma.user.count({ where: { email } })
+        if (inv.status === 'ACCEPTED') {
+          expect([acc.status, rev.status]).toEqual([200, 409])
+          expect(users).toBe(1)
+          expect(await acceptanceAudits(id)).toBe(1)
+        } else {
+          expect(inv.status).toBe('REVOKED')
+          expect([acc.status, rev.status]).toEqual([410, 200])
+          expect(users).toBe(0)
+          expect(await acceptanceAudits(id)).toBe(0)
+        }
+      }
+    })
+
+    it('keeps resend and acceptance consistent whichever wins', async () => {
+      for (let i = 0; i < 6; i++) {
+        const email = addr(`race-resend-${i}`)
+        const created = await invite(email)
+        const id = created.body.invitation.id
+        const oldToken = tokenFor(email)
+        const [acc, resend] = await Promise.all([
+          accept(oldToken, google(email)),
+          request(app).post(`/api/admin/invitations/${id}/resend`).set('Authorization', bearer(admin)),
+        ])
+        const inv = await prisma.userInvitation.findUniqueOrThrow({ where: { id } })
+        if (inv.status === 'ACCEPTED') {
+          expect([acc.status, resend.status]).toEqual([200, 409])
+          expect(await prisma.user.count({ where: { email } })).toBe(1)
+        } else {
+          // The resend replaced the token first, so the old link is rejected and nothing was created.
+          expect([acc.status, resend.status]).toEqual([404, 200])
+          expect(inv.tokenHash).not.toBe(hashInvitationToken(oldToken))
+          expect(await prisma.user.count({ where: { email } })).toBe(0)
+          expect((await accept(tokenFor(email), google(email))).status).toBe(200)
+        }
+        expect(await prisma.user.count({ where: { email } })).toBe(1)
+      }
+    })
+
+    it('never duplicates an account when normal Google sign-in races acceptance', async () => {
+      const { signInWithGoogleUser } = await import('../src/lib/googleSignIn')
+      const req = { ip: '127.0.0.1', headers: {} } as unknown as express.Request
+      for (let i = 0; i < 6; i++) {
+        const email = addr(`race-google-${i}`)
+        const created = await invite(email)
+        const g = JSON.parse(google(email))
+        const [acc, login] = await Promise.all([
+          accept(tokenFor(email), google(email)),
+          signInWithGoogleUser({ googleId: g.sub, email, emailVerified: true, firstName: null, lastName: null, avatar: null }, req),
+        ])
+        const users = await prisma.user.findMany({ where: { email } })
+        expect(users).toHaveLength(1)
+        expect(acc.status).toBe(200)
+        expect(acc.body.user.id).toBe(users[0].id)
+        expect(login).toMatchObject({ ok: true })
+        if (login.ok) expect(login.user.id).toBe(users[0].id)
+        const inv = await prisma.userInvitation.findUniqueOrThrow({ where: { id: created.body.invitation.id } })
+        expect(inv).toMatchObject({ status: 'ACCEPTED', acceptedUserId: users[0].id })
+        expect(await acceptanceAudits(inv.id)).toBe(1)
+      }
+    })
+
+    it('rolls back everything when audit persistence fails, and a retry then succeeds', async () => {
+      const email = addr('audit-fail')
+      const created = await invite(email)
+      const token = tokenFor(email)
+      mocks.auditFailures = 1
+      const failed = await accept(token, google(email))
+      expect(failed.status).toBe(500)
+      expect(await prisma.user.count({ where: { email } })).toBe(0)
+      expect(await prisma.userInvitation.findUniqueOrThrow({ where: { id: created.body.invitation.id } })).toMatchObject({ status: 'PENDING', acceptedUserId: null })
+      expect(await acceptanceAudits(created.body.invitation.id)).toBe(0)
+
+      const retry = await accept(token, google(email))
+      expect(retry.status).toBe(200)
+      expect(retry.body.newAccount).toBe(true)
+      expect(await prisma.user.count({ where: { email } })).toBe(1)
+      expect(await acceptanceAudits(created.body.invitation.id)).toBe(1)
+    })
+
+    it('leaves an existing account and its data untouched when audit persistence fails', async () => {
+      const existing = await prisma.user.create({ data: { email: addr('audit-fail-existing'), loginCount: 3, rewardPoints: 7 } })
+      await prisma.session.create({ data: { userId: existing.id, module: 'elevate' } })
+      await invite(existing.email, { confirmExistingUser: true })
+      mocks.auditFailures = 1
+      expect((await accept(tokenFor(existing.email), google(existing.email))).status).toBe(500)
+      const after = await prisma.user.findUniqueOrThrow({ where: { id: existing.id }, include: { _count: { select: { sessions: true } } } })
+      // Even the login bookkeeping rolled back; nothing was deleted.
+      expect(after).toMatchObject({ loginCount: 3, rewardPoints: 7, googleId: null })
+      expect(after._count.sessions).toBe(1)
+      expect((await accept(tokenFor(existing.email), google(existing.email))).status).toBe(200)
+      expect(await prisma.user.count({ where: { email: existing.email } })).toBe(1)
+    })
+
+  })
+
+  describe('delivery status fencing', () => {
+    const deferred = <T,>() => {
+      let resolve!: (value: T) => void
+      const promise = new Promise<T>((r) => { resolve = r })
+      return { promise, resolve }
+    }
+    type SendResult = { sent: boolean; reason?: string }
+
+    // The first send (create) is still in flight when a resend starts and finishes; then the first completes.
+    async function lateFirstSend(email: string, first: SendResult, second: SendResult) {
+      process.env.INVITATION_EMAIL_DELIVERY = 'smtp'
+      Object.assign(process.env, { SMTP_HOST: 'smtp.test.invalid', SMTP_USER: 'u', SMTP_PASS: 'p', FRONTEND_URL: 'https://app.test.invalid' })
+      const d1 = deferred<SendResult>()
+      const d2 = deferred<SendResult>()
+      mocks.sendEmail.mockReset()
+      mocks.sendEmail.mockImplementationOnce(() => d1.promise).mockImplementationOnce(() => d2.promise)
+      const creating = createInvitation(admin.id, { email })
+      await vi.waitFor(() => expect(mocks.sendEmail).toHaveBeenCalledTimes(1))
+      const { id } = await prisma.userInvitation.findFirstOrThrow({ where: { email } })
+      const resending = resendInvitation(admin.id, id)
+      await vi.waitFor(() => expect(mocks.sendEmail).toHaveBeenCalledTimes(2))
+      d2.resolve(second)
+      await resending
+      d1.resolve(first)
+      await creating
+      const row = await prisma.userInvitation.findUniqueOrThrow({ where: { id } })
+      const audits = await prisma.adminAction.findMany({ where: { targetResource: `invitation:${id}` }, orderBy: { timestamp: 'asc' } })
+      const meta = (a: { metadata: unknown }) => a.metadata as Record<string, unknown>
+      return {
+        row,
+        started: audits.filter((a) => a.action !== 'invitation_delivery').map((a) => [a.action, meta(a).attempt]),
+        delivery: Object.fromEntries(audits.filter((a) => a.action === 'invitation_delivery').map((a) => [meta(a).attempt as number, meta(a)])),
+      }
+    }
+
+    it('ignores an older failed send that finishes after a newer successful resend', async () => {
+      const { row, started, delivery } = await lateFirstSend(addr('late-fail'), { sent: false, reason: 'send_failed' }, { sent: true })
+      expect(row).toMatchObject({ deliveryStatus: 'SENT', deliveryError: null, sendCount: 2 })
+      expect(started).toEqual([['invitation_create', 1], ['invitation_resend', 2]])
+      expect(delivery[1]).toMatchObject({ deliveryStatus: 'FAILED', superseded: true })
+      expect(delivery[2]).toMatchObject({ deliveryStatus: 'SENT', superseded: false })
+    })
+
+    it('ignores an older successful send that finishes after a newer failed resend', async () => {
+      const { row, delivery } = await lateFirstSend(addr('late-ok'), { sent: true }, { sent: false, reason: 'send_failed' })
+      expect(row).toMatchObject({ deliveryStatus: 'FAILED', deliveryError: 'send_failed', sendCount: 2 })
+      expect(delivery[1]).toMatchObject({ deliveryStatus: 'SENT', superseded: true })
+      expect(delivery[2]).toMatchObject({ deliveryStatus: 'FAILED', superseded: false })
+    })
+  })
+
+  describe('transactional admin audit', () => {
+    const sentTo = (email: string) => capturedInvitationEmails().filter((m) => m.to === email).length
+
+    it('creates nothing and sends nothing when the create audit fails', async () => {
+      const email = addr('audit-create')
+      mocks.failAdminAudit = 'invitation_create'
+      expect((await invite(email)).status).toBe(500)
+      expect(await prisma.userInvitation.count({ where: { email } })).toBe(0)
+      expect(sentTo(email)).toBe(0)
+      // A retry works and the address is not blocked by a half-created pending invitation.
+      expect((await invite(email)).status).toBe(201)
+      expect(sentTo(email)).toBe(1)
+    })
+
+    it('keeps the previous link, expiry and count and sends nothing when the resend audit fails', async () => {
+      const email = addr('audit-resend')
+      const created = await invite(email)
+      const id = created.body.invitation.id
+      const token = tokenFor(email)
+      const before = await prisma.userInvitation.findUniqueOrThrow({ where: { id } })
+      mocks.failAdminAudit = 'invitation_resend'
+      expect((await request(app).post(`/api/admin/invitations/${id}/resend`).set('Authorization', bearer(admin))).status).toBe(500)
+      const after = await prisma.userInvitation.findUniqueOrThrow({ where: { id } })
+      expect(after).toMatchObject({ tokenHash: before.tokenHash, sendCount: 1, expiresAt: before.expiresAt })
+      expect(sentTo(email)).toBe(1)
+      expect((await accept(token, google(email))).status).toBe(200)
+    })
+
+    it('leaves the invitation usable when the revoke audit fails', async () => {
+      const email = addr('audit-revoke')
+      const created = await invite(email)
+      mocks.failAdminAudit = 'invitation_revoke'
+      expect((await request(app).post(`/api/admin/invitations/${created.body.invitation.id}/revoke`).set('Authorization', bearer(admin))).status).toBe(500)
+      expect(await prisma.userInvitation.findUniqueOrThrow({ where: { id: created.body.invitation.id } })).toMatchObject({ status: 'PENDING', revokedAt: null })
+      expect(await prisma.adminAction.count({ where: { action: 'invitation_revoke', targetResource: `invitation:${created.body.invitation.id}` } })).toBe(0)
+    })
+
+    it('keeps a committed invitation (status Sending) when only the delivery audit fails', async () => {
+      const email = addr('audit-delivery')
+      mocks.failAdminAudit = 'invitation_delivery'
+      const res = await invite(email)
+      expect(res.status).toBe(201)
+      expect(res.body.invitation.deliveryStatus).toBe('SENDING')
+      expect(res.body.notice).toMatch(/outcome has not been recorded/)
+      expect(await prisma.adminAction.count({ where: { action: 'invitation_create', targetResource: `invitation:${res.body.invitation.id}` } })).toBe(1)
+    })
+
+    it('gives each of two interleaved resends its own token, expiry and count', async () => {
+      const email = addr('interleave')
+      const created = await invite(email)
+      const id = created.body.invitation.id
+      let second: Promise<unknown> | undefined
+      // The second resend starts between the first one's update and its read; the row lock makes it wait.
+      invitationTestHooks.afterResendUpdate = async () => {
+        invitationTestHooks.afterResendUpdate = undefined
+        second = resendInvitation(admin.id, id, new Date(Date.now() + 60_000))
+        await new Promise((r) => setTimeout(r, 300))
+      }
+      const first = await resendInvitation(admin.id, id)
+      await second
+      const audits = await prisma.adminAction.findMany({ where: { action: 'invitation_resend', targetResource: `invitation:${id}` }, orderBy: { timestamp: 'asc' } })
+      const meta = audits.map((a) => a.metadata as { attempt: number; expiresAt: string })
+      expect(meta.map((m) => m.attempt)).toEqual([2, 3])
+      expect(meta[0].expiresAt).not.toBe(meta[1].expiresAt)
+      expect(first.sendCount).toBeGreaterThanOrEqual(2)
+      const mails = capturedInvitationEmails().filter((m) => m.to === email)
+      const tokens = mails.slice(0, 2).map((m) => new URL(m.acceptUrl).hash.replace('#token=', ''))
+      const row = await prisma.userInvitation.findUniqueOrThrow({ where: { id } })
+      expect(row.sendCount).toBe(3)
+      // The newest mail carries the current token; the first resend's mail carries its own (now superseded) one.
+      expect(tokens.map(hashInvitationToken)).toContain(row.tokenHash)
+      expect(new Set(tokens).size).toBe(2)
+      expect(new Date(meta[1].expiresAt).getTime()).toBe(row.expiresAt.getTime())
+    })
+  })
+
+  it('lists with status filter, search, pagination and per-status counts', async () => {
+    const page = await request(app).get(`/api/admin/invitations?status=pending&q=${tag}&pageSize=2&page=1`).set('Authorization', bearer(admin))
+    expect(page.status).toBe(200)
+    expect(page.body.items).toHaveLength(2)
+    expect(page.body.items.every((i: { status: string }) => i.status === 'pending')).toBe(true)
+    expect(page.body.total).toBeGreaterThan(2)
+    expect(page.body.totalPages).toBe(Math.ceil(page.body.total / 2))
+    expect(Object.keys(page.body.counts).sort()).toEqual(['accepted', 'expired', 'pending', 'revoked'])
+    expect((await request(app).get('/api/admin/invitations?status=bogus').set('Authorization', bearer(admin))).status).toBe(400)
+  })
+})
