@@ -7,32 +7,27 @@ import { MetricCard } from '@/components/admin/MetricCard'
 import { InvitationTable } from '@/components/admin/InvitationTable'
 import { InviteUserDialog } from '@/components/admin/InviteUserDialog'
 import { INVITATION_STATUSES, STATUS_LABEL, listInvitations, type InvitationList } from '@/lib/invitations'
-import { sampleInvitationList } from '@/lib/tenantDemoSample'
 
 const TABLE_SIZE = 5
 
 /**
  * Invitation counts and the pending invitations table for a Dashboard. Counts and rows come from one list
- * response, so the Pending count always matches the table's total. `sample` renders fictional demo rows; the
- * live view is platform-wide and must be tenant-scoped once real tenancy exists.
+ * response, so the Pending count always matches the table's total. Platform-wide: these are platform invitations,
+ * not tenant invitations.
  */
-export function InvitationOverview({ sample = false }: { sample?: boolean }) {
+export function InvitationOverview() {
   const [data, setData] = useState<InvitationList | null>(null)
   const [error, setError] = useState('')
   const [inviteOpen, setInviteOpen] = useState(false)
 
   const load = useCallback(async () => {
     setError('')
-    if (sample) {
-      setData(sampleInvitationList({ status: 'pending', pageSize: TABLE_SIZE }))
-      return
-    }
     try {
       setData(await listInvitations({ status: 'pending', pageSize: TABLE_SIZE }))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load invitations')
     }
-  }, [sample])
+  }, [])
 
   useEffect(() => { load() }, [load])
 
@@ -42,7 +37,7 @@ export function InvitationOverview({ sample = false }: { sample?: boolean }) {
         <div>
           <h2 id="invitation-overview-title" className="text-lg font-semibold">Invitations</h2>
           <p className="text-sm text-muted-foreground">
-            {sample ? 'Sample data. ' : ''}Invitation counts are separate from user and activity counts: a pending invitation is not a user.
+            Invitation counts are separate from user and activity counts: a pending invitation is not a user.
           </p>
         </div>
         <Button onClick={() => setInviteOpen(true)}><MailPlus className="mr-2 h-4 w-4" /> Invite user</Button>
@@ -82,14 +77,13 @@ export function InvitationOverview({ sample = false }: { sample?: boolean }) {
               <InvitationTable invitations={data.items} onChanged={load} showStatus={false} />
               <p className="mt-2 text-xs text-muted-foreground">
                 Showing {data.items.length} of {data.total} pending.
-                {sample && ' Sample rows are fictional, so Resend and Revoke are disabled.'}
               </p>
             </>
           )}
         </CardContent>
       </Card>
 
-      <InviteUserDialog open={inviteOpen} onOpenChange={setInviteOpen} onSent={sample ? undefined : load} demo={sample} />
+      <InviteUserDialog open={inviteOpen} onOpenChange={setInviteOpen} onSent={load} />
     </section>
   )
 }

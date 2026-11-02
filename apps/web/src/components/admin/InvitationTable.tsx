@@ -27,7 +27,7 @@ export function DeliveryStatus({ invitation }: { invitation: Pick<Invitation, 'd
   return <span className={cn('text-xs font-medium', TONE_CLASS[d.tone])}>{d.label}</span>
 }
 
-/** Invitation rows with Resend/Revoke. Sample rows (Tenant Admin demo) are read-only. */
+/** Invitation rows with Resend/Revoke for pending and expired invitations. */
 export function InvitationTable({
   invitations,
   onChanged,
@@ -79,7 +79,7 @@ export function InvitationTable({
         </thead>
         <tbody>
           {invitations.map((inv) => {
-            const canResend = !inv.sample && (inv.status === 'pending' || inv.status === 'expired')
+            const canResend = inv.status === 'pending' || inv.status === 'expired'
             const canRevoke = canResend
             return (
               <tr key={inv.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
@@ -99,9 +99,7 @@ export function InvitationTable({
                 </td>
                 <td className="px-4 py-3"><DeliveryStatus invitation={inv} /></td>
                 <td className="px-4 py-3 text-right whitespace-nowrap">
-                  {inv.sample ? (
-                    <span className="text-xs text-muted-foreground">Sample row</span>
-                  ) : canResend ? (
+                  {canResend ? (
                     <div className="inline-flex gap-1">
                       <Button size="sm" variant="ghost" disabled={busyId === inv.id} onClick={() => act(inv, 'resend')}>
                         {busyId === inv.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCw className="h-4 w-4" />}

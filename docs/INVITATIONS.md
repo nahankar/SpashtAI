@@ -2,7 +2,7 @@
 
 Platform Admins (ADMIN / SUPER_ADMIN, rechecked in the database on every request) can invite a person to
 SpashtAI by email. Invitations are available from **Admin → Dashboard** (invitation counts, pending table and
-Invite user), **Admin → Users**, **Admin → Invitations**, and the Tenant Admin demo. All use the same server
+Invite user), **Admin → Users** and **Admin → Invitations**. All use the same server
 service (`apps/server/src/lib/invitations.ts`). Before sending, the confirmation states plainly that a real
 invitation email goes to the recipient (or, in development, that it is captured locally and not sent).
 

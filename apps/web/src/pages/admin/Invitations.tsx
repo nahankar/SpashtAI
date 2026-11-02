@@ -6,8 +6,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { InvitationTable } from '@/components/admin/InvitationTable'
 import { InviteUserDialog } from '@/components/admin/InviteUserDialog'
 import { cn } from '@/lib/utils'
-import { useTenantDemo } from '@/contexts/TenantDemoContext'
-import { sampleInvitationList } from '@/lib/tenantDemoSample'
 import {
   INVITATION_STATUSES,
   STATUS_LABEL,
@@ -70,8 +68,6 @@ function DevMailbox({ refreshKey }: { refreshKey: number }) {
 
 /** Searchable, paginated invitation management. Platform-wide until real tenancy scopes it. */
 export function Invitations() {
-  // The Tenant Admin demo lists sample rows only; Invite user stays real.
-  const { enabled: sample } = useTenantDemo()
   const [status, setStatus] = useState<InvitationStatus | undefined>('pending')
   const [query, setQuery] = useState('')
   const [search, setSearch] = useState('')
@@ -96,15 +92,13 @@ export function Invitations() {
     setLoading(true)
     setError('')
     try {
-      const params = { status, q: search || undefined, page, pageSize: PAGE_SIZE }
-      // Tenant Admin demo with sample data never calls the server for invitation rows.
-      setData(sample ? sampleInvitationList(params) : await listInvitations(params))
+      setData(await listInvitations({ status, q: search || undefined, page, pageSize: PAGE_SIZE }))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load invitations')
     } finally {
       setLoading(false)
     }
-  }, [status, search, page, sample])
+  }, [status, search, page])
 
   useEffect(() => { load() }, [load, refreshKey])
   const refresh = () => setRefreshKey((k) => k + 1)
@@ -127,7 +121,7 @@ export function Invitations() {
         <Button onClick={() => setInviteOpen(true)}><MailPlus className="mr-2 h-4 w-4" /> Invite user</Button>
       </div>
 
-      {!sample && <EmailSetupNotice config={config} />}
+      <EmailSetupNotice config={config} />
 
       <div className="flex flex-wrap items-center gap-2">
         {filters.map((f) => (
@@ -174,9 +168,9 @@ export function Invitations() {
         </>
       ) : null}
 
-      {!sample && config?.mode === 'dev_capture' && <DevMailbox refreshKey={refreshKey} />}
+      {config?.mode === 'dev_capture' && <DevMailbox refreshKey={refreshKey} />}
 
-      <InviteUserDialog open={inviteOpen} onOpenChange={setInviteOpen} onSent={refresh} demo={sample} />
+      <InviteUserDialog open={inviteOpen} onOpenChange={setInviteOpen} onSent={refresh} />
     </div>
   )
 }

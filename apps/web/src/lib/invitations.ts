@@ -23,8 +23,6 @@ export interface Invitation {
   acceptedAt: string | null
   revokedAt: string | null
   existingUserAtInvite: boolean
-  /** Fictional row shown only in the Tenant Admin demo; never sent to the server. */
-  sample?: boolean
 }
 
 export interface InvitationList {

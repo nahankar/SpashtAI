@@ -1,6 +1,4 @@
 import { useEffect, useState } from 'react'
-import { useTenantDemo } from '@/contexts/TenantDemoContext'
-import { TenantDemoAnalytics } from '@/components/admin/TenantDemoAnalytics'
 import { useSearchParams } from 'react-router-dom'
 import {
   Bar,
@@ -91,12 +89,6 @@ function CanonicalChart({ data }: { data: Record<string, number | string | null>
 }
 
 export function FeatureAnalytics() {
-  // The Tenant Admin demo never loads platform analytics: it shows labelled sample organization data.
-  const { enabled } = useTenantDemo()
-  return enabled ? <TenantDemoAnalytics view="features" /> : <PlatformFeatureAnalytics />
-}
-
-function PlatformFeatureAnalytics() {
   const [params, setParams] = useSearchParams()
   const query = analyticsQueryFromSearch(params)
   const feature = FEATURES.some((item) => item.id === query.feature) ? query.feature : 'replay'
