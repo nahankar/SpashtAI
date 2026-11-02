@@ -67,7 +67,13 @@ Invitations page both state this exception.
   previous link stops working. **Revoke** stops the link; accepted invitations cannot be revoked.
 - Expiry: `INVITATION_EXPIRY_DAYS` (1–30, default 7).
 - Audit: `AdminAction` rows `invitation_create`, `invitation_resend`, `invitation_revoke` with
-  `targetResource = invitation:<id>` and content-free metadata (no email, name or token).
+  `targetResource = invitation:<id>` and content-free metadata (no email, name or token). Each is written in the
+  same transaction as its state change: if the audit write fails, nothing is created, re-tokened or revoked, and
+  no email is sent. Resend locks the row and reads its own token, expiry and attempt number back inside that
+  transaction, so concurrent resends never share or swap metadata. SMTP runs after the transaction commits; each
+  attempt's outcome is then written with an `invitation_delivery` row (`attempt`, `deliveryStatus`, `superseded`)
+  in one short transaction fenced to that attempt's token. If only that last write fails, the invitation stays
+  committed with delivery status Sending, and the Admin is told the outcome was not recorded.
   Acceptance is recorded both as `UserActivity` `invitation_accepted` and as an `AdminAction`
   `invitation_accepted` attributed to the inviting Admin (`targetUserId` = the account, `targetResource` =
   `invitation:<id>`, metadata `{ actor: 'recipient', newAccount, signupsPausedBypass }` only).

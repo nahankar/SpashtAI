@@ -2,6 +2,20 @@ import type { Request } from 'express'
 import type { Prisma } from '@prisma/client'
 
 /**
+ * Admin-initiated invitation audit (create, resend, revoke, delivery outcome), written in the same transaction as
+ * the state change it records. Content-free: invitation id and non-identifying metadata only.
+ */
+export async function writeInvitationAudit(
+  tx: Prisma.TransactionClient,
+  adminId: string,
+  action: 'invitation_create' | 'invitation_resend' | 'invitation_revoke' | 'invitation_delivery',
+  invitationId: string,
+  metadata: Record<string, string | number | boolean>,
+) {
+  await tx.adminAction.create({ data: { adminId, action, targetResource: `invitation:${invitationId}`, metadata } })
+}
+
+/**
  * Acceptance audit, written in the same transaction that marks the invitation accepted: if either row fails,
  * the acceptance (and any account created for it) rolls back, so an acceptance can never exist unaudited.
  * Content-free: invitation id and flags only, never an email, name or token.

@@ -7,7 +7,7 @@ const testDb = vi.hoisted(() => {
   if (url && url !== 'postgresql://postgres@127.0.0.1:55441/simple_bank') throw new Error('Invitation tests use only the isolated simple_bank database')
   return { url }
 })
-const mocks = vi.hoisted(() => ({ signupsPaused: false, sendEmail: vi.fn(), onPauseCheck: null as null | (() => Promise<void>), auditFailures: 0 }))
+const mocks = vi.hoisted(() => ({ signupsPaused: false, sendEmail: vi.fn(), onPauseCheck: null as null | (() => Promise<void>), auditFailures: 0, failAdminAudit: null as null | string }))
 vi.mock('../src/lib/prisma', async () => {
   const { PrismaClient } = await import('@prisma/client')
   return { prisma: new PrismaClient({ datasourceUrl: testDb.url || 'postgresql://postgres@127.0.0.1:55441/simple_bank' }) }
@@ -28,6 +28,10 @@ vi.mock('../src/lib/invitationAudit', async (importOriginal) => {
       if (mocks.auditFailures > 0) { mocks.auditFailures--; throw new Error('audit store unavailable') }
       return real.writeAcceptanceAudit(...args)
     },
+    writeInvitationAudit: async (...args: Parameters<typeof real.writeInvitationAudit>) => {
+      if (mocks.failAdminAudit === args[2]) { mocks.failAdminAudit = null; throw new Error('audit store unavailable') }
+      return real.writeInvitationAudit(...args)
+    },
   }
 })
 // A test credential is the JSON of the Google identity it stands for.
@@ -44,7 +48,7 @@ import { signToken } from '../src/lib/jwt'
 import adminInvitationsRouter from '../src/routes/admin/invitations'
 import adminUsersRouter from '../src/routes/admin/users'
 import invitationsRouter from '../src/routes/invitations'
-import { capturedInvitationEmails, clearCapturedInvitationEmails, createInvitation, hashInvitationToken, invitationDeliveryMode, purgeClosedInvitations, resendInvitation } from '../src/lib/invitations'
+import { capturedInvitationEmails, clearCapturedInvitationEmails, createInvitation, hashInvitationToken, invitationDeliveryMode, purgeClosedInvitations, resendInvitation, invitationTestHooks } from '../src/lib/invitations'
 
 const app = express(); app.use(express.json())
 app.use('/api/admin/invitations', requireAuth, requireCurrentAdmin, adminInvitationsRouter)
@@ -77,6 +81,8 @@ describe.skipIf(!testDb.url)('learner invitations (PostgreSQL)', () => {
     mocks.signupsPaused = false
     mocks.onPauseCheck = null
     mocks.auditFailures = 0
+    mocks.failAdminAudit = null
+    invitationTestHooks.afterResendUpdate = undefined
     process.env.NODE_ENV = 'test'
     delete process.env.INVITATION_EMAIL_DELIVERY
     delete process.env.INVITATION_RETENTION_DAYS
@@ -111,8 +117,8 @@ describe.skipIf(!testDb.url)('learner invitations (PostgreSQL)', () => {
     expect(JSON.stringify(row)).not.toContain(token)
     const days = (row.expiresAt.getTime() - row.createdAt.getTime()) / 86_400_000
     expect(days).toBeCloseTo(7, 1)
-    const audit = await prisma.adminAction.findFirstOrThrow({ where: { adminId: admin.id, targetResource: `invitation:${row.id}` } })
-    expect(audit.action).toBe('invitation_create')
+    const audit = await prisma.adminAction.findFirstOrThrow({ where: { adminId: admin.id, action: 'invitation_create', targetResource: `invitation:${row.id}` } })
+    expect(audit.metadata).toMatchObject({ attempt: 1, existingUser: false })
     expect(JSON.stringify(audit)).not.toContain(email)
     expect(JSON.stringify(audit)).not.toContain(token)
     const mail = capturedInvitationEmails().find((m) => m.to === email)!
@@ -204,7 +210,7 @@ describe.skipIf(!testDb.url)('learner invitations (PostgreSQL)', () => {
     expect((await accept(oldToken, google(email))).status).toBe(404)
     expect((await accept(newToken, google(email))).status).toBe(200)
     const actions = await prisma.adminAction.findMany({ where: { targetResource: `invitation:${created.body.invitation.id}` }, select: { action: true } })
-    expect(actions.map((a) => a.action).sort()).toEqual(['invitation_accepted', 'invitation_create', 'invitation_resend'])
+    expect(actions.map((a) => a.action).sort()).toEqual(['invitation_accepted', 'invitation_create', 'invitation_delivery', 'invitation_delivery', 'invitation_resend'])
   })
 
   it('blocks acceptance after revocation and refuses to revoke an accepted invitation', async () => {
@@ -531,21 +537,103 @@ describe.skipIf(!testDb.url)('learner invitations (PostgreSQL)', () => {
       await creating
       const row = await prisma.userInvitation.findUniqueOrThrow({ where: { id } })
       const audits = await prisma.adminAction.findMany({ where: { targetResource: `invitation:${id}` }, orderBy: { timestamp: 'asc' } })
-      return { row, audits: Object.fromEntries(audits.map((a) => [a.action, a.metadata as Record<string, unknown>])) }
+      const meta = (a: { metadata: unknown }) => a.metadata as Record<string, unknown>
+      return {
+        row,
+        started: audits.filter((a) => a.action !== 'invitation_delivery').map((a) => [a.action, meta(a).attempt]),
+        delivery: Object.fromEntries(audits.filter((a) => a.action === 'invitation_delivery').map((a) => [meta(a).attempt as number, meta(a)])),
+      }
     }
 
     it('ignores an older failed send that finishes after a newer successful resend', async () => {
-      const { row, audits } = await lateFirstSend(addr('late-fail'), { sent: false, reason: 'send_failed' }, { sent: true })
+      const { row, started, delivery } = await lateFirstSend(addr('late-fail'), { sent: false, reason: 'send_failed' }, { sent: true })
       expect(row).toMatchObject({ deliveryStatus: 'SENT', deliveryError: null, sendCount: 2 })
-      expect(audits.invitation_create).toMatchObject({ deliveryStatus: 'FAILED', superseded: true })
-      expect(audits.invitation_resend).toMatchObject({ deliveryStatus: 'SENT', superseded: false })
+      expect(started).toEqual([['invitation_create', 1], ['invitation_resend', 2]])
+      expect(delivery[1]).toMatchObject({ deliveryStatus: 'FAILED', superseded: true })
+      expect(delivery[2]).toMatchObject({ deliveryStatus: 'SENT', superseded: false })
     })
 
     it('ignores an older successful send that finishes after a newer failed resend', async () => {
-      const { row, audits } = await lateFirstSend(addr('late-ok'), { sent: true }, { sent: false, reason: 'send_failed' })
+      const { row, delivery } = await lateFirstSend(addr('late-ok'), { sent: true }, { sent: false, reason: 'send_failed' })
       expect(row).toMatchObject({ deliveryStatus: 'FAILED', deliveryError: 'send_failed', sendCount: 2 })
-      expect(audits.invitation_create).toMatchObject({ deliveryStatus: 'SENT', superseded: true })
-      expect(audits.invitation_resend).toMatchObject({ deliveryStatus: 'FAILED', superseded: false })
+      expect(delivery[1]).toMatchObject({ deliveryStatus: 'SENT', superseded: true })
+      expect(delivery[2]).toMatchObject({ deliveryStatus: 'FAILED', superseded: false })
+    })
+  })
+
+  describe('transactional admin audit', () => {
+    const sentTo = (email: string) => capturedInvitationEmails().filter((m) => m.to === email).length
+
+    it('creates nothing and sends nothing when the create audit fails', async () => {
+      const email = addr('audit-create')
+      mocks.failAdminAudit = 'invitation_create'
+      expect((await invite(email)).status).toBe(500)
+      expect(await prisma.userInvitation.count({ where: { email } })).toBe(0)
+      expect(sentTo(email)).toBe(0)
+      // A retry works and the address is not blocked by a half-created pending invitation.
+      expect((await invite(email)).status).toBe(201)
+      expect(sentTo(email)).toBe(1)
+    })
+
+    it('keeps the previous link, expiry and count and sends nothing when the resend audit fails', async () => {
+      const email = addr('audit-resend')
+      const created = await invite(email)
+      const id = created.body.invitation.id
+      const token = tokenFor(email)
+      const before = await prisma.userInvitation.findUniqueOrThrow({ where: { id } })
+      mocks.failAdminAudit = 'invitation_resend'
+      expect((await request(app).post(`/api/admin/invitations/${id}/resend`).set('Authorization', bearer(admin))).status).toBe(500)
+      const after = await prisma.userInvitation.findUniqueOrThrow({ where: { id } })
+      expect(after).toMatchObject({ tokenHash: before.tokenHash, sendCount: 1, expiresAt: before.expiresAt })
+      expect(sentTo(email)).toBe(1)
+      expect((await accept(token, google(email))).status).toBe(200)
+    })
+
+    it('leaves the invitation usable when the revoke audit fails', async () => {
+      const email = addr('audit-revoke')
+      const created = await invite(email)
+      mocks.failAdminAudit = 'invitation_revoke'
+      expect((await request(app).post(`/api/admin/invitations/${created.body.invitation.id}/revoke`).set('Authorization', bearer(admin))).status).toBe(500)
+      expect(await prisma.userInvitation.findUniqueOrThrow({ where: { id: created.body.invitation.id } })).toMatchObject({ status: 'PENDING', revokedAt: null })
+      expect(await prisma.adminAction.count({ where: { action: 'invitation_revoke', targetResource: `invitation:${created.body.invitation.id}` } })).toBe(0)
+    })
+
+    it('keeps a committed invitation (status Sending) when only the delivery audit fails', async () => {
+      const email = addr('audit-delivery')
+      mocks.failAdminAudit = 'invitation_delivery'
+      const res = await invite(email)
+      expect(res.status).toBe(201)
+      expect(res.body.invitation.deliveryStatus).toBe('SENDING')
+      expect(res.body.notice).toMatch(/outcome has not been recorded/)
+      expect(await prisma.adminAction.count({ where: { action: 'invitation_create', targetResource: `invitation:${res.body.invitation.id}` } })).toBe(1)
+    })
+
+    it('gives each of two interleaved resends its own token, expiry and count', async () => {
+      const email = addr('interleave')
+      const created = await invite(email)
+      const id = created.body.invitation.id
+      let second: Promise<unknown> | undefined
+      // The second resend starts between the first one's update and its read; the row lock makes it wait.
+      invitationTestHooks.afterResendUpdate = async () => {
+        invitationTestHooks.afterResendUpdate = undefined
+        second = resendInvitation(admin.id, id, new Date(Date.now() + 60_000))
+        await new Promise((r) => setTimeout(r, 300))
+      }
+      const first = await resendInvitation(admin.id, id)
+      await second
+      const audits = await prisma.adminAction.findMany({ where: { action: 'invitation_resend', targetResource: `invitation:${id}` }, orderBy: { timestamp: 'asc' } })
+      const meta = audits.map((a) => a.metadata as { attempt: number; expiresAt: string })
+      expect(meta.map((m) => m.attempt)).toEqual([2, 3])
+      expect(meta[0].expiresAt).not.toBe(meta[1].expiresAt)
+      expect(first.sendCount).toBeGreaterThanOrEqual(2)
+      const mails = capturedInvitationEmails().filter((m) => m.to === email)
+      const tokens = mails.slice(0, 2).map((m) => new URL(m.acceptUrl).hash.replace('#token=', ''))
+      const row = await prisma.userInvitation.findUniqueOrThrow({ where: { id } })
+      expect(row.sendCount).toBe(3)
+      // The newest mail carries the current token; the first resend's mail carries its own (now superseded) one.
+      expect(tokens.map(hashInvitationToken)).toContain(row.tokenHash)
+      expect(new Set(tokens).size).toBe(2)
+      expect(new Date(meta[1].expiresAt).getTime()).toBe(row.expiresAt.getTime())
     })
   })
 

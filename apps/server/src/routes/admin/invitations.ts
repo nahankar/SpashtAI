@@ -43,7 +43,8 @@ function handle(fn: (req: Request, res: Response) => Promise<void>) {
 function deliveryNotice(deliveryStatus: string) {
   if (deliveryStatus === 'DEV_CAPTURED') return 'Captured locally (development only). No email was sent.'
   if (deliveryStatus === 'FAILED') return 'The invitation was saved but the email could not be sent. It stays pending; fix email delivery and resend.'
-  return 'Accepted by the mail server for delivery.'
+  if (deliveryStatus === 'SENT') return 'Accepted by the mail server for delivery.'
+  return 'The invitation was saved, but the email outcome has not been recorded. Check delivery before resending.'
 }
 
 router.get('/', handle(async (req, res) => {

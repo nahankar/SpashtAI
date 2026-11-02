@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { prisma } from './prisma'
 import { sendEmail } from './email'
 import { logger } from './logger'
+import { writeInvitationAudit } from './invitationAudit'
 
 /**
  * Platform learner invitations. Every invitation targets an ordinary USER account and assigns no tenant or
@@ -174,21 +175,36 @@ async function deliver(inv: UserInvitation, token: string): Promise<{ deliverySt
   }
 }
 
+/** One send attempt, captured under the row lock in the transaction that started it. */
+interface SendAttempt {
+  invitation: UserInvitation
+  token: string
+}
+
 /**
- * Sends one attempt and records its outcome only if that attempt's token is still current. A resend replaces the
- * token, so an older send that finishes late is ignored instead of overwriting the newer attempt's status.
- * Attempts are counted when they start (sendCount/lastSentAt), so ignoring a stale outcome loses no accounting.
+ * Sends one attempt outside any database transaction, then records its outcome (and a content-free delivery
+ * audit row) in one short transaction, fenced to that attempt's token: a resend replaces the token, so an older
+ * send that finishes late is audited as superseded instead of overwriting the newer attempt's status. Attempts
+ * are counted when they start, so a stale outcome loses no accounting. If the outcome cannot be recorded, the
+ * invitation keeps its SENDING status rather than reporting an error for a state change that already committed.
  */
-async function recordDelivery(inv: UserInvitation, token: string) {
+async function deliverAttempt(adminId: string, attempt: SendAttempt) {
+  const { invitation: inv, token } = attempt
   const outcome = await deliver(inv, token)
-  const { count } = await prisma.userInvitation.updateMany({
-    where: { id: inv.id, tokenHash: hashInvitationToken(token) },
-    data: outcome,
-  })
-  if (count === 0) logger.info({ event: 'invitations.stale_delivery_ignored', invitationId: inv.id, deliveryStatus: outcome.deliveryStatus }, 'Ignored delivery outcome of a superseded send')
-  const current = await prisma.userInvitation.findUnique({ where: { id: inv.id } })
-  // Deleted meanwhile (e.g. the account was removed): report this attempt's own outcome.
-  return { inv: current ?? { ...inv, ...outcome }, outcome, stale: count === 0 }
+  try {
+    const stale = await prisma.$transaction(async (tx) => {
+      const { count } = await tx.userInvitation.updateMany({ where: { id: inv.id, tokenHash: hashInvitationToken(token) }, data: outcome })
+      await writeInvitationAudit(tx, adminId, 'invitation_delivery', inv.id, {
+        attempt: inv.sendCount, deliveryStatus: outcome.deliveryStatus, superseded: count === 0,
+      })
+      return count === 0
+    })
+    if (stale) logger.info({ event: 'invitations.stale_delivery_ignored', invitationId: inv.id, deliveryStatus: outcome.deliveryStatus }, 'Ignored delivery outcome of a superseded send')
+  } catch (error) {
+    logger.error({ event: 'invitations.delivery_record_failed', invitationId: inv.id, errorType: error instanceof Error ? error.name : 'unknown' }, 'Could not record invitation delivery outcome')
+  }
+  // Deleted meanwhile (e.g. the account was removed): report the attempt as it started.
+  return (await prisma.userInvitation.findUnique({ where: { id: inv.id } })) ?? inv
 }
 
 // ---------------------------------------------------------------- admin actions
@@ -222,86 +238,91 @@ export function serializeInvitation(inv: UserInvitation, now = new Date()) {
   }
 }
 
-async function audit(adminId: string, action: string, inv: UserInvitation, metadata: Record<string, unknown>) {
-  // Content-free: no email address, name or token.
-  await prisma.adminAction.create({
-    data: { adminId, action, targetResource: `invitation:${inv.id}`, metadata: metadata as Prisma.InputJsonValue },
-  })
-}
+const lockInvitation = (tx: Prisma.TransactionClient, id: string) => tx.$queryRaw`SELECT 1 FROM "UserInvitation" WHERE "id" = ${id} FOR UPDATE`
 
-/** Marks stored PENDING rows for this address that have expired, so a new invitation can take the pending slot. */
-async function expireStale(email: string, now: Date) {
-  await prisma.userInvitation.updateMany({
-    where: { email, status: 'PENDING', expiresAt: { lte: now } },
-    data: { status: 'EXPIRED', pendingKey: null },
-  })
-}
+/** Test seam: runs inside the resend transaction after the update, before the attempt snapshot is read. */
+export const invitationTestHooks: { afterResendUpdate?: () => Promise<void> } = {}
 
+/**
+ * Creates the invitation and its `invitation_create` audit row in one transaction, then sends outside it. An
+ * audit failure therefore leaves no invitation and sends nothing.
+ */
 export async function createInvitation(adminId: string, input: z.infer<typeof invitationInputSchema>, now = new Date()) {
   const { email, name, confirmExistingUser } = input
-  await expireStale(email, now)
-  const pending = await prisma.userInvitation.findUnique({ where: { pendingKey: email } })
-  if (pending) {
-    throw new InvitationError('duplicate_pending', 409, 'A pending invitation already exists for this email. Resend it instead.', { invitationId: pending.id })
-  }
-  const existing = await prisma.user.findUnique({ where: { email }, select: { id: true } })
-  if (existing && !confirmExistingUser) {
-    throw new InvitationError('existing_user', 409, 'This email already has a SpashtAI account. Accepting will sign them in without changing their account.')
-  }
-
   const { token, tokenHash } = newToken()
-  let inv: UserInvitation
+  let invitation: UserInvitation
   try {
-    inv = await prisma.userInvitation.create({
-      data: { email, recipientName: name ?? null, pendingKey: email, tokenHash, expiresAt: expiryFrom(now), invitedById: adminId, existingUserAtInvite: Boolean(existing), sendCount: 1, lastSentAt: now },
+    invitation = await prisma.$transaction(async (tx) => {
+      // Stored PENDING rows for this address that have expired give up the pending slot.
+      await tx.userInvitation.updateMany({ where: { email, status: 'PENDING', expiresAt: { lte: now } }, data: { status: 'EXPIRED', pendingKey: null } })
+      const pending = await tx.userInvitation.findUnique({ where: { pendingKey: email } })
+      if (pending) {
+        throw new InvitationError('duplicate_pending', 409, 'A pending invitation already exists for this email. Resend it instead.', { invitationId: pending.id })
+      }
+      const existing = await tx.user.findUnique({ where: { email }, select: { id: true } })
+      if (existing && !confirmExistingUser) {
+        throw new InvitationError('existing_user', 409, 'This email already has a SpashtAI account. Accepting will sign them in without changing their account.')
+      }
+      const inv = await tx.userInvitation.create({
+        data: { email, recipientName: name ?? null, pendingKey: email, tokenHash, expiresAt: expiryFrom(now), invitedById: adminId, existingUserAtInvite: Boolean(existing), sendCount: 1, lastSentAt: now },
+      })
+      await writeInvitationAudit(tx, adminId, 'invitation_create', inv.id, { attempt: 1, existingUser: inv.existingUserAtInvite, expiresAt: inv.expiresAt.toISOString() })
+      return inv
     })
   } catch (err) {
     if (isUniqueViolation(err)) throw new InvitationError('duplicate_pending', 409, 'A pending invitation already exists for this email. Resend it instead.')
     throw err
   }
-  const sent = await recordDelivery(inv, token)
-  // The audit keeps this attempt's own outcome, even if a newer send superseded it.
-  await audit(adminId, 'invitation_create', sent.inv, { deliveryStatus: sent.outcome.deliveryStatus, superseded: sent.stale, existingUser: inv.existingUserAtInvite, expiresAt: inv.expiresAt.toISOString() })
-  return sent.inv
+  return deliverAttempt(adminId, { invitation, token })
 }
 
-/** Issues a fresh token (the previous link stops working) and a fresh expiry, then sends again. */
+/**
+ * Issues a fresh token (the previous link stops working) and expiry. The row is locked, updated, read back and
+ * audited in one transaction, so this attempt's token, expiry and count can never be another resend's. The
+ * email is sent afterwards, outside the transaction.
+ */
 export async function resendInvitation(adminId: string, id: string, now = new Date()) {
-  const current = await prisma.userInvitation.findUnique({ where: { id } })
-  if (!current) throw new InvitationError('not_found', 404, 'Invitation not found')
-  if (current.status === 'ACCEPTED' || current.status === 'REVOKED') {
-    throw new InvitationError('not_resendable', 409, `An ${current.status.toLowerCase()} invitation cannot be resent.`)
-  }
   const { token, tokenHash } = newToken()
-  let inv: UserInvitation
+  let invitation: UserInvitation
   try {
-    const updated = await prisma.userInvitation.updateMany({
-      where: { id, status: { in: ['PENDING', 'EXPIRED'] } },
-      data: { status: 'PENDING', pendingKey: current.email, tokenHash, expiresAt: expiryFrom(now), deliveryStatus: 'SENDING', deliveryError: null, sendCount: { increment: 1 }, lastSentAt: now },
+    invitation = await prisma.$transaction(async (tx) => {
+      await lockInvitation(tx, id)
+      const current = await tx.userInvitation.findUnique({ where: { id } })
+      if (!current) throw new InvitationError('not_found', 404, 'Invitation not found')
+      if (current.status === 'ACCEPTED' || current.status === 'REVOKED') {
+        throw new InvitationError('not_resendable', 409, `An ${current.status.toLowerCase()} invitation cannot be resent.`)
+      }
+      await tx.userInvitation.update({
+        where: { id },
+        data: { status: 'PENDING', pendingKey: current.email, tokenHash, expiresAt: expiryFrom(now), deliveryStatus: 'SENDING', deliveryError: null, sendCount: { increment: 1 }, lastSentAt: now },
+      })
+      await invitationTestHooks.afterResendUpdate?.()
+      const inv = await tx.userInvitation.findUniqueOrThrow({ where: { id } })
+      await writeInvitationAudit(tx, adminId, 'invitation_resend', inv.id, { attempt: inv.sendCount, expiresAt: inv.expiresAt.toISOString() })
+      return inv
     })
-    if (updated.count === 0) throw new InvitationError('not_resendable', 409, 'This invitation changed while resending. Refresh and try again.')
-    inv = await prisma.userInvitation.findUniqueOrThrow({ where: { id } })
   } catch (err) {
     if (isUniqueViolation(err)) throw new InvitationError('duplicate_pending', 409, 'Another pending invitation exists for this email.')
     throw err
   }
-  const sent = await recordDelivery(inv, token)
-  await audit(adminId, 'invitation_resend', sent.inv, { deliveryStatus: sent.outcome.deliveryStatus, superseded: sent.stale, sendCount: inv.sendCount, expiresAt: inv.expiresAt.toISOString() })
-  return sent.inv
+  return deliverAttempt(adminId, { invitation, token })
 }
 
+/** Revokes under the row lock; the state change and its audit row commit together or not at all. */
 export async function revokeInvitation(adminId: string, id: string, now = new Date()) {
-  const current = await prisma.userInvitation.findUnique({ where: { id } })
-  if (!current) throw new InvitationError('not_found', 404, 'Invitation not found')
-  if (current.status === 'REVOKED') return current
-  const updated = await prisma.userInvitation.updateMany({
-    where: { id, status: { in: ['PENDING', 'EXPIRED'] } },
-    data: { status: 'REVOKED', pendingKey: null, revokedAt: now, revokedById: adminId },
+  return prisma.$transaction(async (tx) => {
+    await lockInvitation(tx, id)
+    const current = await tx.userInvitation.findUnique({ where: { id } })
+    if (!current) throw new InvitationError('not_found', 404, 'Invitation not found')
+    if (current.status === 'REVOKED') return current
+    if (current.status === 'ACCEPTED') throw new InvitationError('not_revocable', 409, 'An accepted invitation cannot be revoked.')
+    const inv = await tx.userInvitation.update({
+      where: { id },
+      data: { status: 'REVOKED', pendingKey: null, revokedAt: now, revokedById: adminId },
+    })
+    await writeInvitationAudit(tx, adminId, 'invitation_revoke', inv.id, { previousStatus: effectiveStatus(current, now) })
+    return inv
   })
-  if (updated.count === 0) throw new InvitationError('not_revocable', 409, 'An accepted invitation cannot be revoked.')
-  const inv = await prisma.userInvitation.findUniqueOrThrow({ where: { id } })
-  await audit(adminId, 'invitation_revoke', inv, { previousStatus: effectiveStatus(current, now) })
-  return inv
 }
 
 export async function listInvitations(opts: { view?: InvitationView; q?: string; page: number; pageSize: number }, now = new Date()) {
