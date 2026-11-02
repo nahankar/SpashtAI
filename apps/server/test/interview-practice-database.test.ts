@@ -619,7 +619,7 @@ describe.skipIf(!db.url)('owned interview capture PostgreSQL contracts', () => {
       expect(accepted.body).toMatchObject({ version: RECORDING_ACKNOWLEDGMENT.version, reused: false })
       const again = await auth(request(app).post('/practice/recording-acknowledgment')).send({ version: RECORDING_ACKNOWLEDGMENT.version })
       expect(again.body).toMatchObject({ reused: true, acceptedAt: accepted.body.acceptedAt })
-      const row = await prisma.recordingAcknowledgment.findUniqueOrThrow({ where: { userId_version: { userId: owner, version: RECORDING_ACKNOWLEDGMENT.version } } })
+      const row = await prisma.recordingAcknowledgment.findFirstOrThrow({ where: { userId: owner, version: RECORDING_ACKNOWLEDGMENT.version, workspaceKind: 'PERSONAL' } })
       expect(row).toMatchObject({ scope: [...RECORDING_ACKNOWLEDGMENT.scope], textHash: hash(RECORDING_ACKNOWLEDGMENT.text), source: 'INTERVIEWS_PAGE' })
       await expect(prisma.recordingAcknowledgment.update({ where: { id: row.id }, data: { source: 'EDITED' } })).rejects.toThrow()
       // With a valid acknowledgment the practice starts without the checkbox and records where consent came from.

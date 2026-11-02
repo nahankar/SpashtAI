@@ -8,13 +8,20 @@ import { BankError } from '../bank/csv'
 import { CURRENT_LEARNER_POLICY, LEARNER_POLICIES, deterministicResult, hash, explicitDontKnow, questionSnapshotSchema, resultSchema } from './contracts'
 import { evaluateAnswer, EvaluationFailure, type Invocation } from './model'
 import { transcriptIntegrity } from '../practice/integrity'
+import { currentDataScope, runOutsideDataScope } from '../../lib/dataScope'
+import { workspacesEnabled } from '../../workspaces/contracts'
+import { dueWorkspaceJobScopes } from '../../workspaces/jobScopes'
+import { withJobScope } from '../../workspaces/requestScope'
 
 type Tx = Prisma.TransactionClient
 const json = (v: unknown) => v as Prisma.InputJsonValue
 const today = () => new Date().toISOString().slice(0, 10)
 export const LEARNER_LIMITS = { perUser: 30, global: 300, concurrent: 2, attempts: 2, leaseMs: 60_000 }
 const persistedResult = resultSchema.extend({ validationNotes: z.array(z.string().max(2000)).max(6).optional(), responseKind: z.enum(['REQUEST_ONLY', 'DONT_KNOW']).optional() })
-const scopes = (ownerId: string) => ['learner-global', `learner-${hash(ownerId)}`]
+// The per-learner allowance is counted separately in each workspace, so organization work never
+// spends a person's Personal allowance (or another organization's).
+const scopes = (ownerId: string, workspaceId?: string) =>
+  ['learner-global', `learner-${hash(workspaceId ? `${workspaceId}:${ownerId}` : ownerId)}`]
 /** Current integrity of an answer from its append-only events (a late event still counts). */
 async function attemptIntegrity(tx: Tx, attemptId: string) {
   return transcriptIntegrity(await tx.interviewTranscriptIssue.findMany({ where: { attemptId } }))
@@ -23,11 +30,14 @@ const savedIncomplete = (value: Prisma.JsonValue | null) =>
   !!value && typeof value === 'object' && !Array.isArray(value) && (value as { incomplete?: unknown }).incomplete === true
 
 export async function learnerEvaluationAccess(ownerId: string, tx: Tx = prisma) {
+  // Inside an organization the verified workspace decision replaces Personal pilot grants.
+  const scope = currentDataScope()
+  if (scope && (scope.actorId !== ownerId || !scope.features.interviews)) return false
   for (const feature of ['interviews', 'interview_voice', 'interview_adaptive']) {
     await tx.$queryRaw`SELECT feature FROM "PlatformFeatureFlag" WHERE feature=${feature} FOR SHARE`
     const flag = await tx.platformFeatureFlag.findUnique({ where: { feature } })
     if (!flag || flag.hidden || flag.disabled) return false
-    if (flag.audience === 'SELECTED_USERS') {
+    if (flag.audience === 'SELECTED_USERS' && !scope) {
       await tx.$queryRaw`SELECT id FROM "UserFeatureGrant" WHERE "userId"=${ownerId} AND feature=${feature} FOR SHARE`
       if (!await tx.userFeatureGrant.findUnique({ where: { userId_feature: { userId: ownerId, feature } } })) return false
     }
@@ -44,18 +54,31 @@ function pinnedPolicy(policy: Prisma.JsonValue | null) {
   const entry = Object.hasOwn(LEARNER_POLICIES, policy.version) ? LEARNER_POLICIES[policy.version] : null
   return entry && hash(policy.config) === hash(entry.config) ? entry : null
 }
+/** Calendar day in the organization's time zone, so a tenant budget resets at its own midnight. */
+export function workspaceDay(timeZone: string, at = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(at)
+}
 async function budget(ownerId: string, tx: Tx) {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('interview-learner-budget',0))`
-  const keys = scopes(ownerId)
-  for (const [i, scope] of keys.entries()) {
-    const row = await tx.interviewEvaluatorBudget.upsert({ where: { scope_day: { scope, day: today() } }, create: { scope, day: today() }, update: {} })
-    // The shared (all learners) and personal daily limits are reported separately, so a shared limit is never
-    // described as the learner's own allowance. Each model evaluation and each retry uses one unit.
-    if (row.used >= (i === 0 ? LEARNER_LIMITS.global : LEARNER_LIMITS.perUser)) {
-      throw new BankError(429, 'Learner evaluation budget reached', i === 0 ? 'EVALUATION_SHARED_BUDGET_REACHED' : 'EVALUATION_USER_BUDGET_REACHED')
-    }
+  const workspace = currentDataScope()
+  const [global, personal] = scopes(ownerId, workspace?.workspaceId)
+  const entries = [
+    { scope: global, day: today(), limit: LEARNER_LIMITS.global, code: 'EVALUATION_SHARED_BUDGET_REACHED' },
+    { scope: personal, day: today(), limit: LEARNER_LIMITS.perUser, code: 'EVALUATION_USER_BUDGET_REACHED' },
+  ]
+  if (workspace) {
+    const row = await tx.workspace.findUniqueOrThrow({ where: { id: workspace.workspaceId }, select: { dailyEvaluations: true, timeZone: true } })
+    entries.push({ scope: `workspace-${workspace.workspaceId}`, day: workspaceDay(row.timeZone), limit: row.dailyEvaluations, code: 'EVALUATION_WORKSPACE_BUDGET_REACHED' })
   }
-  await tx.interviewEvaluatorBudget.updateMany({ where: { day: today(), scope: { in: keys } }, data: { used: { increment: 1 } } })
+  for (const entry of entries) {
+    const row = await tx.interviewEvaluatorBudget.upsert({ where: { scope_day: { scope: entry.scope, day: entry.day } }, create: { scope: entry.scope, day: entry.day }, update: {} })
+    // The shared (all learners), organization and personal daily limits are reported separately, so a shared
+    // limit is never described as the learner's own allowance. Each model evaluation and each retry uses one unit.
+    if (row.used >= entry.limit) throw new BankError(429, 'Learner evaluation budget reached', entry.code)
+  }
+  for (const entry of entries) {
+    await tx.interviewEvaluatorBudget.updateMany({ where: { scope: entry.scope, day: entry.day }, data: { used: { increment: 1 } } })
+  }
 }
 
 /** Caller holds Session/Run locks and created the authoritative snapshot in this transaction.
@@ -121,7 +144,7 @@ export async function claimLearnerAssessment() {
     await tx.interviewAssessment.update({ where: { id: row.id }, data: { status: 'RUNNING', attempts: { increment: 1 }, leaseToken,
       leaseUntil: new Date(Date.now() + LEARNER_LIMITS.leaseMs) } })
     // Ledger row before the provider call, so a lost publication still leaves an unknown-usage record.
-    await tx.interviewEvaluatorUsage.create({ data: { invocationKey: leaseToken, assessmentId: row.id, modelId: policy.config.modelId,
+    await tx.interviewEvaluatorUsage.create({ data: { invocationKey: leaseToken, assessmentId: row.id, workspaceId: currentDataScope()?.workspaceId ?? null, modelId: policy.config.modelId,
       region: policy.config.region, inputTokens: null, outputTokens: null, latencyMs: 0, outcome: 'STARTED' } })
     return { ...row, leaseToken, attempts: row.attempts + 1, sessionId: run.sessionId, policy }
   })
@@ -139,7 +162,7 @@ export async function finishLearnerAssessment(job: Claim, invocation: Invocation
     const recorded = { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, latencyMs: usage.latencyMs, outcome: failure ? invocation.code : 'SUCCESS' }
     // Completes the claim's ledger row; a late result after lease expiry still records its usage.
     await tx.interviewEvaluatorUsage.upsert({ where: { invocationKey: job.leaseToken }, update: recorded, create: {
-      invocationKey: job.leaseToken, assessmentId: current?.id ?? null, modelId: job.policy.config.modelId, region: job.policy.config.region, ...recorded } })
+      invocationKey: job.leaseToken, assessmentId: current?.id ?? null, workspaceId: currentDataScope()?.workspaceId ?? null, modelId: job.policy.config.modelId, region: job.policy.config.region, ...recorded } })
     if (!current || current.status !== 'RUNNING' || current.leaseToken !== job.leaseToken) return
     const release = { leaseToken: null, leaseUntil: null }
     const cancel = !session || session.discardedAt ? 'SESSION_DISCARDED' : !await learnerEvaluationAccess(job.snapshot.ownerId, tx) ? 'PILOT_ACCESS_UNAVAILABLE'
@@ -160,8 +183,10 @@ export async function finishLearnerAssessment(job: Claim, invocation: Invocation
 }
 
 export async function learnerFindings(runId: string, ownerId: string, tx: Tx = prisma) {
-  const run = await tx.interviewRun.findFirst({ where: { id: runId, ownerId }, include: { owner: { select: { hideTranscriptText: true } } } })
-  if (!run) throw new BankError(404, 'Interview not found')
+  const found = await tx.interviewRun.findFirst({ where: { id: runId, ownerId }, include: { owner: { select: { hideTranscriptText: true } } } })
+  if (!found) throw new BankError(404, 'Interview not found')
+  // A Personal account switch never hides a learner's own organization feedback.
+  const run = currentDataScope() ? { ...found, owner: { hideTranscriptText: false } } : found
   await lockWritableSession(tx, run.sessionId)
   const rows = await tx.interviewAttempt.findMany({ where: { runId }, orderBy: { index: 'asc' },
     include: { answerSnapshots: { include: { assessment: true } }, transcriptIssues: { include: { segment: { select: { id: true, audioStatus: true } } } },
@@ -212,13 +237,22 @@ export async function sweepLearnerAssessments() {
   catch (e) { invocation = e instanceof EvaluationFailure ? e : new EvaluationFailure('EVALUATION_FAILED', false, { inputTokens: null, outputTokens: null, latencyMs: 0 }) }
   await finishLearnerAssessment(job, invocation); return true
 }
+/** Personal first, then each organization learner with pending work, each in a freshly verified scope. */
+export async function sweepLearnerAssessmentsEverywhere() {
+  let claimed = await runOutsideDataScope(sweepLearnerAssessments)
+  if (!workspacesEnabled()) return claimed
+  for (const { workspaceId, userId } of await dueWorkspaceJobScopes('learner_evaluation')) {
+    claimed = Boolean(await withJobScope(workspaceId, userId, sweepLearnerAssessments)) || claimed
+  }
+  return claimed
+}
 let timer: NodeJS.Timeout | null = null; let running = false; let rerun = false
 // Single-flight sweep. A claimed job is followed immediately by another sweep, so queued answers do
 // not wait for the next interval; a wake during a sweep is remembered rather than dropped.
 function tick() {
   if (running) { rerun = true; return }
   running = true; rerun = false
-  void sweepLearnerAssessments().then(claimed => { if (claimed) rerun = true })
+  void sweepLearnerAssessmentsEverywhere().then(claimed => { if (claimed) rerun = true })
     .catch(e => logger.error({ event: 'interviews.learner_evaluation_failed', errorType: e instanceof Error ? e.name : 'unknown' }, 'Learner evaluation worker failed'))
     .finally(() => { running = false; if (rerun) setImmediate(tick) })
 }
