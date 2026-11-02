@@ -1,7 +1,15 @@
 # Tenancy implementation status
 
-Current production status: reviewed control-plane release deployed November 2, 2026 (code `cd2acd5`).
-See `TENANCY-RELEASE-2026-11-02.md`. Earlier checkpoint notes below describe their status at the time.
+Current production status: reviewed control-plane release deployed November 2, 2026 (code `cd2acd5`); production
+is now `d90bccf`. See `TENANCY-RELEASE-2026-11-02.md`.
+
+**Organization product plane (November 3, 2026):** branch `codex/workspace-product-access`. Data isolation for
+every product, Elevate/Replay/Interviews organization paths, workspace admin APIs and pages, and the `/w/:slug`
+browser shell are implemented and tested. Organization products stay hidden (readiness `false`) until each passes a
+browser walkthrough, and Elevate/Interviews a human microphone check. Not merged or deployed. Progress, evidence and
+release gates: [TENANCY-PRODUCT-PLANE.md](TENANCY-PRODUCT-PLANE.md).
+
+Earlier checkpoint notes below describe their status at the time.
 
 Branch: `codex/multi-tenant-workspaces` from `8e438a3`.
 Worktree: `VI/worktrees/spashtai-tenancy`. Separate from Claude's invitation/demo checkout.
@@ -70,7 +78,7 @@ rollback on failed audit and competing final-seat acceptance. Local browser chec
 and captured mail for create/resend/revoke; no real emails sent. Google verification is mocked in API tests;
 real Google acceptance and production mail delivery remain pending. No merge to main or deployment.
 
-## Remaining before KLSVDIT learner access
+## Remaining before KLSVDIT learner access (November 2 list; items 1, 2, 4, 5 and 6 are now implemented on the product-plane branch)
 
 1. Extend the completed model inventory and Session aggregate boundary to the remaining product roots.
    This includes Replay, Prepare, Interviews, scores, feedback and usage.

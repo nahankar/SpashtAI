@@ -55,10 +55,10 @@ Nothing on this branch is merged, deployed or human-verified yet. No deployment 
 | 2 | Elevate voice: agent scope, callbacks, live updates, media, workers, voice concurrency | Yes (server, agent) | Yes (server, agent unit) |
 | 3 | Replay: uploads, storage keys, processing, playback, export, deletion | Yes (server) | Yes |
 | 4 | Interviews: runs, attempts, evaluator workers, tenant evaluation budget | Yes (server) | Yes |
-| 5 | Workspace admin APIs: dashboard, users, invitations, feedback, usage, Pulse, AI Analytics, settings | No | No |
-| 6 | Web shell `/w/:slug`, role navigation, workspace header, namespaced browser storage | No | No |
-| 7 | Prepare/Coach readiness (isolated at the data level; not offered) | Data only | Data only |
-| 8 | Docs, review, push; deployment only after authorization | No | No |
+| 5 | Workspace admin APIs: dashboard, users, invitations, feedback, usage, Pulse, AI Analytics, settings | Yes | Yes |
+| 6 | Web shell `/w/:slug`, role navigation, workspace header, namespaced browser storage, admin pages | Yes | Yes (unit and render tests; no browser walkthrough yet) |
+| 7 | Prepare/Coach (isolated at the data level; not offered; Coach refuses a workspace scope) | Data only | Data only |
+| 8 | Docs, review, push; deployment only after authorization | Docs updated | — |
 
 ## Checkpoint 1 evidence
 
@@ -123,17 +123,80 @@ is part of each product's organization path. Tests switch readiness on locally o
   temporary copies against a scratch database on 55443 (157 passed, 4 skipped); copies deleted. One fix was needed in
   `interview-practice-database.test.ts` for the new acknowledgment unique key.
 
+## Checkpoint 5 evidence (workspace admin APIs, commits `4ad599d`, `fcd3ba7`, `6394972`)
+
+- Owner/Admin routes under `/api/workspaces/current/admin/...`: overview, day-wise activity, learner activity, feature
+  usage, Progress Pulse, feedback, and AI Analytics (interpret, run, saved plans). They read only aggregate-visible rows
+  of the current organization with allowlisted columns, bucket days in `Workspace.timeZone` and zero-fill periods.
+- AI Analytics compiles a question into one of five allowlisted report plans; a named learner must be a member of this
+  workspace. Saved plans live in `WorkspaceAnalyticsQuery` (forced RLS), so they are per organization.
+- Members are paged (50) and searchable. Learner feedback inside an organization needs the `feedback` feature, stores
+  attachments under the workspace prefix and takes numbers from a sequence (a row count under RLS would collide).
+  Platform staff handle all feedback in the audited platform context.
+- `test/workspace-admin-analytics-database.test.ts` (9 tests): learners and outsiders refused; organization-day grouping
+  that never counts Personal or the other organization; learner filter limited to the workspace and empty zero-filled
+  results; Pulse/usage/overview without raw content; feedback list without session links; member paging and search;
+  AI Analytics learner binding, allowlisted plans and per-organization saved plans; feedback gate and numbering;
+  platform feedback handling.
+
+## Checkpoint 6 evidence (browser, commits `a185bd5`, `e31bf38`)
+
+- **Workspace session.** `/w/:slug` enters the workspace, accepts a pending membership, and keeps the 15-minute
+  workspace token in memory only (never in storage or URLs). It renews every 10 minutes, on return to the tab and on any
+  workspace failure. A network error retries; a server refusal ends the workspace; nothing can reopen it after leaving
+  (guards after every await). Product requests carry `x-spasht-workspace`; workspace failures never sign the user out
+  or fall back to Personal.
+- **Browser state.** Resumable-session keys are namespaced per workspace. A recording uploads, and a live-update
+  subscription runs, with the workspace it started in; after a switch the stale token fails closed.
+- **Playback.** Organization recordings play through a two-hour ticket bound to one session and person
+  (`POST /api/sessions/:id/recording/ticket`, then `?workspace_media=`), rechecking membership on every range request.
+  Tickets are redacted from logs.
+- **Navigation.** Learner links come only from the member's own feature decisions (Elevate, Replay, Interviews,
+  Progress, Feedback). Coach and Prepare are not offered; `/api/coach` returns 403 `WORKSPACE_FEATURE_UNAVAILABLE`
+  in an organization. Owners/Admins also get Dashboard, Users, Invitations, Feedback, Feature usage, Progress Pulse,
+  AI Analytics and Workspace settings, all on the workspace API, never on platform `/admin` routes.
+- **UI.** Workspace and platform workspace screens use shadcn Select, Switch, Table, Checkbox, RadioGroup, Accordion,
+  Dialog and AlertDialog; no native select, table, details or checkbox remain there.
+- Tests: server `workspace-elevate-database.test.ts` (8, including 9 ticket cases and the Coach guard); web
+  `activeWorkspace.test.ts`, `WorkspaceFeatureFlags.test.tsx`, `shell/session.test.ts` (7), `shell/model.test.ts`,
+  `shell/render.test.tsx`, updated `EnrollmentForm.test.tsx`.
+- Latest full runs (November 3): server 724 passed, 124 skipped; web 363 passed; web type check and production build
+  pass; OpenAPI validates. Lint errors remain only in four pre-existing platform admin files.
+
+## Release gates
+
+| Gate | State |
+| --- | --- |
+| Server isolation tests on the restricted role | Pass |
+| Migration upgrade verifier | Pass (November 3, after checkpoint 6: 42 tables enforce forced RLS) |
+| Browser walkthrough with fictional local accounts (two organizations plus Personal) | Not done |
+| Product readiness flags (`WORKSPACE_FEATURE_READINESS`) | All organization products still `false`; flip one product at a time after its browser walkthrough |
+| Real Google sign-in, microphone, LiveKit room and agent in an organization | Human check, not done |
+| Merge to `main` | Not done |
+| Deployment (backup, active-session check, migration, runtime role, rollback plan) | Not authorized |
+
+With readiness `false`, a deployed build would give Owners/Admins the admin pages (with empty reports) while learners
+see no products. That is safe but is not the KLSVDIT goal.
+
 ## Known gaps and decisions
 
 - Platform Admin analytics run without a workspace context and therefore show Personal activity only. Organization
-  analytics belong to the workspace admin pages (checkpoint 5).
+  analytics are on the workspace admin pages.
+- A playback ticket lasts two hours; a Replay page left open longer must be reopened to seek.
+- Microsoft Clarity: the workspace shell reloads the page once if Clarity was already loaded, so organization pages
+  are not recorded. Platform `/admin` has the same pre-existing gap and is unchanged.
+- Admins see progress and usage, not raw content: transcripts, recordings, Replay results and interview answers stay
+  learner-only by database policy.
 - Flaky under parallel load: invitation database suites (shared mailbox and fixtures across parallel files) and once a
   `socket hang up` in the in-memory `preparations.test.ts`. Each passes alone; three consecutive full runs after
-  checkpoint 4 were clean (714 passed, 124 skipped). Not caused by isolation changes; tracked.
+  checkpoint 4 were clean (714 passed, 124 skipped). After checkpoint 6, `replay-workflow-evidence.test.ts` failed once
+  under full parallel load and passed alone three times and in the next full run. Not caused by isolation changes; tracked.
 - The platform-wide learner evaluation cap (300/day) is shared by Personal and all organizations; KLSVDIT's 299/day
   budget can therefore be limited by platform demand. Raising it is a platform cost decision.
 - Interview database suites are hard-wired to the other checkout's database on 55441 and are not run there.
 
 ## Blockers
 
-None. Deployment needs explicit authorization in the Cursor conversation.
+- Enabling a product for organizations needs a browser walkthrough first, and for Elevate and Interviews a human
+  microphone check.
+- Deployment needs explicit authorization in the Cursor conversation.

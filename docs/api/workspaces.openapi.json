@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "SpashtAI workspace foundation",
-    "version": "0.5.0",
-    "description": "Local contract. Feature flag WORKSPACES_ENABLED defaults false. This is control-plane administration only, not tenant product readiness. Workspace JWTs cannot authorize legacy Personal/Admin APIs. Read-only own-session archive additionally requires WORKSPACE_SESSION_ARCHIVE_ENABLED. Organization practice creation remains disabled."
+    "version": "0.6.0",
+    "description": "Local contract. Organization product requests carry the identity JWT in Authorization and the workspace JWT in x-spasht-workspace; both must name the same person, and membership, workspace state and placement are rechecked on every request. Control-plane paths (/api/workspaces, /api/auth, /api/invitations) ignore that header; /api/admin and /internal reject it with 403 WORKSPACE_CONTEXT_REJECTED. Product readiness is product code (WORKSPACE_FEATURE_READINESS); a product that is not ready returns 403 WORKSPACE_FEATURE_UNAVAILABLE in an organization whatever its settings. Coach and Prepare are Personal-only. Workspace admin report and AI Analytics paths use the workspace JWT as the Bearer and are Owner/Admin only."
   },
   "servers": [
     {
@@ -203,14 +203,60 @@
     },
     "/api/workspaces/current/members": {
       "get": {
-        "summary": "List workspace members (Owner/Admin only, first 100)",
+        "summary": "List workspace members (Owner/Admin only), 50 per page",
         "description": "",
         "security": [
           {
             "workspace": []
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "description": "Search email or name"
+          },
+          {
+            "name": "role",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "OWNER",
+                "ADMIN",
+                "LEARNER"
+              ]
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ACTIVE",
+                "INVITED",
+                "SUSPENDED"
+              ]
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Cursor: last member ID of the previous page"
+          }
+        ],
         "responses": {
           "200": {
             "description": "JSON result. See docs/TENANCY.md for DTO and rollout boundaries."
@@ -1730,6 +1776,998 @@
           }
         }
       }
+    },
+    "/api/workspaces/current/admin/overview": {
+      "get": {
+        "summary": "Organization overview: members, activity, evaluation budget and voice capacity",
+        "description": "Aggregate rows of this organization only, with allowlisted columns; no transcripts, answers or recordings. Days are bucketed in the organization time zone and zero-filled.",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 90,
+              "default": 30
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Day"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Day"
+            }
+          },
+          {
+            "name": "learner",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Workspace member ID; never a user ID from another scope."
+          },
+          {
+            "name": "product",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "elevate",
+                "replay",
+                "interviews"
+              ]
+            }
+          },
+          {
+            "name": "skill",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "clarity",
+                "conciseness",
+                "confidence",
+                "structure",
+                "engagement",
+                "pacing",
+                "delivery",
+                "emotional_control",
+                "filler_words",
+                "action_items"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      }
+    },
+    "/api/workspaces/current/admin/activity/daily": {
+      "get": {
+        "summary": "Day-wise activity by product",
+        "description": "Aggregate rows of this organization only, with allowlisted columns; no transcripts, answers or recordings. Days are bucketed in the organization time zone and zero-filled.",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 90,
+              "default": 30
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Day"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Day"
+            }
+          },
+          {
+            "name": "learner",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Workspace member ID; never a user ID from another scope."
+          },
+          {
+            "name": "product",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "elevate",
+                "replay",
+                "interviews"
+              ]
+            }
+          },
+          {
+            "name": "skill",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "clarity",
+                "conciseness",
+                "confidence",
+                "structure",
+                "engagement",
+                "pacing",
+                "delivery",
+                "emotional_control",
+                "filler_words",
+                "action_items"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      }
+    },
+    "/api/workspaces/current/admin/activity/learners": {
+      "get": {
+        "summary": "Activity per learner",
+        "description": "Aggregate rows of this organization only, with allowlisted columns; no transcripts, answers or recordings. Days are bucketed in the organization time zone and zero-filled.",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 90,
+              "default": 30
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Day"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Day"
+            }
+          },
+          {
+            "name": "learner",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Workspace member ID; never a user ID from another scope."
+          },
+          {
+            "name": "product",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "elevate",
+                "replay",
+                "interviews"
+              ]
+            }
+          },
+          {
+            "name": "skill",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "clarity",
+                "conciseness",
+                "confidence",
+                "structure",
+                "engagement",
+                "pacing",
+                "delivery",
+                "emotional_control",
+                "filler_words",
+                "action_items"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      }
+    },
+    "/api/workspaces/current/admin/feature-usage": {
+      "get": {
+        "summary": "Feature usage events by feature and day",
+        "description": "Aggregate rows of this organization only, with allowlisted columns; no transcripts, answers or recordings. Days are bucketed in the organization time zone and zero-filled.",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 90,
+              "default": 30
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Day"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Day"
+            }
+          },
+          {
+            "name": "learner",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Workspace member ID; never a user ID from another scope."
+          },
+          {
+            "name": "product",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "elevate",
+                "replay",
+                "interviews"
+              ]
+            }
+          },
+          {
+            "name": "skill",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "clarity",
+                "conciseness",
+                "confidence",
+                "structure",
+                "engagement",
+                "pacing",
+                "delivery",
+                "emotional_control",
+                "filler_words",
+                "action_items"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      }
+    },
+    "/api/workspaces/current/admin/progress-pulse": {
+      "get": {
+        "summary": "Progress Pulse skill averages and trend (Elevate and Replay)",
+        "description": "Aggregate rows of this organization only, with allowlisted columns; no transcripts, answers or recordings. Days are bucketed in the organization time zone and zero-filled.",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 90,
+              "default": 30
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Day"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Day"
+            }
+          },
+          {
+            "name": "learner",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Workspace member ID; never a user ID from another scope."
+          },
+          {
+            "name": "product",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "elevate",
+                "replay",
+                "interviews"
+              ]
+            }
+          },
+          {
+            "name": "skill",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "clarity",
+                "conciseness",
+                "confidence",
+                "structure",
+                "engagement",
+                "pacing",
+                "delivery",
+                "emotional_control",
+                "filler_words",
+                "action_items"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      }
+    },
+    "/api/workspaces/current/admin/feedback": {
+      "get": {
+        "summary": "Learner feedback submitted in this organization",
+        "description": "Session links and attachments are not returned. 50 per page.",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "OPEN",
+                "ACKNOWLEDGED",
+                "CONSIDERED",
+                "IMPLEMENTED",
+                "PARKED"
+              ]
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "FEEDBACK",
+                "ISSUE",
+                "FEATURE_REQUEST"
+              ]
+            }
+          },
+          {
+            "name": "learner",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      }
+    },
+    "/api/workspaces/current/admin/analytics/interpret": {
+      "post": {
+        "summary": "Turn a question into an allowlisted report plan",
+        "description": "Returns status ready (with plan), clarification, unsupported or choose_learner. Named learners are bound to members of this workspace. Rate limited.",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "JSON result."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "question": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000
+                  },
+                  "learner": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "question"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/current/admin/analytics/run": {
+      "post": {
+        "summary": "Run a report plan in this organization and save it",
+        "description": "",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "JSON result."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "question": {
+                    "type": "string",
+                    "maxLength": 1000
+                  },
+                  "plan": {
+                    "$ref": "#/components/schemas/ReportPlan"
+                  }
+                },
+                "required": [
+                  "plan"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/current/admin/analytics/saved": {
+      "get": {
+        "summary": "List this organization's saved report plans",
+        "description": "",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "JSON result."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      }
+    },
+    "/api/workspaces/current/admin/analytics/saved/{id}/run": {
+      "post": {
+        "summary": "Rerun a saved plan of this organization",
+        "description": "",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      }
+    },
+    "/api/workspaces/current/admin/analytics/saved/{id}": {
+      "patch": {
+        "summary": "Rename or pin a saved plan",
+        "description": "",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "pinned": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a saved plan",
+        "description": "",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      }
+    },
+    "/api/sessions/{sessionId}/recording/ticket": {
+      "post": {
+        "summary": "Issue a playback ticket for the caller's own session in the open organization",
+        "description": "Requires x-spasht-workspace. Returns {ticket, expiresInSeconds}. 404 unless the session belongs to the caller, this workspace and is not discarded.",
+        "security": [
+          {
+            "identity": [],
+            "workspaceContext": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      }
+    },
+    "/api/sessions/{sessionId}/recording/stream": {
+      "get": {
+        "summary": "Stream a session recording (byte ranges supported)",
+        "description": "Personal: identity token via access_token or Bearer. Organization: also workspace_media, which must name this session and the same person; membership is rechecked on every range request. Sending x-spasht-workspace with a ticket returns 400 WORKSPACE_MEDIA_REJECTED.",
+        "security": [
+          {
+            "identity": []
+          },
+          {
+            "identity": [],
+            "workspaceMedia": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identity JWT"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          }
+        }
+      }
+    },
+    "/api/coach": {
+      "get": {
+        "summary": "Coach (Personal only)",
+        "description": "Any Coach path with x-spasht-workspace returns 403 WORKSPACE_FEATURE_UNAVAILABLE.",
+        "security": [
+          {
+            "identity": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "JSON result."
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1743,6 +2781,18 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "Workspace JWT (workspace-api audience, 15 minutes)"
+      },
+      "workspaceContext": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-spasht-workspace",
+        "description": "Workspace JWT naming the organization for a product request. Used together with the identity Bearer."
+      },
+      "workspaceMedia": {
+        "type": "apiKey",
+        "in": "query",
+        "name": "workspace_media",
+        "description": "Two-hour media ticket for one organization session recording (audience workspace-media). Redacted from logs."
       }
     },
     "schemas": {
@@ -2228,6 +3278,85 @@
             }
           }
         }
+      },
+      "Day": {
+        "type": "string",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+        "description": "Calendar day in the organization time zone."
+      },
+      "ReportPlan": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "report": {
+            "type": "string",
+            "enum": [
+              "overview",
+              "daily_activity",
+              "learner_activity",
+              "feature_usage",
+              "progress_pulse"
+            ]
+          },
+          "days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 90,
+            "default": 30
+          },
+          "product": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "elevate",
+              "replay",
+              "interviews"
+            ]
+          },
+          "skill": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "clarity",
+              "conciseness",
+              "confidence",
+              "structure",
+              "engagement",
+              "pacing",
+              "delivery",
+              "emotional_control",
+              "filler_words",
+              "action_items"
+            ]
+          },
+          "explanation": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 400
+          },
+          "learnerMemberId": {
+            "type": "string",
+            "nullable": true,
+            "description": "Must be a member of the current workspace."
+          }
+        },
+        "required": [
+          "version",
+          "title",
+          "report",
+          "explanation"
+        ]
       }
     },
     "responses": {
@@ -2283,6 +3412,16 @@
       },
       "503": {
         "description": "Unsafe database role, missing row isolation or unavailable placement",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "429": {
+        "description": "Rate limited",
         "content": {
           "application/json": {
             "schema": {
