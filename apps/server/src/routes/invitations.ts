@@ -24,6 +24,8 @@ router.post('/lookup', invitationAcceptLimiter, async (req: Request, res: Respon
       // The link holder is shown the full address so they know which Google Account to use.
       invitedEmail: inv.email,
       expiresAt: inv.expiresAt,
+      workspaceInvitation: Boolean(inv.workspaceId),
+      proposedRole: inv.proposedRole,
     })
   } catch (err) {
     logger.error({ err }, 'Invitation lookup failed')
@@ -58,7 +60,7 @@ router.post('/accept', invitationAcceptLimiter, async (req: Request, res: Respon
       return
     }
     const jwt = signToken({ userId: result.user.id, email: result.user.email, role: result.user.role })
-    res.json({ token: jwt, user: await authUserForClient(result.user), alreadyAccepted: result.alreadyAccepted, newAccount: result.newAccount })
+    res.json({ token: jwt, user: await authUserForClient(result.user), alreadyAccepted: result.alreadyAccepted, newAccount: result.newAccount, workspacePath: result.workspacePath })
   } catch (err) {
     logger.error({ err }, 'Invitation acceptance failed')
     res.status(500).json({ error: 'Could not accept this invitation' })

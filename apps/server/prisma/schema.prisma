@@ -238,6 +238,7 @@ model Workspace {
   databaseKey      String                  @default("primary")
   createdAt        DateTime                @default(now())
   updatedAt        DateTime                @updatedAt
+  invitations UserInvitation[]
   sessions         Session[]
   members          WorkspaceMember[]
   features         WorkspaceFeature[]
@@ -1533,14 +1534,17 @@ enum InvitationDeliveryStatus {
   DEV_CAPTURED
 }
 
-// Platform-level learner invitation. Recipients join as ordinary USER accounts; no tenant or
-// organization is assigned. Once real tenancy exists this needs a tenant scope.
+// Global identity invitation with an optional immutable organization-membership target.
 model UserInvitation {
+  workspaceId String?
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  proposedRole WorkspaceMemberRole?
+  memberFeatures Json @default("{}")
   id                   String           @id @default(cuid())
   email                String
   recipientName        String?
   status               InvitationStatus @default(PENDING)
-  // Equals email only while PENDING, so the unique index allows one pending invitation per address.
+  // While PENDING: email for platform, workspace:<id>:<email> for organization invitations.
   pendingKey           String?          @unique
   // SHA-256 of the acceptance token. The raw token exists only in the sent link.
   tokenHash            String           @unique
@@ -1562,6 +1566,7 @@ model UserInvitation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([workspaceId, status, expiresAt])
   @@index([status, expiresAt])
   @@index([email])
   @@index([createdAt])

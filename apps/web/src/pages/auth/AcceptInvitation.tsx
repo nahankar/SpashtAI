@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { Loader2, MailCheck, TriangleAlert, UserRoundCog } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
@@ -14,6 +14,8 @@ interface Lookup {
   status: 'pending' | 'accepted' | 'expired' | 'revoked'
   recipientName: string | null
   invitedEmail: string
+  workspaceInvitation?: boolean
+  proposedRole?: string
   expiresAt: string
 }
 
@@ -42,7 +44,6 @@ export function AcceptInvitation() {
   const [problem, setProblem] = useState<Problem | null>(null)
   const [accepting, setAccepting] = useState(false)
   const { fetchCurrentUser } = useAuth()
-  const navigate = useNavigate()
 
   useEffect(() => {
     if (!token) return
@@ -56,7 +57,7 @@ export function AcceptInvitation() {
     setProblem(null)
     setAccepting(true)
     try {
-      const { ok, data } = await post<{ token: string; user: { needsProfileCompletion?: boolean } }>('/api/invitations/accept', { token, credential })
+      const { ok, data } = await post<{ token: string; user: { needsProfileCompletion?: boolean }; workspacePath?: string }>('/api/invitations/accept', { token, credential })
       if (!ok) {
         const kind = data.error === 'wrong_account' ? 'wrong_account' : data.error ? 'blocked' : 'error'
         setProblem({ kind, message: data.message || data.error || 'Could not accept this invitation.' })
@@ -66,7 +67,8 @@ export function AcceptInvitation() {
       try { sessionStorage.removeItem(TOKEN_KEY) } catch { /* ignore */ }
       await fetchCurrentUser()
       // New accounts finish the normal onboarding (profile details) before using SpashtAI.
-      navigate(data.user.needsProfileCompletion ? '/auth/complete-profile' : '/', { replace: true })
+      const next = data.workspacePath?.startsWith('/w/') ? data.workspacePath : '/'
+      window.location.assign(data.user.needsProfileCompletion ? `/auth/complete-profile?next=${encodeURIComponent(next)}` : next)
     } catch {
       setProblem({ kind: 'error', message: 'Could not reach SpashtAI. Please try again.' })
     } finally {
@@ -89,6 +91,7 @@ export function AcceptInvitation() {
           {loadError && <p className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{loadError}</p>}
           {!lookup && !loadError && <div className="flex justify-center py-4"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>}
 
+          {lookup?.workspaceInvitation && <p className="text-sm">This invitation grants {lookup.proposedRole?.toLowerCase()} access to an organization workspace. Your Personal history stays separate.</p>}
           {closed && (
             <p className="rounded-md bg-muted p-3 text-sm">
               {lookup.status === 'revoked'

@@ -47,6 +47,26 @@ the full repeat; no timeout was increased. Upgrade verification confirms eleven 
 This is an API/database checkpoint: there is no archive player UI, remote-object playback or organization
 practice creation. Raw content remains private to its learner. No production data or real invitations used.
 
+## Invitation integration checkpoint (November 2)
+
+Integrated Claude's final platform invitation branch through `81c393b` in this worktree. Reviewed fixes for
+transactional audit, locked resend snapshots, signup-policy pool usage and demo removal are retained.
+
+- Organization-bound email invitations, proposed roles and initial member feature settings.
+- Current Owner/Admin permission checks, workspace-only lists/counts/actions and forced invitation RLS.
+- Atomic account/membership/acceptance/audit; inviter, suspension, expiry, seats and entitlements rechecked.
+- Shared mailer, token handling, resend fencing, platform behavior and production SMTP safeguards preserved.
+- Tenant invitation screen with counts, confirmation, paginated lists and truthful delivery status.
+- Workspace return path retained after acceptance/onboarding; Personal history and platform roles unchanged.
+- Bounded retention and platform-authorized account deletion include organization invitation PII.
+
+Validation: 675 server tests passed, 124 optional tests skipped; 332 web tests passed. Build/type checks pass.
+Upgrade from existing records preserves Personal sessions/transcripts and null-scope platform invitations;
+twelve tables enforce RLS. Real restricted-role HTTP tests cover cross-workspace access, role restrictions,
+rollback on failed audit and competing final-seat acceptance. Local browser checks use fictional identities
+and captured mail for create/resend/revoke; no real emails sent. Google verification is mocked in API tests;
+real Google acceptance and production mail delivery remain pending. No merge to main or deployment.
+
 ## Remaining before KLSVDIT learner access
 
 1. Extend the completed model inventory and Session aggregate boundary to the remaining product roots.
@@ -54,8 +74,8 @@ practice creation. Raw content remains private to its learner. No production dat
 2. Replace implicit global user ownership in every applicable API/raw SQL query, signed media URL, upload,
    LiveKit room/dispatch/agent call, WebSocket subscription, cache key, job payload and browser recovery key.
    Add two-organization + Personal leakage tests at each boundary. Enable products individually only after verification.
-3. Integrate Claude's finished invitation service: target workspace, proposed role/settings, verified email,
-   expiration/revocation, atomic membership creation/acceptance, resend fencing and audit/retention.
+3. Finish invitation production readiness: real Google acceptance, SMTP setup/delivery checks, and optional
+   email-based initial Owner provisioning. The shared service integration is implemented.
 4. Implement tenant-only Dashboard/analytics, including learner selectors and day-wise usage. Do not reuse
    platform Admin routes or rely on a hidden sidebar for isolation.
 5. Enforce configured evaluation/concurrency quotas in product services. Configured values are not yet execution limits.

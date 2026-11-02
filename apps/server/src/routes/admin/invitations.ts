@@ -16,8 +16,8 @@ import {
   serializeInvitation,
 } from '../../lib/invitations'
 
-// Mounted behind requireAuth + requireCurrentAdmin. Platform-wide by design: there is no tenant yet, so these
-// endpoints must never be exposed to a tenant administrator until every query is scoped to the active tenant.
+// Mounted behind requireAuth + requireCurrentAdmin. These routes manage only null-scope platform invitations;
+// organization administrators use separate workspace-token endpoints.
 const router = Router()
 
 const listQuery = z.object({

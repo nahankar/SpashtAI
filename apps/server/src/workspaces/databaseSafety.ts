@@ -3,7 +3,7 @@ import { prisma } from '../lib/prisma'
 import { WorkspaceError, workspacesEnabled } from './contracts'
 
 export const WORKSPACE_RLS_TABLES = ['Workspace', 'WorkspaceMember', 'WorkspaceFeature', 'WorkspaceMemberFeature', 'WorkspaceAudit',
-  'Session', 'SessionMetrics', 'SessionTranscript', 'SessionSegment', 'SessionTurn', 'SessionRecording'] as const
+  'Session', 'SessionMetrics', 'SessionTranscript', 'SessionSegment', 'SessionTurn', 'SessionRecording', 'UserInvitation'] as const
 
 export async function assertWorkspaceDatabaseSafety(db: Pick<PrismaClient, '$queryRaw'> = prisma) {
   const roles = await db.$queryRaw<Array<{ bypass: boolean }>>`SELECT

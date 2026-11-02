@@ -1,3 +1,4 @@
+import { prepareWorkspaceTestRole } from './workspace-test-role'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { PrismaClient } from '@prisma/client'
 import express from 'express'
@@ -25,9 +26,7 @@ suite('workspace database and API isolation', () => {
     return api.post(`/api/workspaces/entry/${slug}/accept`).set(bearer(await identity(userId)))
   }
   beforeAll(async () => {
-    await adminDb.$executeRawUnsafe(`DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='tenancy_test_app') THEN CREATE ROLE tenancy_test_app LOGIN NOSUPERUSER NOBYPASSRLS; END IF; END $$`)
-    await adminDb.$executeRawUnsafe('GRANT USAGE ON SCHEMA public TO tenancy_test_app')
-    await adminDb.$executeRawUnsafe('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO tenancy_test_app')
+    await prepareWorkspaceTestRole(adminDb)
     process.env.DATABASE_URL = 'postgresql://tenancy_test_app@127.0.0.1:55443/postgres'
     process.env.WORKSPACES_ENABLED = 'true'
     const module = await import('../src/lib/prisma'); db = module.prisma

@@ -1,3 +1,5 @@
+import { lockInvitationTarget, acceptInvitedMembership } from '../workspaces/invitationMembership'
+import { WorkspaceError } from '../workspaces/contracts'
 import type { Request } from 'express'
 import type { User } from '@prisma/client'
 import type { GoogleUserInfo } from './google-auth'
@@ -7,7 +9,7 @@ import { writeAcceptanceAudit } from './invitationAudit'
 
 export type AcceptanceFailure = { ok: false; status: number; body: { error: string; message?: string; invitedEmail?: string } }
 export type AcceptanceResult =
-  | { ok: true; user: User; newAccount: boolean; alreadyAccepted: boolean; signupsPausedBypass: boolean }
+  | { ok: true; user: User; newAccount: boolean; alreadyAccepted: boolean; signupsPausedBypass: boolean; workspacePath?: string }
   | AcceptanceFailure
 
 export const INVALID_LINK = {
@@ -38,6 +40,11 @@ export async function acceptInvitation(
   const policy = await loadSignupPolicy()
   try {
     return await withAccountRaceRetry(async (tx) => {
+      await tx.$queryRaw`SELECT set_config('app.invitation_hash', ${invitation.tokenHash}, true)`
+      const snapshot = await tx.userInvitation.findUnique({ where: { id: invitation.id } })
+      if (!snapshot || snapshot.tokenHash !== invitation.tokenHash) return fail(404, INVALID_LINK)
+      const workspace = await lockInvitationTarget(tx, snapshot)
+      const workspacePath = workspace ? `/w/${workspace.slug}` : undefined
       await tx.$queryRaw`SELECT 1 FROM "UserInvitation" WHERE "id" = ${invitation.id} FOR UPDATE`
       const inv = await tx.userInvitation.findUnique({ where: { id: invitation.id } })
       // A resend replaced the token: this link is superseded.
@@ -59,25 +66,28 @@ export async function acceptInvitation(
         const account = await resolveGoogleAccount(tx, googleUser, req, { policy })
         if (!account.ok) return account
         if (account.user.id !== inv.acceptedUserId) throw new Abort(fail(409, { error: 'invitation_used', message: 'This invitation has already been used.' }))
-        return { ok: true, user: account.user, newAccount: false, alreadyAccepted: true, signupsPausedBypass: false }
+        if (workspace) await acceptInvitedMembership(tx, inv, account.user.id, workspace.maxMembers, true)
+        return { ok: true, user: account.user, newAccount: false, alreadyAccepted: true, signupsPausedBypass: false, workspacePath }
       }
 
-      // Pending and unexpired under the lock: this exact invited address may get a USER account even while
-      // signups are paused (deliberate policy exception; see docs/INVITATIONS.md).
-      const account = await resolveGoogleAccount(tx, googleUser, req, { policy, invitationBypassesSignupPause: true })
+      // The approved paused-signup exception applies only to platform invitations. Organization invitations
+      // respect the public pause for new identities; see docs/INVITATIONS.md.
+      const account = await resolveGoogleAccount(tx, googleUser, req, { policy, invitationBypassesSignupPause: !workspace })
       if (!account.ok) return account
       const bypassed = account.created && policy.paused
+      if (workspace) await acceptInvitedMembership(tx, inv, account.user.id, workspace.maxMembers, false)
       await tx.userInvitation.update({
         where: { id: inv.id },
         data: { status: 'ACCEPTED', pendingKey: null, acceptedAt: new Date(), acceptedUserId: account.user.id },
       })
-      await writeAcceptanceAudit(tx, {
+      if (!workspace) await writeAcceptanceAudit(tx, {
         invitationId: inv.id, invitedById: inv.invitedById, userId: account.user.id, newAccount: account.created, signupsPausedBypass: bypassed, req,
       })
-      return { ok: true, user: account.user, newAccount: account.created, alreadyAccepted: false, signupsPausedBypass: bypassed }
+      return { ok: true, user: account.user, newAccount: account.created, alreadyAccepted: false, signupsPausedBypass: bypassed, workspacePath }
     })
   } catch (err) {
     if (err instanceof Abort) return err.result
+    if (err instanceof WorkspaceError) return fail(err.status, { error: err.code, message: err.message })
     throw err
   }
 }

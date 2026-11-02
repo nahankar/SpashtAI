@@ -1,3 +1,4 @@
+import { prepareWorkspaceTestRole } from './workspace-test-role'
 import { WebSocket, WebSocketServer } from 'ws'
 import { once } from 'node:events'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -33,9 +34,7 @@ suite('workspace Session aggregate and media isolation', () => {
     process.env.DATABASE_URL = 'postgresql://tenancy_test_app@127.0.0.1:55443/postgres'
     process.env.WORKSPACES_ENABLED = 'true'; process.env.WORKSPACE_SESSION_ARCHIVE_ENABLED = 'true'
     // This file is independently runnable, without another test's role setup.
-    await admin.$executeRawUnsafe(`DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='tenancy_test_app') THEN CREATE ROLE tenancy_test_app LOGIN NOSUPERUSER NOBYPASSRLS; END IF; END $$`)
-    await admin.$executeRawUnsafe('GRANT USAGE ON SCHEMA public TO tenancy_test_app')
-    await admin.$executeRawUnsafe('GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO tenancy_test_app')
+    await prepareWorkspaceTestRole(admin)
     db = (await import('../src/lib/prisma')).prisma
     const { workspaceRouter, platformWorkspacesRouter } = await import('../src/workspaces/routes')
     const app = express(); app.use(express.json()); app.use('/api/workspaces', workspaceRouter); app.use('/api/admin/workspaces', platformWorkspacesRouter); api = request(app)

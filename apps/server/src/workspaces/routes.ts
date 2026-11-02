@@ -1,3 +1,5 @@
+import * as invitations from './invitations'
+import { workspaceInvitationSendLimiter } from '../middleware/rate-limit'
 import { archiveSessionDetail, archiveSessionTranscript, listArchiveSessions } from './sessionArchive'
 import { streamWorkspaceRecording } from './sessionMedia'
 import { Router, type Request, type Response, type NextFunction } from 'express'
@@ -37,14 +39,20 @@ workspaceRouter.get('/', requireAuth, route(req => service.listMyWorkspaces(req.
 workspaceRouter.post('/entry/:slug', requireAuth, route(req => service.enterWorkspace(req.user!.userId, idSchema.parse(req.params.slug))))
 workspaceRouter.post('/entry/:slug/accept', requireAuth, route(req => service.acceptWorkspaceMembership(req.user!.userId, idSchema.parse(req.params.slug))))
 
+function workspaceClaims(req: Request) {
+  const token = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : ''
+  try { return verifyWorkspaceToken(token) } catch { throw new WorkspaceError(401, 'WORKSPACE_TOKEN_REQUIRED', 'Open the workspace again to continue') }
+}
 function scoped(handler: (tx: Parameters<Parameters<typeof withWorkspaceAccess>[1]>[0], scope: Parameters<Parameters<typeof withWorkspaceAccess>[1]>[1], req: Request) => Promise<unknown>) {
   return route(async req => {
-    const token = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : ''
-    let claims
-    try { claims = verifyWorkspaceToken(token) } catch { throw new WorkspaceError(401, 'WORKSPACE_TOKEN_REQUIRED', 'Open the workspace again to continue') }
+    const claims = workspaceClaims(req)
     return withWorkspaceAccess(claims, (tx, scope) => handler(tx, scope, req))
   })
 }
+workspaceRouter.get('/current/invitations', scoped((tx, scope, req) => invitations.listWorkspaceInvitations(tx, scope, req.query)))
+workspaceRouter.post('/current/invitations', workspaceInvitationSendLimiter, route(req => invitations.createWorkspaceInvitation(workspaceClaims(req), req.body)))
+workspaceRouter.post('/current/invitations/:id/resend', workspaceInvitationSendLimiter, route(req => invitations.changeWorkspaceInvitation(workspaceClaims(req), idSchema.parse(req.params.id), 'resend')))
+workspaceRouter.post('/current/invitations/:id/revoke', route(req => invitations.changeWorkspaceInvitation(workspaceClaims(req), idSchema.parse(req.params.id), 'revoke')))
 workspaceRouter.get('/current/sessions', scoped((tx, scope, req) => listArchiveSessions(tx, scope, req.query)))
 workspaceRouter.get('/current/sessions/:sessionId', scoped((tx, scope, req) => archiveSessionDetail(tx, scope, idSchema.parse(req.params.sessionId))))
 workspaceRouter.get('/current/sessions/:sessionId/transcript', scoped((tx, scope, req) => archiveSessionTranscript(tx, scope, idSchema.parse(req.params.sessionId))))

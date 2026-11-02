@@ -1,12 +1,13 @@
 # Data ownership inventory
 
-Reviewed against the tenancy branch schema (62 models). “Pending” is a release blocker for that product,
+Reviewed against the tenancy branch schema (63 models). “Pending” is a release blocker for that product,
 not permission to reuse a user-only query. Shared login identity never implies shared activity history.
 
 | Models | Ownership boundary | Current state / next requirement |
 | --- | --- | --- |
 | User | Global identity | Keep credentials/profile global. Workspace roles never change platform role. Review global license/export flags before tenant delegation. |
 | Workspace, WorkspaceMember, WorkspaceFeature, WorkspaceMemberFeature, WorkspaceAudit | Workspace control plane | RLS, current membership, entitlement ceiling and content-free audit implemented. |
+| UserInvitation | Optional organization scope + proposed membership | Integrated shared mailer, immutable scope/role, RLS, token-bound acceptance, current inviter permissions, seat reservations, content-free WorkspaceAudit and tenant retention/deletion. Null scope remains platform-only. |
 | Session | Workspace + learner | Immutable workspace ID/kind/user ID; existing and legacy-created activity is Personal. RLS implemented. |
 | SessionMetrics, SessionTranscript, SessionSegment, SessionTurn, SessionRecording | Inherited from Session | RLS through parent, immutable session links, same-session segment validation implemented. Recording files additionally need workspace/session/recording namespaces. |
 | Preparation, InterviewPreparation, PreparationStage, InterviewQuestion, StageReflection | Workspace + learner through Preparation | Pending. Add root workspace ownership; round/stage/journey consistency; scope every list and transition. |
@@ -47,8 +48,9 @@ not permission to reuse a user-only query. Shared login identity never implies s
   and role checks. A hidden sidebar is not authorization. Pending.
 - Browser recovery journals, IndexedDB, local/session storage, query caches and audio blobs need workspace
   keys. A workspace switch must not resume a Personal recording or reuse another workspace's transcript. Pending.
-- Workspace invitations will reuse Claude's invitation service with workspace/role-bound atomic acceptance.
-  Its new invitation model is intentionally absent from this branch until integration.
+- Workspace invitations reuse the integrated service. Tenant invitations and tokens stay out of platform
+  lists and the platform development mailbox. Google-only acceptance is locally tested with verified fixture
+  identities; live Google acceptance and production email delivery remain unverified.
 - Tenant limits are currently configuration. Enforce budgets, concurrency, retention and plan entitlements
   at the operation boundary before any organization practice launch.
 - Dedicated database routing is not provisioned: the current placement check refuses non-primary databases.

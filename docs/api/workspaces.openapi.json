@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "SpashtAI workspace foundation",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "description": "Local contract. Feature flag WORKSPACES_ENABLED defaults false. This is control-plane administration only, not tenant product readiness. Workspace JWTs cannot authorize legacy Personal/Admin APIs. Read-only own-session archive additionally requires WORKSPACE_SESSION_ARCHIVE_ENABLED. Organization practice creation remains disabled."
   },
   "servers": [
@@ -969,6 +969,230 @@
           }
         }
       }
+    },
+    "/api/workspaces/current/invitations": {
+      "get": {
+        "summary": "List/count only current organization invitations (20 per page)",
+        "description": "Active workspace Owner/Admin required. Admin may grant/manage LEARNER only; Owner may grant all workspace roles. No platform role changes. SMTP runs after commit. New identities respect paused public signups.",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "accepted",
+                "expired",
+                "revoked"
+              ]
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000,
+              "default": 1
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          },
+          "200": {
+            "description": "Workspace-only invitation or paginated items/counts. No acceptance token is returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Invite a verified Google identity to this workspace",
+        "description": "Active workspace Owner/Admin required. Admin may grant/manage LEARNER only; Owner may grant all workspace roles. No platform role changes. SMTP runs after commit. New identities respect paused public signups.",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          },
+          "200": {
+            "description": "Workspace-only invitation or paginated items/counts. No acceptance token is returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceInvitation"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Send budget exceeded (60 per identity per hour in production)"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceInvitationInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/current/invitations/{id}/resend": {
+      "post": {
+        "summary": "Resend with a new token and expiry",
+        "description": "Active workspace Owner/Admin required. Admin may grant/manage LEARNER only; Owner may grant all workspace roles. No platform role changes. SMTP runs after commit. New identities respect paused public signups.",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          },
+          "200": {
+            "description": "Workspace-only invitation or paginated items/counts. No acceptance token is returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceInvitation"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Send budget exceeded (60 per identity per hour in production)"
+          }
+        }
+      }
+    },
+    "/api/workspaces/current/invitations/{id}/revoke": {
+      "post": {
+        "summary": "Revoke a pending or expired invitation",
+        "description": "Active workspace Owner/Admin required. Admin may grant/manage LEARNER only; Owner may grant all workspace roles. No platform role changes. SMTP runs after commit. New identities respect paused public signups.",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          },
+          "200": {
+            "description": "Workspace-only invitation or paginated items/counts. No acceptance token is returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceInvitation"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1388,6 +1612,85 @@
           "messages",
           "updatedAt"
         ]
+      },
+      "WorkspaceInvitationInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 254
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "OWNER",
+              "ADMIN",
+              "LEARNER"
+            ],
+            "default": "LEARNER"
+          },
+          "memberFeatures": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "description": "Optional feature-catalog overrides constrained by workspace entitlements."
+          }
+        }
+      },
+      "WorkspaceInvitation": {
+        "type": "object",
+        "description": "Safe invitation fields only; excludes tokenHash, pendingKey and inviter identity.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "OWNER",
+              "ADMIN",
+              "LEARNER"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "accepted",
+              "expired",
+              "revoked"
+            ]
+          },
+          "deliveryStatus": {
+            "type": "string",
+            "enum": [
+              "SENDING",
+              "SENT",
+              "FAILED",
+              "DEV_CAPTURED"
+            ]
+          },
+          "memberFeatures": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          }
+        }
       }
     },
     "responses": {

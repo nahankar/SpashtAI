@@ -22,8 +22,8 @@ Base: `8e438a3`. No production changes or real invitations are part of this work
    safe path-based UI, short-lived workspace-only tokens, and two-tenant isolation checks.
 2. **Data plane:** classify all models; migrate each enabled product's records, raw SQL, media access,
    LiveKit/WebSocket paths, worker jobs, analytics, local recovery and caches to a verified tenant boundary.
-3. **Invitations:** integrate the completed invitation service from Claude's branch, recording target tenant,
-   role and member settings and creating membership atomically with acceptance. No duplicate mailer here.
+3. **Invitations (integrated, not deployed):** shared platform/workspace service, role/settings-bound atomic
+   membership acceptance, RLS, shared mailer and tenant UI. Live Google and SMTP verification remain pending.
 4. **Pilot:** owner and learners in two organizations plus Personal, real microphone/recording checks,
    then KLSVDIT onboarding once its Owner, logo, features and limits are supplied.
 
@@ -58,10 +58,10 @@ Later extraction must cover all data, queued work, object keys and rollback; a p
 
 ## Parallel work and integration
 
-Do not edit Claude's checkout, invitation files, email service, Google identity resolver or demo components.
-Shared App/index/schema/sidebar changes will require a normal reviewed merge. Membership invitation email
-is deliberately not implemented in a second service. Existing-user membership invitations in the foundation
-are visible in the signed-in workspace list, with no claim that an email was sent.
+Claude's checkout is unchanged. Its completed invitation branch through `81c393b` is merged into this
+separate tenancy branch. The shared invitation service now supports workspace invitations; no duplicate
+mailer or resolver exists. The Tenant Admin demo remains removed. See `INVITATIONS.md` for the API, policy
+and verified boundaries. Initial Owner setup still requires a verified existing account.
 
 ## Parked follow-ups
 

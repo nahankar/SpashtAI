@@ -249,7 +249,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
     }
     // Invitations hold the address and name, so they go with the account.
     const removedInvitations = await prisma.$transaction(async (tx) => {
-      const count = await deleteInvitationsForUser(tx, target)
+      const count = await deleteInvitationsForUser(tx, target, req.user!.userId)
       await tx.user.delete({ where: { id: target.id } })
       return count
     })

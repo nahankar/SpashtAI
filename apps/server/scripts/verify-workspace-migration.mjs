@@ -29,12 +29,16 @@ try {
   await db.user.create({ data: { id: 'preexisting-user', email: 'existing@example.test', emailVerified: true } })
   await db.$executeRaw`INSERT INTO "Session" (id,"userId",module) VALUES ('old-personal-session','preexisting-user','elevate')`
   await db.sessionTranscript.create({ data: { sessionId: 'old-personal-session', conversationData: { messages: [{ role: 'user', content: 'preserved answer' }] } } })
+  execute(resolve(root, 'apps/server/prisma/migrations/20261031100000_user_invitations/migration.sql'))
+  await db.$executeRaw`INSERT INTO "UserInvitation" (id,email,"pendingKey","tokenHash","expiresAt","invitedById","updatedAt") VALUES ('old-platform-invite','invite@example.test','invite@example.test','old-hash',CURRENT_TIMESTAMP+interval '7 days','preexisting-user',CURRENT_TIMESTAMP)`
   execute(migration)
   execute(resolve(root, 'apps/server/prisma/migrations/20261102120000_workspace_owner_deletion_guard/migration.sql'))
   // Also cover accounts created after the foundation but before this migration.
   await db.user.create({ data: { id: 'after-foundation', email: 'later@example.test' } })
   await db.$executeRaw`INSERT INTO "Session" (id,"userId",module) VALUES ('later-personal-session','after-foundation','elevate')`
   execute(resolve(root, 'apps/server/prisma/migrations/20261102140000_workspace_session_boundary/migration.sql'))
+  execute(resolve(root, 'apps/server/prisma/migrations/20261102160000_workspace_invitations/migration.sql'))
+  assert.equal((await db.userInvitation.findUniqueOrThrow({ where: { id: 'old-platform-invite' } })).workspaceId, null)
   const workspaces = await db.workspace.findMany({ where: { personalOwnerId: 'preexisting-user' } })
   assert.equal(workspaces.length, 1)
   assert.equal(workspaces[0].personalOwnerId, 'preexisting-user')
@@ -45,9 +49,9 @@ try {
   assert.equal(session.userId, 'preexisting-user'); assert.equal(session.workspaceId, workspaces[0].id); assert.equal(session.workspaceKind, 'PERSONAL')
   assert.equal((await db.workspace.findUniqueOrThrow({ where: { personalOwnerId: 'after-foundation' } })).kind, 'PERSONAL')
   assert.equal((await db.sessionTranscript.findUniqueOrThrow({ where: { sessionId: session.id } })).conversationData.messages[0].content, 'preserved answer')
-  const policies = await db.$queryRaw`SELECT count(*) AS count FROM pg_class WHERE relname IN ('Workspace','WorkspaceMember','WorkspaceFeature','WorkspaceMemberFeature','WorkspaceAudit','Session','SessionMetrics','SessionTranscript','SessionSegment','SessionTurn','SessionRecording') AND relrowsecurity AND relforcerowsecurity`
-  assert.equal(Number(policies[0].count), 11)
-  console.log('Upgrade/backfill passed: Personal ownership preserved; eleven workspace/session tables enforce RLS.')
+  const policies = await db.$queryRaw`SELECT count(*) AS count FROM pg_class WHERE relname IN ('Workspace','WorkspaceMember','WorkspaceFeature','WorkspaceMemberFeature','WorkspaceAudit','Session','SessionMetrics','SessionTranscript','SessionSegment','SessionTurn','SessionRecording','UserInvitation') AND relrowsecurity AND relforcerowsecurity`
+  assert.equal(Number(policies[0].count), 12)
+  console.log('Upgrade/backfill passed: Personal ownership preserved; twelve workspace/session/invitation tables enforce RLS.')
 } finally {
   await db?.$disconnect()
   await admin.$executeRawUnsafe(`DROP DATABASE IF EXISTS "${name}"`)

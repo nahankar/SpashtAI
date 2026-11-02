@@ -3,8 +3,8 @@ import express from 'express'
 import request from 'supertest'
 import { randomUUID } from 'crypto'
 const testDb = vi.hoisted(() => {
-  const url = process.env.BANK_TEST_DATABASE_URL
-  if (url && url !== 'postgresql://postgres@127.0.0.1:55441/simple_bank') throw new Error('Invitation tests use only the isolated simple_bank database')
+  const url = process.env.WORKSPACE_TEST_DATABASE_URL || process.env.BANK_TEST_DATABASE_URL
+  if (url && !['postgresql://postgres@127.0.0.1:55441/simple_bank', 'postgresql://postgres@127.0.0.1:55443/postgres'].includes(url)) throw new Error('Invitation tests use only the isolated simple_bank database')
   return { url }
 })
 // One pooled connection: any second connection acquisition inside an interactive transaction would wait for the

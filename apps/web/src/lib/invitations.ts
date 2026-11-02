@@ -1,8 +1,8 @@
 import { apiClient } from '@/lib/api-client'
 
 /**
- * Platform learner invitations (Admin). These calls are platform-wide: nothing here is tenant-scoped yet, so
- * once real tenancy exists every list, count and action must be restricted to the active tenant.
+ * Platform learner invitations (Admin), excluding organization invitation records.
+ * The workspace UI uses separate workspace-token endpoints.
  */
 
 export type InvitationStatus = 'pending' | 'accepted' | 'expired' | 'revoked'

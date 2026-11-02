@@ -1,6 +1,6 @@
 import rateLimit from 'express-rate-limit'
 import type { Request, RequestHandler } from 'express'
-import { verifyToken } from '../lib/jwt'
+import { verifyToken, verifyWorkspaceToken } from '../lib/jwt'
 
 const passthrough: RequestHandler = (_req, _res, next) => next()
 
@@ -80,3 +80,13 @@ export const invitationAcceptLimiter = authRateLimitDisabled
       standardHeaders: true,
       legacyHeaders: false,
     })
+
+/** Workspace sends share a per-identity budget across all their workspaces. */
+export const workspaceInvitationSendLimiter = authRateLimitDisabled ? passthrough : rateLimit({
+  windowMs: 60 * 60 * 1000, max: 60,
+  keyGenerator: req => {
+    try { return `workspace-invite:${verifyWorkspaceToken(req.headers.authorization?.slice(7) || '').userId}` }
+    catch { return 'workspace-invite:unauthenticated' }
+  },
+  message: { error: 'Too many invitations sent, please try again later' }, standardHeaders: true, legacyHeaders: false,
+})

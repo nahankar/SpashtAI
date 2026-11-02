@@ -1,3 +1,4 @@
+import { reservedWorkspaceSeats } from './invitations'
 import { z } from 'zod'
 import type { Workspace } from '@prisma/client'
 import { Prisma } from '@prisma/client'
@@ -99,7 +100,7 @@ export function updatePlatformWorkspace(actorId: string, workspaceId: string, in
     await tx.$queryRaw`SELECT id FROM "Workspace" WHERE id=${workspaceId} FOR UPDATE`
     const { limits, ...settings } = body
     if (limits) {
-      const seats = await tx.workspaceMember.count({ where: { workspaceId, state: { not: 'SUSPENDED' } } })
+      const seats = await reservedWorkspaceSeats(tx, workspaceId)
       if (limits.maxMembers < seats) throw new WorkspaceError(409, 'SEAT_LIMIT_BELOW_MEMBERS', 'The seat limit cannot be lower than current members and invitations')
     }
     const row = await tx.workspace.update({ where: { id: workspaceId }, data: { ...settings, ...limits } })
@@ -134,7 +135,7 @@ export async function workspaceSnapshot(tx: WorkspaceTx, scope: Awaited<ReturnTy
     suspended: await tx.workspaceMember.count({ where: { workspaceId: workspace.id, state: 'SUSPENDED' } }),
   }
   return { workspace: presentWorkspace(workspace), membership: { id: member.id, role: member.role, state: member.state },
-    counts, features, notice: WORKSPACE_INTEGRATION_NOTICE, emailInvitationsReady: false }
+    counts, features, notice: WORKSPACE_INTEGRATION_NOTICE, emailInvitationsReady: true }
 }
 
 export async function listWorkspaceMembers(tx: WorkspaceTx, scope: Awaited<ReturnType<typeof establishWorkspace>>) {
@@ -195,7 +196,7 @@ export async function changeWorkspaceMember(tx: WorkspaceTx, scope: Awaited<Retu
     }
   }
   if (target.state === 'SUSPENDED' && body.state === 'ACTIVE') {
-    if (await tx.workspaceMember.count({ where: { workspaceId: scope.workspace.id, state: { not: 'SUSPENDED' } } }) >= scope.workspace.maxMembers) {
+    if (await reservedWorkspaceSeats(tx, scope.workspace.id) >= scope.workspace.maxMembers) {
       throw new WorkspaceError(409, 'SEAT_LIMIT', 'This workspace has no available seats')
     }
     if (!target.acceptedAt) throw new WorkspaceError(409, 'MEMBER_ACCEPTANCE_REQUIRED', 'An unaccepted invitation cannot be activated by an administrator')
@@ -231,7 +232,7 @@ export async function addExistingMember(tx: WorkspaceTx, scope: Awaited<ReturnTy
   const body = z.object({ email: z.string().trim().toLowerCase().email().max(254), role: z.enum(['OWNER', 'ADMIN', 'LEARNER']) }).strict().parse(input)
   requireWorkspaceManager(scope)
   if (body.role !== 'LEARNER' && scope.member.role !== 'OWNER') throw new WorkspaceError(403, 'OWNER_REQUIRED', 'Only an Owner may add administrators')
-  const seats = await tx.workspaceMember.count({ where: { workspaceId: scope.workspace.id, state: { not: 'SUSPENDED' } } })
+  const seats = await reservedWorkspaceSeats(tx, scope.workspace.id)
   if (seats >= scope.workspace.maxMembers) throw new WorkspaceError(409, 'SEAT_LIMIT', 'This workspace has no available seats')
   const user = await tx.user.findFirst({ where: { email: { equals: body.email, mode: 'insensitive' }, emailVerified: true }, select: { id: true } })
   if (!user) throw new WorkspaceError(409, 'VERIFIED_ACCOUNT_REQUIRED', 'This address needs a verified SpashtAI account first. Email invitations are not connected yet.')
