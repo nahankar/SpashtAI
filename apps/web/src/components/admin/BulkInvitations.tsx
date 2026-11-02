@@ -1,8 +1,9 @@
+import { RecipientExperiencePreview, type PreviewProps } from '@/workspaces/RecipientExperiencePreview'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 export interface BatchResult { results: Array<{ email: string; ok: boolean; error?: string; invitation?: { deliveryStatus: string } }> }
 const inputClass = 'w-full min-w-0 rounded border px-3 py-2 bg-background'
-export function BulkInvitations({ send, emailContent, workspace = false }: { send: (body: { emails: string[]; emailContent: { subject: string; message: string }; confirmExistingUser?: boolean }) => Promise<BatchResult>; emailContent?: { subject: string; message: string }; workspace?: boolean }) {
+export function BulkInvitations({ send, emailContent, workspace = false, preview, fields, workspaceName }: { send: (body: { emails: string[]; emailContent: { subject: string; message: string }; confirmExistingUser?: boolean }) => Promise<BatchResult>; emailContent?: { subject: string; message: string }; workspace?: boolean; preview?: PreviewProps['onEmailPreview']; fields?: PreviewProps['fields']; workspaceName?: string }) {
   const [emails, setEmails] = useState(''), [subject, setSubject] = useState(emailContent?.subject || ''), [message, setMessage] = useState(emailContent?.message || '')
   const [confirm, setConfirm] = useState(false), [existing, setExisting] = useState(false), [busy, setBusy] = useState(false)
   const [error, setError] = useState(''), [result, setResult] = useState<BatchResult | null>(null)
@@ -21,6 +22,7 @@ export function BulkInvitations({ send, emailContent, workspace = false }: { sen
       <label className="block">Email message (optional)<textarea className={inputClass} rows={4} maxLength={5000} value={message} onChange={e => setMessage(e.target.value)} /></label>
       <p className="text-sm">The acceptance link, expiry and sign-in instructions are always included. Up to 20 recipients per batch and 60 invitation attempts per hour.</p>
       {!workspace && <label className="flex gap-2"><input type="checkbox" checked={existing} onChange={e => setExisting(e.target.checked)} />Also send to existing accounts (their data and permissions stay unchanged)</label>}
+      {preview && <RecipientExperiencePreview key={JSON.stringify({ subject, message, fields })} workspaceName={workspaceName} fields={fields} emailContent={{ subject, message }} onEmailPreview={preview} />}
       <Button type="submit">Review batch</Button></fieldset>
     </form>
     {confirm && <div className="rounded border p-3 my-3 space-y-3" role="dialog" aria-label="Confirm bulk invitations"><p>Send invitation emails to these {addresses.length} recipients? If email delivery fails, their invitations remain saved for resending.</p><ul className="break-all">{addresses.map(a => <li key={a}>{a}</li>)}</ul><p className="font-semibold">{subject || 'Default invitation subject'}</p><p className="whitespace-pre-wrap">{message || 'Default invitation message'}</p><Button disabled={busy} onClick={submit}>{busy ? 'Processing batch…' : 'Confirm and send invitations'}</Button><Button variant="outline" disabled={busy} onClick={() => setConfirm(false)}>Cancel</Button></div>}

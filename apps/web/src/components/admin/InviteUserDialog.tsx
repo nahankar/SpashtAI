@@ -1,3 +1,5 @@
+import { RecipientExperiencePreview } from '@/workspaces/RecipientExperiencePreview'
+import { apiClient } from '@/lib/api-client'
 import { useEffect, useState } from 'react'
 import { Loader2, MailPlus } from 'lucide-react'
 import { toast } from 'sonner'
@@ -108,6 +110,7 @@ export function InviteUserDialog({
             </div>
             <label className="block text-sm">Email subject (optional)<Input maxLength={150} value={subject} onChange={e => setSubject(e.target.value)} /></label>
             <label className="block text-sm">Email message (optional)<textarea className="w-full rounded border p-2" rows={4} maxLength={5000} value={message} onChange={e => setMessage(e.target.value)} /></label>
+            <RecipientExperiencePreview key={JSON.stringify({ subject, message, name })} emailContent={{ subject, message }} onEmailPreview={body => apiClient('/api/admin/invitations/preview', { method: 'POST', body: JSON.stringify({ ...body, name }) })} />
             <p className="text-xs text-muted-foreground">The acceptance link, expiry and sign-in instructions are always included.</p>
             <p className="text-xs text-muted-foreground">
               The recipient signs in with Google using this address, so it must be a Google Account (Gmail, Google Workspace, or

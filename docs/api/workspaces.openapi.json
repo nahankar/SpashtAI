@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "SpashtAI workspace foundation",
-    "version": "0.4.0",
+    "version": "0.5.0",
     "description": "Local contract. Feature flag WORKSPACES_ENABLED defaults false. This is control-plane administration only, not tenant product readiness. Workspace JWTs cannot authorize legacy Personal/Admin APIs. Read-only own-session archive additionally requires WORKSPACE_SESSION_ARCHIVE_ENABLED. Organization practice creation remains disabled."
   },
   "servers": [
@@ -1473,6 +1473,260 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/workspaces/current/invitations/preview": {
+      "post": {
+        "summary": "Preview invitation email without sending or saving",
+        "description": "See docs/WORKSPACE-SIGNUP-AND-INVITATIONS.md. Preview uses an inactive link and no delivery/token side effects. Owner email requires explicit operator confirmation; production uses SMTP.",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          },
+          "200": {
+            "description": "Workspace-only invitation or paginated items/counts. No acceptance token is returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceInvitation"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Send budget exceeded (60 per identity per hour in production)"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              },
+              "example": {
+                "emailContent": {
+                  "subject": "Welcome",
+                  "message": "Please join our workspace."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/workspaces/{workspaceId}/invitations/preview": {
+      "post": {
+        "summary": "Preview organization invitation email (platform Admin)",
+        "description": "See docs/WORKSPACE-SIGNUP-AND-INVITATIONS.md. Preview uses an inactive link and no delivery/token side effects. Owner email requires explicit operator confirmation; production uses SMTP.",
+        "security": [
+          {
+            "identity": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          },
+          "200": {
+            "description": "Workspace-only invitation or paginated items/counts. No acceptance token is returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceInvitation"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Send budget exceeded (60 per identity per hour in production)"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              },
+              "example": {
+                "emailContent": {
+                  "subject": "Welcome",
+                  "message": "Please join our workspace."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/invitations/preview": {
+      "post": {
+        "summary": "Preview platform learner invitation email",
+        "description": "See docs/WORKSPACE-SIGNUP-AND-INVITATIONS.md. Preview uses an inactive link and no delivery/token side effects. Owner email requires explicit operator confirmation; production uses SMTP.",
+        "security": [
+          {
+            "identity": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          },
+          "200": {
+            "description": "Workspace-only invitation or paginated items/counts. No acceptance token is returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceInvitation"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Send budget exceeded (60 per identity per hour in production)"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              },
+              "example": {
+                "emailContent": {
+                  "subject": "Welcome",
+                  "message": "Please join our workspace."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/workspaces/{workspaceId}/owners/{membershipId}/send-access": {
+      "post": {
+        "summary": "Send instructions to an already-assigned Owner; no access grant",
+        "description": "See docs/WORKSPACE-SIGNUP-AND-INVITATIONS.md. Preview uses an inactive link and no delivery/token side effects. Owner email requires explicit operator confirmation; production uses SMTP.",
+        "security": [
+          {
+            "identity": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "membershipId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          },
+          "200": {
+            "description": "Workspace-only invitation or paginated items/counts. No acceptance token is returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceInvitation"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Send budget exceeded (60 per identity per hour in production)"
           }
         }
       }

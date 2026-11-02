@@ -57,22 +57,24 @@ export function ProfileDetailsRow({
   onGenderChange,
   pincode,
   onPincodeChange,
+  idPrefix = '',
 }: {
   dateOfBirth: string
   onDateOfBirthChange: (v: string) => void
   gender: ProfileGender
   onGenderChange: (g: 'MALE' | 'FEMALE') => void
+  idPrefix?: string
   pincode: string
   onPincodeChange: (v: string) => void
 }) {
   return (
     <div className="grid grid-cols-3 gap-2 items-end">
       <div className="min-w-0 space-y-1.5">
-        <Label htmlFor="dob" className="text-xs">
+        <Label htmlFor={`${idPrefix}dob`} className="text-xs">
           Date of birth
         </Label>
         <Input
-          id="dob"
+          id={`${idPrefix}dob`}
           type="date"
           value={dateOfBirth}
           onChange={(e) => onDateOfBirthChange(e.target.value)}
@@ -85,11 +87,11 @@ export function ProfileDetailsRow({
         <GenderSelect value={gender} onChange={onGenderChange} compact />
       </div>
       <div className="min-w-0 space-y-1.5">
-        <Label htmlFor="pincode" className="text-xs">
+        <Label htmlFor={`${idPrefix}pincode`} className="text-xs">
           Pincode
         </Label>
         <Input
-          id="pincode"
+          id={`${idPrefix}pincode`}
           placeholder="110001"
           value={pincode}
           onChange={(e) => onPincodeChange(e.target.value.toUpperCase())}

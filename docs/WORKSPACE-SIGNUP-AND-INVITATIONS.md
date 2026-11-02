@@ -27,8 +27,22 @@ Platform batches can optionally include existing accounts with an explicit check
 
 ## Release validation
 
-- Full server suite with isolated tenancy database: 685 passed, 124 optional skipped.
-- Web suite: 335 passed.
+- Full server suite with isolated tenancy database: 687 passed, 124 optional skipped.
+- Web suite: 338 passed.
 - Web typecheck, server build, changed UI lint, migration upgrade/backfill verification passed.
 - Local browser: saved required Department dropdown and custom email; two-recipient batch displayed two development-capture results and updated the invitation list. No real emails sent by the checks.
 - Real Google authentication remains a human test; the database tests use verified synthetic identity fixtures.
+
+## Recipient previews and first Owner handoff
+
+Open **Preview recipient experience** in the workspace settings editor, a single invitation, or a bulk invitation. **Invitation email → Generate email preview** renders the server's actual email template, including the edited subject/message, Google sign-in instructions and footer. The recipient and expiry are samples; the acceptance link is an inactive fragment. No token, invitation or email is created. The HTML is displayed in an iframe sandbox without scripts, forms, same-origin access or top-level navigation. The plain-text MIME version is also available.
+
+**Signup fields** shows the same custom field renderer as invitation acceptance, followed by the normal phone/date-of-birth/gender/pincode controls. All preview controls are disabled. It explicitly shows that custom details precede Google acceptance and that already-complete regular profiles skip step 2. Unsaved form/email edits can be previewed; preview does not save them.
+
+Creating a workspace assigns an **INVITED Owner** membership to an existing verified account, but sends no email automatically. In **Admin → Workspaces → select organization → Workspace Owner access**, the platform Admin now sees each assigned Owner's email and state, the full workspace login URL, and copyable access instructions. **Send access email** requires an explicit recipient confirmation. It sends only to an already-assigned, verified, active/pending Owner of that workspace. It cannot assign a role, change permissions, or enroll a different person. Development mode sends nothing. Request and outcome are audited without copying the email address or message into metadata; a post-send audit failure cannot turn an SMTP success into a reported send failure.
+
+For the existing KLSVDIT organization, share `https://spasht.ai/w/klsvdit` with the assigned Owner shown in this panel. The Owner signs in using the Google Account for the assigned email and selects **Accept invitation** if their membership is pending. There is no tenant password. They can then invite other people, choosing **Admin** for another workspace administrator or **Learner** for users. Workspace administrators work at `/w/klsvdit`; `/admin` remains the platform Admin panel. Someone who is not assigned membership cannot gain access just by knowing the URL. No real Owner email is sent during release verification.
+
+This remains workspace administration only: organization practices and analytics are not enabled. The initial Owner must already have a verified SpashtAI account; for a new person, send a platform invitation first and create the workspace after they have completed it.
+
+Preview/Owner handoff verification on 3 November 2026: the local browser rendered the real invitation template and disabled signup controls, and displayed the pending Owner identity/link with an explicit send confirmation. The development send path truthfully reported no email sent. The invitation database suite passed an additional injected post-send audit failure while preserving the SMTP-success result.

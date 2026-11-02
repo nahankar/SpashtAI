@@ -72,9 +72,9 @@ export function acceptWorkspaceMembership(userId: string, slug: string) {
 export function listPlatformWorkspaces(actorId: string) {
   return withPlatformWorkspaceAdmin(actorId, async tx => {
     const rows = await tx.workspace.findMany({ where: { kind: 'ORGANIZATION' }, orderBy: { createdAt: 'desc' }, take: 100,
-      include: { _count: { select: { members: { where: { state: { not: 'SUSPENDED' } } } } }, features: true } })
+      include: { _count: { select: { members: { where: { state: { not: 'SUSPENDED' } } } } }, features: true, members: { where: { role: 'OWNER' }, select: { id: true, state: true, user: { select: { email: true } } } } } })
     return rows.map(row => ({ ...presentWorkspace(row), members: row._count.members, features: row.features,
-      createdAt: row.createdAt }))
+      createdAt: row.createdAt, owners: row.members.map(m => ({ id: m.id, email: m.user.email, state: m.state })) }))
   })
 }
 
@@ -82,7 +82,7 @@ export function createOrganization(actorId: string, input: unknown) {
   const body = createWorkspaceSchema.parse(input)
   return withPlatformWorkspaceAdmin(actorId, async tx => {
     const owner = await tx.user.findFirst({ where: { email: { equals: body.ownerEmail, mode: 'insensitive' }, emailVerified: true }, select: { id: true } })
-    if (!owner) throw new WorkspaceError(409, 'OWNER_ACCOUNT_REQUIRED', 'The initial Owner needs a verified SpashtAI account. Email invitation integration is a separate checkpoint.')
+    if (!owner) throw new WorkspaceError(409, 'OWNER_ACCOUNT_REQUIRED', 'The initial Owner needs a verified SpashtAI account. Invite them to SpashtAI first, then create the workspace.')
     const branding = brandingSchema.parse({ name: body.name, logoDataUrl: body.logoDataUrl, accentColor: body.accentColor, timeZone: body.timeZone })
     const limits = body.limits
     const row = await tx.workspace.create({ data: { ...branding, name: body.name, slug: body.slug, ...limits, kind: 'ORGANIZATION', isolationStage: 'FOUNDATION_ONLY',

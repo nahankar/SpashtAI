@@ -1,3 +1,5 @@
+import { invitationPreview } from '../../workspaces/invitationPreview'
+import { ZodError } from 'zod'
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod'
 import { batchEmailsSchema, runInvitationBatch } from '../../lib/invitationBatch'
@@ -32,6 +34,7 @@ const listQuery = z.object({
 function handle(fn: (req: Request, res: Response) => Promise<void>) {
   return (req: Request, res: Response, next: NextFunction) => {
     fn(req, res).catch((err) => {
+      if (err instanceof ZodError) { res.status(400).json({ error: 'invalid_preview', message: 'Check the email subject and message.' }); return }
       if (err instanceof WorkspaceError) { res.status(err.status).json({ error: err.code, message: err.message }); return }
       if (err instanceof InvitationError) {
         res.status(err.status).json({ error: err.code, code: err.code, message: err.message, ...err.details })
@@ -72,6 +75,8 @@ router.get('/dev-mailbox', (_req, res) => {
   }
   res.json({ developmentOnly: true, messages: capturedInvitationEmails() })
 })
+
+router.post('/preview', handle(async (req, res) => { res.json(invitationPreview(undefined, req.body)) }))
 
 router.post('/', invitationSendLimiter, handle(async (req, res) => {
   const parsed = invitationInputSchema.safeParse(req.body ?? {})

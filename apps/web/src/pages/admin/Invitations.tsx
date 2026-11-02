@@ -124,7 +124,7 @@ export function Invitations() {
       </div>
 
       <EmailSetupNotice config={config} />
-      <BulkInvitations send={async body => { const result = await apiClient<BatchResult>('/api/admin/invitations/bulk', { method: 'POST', body: JSON.stringify(body) }); refresh(); return result }} />
+      <BulkInvitations preview={body => apiClient('/api/admin/invitations/preview', { method: 'POST', body: JSON.stringify(body) })} send={async body => { const result = await apiClient<BatchResult>('/api/admin/invitations/bulk', { method: 'POST', body: JSON.stringify(body) }); refresh(); return result }} />
 
       <div className="flex flex-wrap items-center gap-2">
         {filters.map((f) => (

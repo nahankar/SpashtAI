@@ -8,6 +8,8 @@ vi.mock('../src/lib/prisma', async () => {
   const { PrismaClient } = await import('@prisma/client')
   return { prisma: new PrismaClient({ datasourceUrl: 'postgresql://tenancy_test_app@127.0.0.1:55443/postgres' }) }
 })
+const delivery = vi.hoisted(() => ({ sendEmail: vi.fn().mockResolvedValue({ sent: true }) }))
+vi.mock('../src/lib/email', () => ({ sendEmail: delivery.sendEmail }))
 const state = vi.hoisted(() => ({ paused: false }))
 vi.mock('../src/lib/platformSettings', () => ({ areSignupsPaused: async () => state.paused, getSignupsPausedMessage: async () => 'Signups paused', areRewardPointsEnabled: async () => false }))
 vi.mock('../src/lib/google-auth', () => ({ verifyGoogleIdToken: async (credential: string) => {
@@ -248,6 +250,60 @@ suite('workspace email invitation boundaries with a restricted runtime role', ()
     const platformBatch = await request(app).post('/api/admin/invitations/bulk').set(bearer(platformToken)).send({ emails: [addr('platform-bulk')], emailContent: { subject: 'Platform welcome', message: '<b>plain text</b>' } })
     expect(platformBatch.status).toBe(200); expect(platformBatch.body.results[0].ok).toBe(true)
     expect(captured().find(m => m.to === addr('platform-bulk'))?.subject).toBe('Platform welcome')
+  })
+
+  it('previews the exact email template without writing invitations or sending mail', async () => {
+    const before = await admin.userInvitation.count({ where: { workspaceId: alpha } })
+    delivery.sendEmail.mockClear()
+    const body = { emailContent: { subject: 'Preview subject', message: '<script>plain text only</script>' } }
+    const preview = await request(app).post(`${base}/preview`).set(bearer(tokenA)).send(body)
+    expect(preview.status).toBe(200); expect(preview.body.previewOnly).toBe(true)
+    expect(preview.body.subject).toBe('Preview subject'); expect(preview.body.html).toContain('&lt;script&gt;')
+    expect(preview.body.html).not.toContain('<script>'); expect(preview.body.html).toContain('href="#preview-only"')
+    expect(JSON.stringify(preview.body)).not.toContain('token=')
+    expect((await request(app).post(`${base}/preview`).set(bearer(tokenLearner)).send(body)).status).toBe(403)
+    expect((await request(app).post(`/api/admin/workspaces/${alpha}/invitations/preview`).set(bearer(platformToken)).send(body)).status).toBe(200)
+    expect((await request(app).post('/api/admin/invitations/preview').set(bearer(platformToken)).send(body)).status).toBe(200)
+    expect((await request(app).post(`${base}/preview`).set(bearer(tokenA)).send({ emailContent: { subject: 'bad\r\nsubject' } })).status).toBe(400)
+    expect(await admin.userInvitation.count({ where: { workspaceId: alpha } })).toBe(before)
+    expect(delivery.sendEmail).not.toHaveBeenCalled()
+  })
+  it('hands off only an already-assigned Owner; never grants access or lets tenant tokens email owners', async () => {
+    const list = await request(app).get('/api/admin/workspaces').set(bearer(platformToken))
+    const row = list.body.find((w: { id: string }) => w.id === alpha)
+    expect(row.owners.some((m: { email: string }) => m.email === addr('owner'))).toBe(true)
+    const membership = await admin.workspaceMember.findUniqueOrThrow({ where: { workspaceId_userId: { workspaceId: alpha, userId: owner } } })
+    const url = `/api/admin/workspaces/${alpha}/owners/${membership.id}/send-access`
+    const previous = process.env.INVITATION_EMAIL_DELIVERY
+    const previousBase = process.env.FRONTEND_URL
+    process.env.INVITATION_EMAIL_DELIVERY = 'smtp'; process.env.FRONTEND_URL = 'https://example.invalid'
+    delivery.sendEmail.mockClear()
+    try {
+      expect((await request(app).post(url).set(bearer(tokenA))).status).toBe(401)
+      expect((await request(app).post(`/api/admin/workspaces/${beta}/owners/${membership.id}/send-access`).set(bearer(platformToken))).status).toBe(404)
+      const sent = await request(app).post(url).set(bearer(platformToken))
+      expect(sent.status).toBe(200); expect(sent.body.deliveryStatus).toBe('SENT')
+      expect(delivery.sendEmail).toHaveBeenCalledTimes(1)
+      expect(delivery.sendEmail.mock.calls[0][0]).toMatchObject({ to: addr('owner'), logBody: false })
+      expect(delivery.sendEmail.mock.calls[0][0].text).toContain(`/w/${tag}-alpha`)
+      expect(await admin.workspaceMember.findUnique({ where: { id: membership.id } })).toMatchObject({ role: membership.role, state: membership.state })
+      delivery.sendEmail.mockResolvedValueOnce({ sent: false })
+      expect((await request(app).post(url).set(bearer(platformToken))).body.deliveryStatus).toBe('NOT_SENT')
+      const functionName = 'owner_email_' + tag.replaceAll('-', '_')
+      await admin.$executeRawUnsafe(`CREATE FUNCTION public.${functionName}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW."workspaceId"='${alpha}' AND NEW.action='owner_access_email_result' THEN RAISE EXCEPTION 'fixture result audit unavailable'; END IF; RETURN NEW; END $$`)
+      await admin.$executeRawUnsafe(`CREATE TRIGGER ${functionName} BEFORE INSERT ON "WorkspaceAudit" FOR EACH ROW EXECUTE FUNCTION public.${functionName}()`)
+      try { expect((await request(app).post(url).set(bearer(platformToken))).body.deliveryStatus).toBe('SENT') }
+      finally {
+        await admin.$executeRawUnsafe(`DROP TRIGGER ${functionName} ON "WorkspaceAudit"`)
+        await admin.$executeRawUnsafe(`DROP FUNCTION public.${functionName}()`)
+      }
+
+      const nonOwner = await admin.workspaceMember.findUniqueOrThrow({ where: { workspaceId_userId: { workspaceId: alpha, userId: manager } } })
+      expect((await request(app).post(`/api/admin/workspaces/${alpha}/owners/${nonOwner.id}/send-access`).set(bearer(platformToken))).status).toBe(404)
+    } finally {
+      if (previous === undefined) delete process.env.INVITATION_EMAIL_DELIVERY; else process.env.INVITATION_EMAIL_DELIVERY = previous
+      if (previousBase === undefined) delete process.env.FRONTEND_URL; else process.env.FRONTEND_URL = previousBase
+    }
   })
 
 })

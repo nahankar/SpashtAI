@@ -1,3 +1,6 @@
+import { invitationPreview } from './invitationPreview'
+import { sendOwnerAccess } from './ownerAccess'
+import { invitationSendLimiter } from '../middleware/rate-limit'
 import * as invitations from './invitations'
 import { saveManagedEnrollment, saveEnrollmentSettings } from './enrollment'
 import { withPlatformWorkspaceAdmin } from './context'
@@ -11,7 +14,7 @@ import { requireAuth } from '../middleware/auth'
 import { assertWorkspaceDatabaseSafety } from './databaseSafety'
 import { verifyWorkspaceToken } from '../lib/jwt'
 import { idSchema, WorkspaceError, workspacesEnabled } from './contracts'
-import { withWorkspaceAccess } from './context'
+import { withWorkspaceAccess, requireWorkspaceManager } from './context'
 import * as service from './service'
 
 export const workspaceRouter = Router()
@@ -51,6 +54,10 @@ function scoped(handler: (tx: Parameters<Parameters<typeof withWorkspaceAccess>[
     return withWorkspaceAccess(claims, (tx, scope) => handler(tx, scope, req))
   })
 }
+workspaceRouter.post('/current/invitations/preview', scoped(async (_tx, scope, req) => {
+  requireWorkspaceManager(scope)
+  return invitationPreview(scope.workspace.name, req.body)
+}))
 workspaceRouter.put('/current/enrollment', scoped((tx, scope, req) => saveManagedEnrollment(tx, scope, req.body)))
 workspaceRouter.post('/current/invitations/bulk', workspaceInvitationSendLimiter, route(req => invitations.createWorkspaceInvitationBatch(workspaceClaims(req), req.body)))
 workspaceRouter.get('/current/invitations', scoped((tx, scope, req) => invitations.listWorkspaceInvitations(tx, scope, req.query)))
@@ -69,6 +76,12 @@ workspaceRouter.put('/current/features/:feature', scoped((tx, scope, req) => ser
 workspaceRouter.patch('/current/members/:memberId', scoped((tx, scope, req) => service.changeWorkspaceMember(tx, scope, idSchema.parse(req.params.memberId), req.body)))
 workspaceRouter.put('/current/members/:memberId/features/:feature', scoped((tx, scope, req) => service.configureMemberFeature(tx, scope, idSchema.parse(req.params.memberId), String(req.params.feature), req.body)))
 platformWorkspacesRouter.put('/:workspaceId/enrollment', route(req => withPlatformWorkspaceAdmin(req.user!.userId, tx => saveEnrollmentSettings(tx, idSchema.parse(req.params.workspaceId), req.user!.userId, req.body))))
+platformWorkspacesRouter.post('/:workspaceId/invitations/preview', route(req => withPlatformWorkspaceAdmin(req.user!.userId, async tx => {
+  const workspace = await tx.workspace.findUnique({ where: { id: idSchema.parse(req.params.workspaceId), kind: 'ORGANIZATION' } })
+  if (!workspace) throw new WorkspaceError(404, 'WORKSPACE_NOT_FOUND', 'Workspace not found')
+  return invitationPreview(workspace.name, req.body)
+})))
+platformWorkspacesRouter.post('/:workspaceId/owners/:membershipId/send-access', invitationSendLimiter, route(req => sendOwnerAccess(req.user!.userId, idSchema.parse(req.params.workspaceId), idSchema.parse(req.params.membershipId))))
 platformWorkspacesRouter.get('/', route(req => service.listPlatformWorkspaces(req.user!.userId)))
 platformWorkspacesRouter.post('/', route(req => service.createOrganization(req.user!.userId, req.body)))
 platformWorkspacesRouter.patch('/:workspaceId', route(req => service.updatePlatformWorkspace(req.user!.userId, idSchema.parse(req.params.workspaceId), req.body)))

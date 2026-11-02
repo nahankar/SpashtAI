@@ -1,22 +1,11 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
-export interface EnrollmentField { id: string; type: 'text' | 'dropdown' | 'radio' | 'checkbox' | 'message'; label: string; required: boolean; options: string[] }
-export interface EnrollmentSettings { fields: EnrollmentField[]; email: { subject: string; message: string } }
-export type EnrollmentResponses = Record<string, string | string[]>
+import { RecipientExperiencePreview, type EmailPreview } from './RecipientExperiencePreview'
+import type { EnrollmentField, EnrollmentSettings } from './EnrollmentFields'
+export { EnrollmentFields } from './EnrollmentFields'
+export type { EnrollmentField, EnrollmentSettings, EnrollmentResponses } from './EnrollmentFields'
 const inputClass = 'w-full min-w-0 rounded-md border px-3 py-2 bg-background'
-export function EnrollmentFields({ fields, values, onChange }: { fields: EnrollmentField[]; values: EnrollmentResponses; onChange: (v: EnrollmentResponses) => void }) {
-  return <div className="space-y-4">{fields.map(f => {
-    const value = values[f.id]
-    const title = `${f.label}${f.required ? ' *' : ''}`
-    const set = (v: string | string[]) => onChange({ ...values, [f.id]: v })
-    if (f.type === 'message') return <p key={f.id} className="whitespace-pre-wrap rounded bg-muted p-3">{f.label}</p>
-    if (f.type === 'text') return <label className="block" key={f.id}>{title}<input className={inputClass} required={f.required} maxLength={1000} value={typeof value === 'string' ? value : ''} onChange={e => set(e.target.value)} /></label>
-    if (f.type === 'dropdown') return <label className="block" key={f.id}>{title}<select className={inputClass} required={f.required} value={typeof value === 'string' ? value : ''} onChange={e => set(e.target.value)}><option value="">Choose…</option>{f.options.map(o => <option key={o}>{o}</option>)}</select></label>
-    const checked = Array.isArray(value) ? value : []
-    return <fieldset key={f.id} className="space-y-2"><legend>{title}</legend>{f.options.map((o, i) => <label className="flex gap-2 items-center" key={o}><input type={f.type === 'radio' ? 'radio' : 'checkbox'} name={`enrollment-${f.id}`} required={f.required && (f.type === 'radio' || (!checked.length && i === 0))} checked={f.type === 'radio' ? value === o : checked.includes(o)} onChange={e => set(f.type === 'radio' ? o : e.target.checked ? [...checked, o] : checked.filter(v => v !== o))} />{o}</label>)}</fieldset>
-  })}</div>
-}
-export function EnrollmentSettingsEditor({ settings, onSave, busy }: { settings?: EnrollmentSettings; onSave: (v: EnrollmentSettings) => void; busy: boolean }) {
+export function EnrollmentSettingsEditor({ settings, onSave, busy, workspaceName, onEmailPreview }: { settings?: EnrollmentSettings; onSave: (v: EnrollmentSettings) => void; busy: boolean; workspaceName?: string; onEmailPreview?: (body: { emailContent: EnrollmentSettings['email'] }) => Promise<EmailPreview> }) {
   const [draft, setDraft] = useState<EnrollmentSettings>(settings ?? { fields: [], email: { subject: '', message: '' } })
   const update = (id: string, change: Partial<EnrollmentField>) => setDraft(d => ({ ...d, fields: d.fields.map(f => f.id === id ? { ...f, ...change } : f) }))
   return <form className="rounded-lg border p-5 space-y-4" onSubmit={e => { e.preventDefault(); onSave(draft) }}>
@@ -34,7 +23,7 @@ export function EnrollmentSettingsEditor({ settings, onSave, busy }: { settings?
     <label className="block">Invitation subject (optional)<input className={inputClass} maxLength={150} value={draft.email.subject} onChange={e => setDraft(d => ({ ...d, email: { ...d.email, subject: e.target.value } }))} /></label>
     <label className="block">Invitation message (optional)<textarea rows={5} className={inputClass} maxLength={5000} value={draft.email.message} onChange={e => setDraft(d => ({ ...d, email: { ...d.email, message: e.target.value } }))} /></label>
     <p>Plain text only. The workspace identity, acceptance link, expiry and sign-in instructions are always included.</p>
-    <details><summary>Message preview</summary><div className="whitespace-pre-wrap border rounded p-3"><strong>{draft.email.subject || 'Default invitation subject'}</strong><p>{draft.email.message || 'Default invitation message'}</p><p>[Accept invitation link and sign-in instructions]</p></div></details>
+    {onEmailPreview && <RecipientExperiencePreview key={JSON.stringify(draft)} workspaceName={workspaceName} fields={draft.fields} emailContent={draft.email} onEmailPreview={onEmailPreview} />}
     <Button disabled={busy}>Save signup and email settings</Button>
   </form>
 }
