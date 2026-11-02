@@ -4,7 +4,7 @@ import { invitationSendLimiter } from '../middleware/rate-limit'
 import * as invitations from './invitations'
 import { saveManagedEnrollment, saveEnrollmentSettings } from './enrollment'
 import { withPlatformWorkspaceAdmin } from './context'
-import { workspaceInvitationSendLimiter } from '../middleware/rate-limit'
+import { workspaceAnalyticsLimiter, workspaceInvitationSendLimiter } from '../middleware/rate-limit'
 import { archiveSessionDetail, archiveSessionTranscript, listArchiveSessions } from './sessionArchive'
 import { streamWorkspaceRecording } from './sessionMedia'
 import { Router, type Request, type Response, type NextFunction } from 'express'
@@ -16,6 +16,8 @@ import { verifyWorkspaceToken } from '../lib/jwt'
 import { idSchema, WorkspaceError, workspacesEnabled } from './contracts'
 import { withWorkspaceAccess, requireWorkspaceManager } from './context'
 import * as service from './service'
+import * as analytics from './analytics'
+import * as plans from './analyticsPlans'
 
 export const workspaceRouter = Router()
 export const platformWorkspacesRouter = Router()
@@ -69,7 +71,19 @@ workspaceRouter.get('/current/sessions/:sessionId', scoped((tx, scope, req) => a
 workspaceRouter.get('/current/sessions/:sessionId/transcript', scoped((tx, scope, req) => archiveSessionTranscript(tx, scope, idSchema.parse(req.params.sessionId))))
 workspaceRouter.get('/current/sessions/:sessionId/recordings/:recordingId/stream', streamWorkspaceRecording)
 workspaceRouter.get('/current', scoped((tx, scope) => service.workspaceSnapshot(tx, scope)))
-workspaceRouter.get('/current/members', scoped((tx, scope) => service.listWorkspaceMembers(tx, scope)))
+workspaceRouter.get('/current/members', scoped((tx, scope, req) => service.listWorkspaceMembers(tx, scope, req.query)))
+workspaceRouter.get('/current/admin/overview', scoped((tx, scope, req) => analytics.workspaceOverview(tx, scope, req.query)))
+workspaceRouter.get('/current/admin/activity/daily', scoped((tx, scope, req) => analytics.workspaceDailyActivity(tx, scope, req.query)))
+workspaceRouter.get('/current/admin/activity/learners', scoped((tx, scope, req) => analytics.workspaceLearnerActivity(tx, scope, req.query)))
+workspaceRouter.get('/current/admin/feature-usage', scoped((tx, scope, req) => analytics.workspaceFeatureUsage(tx, scope, req.query)))
+workspaceRouter.get('/current/admin/progress-pulse', scoped((tx, scope, req) => analytics.workspaceProgressPulse(tx, scope, req.query)))
+workspaceRouter.get('/current/admin/feedback', scoped((tx, scope, req) => analytics.workspaceFeedback(tx, scope, req.query)))
+workspaceRouter.post('/current/admin/analytics/interpret', workspaceAnalyticsLimiter, scoped((tx, scope, req) => plans.interpretWorkspaceQuestion(tx, scope, req.body)))
+workspaceRouter.post('/current/admin/analytics/run', scoped((tx, scope, req) => plans.runWorkspacePlan(tx, scope, req.body)))
+workspaceRouter.get('/current/admin/analytics/saved', scoped((tx, scope) => plans.listWorkspacePlans(tx, scope)))
+workspaceRouter.post('/current/admin/analytics/saved/:id/run', scoped((tx, scope, req) => plans.rerunWorkspacePlan(tx, scope, idSchema.parse(req.params.id))))
+workspaceRouter.patch('/current/admin/analytics/saved/:id', scoped((tx, scope, req) => plans.updateWorkspacePlan(tx, scope, idSchema.parse(req.params.id), req.body)))
+workspaceRouter.delete('/current/admin/analytics/saved/:id', scoped((tx, scope, req) => plans.deleteWorkspacePlan(tx, scope, idSchema.parse(req.params.id))))
 workspaceRouter.post('/current/members', scoped((tx, scope, req) => service.addExistingMember(tx, scope, req.body)))
 workspaceRouter.patch('/current/branding', scoped((tx, scope, req) => service.updateWorkspaceBranding(tx, scope, req.body)))
 workspaceRouter.put('/current/features/:feature', scoped((tx, scope, req) => service.configureWorkspaceFeature(tx, scope, String(req.params.feature), req.body)))

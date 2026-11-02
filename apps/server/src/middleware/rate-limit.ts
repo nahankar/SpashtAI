@@ -90,3 +90,13 @@ export const workspaceInvitationSendLimiter = authRateLimitDisabled ? passthroug
   },
   message: { error: 'Too many invitations sent, please try again later' }, standardHeaders: true, legacyHeaders: false,
 })
+
+/** AI Analytics interpretation calls a model; one budget per identity across workspaces. */
+export const workspaceAnalyticsLimiter = authRateLimitDisabled ? passthrough : rateLimit({
+  windowMs: 60_000, max: 10,
+  keyGenerator: req => {
+    try { return `workspace-analytics:${verifyWorkspaceToken(req.headers.authorization?.slice(7) || '').userId}` }
+    catch { return 'workspace-analytics:unauthenticated' }
+  },
+  message: { error: 'Too many AI Analytics questions. Please wait a moment.' }, standardHeaders: true, legacyHeaders: false,
+})

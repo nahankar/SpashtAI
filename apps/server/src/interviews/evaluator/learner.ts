@@ -12,6 +12,8 @@ import { currentDataScope, runOutsideDataScope } from '../../lib/dataScope'
 import { workspacesEnabled } from '../../workspaces/contracts'
 import { dueWorkspaceJobScopes } from '../../workspaces/jobScopes'
 import { withJobScope } from '../../workspaces/requestScope'
+import { workspaceDay } from '../../workspaces/time'
+export { workspaceDay }
 
 type Tx = Prisma.TransactionClient
 const json = (v: unknown) => v as Prisma.InputJsonValue
@@ -53,10 +55,6 @@ function pinnedPolicy(policy: Prisma.JsonValue | null) {
     || !policy.config || typeof policy.config !== 'object') return null
   const entry = Object.hasOwn(LEARNER_POLICIES, policy.version) ? LEARNER_POLICIES[policy.version] : null
   return entry && hash(policy.config) === hash(entry.config) ? entry : null
-}
-/** Calendar day in the organization's time zone, so a tenant budget resets at its own midnight. */
-export function workspaceDay(timeZone: string, at = new Date()) {
-  return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(at)
 }
 async function budget(ownerId: string, tx: Tx) {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('interview-learner-budget',0))`

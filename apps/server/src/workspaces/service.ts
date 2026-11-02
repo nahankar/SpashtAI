@@ -130,12 +130,27 @@ export function workspaceNotice(features: Array<{ feature: string; entitled: boo
   return pending.length ? `${WORKSPACE_PRIVACY_NOTICE} Not yet available in organizations: ${pending.join(', ')}.` : WORKSPACE_PRIVACY_NOTICE
 }
 
-export async function listWorkspaceMembers(tx: WorkspaceTx, scope: Awaited<ReturnType<typeof establishWorkspace>>) {
+const memberQuerySchema = z.object({
+  q: z.string().trim().min(1).max(100).optional(),
+  role: z.enum(['OWNER', 'ADMIN', 'LEARNER']).optional(),
+  state: z.enum(['ACTIVE', 'INVITED', 'SUSPENDED']).optional(),
+  after: z.string().min(1).max(64).optional(),
+}).strict()
+
+export async function listWorkspaceMembers(tx: WorkspaceTx, scope: Awaited<ReturnType<typeof establishWorkspace>>, input: unknown = {}) {
   requireWorkspaceManager(scope)
-  const rows = await tx.workspaceMember.findMany({ where: { workspaceId: scope.workspace.id },
-    include: { user: { select: { firstName: true, lastName: true, email: true } }, features: true }, orderBy: { createdAt: 'asc' }, take: 100 })
-  return rows.map(row => ({ id: row.id, role: row.role, state: row.state, acceptedAt: row.acceptedAt,
+  const query = memberQuerySchema.parse(input ?? {})
+  const where: Prisma.WorkspaceMemberWhereInput = { workspaceId: scope.workspace.id,
+    ...(query.role ? { role: query.role } : {}), ...(query.state ? { state: query.state } : {}),
+    ...(query.q ? { user: { OR: ['email', 'firstName', 'lastName'].map(field => ({ [field]: { contains: query.q, mode: 'insensitive' } })) } } : {}) }
+  const [rows, total] = await Promise.all([
+    tx.workspaceMember.findMany({ where, include: { user: { select: { firstName: true, lastName: true, email: true } }, features: true },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take: 51, ...(query.after ? { cursor: { id: query.after }, skip: 1 } : {}) }),
+    tx.workspaceMember.count({ where }),
+  ])
+  const items = rows.slice(0, 50).map(row => ({ id: row.id, role: row.role, state: row.state, acceptedAt: row.acceptedAt,
     enrollmentResponses: row.enrollmentResponses, enrollmentFields: row.enrollmentFields, name: [row.user.firstName, row.user.lastName].filter(Boolean).join(' '), email: row.user.email, features: row.features.map(f => ({ feature: f.feature, allowed: f.allowed })) }))
+  return { items, nextCursor: rows.length > 50 ? items.at(-1)!.id : null, total }
 }
 
 export async function configureWorkspaceFeature(tx: WorkspaceTx, scope: Awaited<ReturnType<typeof establishWorkspace>>, feature: string, input: unknown) {

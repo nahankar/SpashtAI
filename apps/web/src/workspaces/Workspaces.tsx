@@ -48,7 +48,7 @@ function OrganizationContent({ slug }: { slug: string }) {
     if (next.accessToken) {
       const state = await request<Snapshot>('/api/workspaces/current', next.accessToken)
       setSnapshot(state)
-      setMembers(state.membership.role === 'LEARNER' ? [] : await request<Member[]>('/api/workspaces/current/members', next.accessToken))
+      setMembers(state.membership.role === 'LEARNER' ? [] : (await request<{ items: Member[] }>('/api/workspaces/current/members', next.accessToken)).items)
     }
   }, [slug])
   useEffect(() => { setEntry(null); setSnapshot(null); setMembers([]); setError(''); load().catch(e => setError(e.message)) }, [load])
