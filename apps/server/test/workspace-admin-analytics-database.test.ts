@@ -49,11 +49,12 @@ suite('organization admin reports and AI Analytics', () => {
     const { bindWorkspaceRequest } = await import('../src/workspaces/requestScope')
     const { requireAuth } = await import('../src/middleware/auth')
     const feedback = (await import('../src/routes/feedback')).default
+    const platformFeedback = (await import('../src/routes/admin/feedback')).default
     const app = express(); app.use(express.json()); app.use('/api/workspaces', routes.workspaceRouter)
-    app.use(bindWorkspaceRequest); app.use('/api/feedback', requireAuth, feedback)
+    app.use(bindWorkspaceRequest); app.use('/api/feedback', requireAuth, feedback); app.use('/api/admin/feedback', requireAuth, platformFeedback)
     api = supertest(app)
-    for (const who of ['owner', 'admin', 'learner', 'second', 'betaOwner', 'outsider']) {
-      users[who] = (await admin.user.create({ data: { email: `${tag}-${who}@example.invalid`, firstName: who, emailVerified: true } })).id
+    for (const who of ['owner', 'admin', 'learner', 'second', 'betaOwner', 'outsider', 'staff']) {
+      users[who] = (await admin.user.create({ data: { email: `${tag}-${who}@example.invalid`, firstName: who, emailVerified: true, role: who === 'staff' ? 'ADMIN' : 'USER' } })).id
     }
     for (const name of ['alpha', 'beta']) {
       const ws = await admin.workspace.create({ data: { kind: 'ORGANIZATION', name, slug: `${tag}-${name}`, isolationStage: 'FOUNDATION_ONLY', timeZone: tz } })
@@ -240,6 +241,24 @@ suite('organization admin reports and AI Analytics', () => {
     const listed = await api.get('/api/workspaces/current/admin/feedback').set(token(alpha, 'owner'))
     expect(listed.body.items.map((row: { body: string }) => row.body)).toEqual(expect.arrayContaining(['Organization feedback']))
     expect(listed.body.items.map((row: { body: string }) => row.body)).not.toContain('Personal feedback')
+  })
+
+  it('lets platform staff handle Personal and organization feedback in the platform context only', async () => {
+    const staff = { Authorization: `Bearer ${signToken({ userId: users.staff, email: 'staff@example.invalid', role: 'ADMIN' })}` }
+    const listed = await api.get('/api/admin/feedback?limit=100').set(staff)
+    expect(listed.status).toBe(200)
+    const mine = listed.body.feedback.filter((row: { userId: string }) => row.userId === users.learner)
+    expect(mine.map((row: { body: string }) => row.body)).toEqual(expect.arrayContaining(['Alpha feedback body', 'Beta feedback body', 'Personal feedback body']))
+    const alphaRow = mine.find((row: { body: string }) => row.body === 'Alpha feedback body')
+    expect(alphaRow.workspace).toMatchObject({ kind: 'ORGANIZATION', slug: `${tag}-alpha` })
+    const before = await admin.user.findUniqueOrThrow({ where: { id: users.learner }, select: { rewardPoints: true } })
+    const updated = await api.put(`/api/admin/feedback/${alphaRow.id}`).set(staff).send({ status: 'CONSIDERED' })
+    expect(updated.status).toBe(200); expect(updated.body.pointsAwarded).toBe(0)
+    expect((await admin.user.findUniqueOrThrow({ where: { id: users.learner }, select: { rewardPoints: true } })).rewardPoints).toBe(before.rewardPoints)
+    expect((await api.post(`/api/admin/feedback/${alphaRow.id}/notes`).set(staff).send({ body: 'Thanks' })).status).toBe(201)
+    // A forged ADMIN claim for an ordinary account is refused by the database role recheck.
+    const forged = { Authorization: `Bearer ${signToken({ userId: users.outsider, email: 'x@example.invalid', role: 'ADMIN' })}` }
+    expect((await api.get('/api/admin/feedback').set(forged)).status).toBe(403)
   })
 
   const betaId = () => beta

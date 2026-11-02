@@ -4,22 +4,38 @@ import { prisma } from '../../lib/prisma'
 import { FEEDBACK_PRIORITIES, FEEDBACK_STATUSES } from '../../lib/feedback'
 import { awardFeedbackConsideredPoints } from '../../lib/points'
 import { recordProductEvent } from '../../analytics/recordProductEvent'
+import { withPlatformWorkspaceAdmin, type WorkspaceTx } from '../../workspaces/context'
+import { WorkspaceError } from '../../workspaces/contracts'
 
 const router = Router()
 
+/**
+ * Platform staff handle feedback from Personal and every organization. Each request runs in the audited
+ * platform context, which rechecks the caller's current role in the database.
+ */
+function platform<T>(req: Request, work: (tx: WorkspaceTx) => Promise<T>) {
+  return withPlatformWorkspaceAdmin((req as Request & { user?: { userId: string } }).user!.userId, work)
+}
+function platformDenied(res: Response, err: unknown) {
+  if (!(err instanceof WorkspaceError)) return false
+  res.status(err.status).json({ error: err.message, code: err.code })
+  return true
+}
+
 // GET /api/admin/feedback/stats
-router.get('/stats', async (_req: Request, res: Response) => {
+router.get('/stats', async (req: Request, res: Response) => {
   try {
-    const [total, open, acknowledged, considered, implemented, parked] = await Promise.all([
-      prisma.userFeedback.count(),
-      prisma.userFeedback.count({ where: { status: 'OPEN' } }),
-      prisma.userFeedback.count({ where: { status: 'ACKNOWLEDGED' } }),
-      prisma.userFeedback.count({ where: { status: 'CONSIDERED' } }),
-      prisma.userFeedback.count({ where: { status: 'IMPLEMENTED' } }),
-      prisma.userFeedback.count({ where: { status: 'PARKED' } }),
-    ])
+    const [total, open, acknowledged, considered, implemented, parked] = await platform(req, tx => Promise.all([
+      tx.userFeedback.count(),
+      tx.userFeedback.count({ where: { status: 'OPEN' } }),
+      tx.userFeedback.count({ where: { status: 'ACKNOWLEDGED' } }),
+      tx.userFeedback.count({ where: { status: 'CONSIDERED' } }),
+      tx.userFeedback.count({ where: { status: 'IMPLEMENTED' } }),
+      tx.userFeedback.count({ where: { status: 'PARKED' } }),
+    ]))
     res.json({ total, open, acknowledged, considered, implemented, parked })
   } catch (err) {
+    if (platformDenied(res, err)) return
     console.error('Feedback stats error:', err)
     res.status(500).json({ error: 'Failed to fetch feedback stats' })
   }
@@ -53,7 +69,7 @@ router.get('/', async (req: Request, res: Response) => {
       where.priority = priority
     }
 
-    const feedback = await prisma.userFeedback.findMany({
+    const feedback = await platform(req, tx => tx.userFeedback.findMany({
       where,
       orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
       take: limit,
@@ -62,11 +78,13 @@ router.get('/', async (req: Request, res: Response) => {
         attachments: true,
         notes: { orderBy: { createdAt: 'asc' } },
         _count: { select: { notes: true, attachments: true } },
+        workspace: { select: { kind: true, name: true, slug: true } },
       },
-    })
+    }))
 
     res.json({ feedback })
   } catch (err) {
+    if (platformDenied(res, err)) return
     console.error('Admin feedback list error:', err)
     res.status(500).json({ error: 'Failed to load feedback' })
   }
@@ -75,17 +93,19 @@ router.get('/', async (req: Request, res: Response) => {
 // GET /api/admin/feedback/:id
 router.get('/:id', async (req: Request, res: Response) => {
   try {
-    const item = await prisma.userFeedback.findUnique({
+    const item = await platform(req, tx => tx.userFeedback.findUnique({
       where: { id: req.params.id },
       include: {
         user: { select: { id: true, email: true, firstName: true, lastName: true } },
         attachments: true,
         notes: { orderBy: { createdAt: 'asc' } },
+        workspace: { select: { kind: true, name: true, slug: true } },
       },
-    })
+    }))
     if (!item) return res.status(404).json({ error: 'Not found' })
     res.json({ feedback: item })
   } catch (err) {
+    if (platformDenied(res, err)) return
     res.status(500).json({ error: 'Failed to load feedback' })
   }
 })
@@ -94,8 +114,10 @@ router.get('/:id', async (req: Request, res: Response) => {
 router.put('/:id', async (req: Request, res: Response) => {
   try {
     const { status, priority } = req.body as { status?: string; priority?: string | null }
-    const existing = await prisma.userFeedback.findUnique({ where: { id: req.params.id } })
+    const existing = await platform(req, tx => tx.userFeedback.findUnique({ where: { id: req.params.id } }))
     if (!existing) return res.status(404).json({ error: 'Not found' })
+    // Points and product events belong to the Personal account; organization feedback never changes it.
+    const personal = existing.workspaceKind === 'PERSONAL'
 
     const data: Record<string, unknown> = {}
 
@@ -119,7 +141,7 @@ router.put('/:id', async (req: Request, res: Response) => {
       }
     }
 
-    const updated = await prisma.userFeedback.update({
+    const updated = await platform(req, tx => tx.userFeedback.update({
       where: { id: req.params.id },
       data,
       include: {
@@ -127,11 +149,11 @@ router.put('/:id', async (req: Request, res: Response) => {
         attachments: true,
         notes: { orderBy: { createdAt: 'asc' } },
       },
-    })
+    }))
 
     let pointsAwarded = 0
     let totalPoints: number | undefined
-    if (status === 'CONSIDERED' && existing.status !== 'CONSIDERED') {
+    if (personal && status === 'CONSIDERED' && existing.status !== 'CONSIDERED') {
       const pts = await awardFeedbackConsideredPoints(existing.userId, existing.id)
       pointsAwarded = pts.awarded
       totalPoints = pts.total
@@ -149,7 +171,7 @@ router.put('/:id', async (req: Request, res: Response) => {
           })
         : updated
 
-    if (status && status !== existing.status) {
+    if (personal && status && status !== existing.status) {
       void recordProductEvent({
         userId: existing.userId,
         feature: 'feedback',
@@ -160,6 +182,7 @@ router.put('/:id', async (req: Request, res: Response) => {
     }
     res.json({ feedback: feedback ?? updated, pointsAwarded, totalPoints })
   } catch (err) {
+    if (platformDenied(res, err)) return
     console.error('Admin feedback update error:', err)
     res.status(500).json({ error: 'Failed to update feedback' })
   }
@@ -173,34 +196,38 @@ router.post('/:id/notes', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'body is required' })
     }
     const adminId = (req as Request & { user?: { userId: string } }).user!.userId
-    const existing = await prisma.userFeedback.findUnique({ where: { id: req.params.id } })
-    if (!existing) return res.status(404).json({ error: 'Not found' })
-
-    const note = await prisma.userFeedbackNote.create({
-      data: {
-        feedbackId: req.params.id,
-        authorId: adminId,
-        isAdmin: true,
-        body: body.trim(),
-      },
+    const note = await platform(req, async tx => {
+      const existing = await tx.userFeedback.findUnique({ where: { id: req.params.id } })
+      if (!existing) return null
+      return tx.userFeedbackNote.create({
+        data: {
+          feedbackId: req.params.id,
+          authorId: adminId,
+          isAdmin: true,
+          body: body.trim(),
+        },
+      })
     })
+    if (!note) return res.status(404).json({ error: 'Not found' })
     res.status(201).json({ note })
   } catch (err) {
+    if (platformDenied(res, err)) return
     res.status(500).json({ error: 'Failed to add note' })
   }
 })
 
 router.get('/:id/attachments/:attachmentId', async (req: Request, res: Response) => {
   try {
-    const attachment = await prisma.userFeedbackAttachment.findUnique({
+    const attachment = await platform(req, tx => tx.userFeedbackAttachment.findUnique({
       where: { id: req.params.attachmentId },
       include: { feedback: true },
-    })
+    }))
     if (!attachment || attachment.feedbackId !== req.params.id) {
       return res.status(404).json({ error: 'Not found' })
     }
     res.sendFile(path.resolve(attachment.storedPath))
   } catch (err) {
+    if (platformDenied(res, err)) return
     res.status(500).json({ error: 'Failed to load attachment' })
   }
 })
