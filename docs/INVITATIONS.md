@@ -10,8 +10,9 @@ invitation email goes to the recipient (or, in development, that it is captured 
 
 - Recipients join as ordinary learners (`USER`). An invitation can never grant ADMIN or SUPER_ADMIN; any role
   sent by a client is ignored.
-- No tenant or organization is assigned. **Every list, count and action is platform-wide today. When real
-  tenancy exists, each must be scoped to the active tenant before any tenant administrator gets access.**
+- These are **platform invitations, not tenant invitations.** No workspace, organization or membership is
+  assigned, and every list, count and action is platform-wide. Only platform Admins (current role) use them.
+  Tenant membership invitations are future work on top of this service; see "Tenancy integration" below.
 - Accepting requires Google sign-in. Gmail, Google Workspace and other addresses registered as a Google Account
   all work; we never judge this from the email domain. Email-code / magic-link sign-in is not implemented.
 
@@ -129,9 +130,48 @@ Admin (`requireAuth` + `requireCurrentAdmin`):
 
 Public: `POST /api/invitations/lookup` `{ token }`, `POST /api/invitations/accept` `{ token, credential }`.
 
-## Remaining for real tenant membership
+## Tenancy integration
 
-- A tenant/organization model with membership, and a real tenant-administrator role with its own authorization.
-- Tenant-scoped invitation creation, listing, counts and acceptance (the invitation records which tenant it joins).
-- Tenant-scoped Users and analytics, with cohort suppression applied per tenant.
-- Optionally, non-Google sign-in (email code / magic link) for recipients without a Google Account.
+Workspace tenancy is being built on `codex/multi-tenant-workspaces` (`docs/TENANCY.md`,
+`docs/TENANCY-STATUS.md`). That branch owns `Workspace`, `WorkspaceMember` (OWNER / ADMIN / LEARNER;
+INVITED / ACTIVE / SUSPENDED), feature entitlements and `WorkspaceAudit`, and plans to extend this service
+for email invitations rather than add a second mailer. This branch builds no membership model of its own.
+
+**Reusable as is:**
+
+- Token handling: 32-byte tokens, SHA-256 at rest, link token in the URL fragment, lookup and accept by body.
+- Atomic acceptance (`lib/invitationAcceptance.ts`): row lock, re-validation of token, address, status and
+  expiry, account resolution and audit in one transaction, with a retry on unique races.
+- Verified Google identity matching against the invited address, with the "Switch Google account" response.
+- Expiry, resend (new token, locked snapshot, previous link revoked), revoke, idempotent re-acceptance.
+- Delivery: SMTP outside transactions, per-attempt fencing, `invitation_delivery` audit, dev capture refused in
+  production, the email check script.
+- Transactional, content-free audit for every state change; retention purge; user-deletion cleanup.
+- One pending invitation per key (`pendingKey`), and the Admin UI pieces (`InvitationTable`,
+  `InviteUserDialog`, `InvitationOverview`).
+
+**Gaps to close when integrating (on the tenancy side, reviewed together):**
+
+1. **Target workspace and proposed membership:** a nullable `workspaceId` plus a proposed workspace role and
+   member settings on the invitation, with the pending key widened to (workspace, address). Platform
+   invitations keep `workspaceId = null`.
+2. **Acceptance grants only that membership:** inside the same acceptance transaction, create or activate
+   exactly the target `WorkspaceMember` with the proposed role and settings, and write the matching
+   `WorkspaceAudit` row. Never change `User.role`: a workspace Owner/Admin must never become a global ADMIN.
+   Personal workspace data is never moved or exposed.
+3. **Who may invite and see invitations:** workspace invitations are created, listed, counted, resent and
+   revoked only through workspace-scoped, membership-rechecked endpoints under RLS. They are never exposed
+   through the platform `/api/admin/invitations` routes. Tenant administrators must never see platform-wide
+   invitations, users or analytics.
+4. **Limits and state:** respect `maxMembers`, workspace suspension and member suspension at acceptance time,
+   under the same lock.
+5. **Paused signups:** the current exception (a valid platform invitation may create a learner account while
+   public signups are paused) is scoped to platform invitations and covered by tests (matching identity only,
+   not for expired or revoked invitations, ordinary Google signup still blocked). Whether workspace invitations
+   get the same exception is a separate product decision, to be tested on its own.
+6. **Retention and deletion:** extend the purge and user-deletion cleanup to workspace invitations, and decide
+   what happens to pending invitations when a workspace is suspended or deleted.
+7. **Tenant UI:** tenant Dashboard, Users and Invitations pages under `/w/:slug`, not the platform Admin pages.
+   The removed Tenant Admin demo is not a basis for these.
+
+Not planned here: non-Google sign-in (email code / magic link) for recipients without a Google Account.
