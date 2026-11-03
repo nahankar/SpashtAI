@@ -112,6 +112,61 @@ describe('live controller start and resume characterization', () => {
     expect(f.effects.addMessage).toHaveBeenCalledOnce()
   })
 
+  it('asks before takeover and leaves the other session alone when cancelled', async () => {
+    const f = fixture()
+    f.effects.confirmTakeover = vi.fn(async () => false)
+    const original = f.fetcher.getMockImplementation()!
+    f.fetcher.mockImplementation(async (input, init) => {
+      if (String(input).includes('/segments')) {
+        return new Response(JSON.stringify({
+          error: 'You already have a live session in this workspace. Resume it, or confirm starting a new one to end the other take.',
+          code: 'VOICE_SESSION_ACTIVE',
+        }), { status: 409 })
+      }
+      return original(input, init)
+    })
+    await f.controller.start(f.config, elevateAdapter(f.api, f.config))
+    expect(f.effects.confirmTakeover).toHaveBeenCalledOnce()
+    expect(f.calls.some(call => call.body?.takeover === true)).toBe(false)
+    expect(f.effects.toast).toHaveBeenCalledWith('error', expect.stringContaining('already have a live session'))
+    expect(f.controller.getSnapshot().token).toBeNull()
+    expect(f.controller.getSnapshot().isJoining).toBe(false)
+  })
+
+  it('starts only after explicit takeover and finalizes the taken-over tab when its room drops', async () => {
+    const f = fixture()
+    f.effects.confirmTakeover = vi.fn(async () => true)
+    const original = f.fetcher.getMockImplementation()!
+    f.fetcher.mockImplementation(async (input, init) => {
+      const body = init?.body ? JSON.parse(String(init.body)) as { takeover?: boolean } : {}
+      if (String(input).includes('/segments') && !body.takeover) {
+        return new Response(JSON.stringify({
+          error: 'You already have a live session in this workspace.',
+          code: 'VOICE_SESSION_ACTIVE',
+        }), { status: 409 })
+      }
+      return original(input, init)
+    })
+    await f.controller.start(f.config, elevateAdapter(f.api, f.config))
+    expect(f.effects.confirmTakeover).toHaveBeenCalledOnce()
+    expect(f.calls.some(call => call.path.endsWith('/segments') && call.body?.takeover === true)).toBe(true)
+    expect(f.controller.getSnapshot().token).toBeTruthy()
+
+    const takenOver = fixture()
+    await takenOver.controller.resume('existing')
+    takenOver.calls.length = 0
+    const binding = takenOver.controller.getSnapshot()
+    const { recorder } = await import('./test-fixtures')
+    const capture = recorder('uploaded')
+    await takenOver.controller.onDisconnected(capture, binding)
+    expect(capture.finalize).toHaveBeenCalledOnce()
+    expect(takenOver.calls[0]).toMatchObject({ method: 'PATCH', body: { audioStatus: 'available' } })
+    expect(takenOver.controller.getSnapshot()).toMatchObject({ pauseReason: 'disconnected', token: null })
+    await takenOver.controller.onDisconnected(capture, binding)
+    expect(capture.finalize).toHaveBeenCalledOnce()
+    expect(takenOver.calls).toHaveLength(1)
+  })
+
   it('delegates launch transport to the adapter without hardcoding the creation endpoint', async () => {
     const f = fixture(); const adapter = elevateAdapter(f.api, f.config)
     adapter.createActivity = async (id, startedAt) => {

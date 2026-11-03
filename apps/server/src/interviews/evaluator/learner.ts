@@ -10,7 +10,7 @@ import { evaluateAnswer, EvaluationFailure, type Invocation } from './model'
 import { transcriptIntegrity } from '../practice/integrity'
 import { currentDataScope, runOutsideDataScope } from '../../lib/dataScope'
 import { workspacesEnabled } from '../../workspaces/contracts'
-import { dueWorkspaceJobScopes } from '../../workspaces/jobScopes'
+import { forEachDueJobScope } from '../../workspaces/jobScopes'
 import { withJobScope } from '../../workspaces/requestScope'
 import { workspaceDay } from '../../workspaces/time'
 export { workspaceDay }
@@ -239,10 +239,9 @@ export async function sweepLearnerAssessments() {
 export async function sweepLearnerAssessmentsEverywhere() {
   let claimed = await runOutsideDataScope(sweepLearnerAssessments)
   if (!workspacesEnabled()) return claimed
-  for (const { workspaceId, userId } of await dueWorkspaceJobScopes('learner_evaluation')) {
-    claimed = Boolean(await withJobScope(workspaceId, userId, sweepLearnerAssessments)) || claimed
-  }
-  return claimed
+  const more = await forEachDueJobScope('learner_evaluation', ({ workspaceId, userId }) =>
+    withJobScope(workspaceId, userId, sweepLearnerAssessments))
+  return Boolean(claimed || more)
 }
 let timer: NodeJS.Timeout | null = null; let running = false; let rerun = false
 // Single-flight sweep. A claimed job is followed immediately by another sweep, so queued answers do

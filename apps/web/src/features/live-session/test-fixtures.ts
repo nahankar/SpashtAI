@@ -9,6 +9,7 @@ export function fixture() {
     sessionChanged: vi.fn(), clearMessages: vi.fn(), resetMetrics: vi.fn(), hideHistory: vi.fn(), toast: vi.fn(), log: vi.fn(),
     messages: vi.fn(() => []), addMessage: vi.fn(async () => {}), upsertStreamingMessage: vi.fn(),
     clearActiveSession: vi.fn(), rewardPoints: vi.fn(), left: vi.fn(), discarded: vi.fn(), discardFinished: vi.fn(),
+    confirmTakeover: vi.fn(async () => false),
   }
   const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     calls.push({ path: String(input).replace('http://api', ''), method: init?.method || 'GET', body: init?.body ? JSON.parse(String(init.body)) : {}, signal: init?.signal })

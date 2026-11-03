@@ -37,6 +37,7 @@ import { applyRetainResult } from '@/lib/sessionRetain'
 import { useFeatureFlags } from '@/contexts/FeatureFlagsContext'
 import { useUserExportFlags } from '@/hooks/useUserExportFlags'
 import { useConfirm } from '@/hooks/useConfirm'
+import { confirmVoiceTakeover } from '@/features/live-session/voiceTakeover'
 import { Trash2, CheckSquare, Square, Target, ArrowRight, Play, BarChart3, CheckCircle2, Download, Loader2, Bug, TrendingUp } from 'lucide-react'
 import { generateSessionPdf, type SessionReport } from '@/lib/generate-session-pdf'
 import { type SessionRecorderHandle } from '@/components/session/SessionRecorder'
@@ -133,6 +134,7 @@ export function Elevate() {
       localStorage.removeItem(sessionTimestampKey())
     },
     left: (id, track) => onSessionLeft(id, track), discarded: id => onDiscarded(id), discardFinished: () => onDiscardFinished(),
+    confirmTakeover: message => confirmVoiceTakeover(confirmDialog, message),
   }, sessionId)
   const { roomName, token, url, isJoining, isLeaving, segmentId, isPausing, pauseAudioFailure, isResuming,
     assistantState, isSessionPaused, pauseReason, setAssistantState, idleWarning, resetIdleTimer } = live
