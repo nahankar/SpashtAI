@@ -173,3 +173,19 @@ npm test           # unit tests: audio utilities, VAD, conversation orchestratio
 npm run typecheck
 npm run vtc -- diagnose
 ```
+
+## Validation record (2026-11-03, isolated local stack from this checkout)
+
+| Layer | Result |
+|---|---|
+| Unit tests (40) | pass — VAD boundaries, gap alignment, turn merging, cancellation/re-queue, duplicate suppression, mic gating, yielding, controlled silence, timeouts, redaction, production guard, outcome rules, provider retry/budget/cancellation |
+| `diagnose` (provider-free) | pass — 3/3 fixture utterances through virtual mic → WebRTC → tap, 46 ms latency, gap-free chunking, disabled track carries silence |
+| Interview, `confident-interview`, 5 min | **passed** — 6 answers, ended by "Practice time is up", app transcript 95% word recall, recording, 6 assessments, history, playback |
+| Elevate, `elevate-learner`, clarity | **passed** — 10 learner turns, coach wrap-up heard, Leave → results, transcript 99% recall, recording, metrics, async processing settled, history |
+| Interview, `hesitant-interview` | **passed** — fillers in text, ~1 s inserted pauses measured as 1.4–1.5 s in the audio |
+| Interview, `silence-interview` | **failed (product finding)** — 20 s silence handled (no re-prompt, question kept open), first answer saved; the second answer then stayed "still being transcribed" after an agent-side AWS Transcribe stream error, so the practice could not end |
+
+The same agent-side recognizer stall (`AWS_ERROR_HTTP_STREAM_HAS_COMPLETED`, answer stuck as transcript pending,
+End practice not completing) occurred in 2 of 6 live Interview runs. Response gaps (SpashtAI speech end →
+candidate audio) were ~7–8 s median with local CPU providers; the first turn of a run can be ~30 s while Ollama
+loads the model.
