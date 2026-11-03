@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import type { ProviderConfig } from '../config.js'
 import { encodeWav, type Pcm } from '../audio/pcm.js'
-import { Budget, providerFetch } from './http.js'
+import { Budget, providerRequest } from './http.js'
 
 const run = promisify(execFile)
 
@@ -29,9 +29,9 @@ export function createStt(cfg: ProviderConfig['stt']): SpeechToText {
       form.append('model', cfg.model)
       form.append('language', 'en')
       form.append('response_format', 'json')
-      const res = await providerFetch(budget, `${trimSlash(cfg.baseUrl)}/audio/transcriptions`,
-        { method: 'POST', body: form, headers: { Authorization: `Bearer ${cfg.apiKey}` } }, { timeoutMs: cfg.timeoutMs, signal })
-      const body = await res.json() as { text?: string }
+      const body = await providerRequest(budget, `${trimSlash(cfg.baseUrl)}/audio/transcriptions`,
+        { method: 'POST', body: form, headers: { Authorization: `Bearer ${cfg.apiKey}` } },
+        res => res.json() as Promise<{ text?: string }>, { timeoutMs: cfg.timeoutMs, signal })
       return (body.text ?? '').trim()
     },
   }
@@ -57,12 +57,11 @@ export function createTts(cfg: ProviderConfig['tts']): TextToSpeech {
   return {
     budget, description: `${cfg.model} via ${cfg.baseUrl} (voice ${cfg.voice})`,
     async synthesize(text, signal) {
-      const res = await providerFetch(budget, `${trimSlash(cfg.baseUrl)}/audio/speech`, {
+      return await providerRequest(budget, `${trimSlash(cfg.baseUrl)}/audio/speech`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
         body: JSON.stringify({ model: cfg.model, input: text, voice: cfg.voice, response_format: 'wav', speed: cfg.speed }),
-      }, { timeoutMs: cfg.timeoutMs, signal })
-      return Buffer.from(await res.arrayBuffer())
+      }, async res => Buffer.from(await res.arrayBuffer()), { timeoutMs: cfg.timeoutMs, signal })
     },
   }
 }
@@ -76,14 +75,13 @@ export function createChat(cfg: ProviderConfig['llm']): ChatModel {
   return {
     budget, description: `${cfg.model} via ${cfg.baseUrl}`,
     async complete(messages, opts = {}) {
-      const res = await providerFetch(budget, `${trimSlash(cfg.baseUrl)}/chat/completions`, {
+      const body = await providerRequest(budget, `${trimSlash(cfg.baseUrl)}/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
         body: JSON.stringify({ model: cfg.model, messages, temperature: cfg.temperature, max_tokens: 700,
           ...(cfg.reasoningEffort ? { reasoning_effort: cfg.reasoningEffort } : {}),
           ...(opts.json ? { response_format: { type: 'json_object' } } : {}) }),
-      }, { timeoutMs: cfg.timeoutMs, signal: opts.signal })
-      const body = await res.json() as { choices?: Array<{ message?: { content?: string } }> }
+      }, res => res.json() as Promise<{ choices?: Array<{ message?: { content?: string } }> }>, { timeoutMs: cfg.timeoutMs, signal: opts.signal })
       return stripReasoning(body.choices?.[0]?.message?.content ?? '')
     },
   }

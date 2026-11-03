@@ -112,7 +112,7 @@ export async function runSession(cfg: RunConfig): Promise<RunReport> {
       ...(cfg.video ? { recordVideo: { dir: evidence.path('browser'), size: { width: 1360, height: 900 } } } : {}),
     })
     await context.grantPermissions(['microphone'], { origin: new URL(cfg.targetUrl).origin })
-    if (cfg.trace) await context.tracing.start({ screenshots: true, snapshots: cfg.traceSnapshots, sources: false })
+    if (cfg.trace) await context.tracing.start({ screenshots: cfg.traceFull, snapshots: cfg.traceFull, sources: false })
     await bridge.install(context)
     page = await context.newPage()
     bridge.page = page
@@ -219,6 +219,7 @@ export async function runSession(cfg: RunConfig): Promise<RunReport> {
   } finally {
     engine?.stop({ kind: 'cancelled', detail: 'run finished' })
     bridge.flush()
+    await engine?.settleLate(20_000)
     if (page) {
       const state = await bridge.state()
       if (state) evidence.writeJson('browser/audio-state.json', state)
@@ -235,7 +236,7 @@ export async function runSession(cfg: RunConfig): Promise<RunReport> {
       await context.tracing.stop({ path: tracePath }).then(() => {
         const changed = redactTraceArchive(tracePath, secrets)
         evidence.event('tool', 'trace_redacted', { entriesChanged: changed })
-        artifacts.push({ file: 'browser/trace.zip', description: 'Playwright trace (screenshots, DOM snapshots, network) with tokens redacted; open with `npx playwright show-trace`' })
+        artifacts.push({ file: 'browser/trace.zip', description: `Playwright trace (actions and network${cfg.traceFull ? ', screencast, DOM snapshots' : ''}) with tokens redacted; open with \`npx playwright show-trace\`` })
       }, e => missing.push(`trace not saved: ${e instanceof Error ? e.message : e}`))
     }
     await context?.close().catch(() => undefined)

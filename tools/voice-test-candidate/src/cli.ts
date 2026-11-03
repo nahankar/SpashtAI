@@ -38,7 +38,7 @@ run options
   --close-unfinished                  end an unfinished Interview practice through the UI before starting
   --seed <n>                          reproducible delays and pauses (default 1)
   --no-trace                          skip the Playwright trace
-  --trace-snapshots                   include DOM snapshots in the trace (much larger)
+  --trace-full                        add screencast and DOM snapshots to the trace (tens of MB per minute)
   --video                             record browser video (no audio)
   --allow-production                  required to target production
   Provider overrides (also via VTC_* environment variables, see config.example.env):
@@ -69,7 +69,7 @@ async function main(argv: string[]): Promise<number> {
       speakers: { type: 'boolean' }, 'browser-channel': { type: 'string' }, output: { type: 'string' }, experience: { type: 'string' },
       scenario: { type: 'string' }, profile: { type: 'string' }, 'max-minutes': { type: 'string' }, 'max-turns': { type: 'string' },
       'interview-minutes': { type: 'string' }, 'elevate-focus': { type: 'string' }, 'verify-timeout': { type: 'string' },
-      'close-unfinished': { type: 'boolean' }, seed: { type: 'string' }, 'no-trace': { type: 'boolean' }, 'trace-snapshots': { type: 'boolean' }, video: { type: 'boolean' },
+      'close-unfinished': { type: 'boolean' }, seed: { type: 'string' }, 'no-trace': { type: 'boolean' }, 'trace-full': { type: 'boolean' }, video: { type: 'boolean' },
       'allow-production': { type: 'boolean' }, manual: { type: 'boolean' }, 'api-url': { type: 'string' },
       'stt-url': { type: 'string' }, 'stt-model': { type: 'string' }, 'llm-provider': { type: 'string' }, 'llm-url': { type: 'string' },
       'llm-model': { type: 'string' }, 'tts-provider': { type: 'string' }, 'tts-url': { type: 'string' }, 'tts-voice': { type: 'string' },
@@ -147,7 +147,7 @@ async function main(argv: string[]): Promise<number> {
       targetUrl: target, targetKind, experience, scenario: scenario.id, profile: values.profile ?? scenario.defaultProfile, authFile,
       headed: Boolean(values.headed), muteSpeakers: !values.speakers, browserChannel: values['browser-channel'],
       maxDurationMs: maxMinutes * 60_000, maxTurns: Number(values['max-turns'] ?? (experience === 'interview' ? 14 : 10)), outputDir: output,
-      trace: !values['no-trace'], traceSnapshots: Boolean(values['trace-snapshots']), video: Boolean(values.video), seed: Number(values.seed ?? 1), interviewMinutes,
+      trace: !values['no-trace'], traceFull: Boolean(values['trace-full']), video: Boolean(values.video), seed: Number(values.seed ?? 1), interviewMinutes,
       elevateFocus: values['elevate-focus'] ?? 'clarity', closeUnfinished: Boolean(values['close-unfinished']),
       verifyTimeoutMs: Number(values['verify-timeout'] ?? 240) * 1000, providers,
     }
@@ -160,6 +160,17 @@ async function main(argv: string[]): Promise<number> {
   process.stderr.write(`Unknown command "${command}"\n\n${HELP}`)
   return 64
 }
+
+// Last resort for a known Node fetch defect: a late network callback on an already-closed response stream must
+// not kill the run before its evidence is written. Anything else still terminates the process.
+process.on('uncaughtException', error => {
+  if ((error as NodeJS.ErrnoException).code === 'ERR_INVALID_STATE' && /ReadableStream is already closed/.test(error.message)) {
+    process.stderr.write(`warning: ignored late fetch stream error (${error.message})\n`)
+    return
+  }
+  process.stderr.write(`${error.stack ?? error.message}\n`)
+  process.exit(70)
+})
 
 main(process.argv.slice(2)).then(code => { process.exitCode = code }, error => {
   process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)

@@ -88,6 +88,7 @@ export class ConversationEngine {
   private startedAt = 0
   private readonly runAbort = new AbortController()
   private readonly silenceDone = new Set<number>()
+  private readonly late: Promise<string>[] = []
   candidateThinksComplete = false
 
   constructor(private readonly ports: EnginePorts, private readonly opts: EngineOptions) {}
@@ -113,10 +114,12 @@ export class ConversationEngine {
     this.lastAppSpeechEnd = Math.max(this.lastAppSpeechEnd, u.endEpoch)
     this.lastActivity = Math.max(this.lastActivity, u.endEpoch)
     const entry: Pending = { u, settled: false, value: '', text: Promise.resolve('') }
-    entry.text = this.ports.transcribe(u, this.runAbort.signal).then(text => {
+    // Utterances after the stop (e.g. a closing remark) are still recognized for the evidence, not answered.
+    const late = this.stopReason !== null
+    entry.text = this.ports.transcribe(u, late ? undefined : this.runAbort.signal).then(text => {
       entry.settled = true; entry.value = text
       this.transcripts.push({ id: u.id, startEpoch: u.startEpoch, endEpoch: u.endEpoch, text })
-      this.ports.log('app_utterance_recognized', { id: u.id, text })
+      this.ports.log('app_utterance_recognized', { id: u.id, text, ...(late ? { afterConversationStopped: true } : {}) })
       return text
     }, error => {
       entry.settled = true; entry.value = ''
@@ -125,7 +128,13 @@ export class ConversationEngine {
       this.ports.log('app_utterance_recognition_failed', { id: u.id, error: message })
       return ''
     })
-    this.pending.push(entry)
+    if (late) this.late.push(entry.text)
+    else this.pending.push(entry)
+  }
+
+  /** Waits (bounded) for recognition of utterances that arrived after the conversation stopped. */
+  async settleLate(timeoutMs: number): Promise<void> {
+    await Promise.race([Promise.allSettled(this.late), new Promise(r => setTimeout(r, timeoutMs))])
   }
 
   stop(reason: StopReason): void {

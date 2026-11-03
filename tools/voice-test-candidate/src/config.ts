@@ -24,7 +24,8 @@ export interface RunConfig {
   maxTurns: number
   outputDir: string
   trace: boolean
-  traceSnapshots: boolean
+  /** Screencast frames and DOM snapshots in the trace (large: the live audio meter redraws constantly). */
+  traceFull: boolean
   video: boolean
   seed: number
   /** Interview practice time chosen in the setup UI (minutes). */

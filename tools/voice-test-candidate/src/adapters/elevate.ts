@@ -37,7 +37,7 @@ export class ElevateAdapter implements ExperienceAdapter {
       throw new BlockedError('The Elevate session form did not appear (feature access or a session already in progress).')
     }
     await page.getByText('Checking for a practice in progress…').waitFor({ state: 'hidden', timeout: 30_000 }).catch(() => undefined)
-    this.sessionName = `Voice test ${evidence.runId}`
+    this.sessionName = `Voice test ${evidence.runId.slice(-6)}`
     await name.fill(this.sessionName)
     const focus = page.locator('select').filter({ has: page.locator('option[value="clarity"]') }).first()
     const options = await focus.locator('option').evaluateAll(o => o.map(x => (x as HTMLOptionElement).value))
@@ -83,9 +83,14 @@ export class ElevateAdapter implements ExperienceAdapter {
     const id = this.sessionId
     if (!id) { add({ name: 'elevate_session_identified', status: 'failed', required: true, basis: 'browser', detail: 'no session id observed' }); return checks }
 
-    const session = await ctx.api.get<{ endedAt?: string | null; id?: string }>(`/sessions/${encodeURIComponent(id)}`)
-    if (session.body) ctx.evidence.writeJson('app-elevate-session.json', session.body)
-    add({ name: 'session_ended', status: session.body?.endedAt ? 'passed' : 'failed', required: true, basis: 'api', detail: session.body?.endedAt ? `endedAt ${session.body.endedAt}` : `HTTP ${session.status}; no endedAt` })
+    type SessionView = { endedAt?: string | null; paceReconciliationStatus?: string | null; deliveryAlignmentStatus?: string | null }
+    const readSession = async () => {
+      const r = await ctx.api.get<{ session?: SessionView } & SessionView>(`/sessions/${encodeURIComponent(id)}`)
+      return { status: r.status, session: r.body ? (r.body.session ?? r.body) : null }
+    }
+    const first = await readSession()
+    if (first.session) ctx.evidence.writeJson('app-elevate-session.json', first.session)
+    add({ name: 'session_ended', status: first.session?.endedAt ? 'passed' : 'failed', required: true, basis: 'api', detail: first.session?.endedAt ? `endedAt ${first.session.endedAt}` : `HTTP ${first.status}; no endedAt` })
 
     const turns = await pollUntil(async () => {
       const r = await ctx.api.get<{ turns?: Turn[] } | Turn[]>(`/sessions/${encodeURIComponent(id)}/turns`)
@@ -111,7 +116,16 @@ export class ElevateAdapter implements ExperienceAdapter {
     }, ctx.cfg.verifyTimeoutMs, 5000)
     if (metrics) ctx.evidence.writeJson('app-elevate-metrics.json', metrics)
     add({ name: 'analysis_available', status: metrics ? 'passed' : 'pending', required: true, basis: 'api',
-      detail: metrics ? `metrics returned (processingStatus: ${JSON.stringify((metrics as { processingStatus?: unknown }).processingStatus ?? 'n/a').slice(0, 160)}); existence only` : 'no metrics within the verification window' })
+      detail: metrics ? 'session metrics returned (existence only; values are not judged)' : 'no metrics within the verification window' })
+
+    const unsettled = (s: SessionView | null) => !s ? ['session unreadable'] : (['paceReconciliationStatus', 'deliveryAlignmentStatus'] as const)
+      .filter(k => /pending|processing|running|queued/i.test(String(s[k] ?? ''))).map(k => `${k}=${s[k]}`)
+    const settled = await pollUntil(async () => { const s = (await readSession()).session; return unsettled(s).length ? null : s }, ctx.cfg.verifyTimeoutMs, 5000)
+    const last = settled ?? (await readSession()).session
+    if (last) ctx.evidence.writeJson('app-elevate-session.json', last)
+    add({ name: 'async_processing_settled', status: settled ? 'passed' : 'pending', required: true, basis: 'api',
+      detail: settled ? `pace ${settled.paceReconciliationStatus ?? 'n/a'}, delivery alignment ${settled.deliveryAlignmentStatus ?? 'n/a'}`
+        : `still ${unsettled(last).join(', ')} after ${ctx.cfg.verifyTimeoutMs / 1000} s` })
 
     await ctx.page.getByRole('tab', { name: /Session Analytics/ }).click().catch(() => undefined)
     await ctx.page.waitForTimeout(3000)
