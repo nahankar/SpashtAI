@@ -1,0 +1,6 @@
+node_modules/
+# Evidence bundles (audio, screenshots, traces) and browser auth state never belong in Git.
+runs/
+.auth/
+.env.local
+*.local.env

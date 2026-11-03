@@ -1,0 +1,28 @@
+{
+  "name": "spashtai-voice-test-candidate",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Developer-only automated voice candidate that drives SpashtAI Interview and Elevate through a real browser, microphone stream and audio output.",
+  "type": "module",
+  "scripts": {
+    "vtc": "tsx src/cli.ts",
+    "login": "tsx src/cli.ts login",
+    "run": "tsx src/cli.ts run",
+    "diagnose": "tsx src/cli.ts diagnose",
+    "providers": "tsx src/cli.ts providers",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "playwright": "^1.64.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.12"
+  }
+}

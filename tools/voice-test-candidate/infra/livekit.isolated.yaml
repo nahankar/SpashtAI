@@ -1,0 +1,12 @@
+# Isolated LiveKit for voice-test-candidate runs. Uses alternate host ports so it never collides with a
+# LiveKit (and its single unnamed agent worker) already serving another checkout on :7880.
+port: 7980
+rtc:
+  tcp_port: 7981
+  udp_port: 7982
+  use_external_ip: false
+keys:
+  devkey: devsecret
+turn:
+  enabled: false
+log_level: info
