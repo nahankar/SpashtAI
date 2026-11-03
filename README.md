@@ -66,6 +66,7 @@ infra/          LiveKit server config
 ## Documentation
 
 - [North Star](docs/NORTHSTAR.md) — product architecture, utterance model, and phased roadmap
+- [Voice test candidate](tools/voice-test-candidate/README.md) — developer-only tool that runs Interview and Elevate sessions by voice in a real browser and writes evidence reports (not part of the app)
 
 ## Quick Start
 

@@ -49,6 +49,8 @@ export class AudioBridge {
   private listeners: BridgeListener[] = []
   private pendingPlays = new Map<string, (r: { stopped: boolean; epochMs: number; underruns: number }) => void>()
   private utteranceCount = 0
+  /** Utterances stopped by the candidate (yield/cancel): their remaining chunks must never be sent. */
+  private stopped = new Set<string>()
   page: Page | null = null
   readonly pageEvents: Array<Record<string, unknown>> = []
 
@@ -94,7 +96,10 @@ export class AudioBridge {
     const gapMs = chunkStartEpoch - expectedEpoch
     if (gapMs > 500) {
       const fill = new Int16Array(Math.round((gapMs / 1000) * ANALYSIS_RATE))
+      const offset = stream.length
       this.append(stream, fill)
+      // The VAD's sample counter must advance with the stream, or every later boundary shifts by the gap.
+      if (stream.vad) this.runVad(stream, fill)
       stream.realigned++
       this.evidence.event('audio', 'stream_gap_filled', { label: stream.label, gapMs: Math.round(gapMs) })
     }
@@ -113,7 +118,7 @@ export class AudioBridge {
     } else down = resample(raw, chunk.sampleRate, ANALYSIS_RATE)
     const offset = stream.length
     this.append(stream, down)
-    if (stream.vad) this.runVad(stream, down, offset)
+    if (stream.vad) this.runVad(stream, down)
   }
 
   private append(stream: Stream, samples: Int16Array) {
@@ -123,7 +128,7 @@ export class AudioBridge {
 
   private sampleEpoch(stream: Stream, sample: number) { return stream.anchorEpoch + (sample / ANALYSIS_RATE) * 1000 }
 
-  private runVad(stream: Stream, samples: Int16Array, _offset: number) {
+  private runVad(stream: Stream, samples: Int16Array) {
     for (const ev of stream.vad!.push(samples)) {
       if (ev.type === 'start') {
         const epochMs = this.sampleEpoch(stream, ev.startSample)
@@ -178,8 +183,9 @@ export class AudioBridge {
     const started = await send(first.value, false)
     void (async () => {
       try {
-        for (let next = await iterator.next(); !next.done; next = await iterator.next()) await send(next.value, false)
+        for (let next = await iterator.next(); !next.done && !this.stopped.has(id); next = await iterator.next()) await send(next.value, false)
       } finally {
+        await iterator.return?.(undefined).catch(() => undefined)
         await page.evaluate(pid => (window as any).__vtc?.close(pid), id).catch(() => undefined)
       }
     })().catch(error => this.evidence.event('tool', 'candidate_audio_stream_error', { id, error: error instanceof Error ? error.message : String(error) }))
@@ -187,6 +193,7 @@ export class AudioBridge {
   }
 
   async stop(id?: string): Promise<void> {
+    if (id) this.stopped.add(id)
     if (!this.page) return
     await this.page.evaluate(pid => (window as any).__vtc?.stop(pid), id).catch(() => undefined)
   }

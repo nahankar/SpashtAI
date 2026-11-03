@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, readFileSync } from 'node:fs'
+import { chmodSync, existsSync, readFileSync, rmSync } from 'node:fs'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
 import { AppApi, BlockedError, type AdapterContext, type Check, type ExperienceAdapter } from './adapters/types.js'
 import { InterviewAdapter } from './adapters/interview.js'
@@ -231,16 +231,24 @@ export async function runSession(cfg: RunConfig): Promise<RunReport> {
     else missing.push('No audio streams were captured.')
     artifacts.push({ file: 'audio/candidate-NNN.wav', description: 'synthesized candidate utterances exactly as sent to the virtual microphone' })
     artifacts.push({ file: 'audio/app-utterance-NNN.wav', description: 'each detected SpashtAI utterance, as sent to speech recognition' })
-    if (context && cfg.trace) {
-      const tracePath = evidence.path('browser/trace.zip')
-      await context.tracing.stop({ path: tracePath }).then(() => {
-        const changed = redactTraceArchive(tracePath, secrets)
-        evidence.event('tool', 'trace_redacted', { entriesChanged: changed })
-        artifacts.push({ file: 'browser/trace.zip', description: `Playwright trace (actions and network${cfg.traceFull ? ', screencast, DOM snapshots' : ''}) with tokens redacted; open with \`npx playwright show-trace\`` })
-      }, e => missing.push(`trace not saved: ${e instanceof Error ? e.message : e}`))
+    try {
+      if (context && cfg.trace) {
+        const tracePath = evidence.path('browser/trace.zip')
+        try {
+          await context.tracing.stop({ path: tracePath })
+          const changed = redactTraceArchive(tracePath, secrets)
+          evidence.event('tool', 'trace_redacted', { entriesChanged: changed })
+          artifacts.push({ file: 'browser/trace.zip', description: `Playwright trace (actions and network${cfg.traceFull ? ', screencast, DOM snapshots' : ''}) with tokens redacted; open with \`npx playwright show-trace\`` })
+        } catch (e) {
+          // An unredacted trace contains live tokens: never keep it.
+          rmSync(tracePath, { force: true })
+          missing.push(`trace discarded (could not be saved and redacted: ${e instanceof Error ? e.message : e})`)
+        }
+      }
+    } finally {
+      await context?.close().catch(() => undefined)
+      await browser?.close().catch(() => undefined)
     }
-    await context?.close().catch(() => undefined)
-    await browser?.close().catch(() => undefined)
     if (cfg.video) artifacts.push({ file: 'browser/*.webm', description: 'browser video — contains NO audio' })
   }
 

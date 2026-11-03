@@ -271,6 +271,8 @@ export class ConversationEngine {
             if (this.ports.now() - overlapSince >= this.opts.yieldAfterMs) {
               this.ports.log('candidate_yielded_to_app', { turn: record.turn })
               await this.ports.stop(id)
+              // Stop synthesizing the rest of the reply too.
+              abort.abort(new Cancelled('yielded to SpashtAI'))
               return
             }
           } else overlapSince = 0

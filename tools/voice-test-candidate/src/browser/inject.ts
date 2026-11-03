@@ -35,6 +35,8 @@ export function instrumentPage(cfg: InjectConfig): void {
   // One utterance may arrive as several chunks (sentence-by-sentence synthesis); they are scheduled back to back.
   const playing = new Map<string, { nodes: Set<AudioBufferSourceNode>; stopped: boolean; closed: boolean; nextTime: number; underruns: number; startEpoch: number }>()
   const taps = new Map<string, { close: () => void; kind: string; trackId: string }>()
+  // Utterances stopped mid-stream: chunks still arriving for them are dropped, never restarted.
+  const stoppedIds = new Set<string>()
 
   function ensureMic() {
     if (!micCtx) {
@@ -141,6 +143,7 @@ export function instrumentPage(cfg: InjectConfig): void {
       const bytes = new Uint8Array(bin.length)
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
       const buffer = await ctx.decodeAudioData(bytes.buffer)
+      if (stoppedIds.has(id)) return { startEpoch: now(), durationMs: 0, ctxState: ctx.state, mic: micState() }
       let entry = playing.get(id)
       const fresh = !entry
       if (!entry) {
@@ -172,7 +175,9 @@ export function instrumentPage(cfg: InjectConfig): void {
       if (e.nodes.size === 0) { playing.delete(id); emit('mic_play_end', { id, stopped: e.stopped, underruns: e.underruns, mic: micState() }) }
     },
     stop(id?: string) {
+      if (id) stoppedIds.add(id)
       for (const [key, e] of playing) if (!id || key === id) {
+        stoppedIds.add(key)
         e.stopped = true
         for (const node of [...e.nodes]) { try { node.stop() } catch { /* not started */ } }
         if (e.nodes.size === 0) { playing.delete(key); emit('mic_play_end', { id: key, stopped: true, underruns: e.underruns, mic: micState() }) }

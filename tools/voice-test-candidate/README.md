@@ -81,7 +81,8 @@ npm run vtc -- --help                                 # every option
 Useful options: `--headed` (watch it; speaker output stays muted unless `--speakers`), `--max-minutes`,
 `--max-turns`, `--close-unfinished` (end a leftover Interview through the UI first), `--verify-timeout`,
 `--llm-provider scripted` (no LLM; canned profile answers), `--tts-provider macos-say`, `--video`, `--no-trace`,
-`--browser-channel chrome`.
+`--trace-full` (adds screencast and DOM snapshots to the trace — tens of MB per minute because the live audio
+meter redraws constantly), `--browser-channel chrome`.
 
 **Production**: any `spasht.ai` host is treated as production and refused unless `--allow-production` is given
 (override lists: `VTC_PRODUCTION_HOSTS`, `VTC_NONPRODUCTION_HOSTS`).
@@ -134,7 +135,7 @@ Each run writes `runs/<run-id>/`:
 | `conversation.json` | Turns, independent transcript, the candidate's own conversation history |
 | `app-*.json` | Read-only API snapshots used for verification (run, assessments, turns, metrics) |
 | `screenshots/` | Setup, connected, before end, ended, history, playback; `99-failure.png` on errors |
-| `browser/trace.zip` | Playwright trace, tokens redacted (`npx playwright show-trace browser/trace.zip`) |
+| `browser/trace.zip` | Playwright trace (actions + network; `--trace-full` adds screencast/DOM), tokens redacted (`npx playwright show-trace browser/trace.zip`) |
 | `browser/page-text-at-stop.txt` | Visible page text when the conversation stopped (secondary diagnostics) |
 | `errors.json` | Sanitized console errors, page errors, failed requests, HTTP 5xx |
 
