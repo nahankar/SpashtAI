@@ -1,7 +1,7 @@
-import { RoomServiceClient } from 'livekit-server-sdk'
 import { randomUUID } from 'crypto'
 import { prisma } from './prisma'
 import { logger } from './logger'
+import { deleteLivekitRooms } from './livekitRooms'
 import { deleteSessionStorage, stopSessionEgress } from './sessionStorageCleanup'
 import { sweepAllScopes } from '../workspaces/jobScopes'
 
@@ -30,47 +30,8 @@ function legacyTranscriptAudioPaths(conversationData: unknown): string[] {
   })
 }
 
-function livekitConfig() {
-  const url = process.env.LIVEKIT_URL || ''
-  return {
-    httpUrl: url.startsWith('wss://')
-      ? url.replace('wss://', 'https://')
-      : url.replace('ws://', 'http://'),
-    apiKey: process.env.LIVEKIT_API_KEY || '',
-    apiSecret: process.env.LIVEKIT_API_SECRET || '',
-  }
-}
-
 async function disconnectRooms(roomNames: string[]): Promise<void> {
-  const { httpUrl, apiKey, apiSecret } = livekitConfig()
-  if (!httpUrl || !apiKey || !apiSecret || roomNames.length === 0) return
-  const service = new RoomServiceClient(httpUrl, apiKey, apiSecret)
-  const results = await Promise.allSettled(
-    [...new Set(roomNames)].map((roomName) => service.deleteRoom(roomName)),
-  )
-  const failures = results
-    .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
-    .map((result) => result.reason)
-    .filter((error) => {
-      const candidate = error as {
-        status?: number
-        statusCode?: number
-        code?: string | number
-        message?: string
-      }
-      const code = String(candidate?.code ?? '').toLowerCase()
-      const message = String(candidate?.message ?? '').toLowerCase()
-      return !(
-        candidate?.status === 404 ||
-        candidate?.statusCode === 404 ||
-        code === 'not_found' ||
-        code === 'notfound' ||
-        message.includes('room not found')
-      )
-    })
-  if (failures.length > 0) {
-    throw new AggregateError(failures, `Failed to close ${failures.length} LiveKit room(s)`)
-  }
+  await deleteLivekitRooms(roomNames)
 }
 
 export function enqueueSessionDeletion(sessionId: string, delayMs = 0): void {

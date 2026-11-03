@@ -5,6 +5,7 @@ import { isPrivilegedRole } from '../lib/userExportFlags'
 import { currentDataScope } from '../lib/dataScope'
 import { reserveWorkspaceVoiceSlot } from '../workspaces/quotas'
 import { WorkspaceError } from '../workspaces/contracts'
+import { releaseLivekitRooms } from '../lib/livekitRooms'
 import {
   activeSegmentDurationSec,
   mergeSegmentAudioStatus,
@@ -38,19 +39,24 @@ const VOICE_STALE_MS = 6 * 60 * 60 * 1000
 
 async function closeOpenSegments(
   tx: Prisma.TransactionClient,
-  leftover: Array<{ id: string; startedAt: Date; audioStatus: string }>,
+  leftover: Array<{ id: string; startedAt: Date; audioStatus: string; roomName: string }>,
   endedAt: Date,
-): Promise<void> {
+  audio: 'abandon' | 'keep',
+): Promise<string[]> {
+  const rooms: string[] = []
   for (const open of leftover) {
+    rooms.push(open.roomName)
     await tx.sessionSegment.update({
       where: { id: open.id },
       data: {
         endedAt,
         activeDurationSec: activeSegmentDurationSec(open.startedAt, endedAt),
-        audioStatus: open.audioStatus === 'pending' ? 'unavailable' : open.audioStatus,
+        audioStatus:
+          audio === 'abandon' && open.audioStatus === 'pending' ? 'unavailable' : open.audioStatus,
       },
     })
   }
+  return rooms
 }
 
 /**
@@ -63,8 +69,8 @@ async function claimOwnWorkspaceVoiceSlot(
   exceptSessionId: string,
   endedAt: Date,
   takeover: boolean,
-): Promise<void> {
-  if (!currentDataScope()) return
+): Promise<string[]> {
+  if (!currentDataScope()) return []
   const leftover = await tx.sessionSegment.findMany({
     where: {
       endedAt: null,
@@ -75,12 +81,12 @@ async function claimOwnWorkspaceVoiceSlot(
         discardedAt: null,
       },
     },
-    select: { id: true, sessionId: true, startedAt: true, updatedAt: true, audioStatus: true },
+    select: { id: true, sessionId: true, startedAt: true, updatedAt: true, audioStatus: true, roomName: true },
   })
   const stale = leftover.filter(open => endedAt.getTime() - open.updatedAt.getTime() >= VOICE_STALE_MS)
   const active = leftover.filter(open => endedAt.getTime() - open.updatedAt.getTime() < VOICE_STALE_MS)
-  await closeOpenSegments(tx, stale, endedAt)
-  if (!active.length) return
+  const rooms = await closeOpenSegments(tx, stale, endedAt, 'abandon')
+  if (!active.length) return rooms
   if (!takeover) {
     throw new WorkspaceError(
       409,
@@ -89,7 +95,8 @@ async function claimOwnWorkspaceVoiceSlot(
       { openSessions: [...new Set(active.map(open => open.sessionId))] },
     )
   }
-  await closeOpenSegments(tx, active, endedAt)
+  rooms.push(...await closeOpenSegments(tx, active, endedAt, 'keep'))
+  return rooms
 }
 
 export async function createSessionSegment(req: Request, res: Response) {
@@ -126,6 +133,7 @@ export async function createSessionSegment(req: Request, res: Response) {
     }
 
     let segment
+    let releasedRooms: string[] = []
     try {
       segment = await prisma.$transaction(
         async (tx) => {
@@ -133,18 +141,11 @@ export async function createSessionSegment(req: Request, res: Response) {
           const openSegments = await tx.sessionSegment.findMany({
             where: { sessionId, endedAt: null },
           })
-          for (const open of openSegments) {
-            await tx.sessionSegment.update({
-              where: { id: open.id },
-              data: {
-                endedAt: startedAt,
-                activeDurationSec: activeSegmentDurationSec(open.startedAt, startedAt),
-                audioStatus:
-                  open.audioStatus === 'pending' ? 'unavailable' : open.audioStatus,
-              },
-            })
-          }
-          await claimOwnWorkspaceVoiceSlot(tx, ownership.session.userId, sessionId, startedAt, takeover)
+          const rooms = await closeOpenSegments(tx, openSegments, startedAt, 'keep')
+          rooms.push(
+            ...await claimOwnWorkspaceVoiceSlot(tx, ownership.session.userId, sessionId, startedAt, takeover),
+          )
+          releasedRooms = rooms
           await reserveWorkspaceVoiceSlot(tx)
           const latest = await tx.sessionSegment.findFirst({
             where: { sessionId },
@@ -191,6 +192,7 @@ export async function createSessionSegment(req: Request, res: Response) {
       throw error
     }
 
+    await releaseLivekitRooms(releasedRooms)
     return res.status(201).json({ segment })
   } catch (error) {
     if (error instanceof SessionDiscardedError || error instanceof SessionMissingError) {

@@ -20,6 +20,7 @@ import { RecordingAcknowledgmentCard } from '@/features/interviews/RecordingAckn
 import { ConversationToggle } from '@/features/interviews/ConversationToggle'
 import { applyRetain, deletePractices, historyNavigationBlocked } from '@/lib/interview-history'
 import { useConfirm } from '@/hooks/useConfirm'
+import { confirmVoiceTakeover } from '@/features/live-session/voiceTakeover'
 import { PracticeTitle } from '@/features/interviews/PracticeTitle'
 
 const difficulties=PRACTICE_DIFFICULTIES
@@ -89,6 +90,7 @@ export function Interviews() {
     clearActiveSession:()=>undefined,rewardPoints:()=>undefined,
     left:()=>{ void refreshDetail(); void refreshHistory() },
     discarded:()=>{ activeRun.current=null; setDetail(null); setParams({}); void refreshHistory() },discardFinished:()=>undefined,
+    confirmTakeover:message=>confirmVoiceTakeover(confirmDialog,message),
   },observedId)
   const controller=live.controller
   const adapter=interviewsAdapter(liveSessionApi,(gate==='accepted' ? { ...setup } : { ...setup, recordingConsent:true }) as InterviewSetup,()=>activeRun.current,run=> {

@@ -4,7 +4,7 @@ import { PrismaClient } from '@prisma/client'
 import { randomUUID } from 'node:crypto'
 import { correctEvaluation, testAnswer } from './fixtures/interview-evaluation'
 import { readyDraft } from './fixtures/bank-draft'
-import { hash } from '../src/interviews/evaluator/contracts'
+import { CURRENT_LEARNER_POLICY, LEARNER_POLICIES, hash } from '../src/interviews/evaluator/contracts'
 
 const url = process.env.WORKSPACE_TEST_DATABASE_URL
 if (url && url !== 'postgresql://postgres@127.0.0.1:55443/postgres') throw new Error('Use only the isolated tenancy container')
@@ -31,6 +31,7 @@ suite('organization Interviews path', () => {
   let learnerEval: typeof import('../src/interviews/evaluator/learner')
   let readiness: Record<string, boolean>
   let alpha = '', beta = '', learner = '', editor = ''
+  const extraLearners: string[] = []
   const questions: string[] = []
   const tz = 'Pacific/Kiritimati'
 
@@ -92,7 +93,7 @@ suite('organization Interviews path', () => {
 
   afterAll(async () => {
     if (readiness) readiness.interviews = false
-    const ids = [learner, editor].filter(Boolean)
+    const ids = [learner, editor, ...extraLearners].filter(Boolean)
     await admin.interviewEvaluatorUsage.deleteMany({ where: { workspaceId: { in: [alpha, beta].filter(Boolean) } } })
     const shared = { scope: 'learner-global', day: new Date().toISOString().slice(0, 10) }
     if (originalShared) await admin.interviewEvaluatorBudget.update({ where: { scope_day: shared }, data: { used: originalShared.used } })
@@ -152,6 +153,92 @@ suite('organization Interviews path', () => {
     await expect(learnerEval.learnerFindings(run.id, learner)).rejects.toMatchObject({ status: 404 })
     await expect(inWorkspace(beta, () => learnerEval.learnerFindings(run.id, learner))).rejects.toMatchObject({ status: 404 })
   })
+
+  it('pages more than 50 learner scopes so a later due learner is graded while earlier jobs retry', async () => {
+    await admin.workspace.update({ where: { id: alpha }, data: { dailyEvaluations: 200 } })
+    const draft = readyDraft()
+    const questionSnapshot = {
+      id: questions[0], namespace: 'automation-pilot', externalQid: `${tag}-A`, revision: 1,
+      questionText: draft.questionText, track: tag, category: draft.category, topic: draft.topic,
+      difficulty: 'Medium', experienceBand: '2-5', goodAnswerPoints: draft.goodAnswerPoints,
+      exampleAnswer: draft.exampleAnswer, expectedDepth: draft.expectedDepth, followUpGuidance: draft.followUpGuidance,
+    }
+    const policy = { version: CURRENT_LEARNER_POLICY, config: LEARNER_POLICIES[CURRENT_LEARNER_POLICY].config }
+    const questionHash = hash(questionSnapshot)
+    const answerHash = hash(testAnswer)
+    const created = await Promise.all(Array.from({ length: 51 }, (_, index) =>
+      admin.user.create({ data: { email: `${tag}-page-${String(index).padStart(2, '0')}@example.invalid`, emailVerified: true } })))
+    extraLearners.push(...created.map(user => user.id))
+    await admin.workspaceMember.createMany({
+      data: created.map(user => ({ workspaceId: alpha, userId: user.id, role: 'LEARNER', state: 'ACTIVE', acceptedAt: new Date() })),
+    })
+    const ordered = created.slice().sort((a, b) => a.id.localeCompare(b.id))
+    const later = ordered[50]
+    const future = new Date(Date.now() + 60 * 60_000)
+    const snapshots: Record<string, string> = {}
+    for (const user of ordered) {
+      const sessionId = randomUUID()
+      const runId = randomUUID()
+      const attemptId = randomUUID()
+      const snapshotId = randomUUID()
+      const segmentId = randomUUID()
+      snapshots[user.id] = snapshotId
+      await admin.session.create({
+        data: {
+          id: sessionId, userId: user.id, module: 'elevate', purpose: 'INTERVIEW', contextScope: 'SESSION_ONLY',
+          workspaceId: alpha, workspaceKind: 'ORGANIZATION',
+        },
+      })
+      await admin.interviewRun.create({
+        data: {
+          id: runId, sessionId, ownerId: user.id, track: tag, experienceBand: '2-5', startingDifficulty: 'Medium',
+          recordingConsentAt: new Date(), recordingConsentVersion: 'interview-recording-1',
+          voiceConfigSnapshot: { backend: 'pipeline-bedrock', sttProvider: 'transcribe', ttsProvider: 'polly' },
+          evaluationPolicySnapshot: policy,
+        },
+      })
+      await admin.sessionSegment.create({
+        data: { id: segmentId, sessionId, segmentIndex: 0, roomName: randomUUID(), startedAt: new Date() },
+      })
+      await admin.interviewAttempt.create({
+        data: {
+          id: attemptId, runId, index: 1, questionId: questions[0], questionSnapshot, questionHash,
+          status: 'ASKED', askedAt: new Date(),
+        },
+      })
+      await admin.interviewAnswerChunk.create({
+        data: { attemptId, segmentId, sourceTurnId: `user_turn_${user.id}`, localTurnIndex: 0, text: testAnswer },
+      })
+      await admin.interviewCaptureReceipt.create({
+        data: { id: randomUUID(), attemptId, segmentId, action: 'FINISH', lastTurnIndex: 0 },
+      })
+      await admin.interviewAttempt.update({
+        where: { id: attemptId },
+        data: { status: 'ANSWERED', completedAt: new Date() },
+      })
+      await admin.interviewAnswerSnapshot.create({
+        data: {
+          id: snapshotId, ownerId: user.id, source: 'LIVE_ATTEMPT', attemptId, questionId: questions[0],
+          questionSnapshot, questionHash, answerText: testAnswer, answerHash, textSource: 'AGENT_COMMITTED_TURNS',
+        },
+      })
+      await admin.interviewAssessment.create({
+        data: {
+          snapshotId, inputKey: hash({ snapshotId, userId: user.id }), config: policy.config as object,
+          status: 'PENDING', nextAt: user.id === later.id ? new Date() : future,
+        },
+      })
+    }
+
+    expect(await learnerEval.sweepLearnerAssessmentsEverywhere()).toBe(true)
+    expect(await admin.interviewAssessment.findUniqueOrThrow({ where: { snapshotId: snapshots[later.id] } }))
+      .toMatchObject({ status: 'COMPLETED' })
+    const retrying = await admin.interviewAssessment.findMany({
+      where: { snapshotId: { in: ordered.slice(0, 50).map(user => snapshots[user.id]) } },
+    })
+    expect(retrying).toHaveLength(50)
+    expect(retrying.every(row => row.status === 'PENDING')).toBe(true)
+  }, 120000)
 
   it('uses the organization time zone for the budget day', () => {
     const at = new Date('2026-11-03T12:00:00Z')

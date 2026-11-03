@@ -1,5 +1,5 @@
 import { prepareWorkspaceTestRole } from './workspace-test-role'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { PrismaClient } from '@prisma/client'
 import express from 'express'
 import request from 'supertest'
@@ -57,11 +57,12 @@ suite('organization Elevate voice path', () => {
     jobs = await import('../src/workspaces/jobScopes')
     const { bindWorkspaceRequest, reenterDataScope, requireWorkspaceProduct } = await import('../src/workspaces/requestScope')
     const { requireAuth, requireAuthOrMediaToken } = await import('../src/middleware/auth')
-    const { createSessionSegment } = await import('../src/routes/session-segments')
+    const { createSessionSegment, closeSessionSegment } = await import('../src/routes/session-segments')
     const recordings = await import('../src/routes/recordings')
     const conversations = await import('../src/routes/conversations')
     app = express(); app.use(express.json()); app.use(bindWorkspaceRequest)
     app.post('/sessions/:sessionId/segments', requireAuth, createSessionSegment)
+    app.patch('/sessions/:sessionId/segments/:segmentId', requireAuth, closeSessionSegment)
     app.post('/sessions/:sessionId/recording/upload', requireAuth, recordings.recordingUpload.single('audio'), reenterDataScope, recordings.uploadSessionRecording)
     app.post('/sessions/:sessionId/recording/ticket', requireAuth, recordings.createSessionRecordingTicket)
     app.get('/sessions/:sessionId/recording/stream', requireAuthOrMediaToken, recordings.streamSessionRecording)
@@ -159,14 +160,29 @@ suite('organization Elevate voice path', () => {
     expect(blocked.body).toMatchObject({ code: 'VOICE_SESSION_ACTIVE', openSessions: [first.id] })
     expect((await admin.sessionSegment.findUniqueOrThrow({ where: { id: `${tag}-own-a` } })).endedAt).toBeNull()
 
+    const rooms = await import('../src/lib/livekitRooms')
+    const released = vi.spyOn(rooms, 'releaseLivekitRooms').mockResolvedValue(undefined)
     const taken = await request(app).post(`/sessions/${second.id}/segments`).set(headers(alpha, learner))
       .send({ segmentId: `${tag}-own-c`, roomName: `${tag}-own-c`, takeover: true })
     expect(taken.status).toBe(201)
+    expect(released).toHaveBeenCalledWith(expect.arrayContaining([`${tag}-own-a`]))
     const closed = await admin.sessionSegment.findUniqueOrThrow({ where: { id: `${tag}-own-a` } })
     expect(closed.endedAt).not.toBeNull()
     expect(closed.activeDurationSec).toBeGreaterThanOrEqual(0)
+    expect(closed.audioStatus).toBe('pending')
+    const late = await request(app).patch(`/sessions/${first.id}/segments/${tag}-own-a`).set(headers(alpha, learner))
+      .send({ endedAt: new Date(closed.endedAt!.getTime() + 120_000).toISOString(), audioStatus: 'available' })
+    expect(late.status).toBe(200)
+    const afterLate = await admin.sessionSegment.findUniqueOrThrow({ where: { id: `${tag}-own-a` } })
+    expect(afterLate.endedAt?.getTime()).toBe(closed.endedAt!.getTime())
+    expect(afterLate.activeDurationSec).toBe(closed.activeDurationSec)
+    expect(afterLate.audioStatus).toBe('available')
+    const upload = await request(app).post(`/sessions/${first.id}/recording/upload`).set(headers(alpha, learner))
+      .field('segmentId', `${tag}-own-a`).field('durationSec', '1').attach('audio', wav(), { filename: 'takeover.wav', contentType: 'audio/wav' })
+    expect(upload.status).toBe(201)
     expect((await admin.sessionSegment.findUniqueOrThrow({ where: { id: `${tag}-own-c` } })).endedAt).toBeNull()
     await admin.sessionSegment.update({ where: { id: `${tag}-own-c` }, data: { endedAt: new Date() } })
+    released.mockRestore()
 
     const stale = await orgSession(alpha, learner)
     await request(app).post(`/sessions/${stale.id}/segments`).set(headers(alpha, learner)).send({ segmentId: `${tag}-own-d`, roomName: `${tag}-own-d` })
