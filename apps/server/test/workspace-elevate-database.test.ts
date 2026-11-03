@@ -60,7 +60,12 @@ suite('organization Elevate voice path', () => {
     const { createSessionSegment, closeSessionSegment } = await import('../src/routes/session-segments')
     const recordings = await import('../src/routes/recordings')
     const conversations = await import('../src/routes/conversations')
+    const { getSessionTurns } = await import('../src/routes/turns')
+    const { guardInterviewSession } = await import('../src/middleware/interviewSessionAccess')
     app = express(); app.use(express.json()); app.use(bindWorkspaceRequest)
+    app.use(guardInterviewSession)
+    app.get('/sessions/:sessionId/conversation', requireAuth, conversations.getConversation)
+    app.get('/sessions/:sessionId/turns', requireAuth, getSessionTurns)
     app.post('/sessions/:sessionId/segments', requireAuth, createSessionSegment)
     app.patch('/sessions/:sessionId/segments/:segmentId', requireAuth, closeSessionSegment)
     app.post('/sessions/:sessionId/recording/upload', requireAuth, recordings.recordingUpload.single('audio'), reenterDataScope, recordings.uploadSessionRecording)
@@ -111,7 +116,7 @@ suite('organization Elevate voice path', () => {
     expect((await request(app).get(`/sessions/${session.id}/recording/stream`).set(headers(alpha, other))).status).toBe(404)
 
     // <audio src> playback: a session-bound ticket, with membership rechecked on every range request.
-    expect((await request(app).post(`/sessions/${session.id}/recording/ticket`).set(headers(null, learner))).status).toBe(400)
+    expect((await request(app).post(`/sessions/${session.id}/recording/ticket`).set(headers(null, learner))).status).toBe(404)
     expect((await request(app).post(`/sessions/${session.id}/recording/ticket`).set(headers(alpha, other))).status).toBe(404)
     expect((await request(app).post(`/sessions/${session.id}/recording/ticket`).set(headers(beta, learner))).status).toBe(404)
     const issued = await request(app).post(`/sessions/${session.id}/recording/ticket`).set(headers(alpha, learner))
@@ -134,6 +139,23 @@ suite('organization Elevate voice path', () => {
     } finally {
       await admin.workspaceMember.update({ where: { id: members[`${alpha}:${learner}`] }, data: { state: 'ACTIVE' } })
     }
+  })
+
+  it('returns 404 for conversation and turns outside the session workspace', async () => {
+    const session = await orgSession(alpha, learner)
+    await scopes.runWithDataScope({
+      actorId: learner, workspaceId: alpha, membershipId: members[`${alpha}:${learner}`],
+      role: 'LEARNER', slug: '', timeZone: 'UTC', features: {}, origin: 'request',
+    }, () => db.sessionTranscript.create({
+      data: { sessionId: session.id, conversationData: { messages: [{ role: 'assistant', content: 'secret' }] } },
+    }))
+    const own = await request(app).get(`/sessions/${session.id}/conversation`).set(headers(alpha, learner))
+    expect(own.status).toBe(200)
+    expect(own.body.messages).toEqual([{ role: 'assistant', content: 'secret' }])
+    expect((await request(app).get(`/sessions/${session.id}/conversation`).set(headers(beta, learner))).status).toBe(404)
+    expect((await request(app).get(`/sessions/${session.id}/conversation`).set(headers(null, learner))).status).toBe(404)
+    expect((await request(app).get(`/sessions/${session.id}/turns`).set(headers(beta, learner))).status).toBe(404)
+    expect((await request(app).get(`/sessions/${session.id}/turns`).set(headers(null, learner))).status).toBe(404)
   })
 
   it('keeps Personal-only Coach closed inside an organization', async () => {

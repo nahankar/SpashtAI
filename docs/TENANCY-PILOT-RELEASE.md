@@ -1,11 +1,19 @@
 # Tenancy pilot release report
 
-Stop: not merged, not deployed, production readiness flags unchanged.
+Stop: not merged, not deployed, production readiness flags unchanged. Pending explicit release approval.
+
+## Recommendation
+
+**Not ready for production.** There are no tenancy isolation blockers in the walkthrough evidence. Production still must not change until you approve a release.
+
+**Walkthrough candidate is ready** for the bounded KLSVDIT pilot (Elevate, Replay, Interviews, Feedback, Progress Pulse) once the uncommitted conversation/turns 404 guard is on `tenancy-pilot-rc`. Nova Sonic `95170b3` stays out.
+
+**Actual release blockers:** none. Remaining items below are known limitations, not launch defects.
 
 ## Release candidate
 
-- **Candidate branch:** `tenancy-pilot-rc` (tenancy only; excludes Nova Sonic / agent greeting commit `95170b3`)
-- **Working branch:** `codex/workspace-product-access` still contains `95170b3` as a separately reviewable inclusion
+- **Candidate branch:** `tenancy-pilot-rc` `3039410` (tenancy only; `95170b3` is not an ancestor)
+- **Working branch:** `codex/workspace-product-access` `6e8c881` still contains `95170b3` as a separately reviewable inclusion, plus the uncommitted session-visibility 404
 - Production revision: `origin/main` `d90bccf`
 - Editor checkout `feature/tenant-admin-demo-invitations` @ `81c393b` was not reset
 - Included organization products: Elevate, Replay, Interviews, Feedback, Progress Pulse
@@ -27,13 +35,14 @@ Stop: not merged, not deployed, production readiness flags unchanged.
 
 ## Passed automated checks
 
-- Restricted-role DB: elevate (incl. takeover room release, late close, recording), interviews (incl. 51-scope pagination), admin analytics, product plane, isolation stress, invitations, session — 64 + 4 interview tests this run
-- Web: live-session controller (Cancel and Take over), `voiceTakeover` wiring, api, `activeWorkspace`
+- Restricted-role DB on `127.0.0.1:55443` against the exact tenancy suites (Nova Sonic agent files not exercised): elevate (10, including conversation/turns 404 and Personal ticket 404), replay (7), interviews, admin analytics, product plane, isolation stress, invitations, session — **76 passed / 8 files**
+- `tenancy-pilot-rc` `3039410` excludes `95170b3` (confirmed `merge-base --is-ancestor` exit 1). Working HEAD differs from RC only by those three Nova Sonic agent files
 - Isolated migrate deploy on `127.0.0.1:55443` `postgres` and `spasht_walkthrough` as owner; afterwards `tenancy_test_app` / `walkthrough_app` (`NOSUPERUSER`, `NOBYPASSRLS`) can call both `workspace_job_scopes(text)` and `workspace_job_scopes(text,text,text,int)`
+- Dedicated interview-practice fixture `127.0.0.1:55441/simple_bank` is behind schema (`Session.workspaceId` missing) and was not used as a release signal
 
 ## Acceptance — observed vs pending
 
-Reuse Northwind Elevate mic `session_1793698728660_k17qya9k1` (Transcribe + Nova Lite + Polly, transcript, 71s WebM, Pulse tracked). Delivery alignment was still independently queued.
+Reuse earlier Northwind Elevate mic `session_1793698728660_k17qya9k1`. Newer human check below.
 
 **Observed this pass (walkthrough API `:4100`, restricted `walkthrough_app`):**
 
@@ -42,11 +51,15 @@ Reuse Northwind Elevate mic `session_1793698728660_k17qya9k1` (Transcribe + Nova
 - Northwind session list contains the real mic session; Brightpath list is empty; Personal list does not contain the Northwind id
 - Brightpath `GET` of the Northwind session id → 404; Brightpath recording stream → 404; Personal recording stream → 404; Northwind stream → 200
 - Interviews options 200 in Northwind and Brightpath (fictional bank coverage 3); Personal → 403
+- Northwind Elevate `session_1793728690320_rst8dgeyq`: `pipeline-bedrock` (Transcribe + Nova Lite + Polly), two spoken turns, 135s, Pulse `tracked`, recording uploaded. Delivery alignment still `pending`. `POST /api/coach/home/results/.../seen` → 403 (`This feature is not available in this workspace`) — expected; Coach is unfinished in organizations
+- Brightpath Interview runs `cmw0zufna002t8pqmlk976h7n` (ended) and `cmw0zxxlh003l8pqmcwwywq2w`: live room, Show conversation, Brightpath-labelled `WT-NW-003`. `POST /next` → 409 `QUESTION_BANK_EXHAUSTED` after that one question. Expected: the walkthrough bank has three Automation Testing rows, but only `WT-NW-003` is `experienceBand` `0-2`. The other two are `2-5`. First run saved six speech chunks then skip (no evaluation snapshot). Second run skip-only. Those runs were manual (`conversationPolicySnapshot` null) because `interview_conversation` was still hidden/disabled.
+- Brightpath Interview conversation run `cmw10ifqk006p8pqmu91xmpxa` (`session_1793729971170_qgd1t7ela`): policy pinned (`handoffSilenceMs` 5000). Experience `0-2|2-5|5-8|8+` so all three fictional questions were eligible. Agent states `listening` → `candidate_end` → `confirming`/`saving`/`preparing`/`asking` without a Next click. Q1 ANSWERED, Q2 ANSWERED (`DONT_KNOW`), Q3 SKIPPED, then `waiting` `QUESTION_BANK_EXHAUSTED`. Recording uploaded; playback shows the conversation and player. Q1 assessment `FAILED` `INVALID_OUTPUT_INCONSISTENT` (UI: Evaluation service unavailable). Q2 completed as Did not know. Session recording has no per-answer `audioStart` (jumping to individual answers unavailable). Communication trends correctly withheld.
+- Isolation of that Brightpath Interview session (same learner, identity token): Brightpath `GET /sessions/:id`, conversation (8 messages), turns, transcript, recording ticket/stream, run detail, playback assessments → 200; history includes the run. Northwind and Personal: session/transcript/run/assessments/conversation/turns → 404; recording ticket/stream → 404 or no audio; history count 0. Empty 200 conversation/turns bodies for a hidden session are a regression.
 
 **Not observed — remaining human blockers:**
 
 1. Brightpath Elevate microphone, saved transcript, recording/playback
-2. One real local Interview against the fictional bank: live transcript under Show conversation, progression, recording/playback, technical feedback only after End, isolation of that run from Personal/Northwind/Brightpath
+2. Retry of Q1 technical feedback after `INVALID_OUTPUT_INCONSISTENT`
 
 Do not treat those as complete until they are run.
 
@@ -90,7 +103,7 @@ Dropping functions while the new application is live is not a rollback. Compatib
 - Delivery alignment / Gentle completion is an independent worker path
 - Prepare and Coach stay unfinished in organizations
 - First Owner still requires a verified account
-- Brightpath Elevate mic/playback and a real Interview run are **pending observation**
+- Brightpath Elevate mic/playback still pending. Brightpath Interview live ask + skip/exhaustion and a 3-question conversation run observed; Q1 evaluation `INVALID_OUTPUT_INCONSISTENT` is an independent evaluator defect
 - Nova Sonic agent commit is excluded from this candidate
 
 ## Production smoke checklist
