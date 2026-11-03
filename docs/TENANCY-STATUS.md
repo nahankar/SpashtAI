@@ -3,10 +3,12 @@
 Current production status: reviewed control-plane release deployed November 2, 2026 (code `cd2acd5`); production
 is now `d90bccf`. See `TENANCY-RELEASE-2026-11-02.md`.
 
-**Organization product plane (November 3, 2026):** branch `codex/workspace-product-access`. Data isolation for
-every product, Elevate/Replay/Interviews organization paths, workspace admin APIs and pages, and the `/w/:slug`
-browser shell are implemented and tested. Organization products stay hidden (readiness `false`) until each passes a
-browser walkthrough, and Elevate/Interviews a human microphone check. Not merged or deployed. Progress, evidence and
+**Organization product plane (November 3, 2026):** branch `codex/workspace-product-access`, latest local commit
+`52e0010`. Data isolation, Elevate/Replay/Interviews organization paths, workspace admin APIs/pages and the
+`/w/:slug` shell are implemented and tested. A local fictional-account browser walkthrough has been recorded for
+Replay (scoped history/results/audio/deletion and Pulse values); Elevate and Interviews were opened locally via
+`WORKSPACE_READY_OVERRIDE` only. `WORKSPACE_FEATURE_READINESS` is still `false` for those products. Feedback is
+unfinished. Not human-verified with Google or a microphone. Not merged or deployed. Progress, evidence and
 release gates: [TENANCY-PRODUCT-PLANE.md](TENANCY-PRODUCT-PLANE.md).
 
 Earlier checkpoint notes below describe their status at the time.

@@ -56,7 +56,7 @@ Nothing on this branch is merged, deployed or human-verified yet. No deployment 
 | 3 | Replay: uploads, storage keys, processing, playback, export, deletion | Yes (server) | Yes |
 | 4 | Interviews: runs, attempts, evaluator workers, tenant evaluation budget | Yes (server) | Yes |
 | 5 | Workspace admin APIs: dashboard, users, invitations, feedback, usage, Pulse, AI Analytics, settings | Yes | Yes |
-| 6 | Web shell `/w/:slug`, role navigation, workspace header, namespaced browser storage, admin pages | Yes | Yes (unit and render tests; no browser walkthrough yet) |
+| 6 | Web shell `/w/:slug`, role navigation, workspace header, namespaced browser storage, admin pages | Yes | Yes (unit, render, and local fictional-account walkthrough; not Google/microphone) |
 | 7 | Prepare/Coach (isolated at the data level; not offered; Coach refuses a workspace scope) | Data only | Data only |
 | 8 | Docs, review, push; deployment only after authorization | Docs updated | — |
 
@@ -162,6 +162,7 @@ is part of each product's organization path. Tests switch readiness on locally o
   `shell/render.test.tsx`, updated `EnrollmentForm.test.tsx`.
 - Latest full runs (November 3): server 724 passed, 124 skipped; web 363 passed; web type check and production build
   pass; OpenAPI validates. Lint errors remain only in four pre-existing platform admin files.
+- Local browser walkthrough (November 3, commit `52e0010`): see below. Not human-verified.
 
 ## Release gates
 
@@ -169,14 +170,14 @@ is part of each product's organization path. Tests switch readiness on locally o
 | --- | --- |
 | Server isolation tests on the restricted role | Pass |
 | Migration upgrade verifier | Pass (November 3, after checkpoint 6: 42 tables enforce forced RLS) |
-| Browser walkthrough with fictional local accounts (two organizations plus Personal) | Not done |
-| Product readiness flags (`WORKSPACE_FEATURE_READINESS`) | All organization products still `false`; flip one product at a time after its browser walkthrough |
+| Browser walkthrough with fictional local accounts (two organizations plus Personal) | Local Replay walkthrough done November 3 (commit `52e0010`); Elevate and Interviews opened locally only. Not human-verified with Google or a microphone |
+| Product readiness flags (`WORKSPACE_FEATURE_READINESS`) | All organization products still `false` in product code. Local `WORKSPACE_READY_OVERRIDE` is ignored in production |
 | Real Google sign-in, microphone, LiveKit room and agent in an organization | Human check, not done |
 | Merge to `main` | Not done |
 | Deployment (backup, active-session check, migration, runtime role, rollback plan) | Not authorized |
 
 With readiness `false`, a deployed build would give Owners/Admins the admin pages (with empty reports) while learners
-see no products. That is safe but is not the KLSVDIT goal.
+see no products. That is still the production posture. The local override is walkthrough-only.
 
 ## Known gaps and decisions
 
@@ -195,8 +196,56 @@ see no products. That is safe but is not the KLSVDIT goal.
   budget can therefore be limited by platform demand. Raising it is a platform cost decision.
 - Interview database suites are hard-wired to the other checkout's database on 55441 and are not run there.
 
+## Local walkthrough (November 3, latest commit `52e0010`)
+
+Isolated stack only: API `:4100` as `walkthrough_app` on `127.0.0.1:55443/spasht_walkthrough` (`NOSUPERUSER`,
+`NOBYPASSRLS`), web `:5273`, `NODE_ENV=development`, `DEV_LOGIN=true`. Production host and the editor checkout at
+`81c393b` were not touched. `WORKSPACE_FEATURE_READINESS` is still all `false` except `pro`/`ultra`.
+`WORKSPACE_READY_OVERRIDE` was `replay`, then `replay,elevate`, then `replay,elevate,interviews`. Production
+ignores that override.
+
+**Development login.** `POST /api/auth/dev-login` is 404 `DEV_LOGIN_DISABLED` in production even when `DEV_LOGIN=true`
+and the route is called directly. Live local checks: `anyone@example.com` → 401 `DEV_LOGIN_REJECTED` (user lookup not
+reached); unknown `@walkthrough.test` → 401; `learner@` / `owner@` → 200. Google and `/api/auth/login` are unchanged.
+Six unit/HTTP tests cover the gate.
+
+**Auth contract.** Product routes: identity Bearer plus `x-spasht-workspace`. Workspace admin `/api/workspaces/current/*`:
+workspace JWT as Bearer (`workspaceCall` / `currentWorkspaceRequest`). Documented on `api-client.ts` and
+`workspaces/client.ts`. Live fail-closed: invalid header 401 `WORKSPACE_TOKEN_REQUIRED`; identity/workspace mismatch
+403 `WORKSPACE_IDENTITY_MISMATCH`; identity Bearer on admin 401 `WORKSPACE_TOKEN_REQUIRED`. An absent workspace header
+is Personal, not an organization fallback. Coach in an organization remains 403 `WORKSPACE_FEATURE_UNAVAILABLE`.
+
+**Replay (browser, displayed data).** Learner sees Replay only; no Admin, Elevate or Interviews until those
+overrides. Feedback is unfinished: entitled but readiness false, page copy
+“This product is not yet available in organization workspaces.” History: Northwind shows only Northwind sessions;
+Brightpath only Brightpath; Personal only Personal. Northwind (standard) audio control is locked (“Coming soon”);
+Brightpath Pro upload of `tone.wav` returned 200, opened results, and was deleted from history. Opening the Brightpath
+result id from Northwind shows “Replay session not found.” Owner Admin nav is present. Users page lists only
+Northwind members.
+
+**Progress Pulse (displayed values, not HTTP 200).** Seeded Northwind: learner clarity 8 + confidence 6, owner
+clarity 4. Admin UI last 30 days in `Asia/Kolkata`: Clarity **6** (2 scores · 2 learners), Confidence **6**
+(1 score · 1 learner). Skill filter Clarity: 6 / 2 scores, Confidence card gone. Learner+Clarity: **8**
+(1 score · 1 learner). Brightpath last 30 days in `America/Los_Angeles` (workspace “today” was 2 November):
+Clarity **2** (1 score · 1 learner). A 3 November PT score is correctly excluded until that workspace day.
+Personal clarity 10 does not appear in either organization report.
+
+**Elevate (local override only).** Entitled on both fictional orgs. After `WORKSPACE_READY_OVERRIDE=replay,elevate`,
+`POST /sessions` in Northwind is 201; Brightpath list length 0; Personal list does not contain the organization
+session. Learner nav shows Elevate + Replay; Elevate page lists the Northwind session. No LiveKit room or
+microphone yet.
+
+**Interviews (local override only).** Walkthrough DB flags `interviews` / `interview_voice` / `interview_adaptive`
+were unhidden in `spasht_walkthrough` only. After `WORKSPACE_READY_OVERRIDE=replay,elevate,interviews`,
+`GET /api/interviews/options` is 200 in Northwind and 403 in Personal. Learner nav shows Interviews; the page
+opens and reports no reviewed questions for this selection. No bank content and no microphone yet.
+
+**Unfinished.** Feedback submission stays disabled (readiness false). Prepare and Coach stay off. Organization
+readiness table is unchanged. No production feature is enabled.
+
 ## Blockers
 
-- Enabling a product for organizations needs a browser walkthrough first, and for Elevate and Interviews a human
-  microphone check.
+- Elevate and Interviews still need a human microphone check (script in the walkthrough notes) before any
+  production readiness flip.
+- Feedback remains unfinished while organization readiness is false.
 - Deployment needs explicit authorization in the Cursor conversation.
