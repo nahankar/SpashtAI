@@ -12,7 +12,7 @@ vi.mock('../src/lib/prisma', () => {
 vi.mock('../src/lib/replay-recording', () => ({ identifyReplayRecording: mocks.identify, replayCacheKey: vi.fn() }))
 vi.mock('../src/analytics/insightGenerator', () => ({ generateCoachingInsights: vi.fn(), resolveReplayUploadAudio: vi.fn() }))
 vi.mock('../src/lib/aws-bedrock', () => ({ analyzeTranscript: vi.fn() }))
-vi.mock('../src/lib/aws-transcribe', () => ({ uploadToS3: vi.fn(), startTranscriptionJob: vi.fn(), pollTranscriptionJob: vi.fn(), fetchTranscriptionResult: vi.fn(), mediaFormatFromMime: vi.fn() }))
+vi.mock('../src/lib/aws-transcribe', () => ({ uploadToS3: vi.fn(), transcriptionInputUri: (key: string) => `s3://test-bucket/${key}`, startTranscriptionJob: vi.fn(), pollTranscriptionJob: vi.fn(), fetchTranscriptionResult: vi.fn(), mediaFormatFromMime: vi.fn() }))
 vi.mock('../src/lib/aws-transcribe-streaming', () => ({ transcribeStreamingFromFile: vi.fn() }))
 
 describe('Replay evidence route access and identity invalidation', () => {

@@ -69,6 +69,7 @@ import { skillScoresToPulseEntries } from '../analytics/progressPulse'
 import { REPLAY_PULSE_ORIGIN } from '../analytics/pulseEligibility'
 import {
   uploadToS3,
+  transcriptionInputUri,
   startTranscriptionJob,
   pollTranscriptionJob,
   fetchTranscriptionResult,
@@ -80,6 +81,8 @@ import { transcribeStreamingFromFile } from '../lib/aws-transcribe-streaming'
 import { currentDataScope } from '../lib/dataScope'
 import { activityMediaDir, mediaPathAllowed, workspaceMediaPrefix } from '../lib/mediaStorage'
 import { workspacePlan } from '../workspaces/productAccess'
+import { reenterDataScope } from '../workspaces/requestScope'
+import { deleteRecordingArtifact } from '../lib/sessionStorageCleanup'
 
 const isDev = process.env.NODE_ENV !== 'production'
 
@@ -165,6 +168,10 @@ function buildFallbackSignals(
 /** Personal replays keep the historical flat folder; organization replays live under their workspace prefix. */
 function replayDir(sessionId: string, scope = currentDataScope()): string {
   return activityMediaDir(UPLOAD_DIR, 'replay', sessionId, scope)
+}
+
+function transcriptionInputKey(sessionId: string, storedPath: string, scope = currentDataScope()): string {
+  return `${scope ? workspaceMediaPrefix(scope.workspaceId, 'replay', sessionId) : `replay/${sessionId}`}/${path.basename(storedPath)}`
 }
 
 function transcriptionCachePath(sessionId: string): string {
@@ -436,6 +443,7 @@ router.post(
     } catch { res.status(500).json({ error: 'Unable to authorize upload' }) }
   },
   upload.fields([{ name: 'audio', maxCount: 1 }, { name: 'transcript', maxCount: 1 }]),
+  reenterDataScope,
   async (req: Request, res: Response) => {
     const files = req.files as Record<string, Express.Multer.File[]> | undefined
     const cleanupPaths = Object.values(files ?? {}).flat().map(f => f.path)
@@ -680,8 +688,7 @@ async function processReplaySession(sessionId: string): Promise<void> {
       }
     } else {
       // Production: upload to S3 and use AWS Transcribe
-      const scope = currentDataScope()
-      const s3Key = `${scope ? workspaceMediaPrefix(scope.workspaceId, 'replay', sessionId) : `replay/${sessionId}`}/${path.basename(audioFile.storedPath)}`
+      const s3Key = transcriptionInputKey(sessionId, audioFile.storedPath)
       const mediaFormat = mediaFormatFromMime(audioFile.mimeType)
 
       try {
@@ -702,6 +709,10 @@ async function processReplaySession(sessionId: string): Promise<void> {
         await saveTranscriptionCache(sessionId, result, transcriptionSource, cacheKey)
       } catch (transcribeError: any) {
         console.error('AWS Transcribe failed, checking for text fallback:', transcribeError.message)
+      } finally {
+        // The bucket copy exists only for the transcription job; the local upload stays the source.
+        await deleteRecordingArtifact(transcriptionInputUri(s3Key)).catch((err) =>
+          logger.warn({ err, sessionId }, 'Replay transcription input cleanup failed; deletion will retry'))
       }
     }
   }
@@ -1217,7 +1228,13 @@ router.delete('/sessions/:id', async (req: Request, res: Response) => {
         create: {
           replaySessionId: id,
           workspaceId: currentDataScope()?.workspaceId ?? null,
-          filePaths: [...session.uploadedFiles.map((file) => file.storedPath), transcriptionCachePath(id)],
+          filePaths: [
+            ...session.uploadedFiles.map((file) => file.storedPath),
+            transcriptionCachePath(id),
+            ...(isDev ? [] : session.uploadedFiles
+              .filter((file) => file.fileType === 'audio' || file.fileType === 'video')
+              .map((file) => transcriptionInputUri(transcriptionInputKey(id, file.storedPath)))),
+          ],
         },
         update: {},
       })

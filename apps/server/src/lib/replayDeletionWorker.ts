@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { prisma } from './prisma'
 import { logger } from './logger'
 import { activityMediaDir } from './mediaStorage'
+import { deleteRecordingArtifact } from './sessionStorageCleanup'
 
 const activeJobs = new Set<string>()
 let sweepTimer: NodeJS.Timeout | null = null
@@ -42,6 +43,10 @@ export async function processReplayDeletion(replaySessionId: string): Promise<bo
       data: { status: 'retrying', attempts: { increment: 1 }, error: null, nextAttemptAt: null },
     })
     for (const filePath of new Set(paths)) {
+      if (filePath.startsWith('s3://')) {
+        await deleteRecordingArtifact(filePath)
+        continue
+      }
       try {
         await unlink(filePath)
       } catch (error) {

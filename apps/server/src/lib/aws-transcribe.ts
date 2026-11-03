@@ -41,6 +41,11 @@ export interface TranscriptionResult {
   wordEvidence?: ReplayWordEvidence
 }
 
+/** Location of a transcription input; deterministic so deletion can remove it after the parent is gone. */
+export function transcriptionInputUri(s3Key: string): string {
+  return transcriptionInputUri(s3Key)
+}
+
 export async function uploadToS3(
   localPath: string,
   s3Key: string,

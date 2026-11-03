@@ -7,6 +7,7 @@ import { existsSync } from 'node:fs'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import http from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { signToken, signWorkspaceToken } from '../src/lib/jwt'
 
@@ -141,6 +142,28 @@ suite('organization Replay path', () => {
       .attach('audio', Buffer.from('RIFF'), { filename: 'call.wav', contentType: 'audio/wav' })
     expect(denied.status).toBe(403)
     expect(denied.body.code).toBe('REPLAY_AUDIO_UPLOAD_DISABLED')
+  })
+
+  it('keeps the workspace when a browser streams the multipart body in several network chunks', async () => {
+    const id = (await create(alpha, learner)).body.sessionId
+    const server = app.listen(0)
+    try {
+      const port = (server.address() as { port: number }).port
+      const boundary = `b${tag}`
+      const head = `--${boundary}\r\nContent-Disposition: form-data; name="transcript"; filename="notes.txt"\r\nContent-Type: text/plain\r\n\r\n`
+      const response = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const req = http.request({ port, path: `/api/replay/sessions/${id}/upload`, method: 'POST',
+          headers: { ...as(alpha, learner), 'content-type': `multipart/form-data; boundary=${boundary}` } }, res => {
+          let body = ''; res.on('data', chunk => { body += chunk }); res.on('end', () => resolve({ status: res.statusCode ?? 0, body }))
+        })
+        req.on('error', reject)
+        req.write(head)
+        setTimeout(() => { req.write(`Me: ${'We ship Friday. '.repeat(4000)}`); setTimeout(() => req.end(`\r\n--${boundary}--\r\n`), 30) }, 30)
+      })
+      expect(response.status).toBe(200)
+      const [file] = await admin.replayUpload.findMany({ where: { replaySessionId: id } })
+      expect(file.storedPath.startsWith(path.join(uploads, 'workspaces', alpha, 'replay', id) + path.sep)).toBe(true)
+    } finally { server.close() }
   })
 
   it('deletes an organization replay with a workspace-tagged outbox and removes its files', async () => {
