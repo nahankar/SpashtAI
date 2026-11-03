@@ -152,6 +152,9 @@ export async function getConversation(req: Request, res: Response) {
     const { sessionId } = req.params
 
     const ownerId = await getElevateSessionOwnerId(sessionId)
+    if (!ownerId) {
+      return res.status(404).json({ error: 'Session not found' })
+    }
     const { flags, accessDenied } = await resolveRequestExportFlags(req, ownerId)
     if (accessDenied) {
       return exportDenied(res, 'Access denied')

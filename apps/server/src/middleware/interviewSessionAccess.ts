@@ -7,15 +7,19 @@ import { practiceExecutionAccess } from '../interviews/practice/access'
 import { RECORDING_CONSENT_VERSIONS } from '../interviews/practice/contracts'
 
 async function checkInterview(req: Request, res: Response, id: string, execution: boolean): Promise<boolean> {
+  // Workspace RLS hides other-org rows. A missing session here is the same 404 as GET /sessions/:id,
+  // including same-learner conversation/turns that used to return empty bodies.
+  const visible = await prisma.session.findFirst({ where: { id }, select: { discardedAt: true } })
+  if (!visible) { res.status(404).json({ error: 'Session not found' }); return true }
+  if (visible.discardedAt && req.method !== 'DELETE') { res.status(410).json({ error: 'Session discarded' }); return true }
   const run = await prisma.interviewRun.findUnique({ where: { sessionId: id }, select: { ownerId: true, recordingConsentAt: true,
-    recordingConsentVersion: true, session: { select: { discardedAt: true } } } })
+    recordingConsentVersion: true } })
   if (!run) return false
   if (!isValidInternalAgentRequest(req)) {
     if (!req.user) requireAuth(req, res, () => undefined)
     if (res.headersSent) return true
     if (req.user?.userId !== run.ownerId) { res.status(404).json({ error: 'Session not found' }); return true }
   }
-  if (run.session.discardedAt && req.method !== 'DELETE') { res.status(410).json({ error: 'Session discarded' }); return true }
   if (execution) {
     await practiceExecutionAccess(run.ownerId)
     if (!run.recordingConsentAt || !RECORDING_CONSENT_VERSIONS.includes(run.recordingConsentVersion ?? '')) throw new BankError(409, 'Recording consent is required')

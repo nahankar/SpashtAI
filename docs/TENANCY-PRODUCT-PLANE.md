@@ -170,7 +170,7 @@ is part of each product's organization path. Tests switch readiness on locally o
 | --- | --- |
 | Server isolation tests on the restricted role | Pass |
 | Migration upgrade verifier | Pass (November 3, after checkpoint 6: 42 tables enforce forced RLS) |
-| Browser walkthrough with fictional local accounts (two organizations plus Personal) | Local Replay/Pulse/Feedback and Interview bank ready. Northwind Elevate microphone checked on Transcribe + Nova Lite + Polly (`session_1793698728660_k17qya9k1`). Delivery alignment still independently queued. |
+| Browser walkthrough with fictional local accounts (two organizations plus Personal) | Local Replay/Pulse/Feedback and Interview bank ready. Northwind Elevate microphone checked on Transcribe + Nova Lite + Polly (`session_1793698728660_k17qya9k1`, then `session_1793728690320_rst8dgeyq`). Brightpath Interview asked `WT-NW-003` then exhausted at `0-2`. Delivery alignment still independently queued. |
 | Product readiness flags (`WORKSPACE_FEATURE_READINESS`) | All organization products still `false` in product code. Local `WORKSPACE_READY_OVERRIDE` is ignored in production |
 | Real Google sign-in, microphone, LiveKit room and agent in an organization | Local stack targeted at walkthrough API/DB. Human Elevate microphone check done on the walkthrough stack; production Google sign-in not exercised. |
 | Merge to `main` | Not done |
@@ -241,7 +241,8 @@ session. Learner nav shows Elevate + Replay; Elevate page lists the Northwind se
 microphone yet.
 
 **Interviews (local override only).** Walkthrough DB flags `interviews` / `interview_voice` / `interview_adaptive`
-were unhidden in `spasht_walkthrough` only. After `WORKSPACE_READY_OVERRIDE=replay,elevate,interviews`,
+/ `interview_conversation` were unhidden in `spasht_walkthrough` only. Conversation is on for new org runs
+(5 s silence handoff). Existing runs stay manual. After `WORKSPACE_READY_OVERRIDE=replay,elevate,interviews`,
 `GET /api/interviews/options` is 200 in Northwind and 403 in Personal. Learner nav shows Interviews; the page
 opens and reports no reviewed questions for this selection. No bank content and no microphone yet.
 
@@ -269,6 +270,9 @@ credentials are recorded here.
 `WALKTHROUGH FICTIONAL`, were created, provenance-confirmed, approved and activated through the normal admin HTTP
 workflow in `spasht_walkthrough` only. No production bank content was copied. `GET /api/interviews/options` in
 Northwind is 200 with coverage count 3 (Automation Testing). Personal options remain 403.
+`WT-NW-001` and `WT-NW-002` are experience `2-5`; only `WT-NW-003` is `0-2` (Brightpath-labelled control). A
+Brightpath practice started at `0-2` therefore has one eligible question and `/next` returns 409
+`QUESTION_BANK_EXHAUSTED`. That is bank coverage, not an Interview advance defect.
 
 **Replay honesty.** Browser Replay checks used a mix of real HTTP and seeded rows:
 - Northwind history/results/delete and the Brightpath cross-id “not found” check were live API/UI against walkthrough
@@ -296,13 +300,15 @@ Personal and Brightpath, delete 204. Local override then includes `feedback`. Pr
 
 **Prepare and Coach.** Still unfinished. Organization readiness stays `false`. No local override. No claim they work.
 
-**Microphone check.** Not done. Prerequisites above are complete. The first human check is one Northwind Elevate
-session (URL and expected evidence in the conversation), then Brightpath/Personal isolation, then a real local
-Interview run. Recording playback, transcript persistence, workspace-bound callbacks and absence of cross-workspace
-rows still need that human session — they are not claimed from navigation or HTTP status codes.
+**Microphone check.** Northwind Elevate `session_1793728690320_rst8dgeyq` completed on `pipeline-bedrock`
+(Transcribe + Nova Lite + Polly): greeting, two learner turns, coach replies, Pulse tracked, recording uploaded.
+Delivery alignment still pending. Organization Coach Home mark-seen is 403, as designed. Brightpath Interview
+asked the one `0-2` question live under Show conversation; `/next` then exhausted. Hidden-session
+conversation/turns now 404 instead of an empty 200. Still unobserved: Brightpath Elevate microphone,
+and Interview Q1 evaluation retry after `INVALID_OUTPUT_INCONSISTENT`.
 
 ## Blockers
 
-- Elevate and Interviews still need a human microphone check before any production readiness flip.
+- Brightpath Elevate microphone and Interview multi-question / End-practice / playback still need a human check before any production readiness flip.
 - Prepare and Coach remain unfinished.
 - Deployment needs explicit authorization in the Cursor conversation.
