@@ -162,7 +162,7 @@ is part of each product's organization path. Tests switch readiness on locally o
   `shell/render.test.tsx`, updated `EnrollmentForm.test.tsx`.
 - Latest full runs (November 3): server 724 passed, 124 skipped; web 363 passed; web type check and production build
   pass; OpenAPI validates. Lint errors remain only in four pre-existing platform admin files.
-- Local browser walkthrough (November 3, commit `52e0010`): see below. Not human-verified.
+- Local browser walkthrough (November 3, commit `0f3472a`): see below. Not human-verified.
 
 ## Release gates
 
@@ -170,7 +170,7 @@ is part of each product's organization path. Tests switch readiness on locally o
 | --- | --- |
 | Server isolation tests on the restricted role | Pass |
 | Migration upgrade verifier | Pass (November 3, after checkpoint 6: 42 tables enforce forced RLS) |
-| Browser walkthrough with fictional local accounts (two organizations plus Personal) | Local Replay walkthrough done November 3 (commit `52e0010`); Elevate and Interviews opened locally only. Not human-verified with Google or a microphone |
+| Browser walkthrough with fictional local accounts (two organizations plus Personal) | Local Replay walkthrough done November 3 (commit `0f3472a`); Elevate and Interviews opened locally only. Not human-verified with Google or a microphone |
 | Product readiness flags (`WORKSPACE_FEATURE_READINESS`) | All organization products still `false` in product code. Local `WORKSPACE_READY_OVERRIDE` is ignored in production |
 | Real Google sign-in, microphone, LiveKit room and agent in an organization | Human check, not done |
 | Merge to `main` | Not done |
@@ -196,7 +196,7 @@ see no products. That is still the production posture. The local override is wal
   budget can therefore be limited by platform demand. Raising it is a platform cost decision.
 - Interview database suites are hard-wired to the other checkout's database on 55441 and are not run there.
 
-## Local walkthrough (November 3, latest commit `52e0010`)
+## Local walkthrough (November 3, latest commit `0f3472a`)
 
 Isolated stack only: API `:4100` as `walkthrough_app` on `127.0.0.1:55443/spasht_walkthrough` (`NOSUPERUSER`,
 `NOBYPASSRLS`), web `:5273`, `NODE_ENV=development`, `DEV_LOGIN=true`. Production host and the editor checkout at
