@@ -335,6 +335,8 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,public SET row_s
   ELSE false END
  AND (p_job='session_deletion' OR (w.state='ACTIVE' AND EXISTS (SELECT 1 FROM public."WorkspaceMember" m
    WHERE m."workspaceId"=w.id AND m."userId"=s."userId" AND m.state='ACTIVE')))
+ -- Discovery is for the unscoped worker sweep only; an organization request or job sees nothing.
+ AND nullif(current_setting('app.workspace_id',true),'') IS NULL
  LIMIT 200;
 $$;
 
