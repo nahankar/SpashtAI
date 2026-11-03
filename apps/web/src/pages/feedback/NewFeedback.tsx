@@ -1,4 +1,4 @@
-import { workspaceHeaders, appPath } from '@/workspaces/activeWorkspace'
+import { workspaceHeaders, appPath, WorkspaceContextError } from '@/workspaces/activeWorkspace'
 import { useState, useRef, useMemo } from 'react'
 import { useFeatureMilestone } from '@/hooks/useFeatureMilestone'
 import { useNavigate, Link, useSearchParams } from 'react-router-dom'
@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ArrowLeft, Upload, X, Loader2 } from 'lucide-react'
 import { FeedbackSessionPicker } from '@/components/feedback/FeedbackSessionPicker'
 import { parseSessionPickerValue, type FeedbackSessionModule } from '@/lib/feedback-session'
@@ -90,9 +91,15 @@ export function NewFeedback() {
       files.forEach((file) => form.append('attachments', file))
 
       const token = localStorage.getItem('spashtai_token')
+      let scoped: Record<string, string>
+      try {
+        scoped = workspaceHeaders()
+      } catch (e) {
+        throw e instanceof WorkspaceContextError ? e : new Error('Open the workspace again to continue')
+      }
       const res = await fetch(`${API}/api/feedback`, {
         method: 'POST',
-        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...workspaceHeaders() },
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...scoped },
         body: form,
       })
       if (!res.ok) {
@@ -134,18 +141,18 @@ export function NewFeedback() {
 
           <div className="space-y-1">
             <Label htmlFor="fb-type">Type</Label>
-            <select
-              id="fb-type"
-              className="flex h-9 w-full rounded-md border bg-background px-3 text-sm"
-              value={type}
-              onChange={(e) => setType(e.target.value)}
-            >
-              {TYPES.map((t) => (
-                <option key={t.value} value={t.value}>
-                  {t.label}
-                </option>
-              ))}
-            </select>
+            <Select value={type} onValueChange={setType}>
+              <SelectTrigger id="fb-type">
+                <SelectValue placeholder="Choose a type" />
+              </SelectTrigger>
+              <SelectContent>
+                {TYPES.map((t) => (
+                  <SelectItem key={t.value} value={t.value}>
+                    {t.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <FeedbackSessionPicker

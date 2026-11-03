@@ -14,3 +14,12 @@ export async function generateFeedbackNumber(): Promise<string> {
 export function isFeedbackEditable(status: string): boolean {
   return status === 'OPEN'
 }
+
+export function isFeedbackDeletable(status: string): boolean {
+  return status === 'OPEN'
+}
+
+/** Learner APIs never return staff-only notes (`isAdmin: false`). */
+export function learnerVisibleNotes<T extends { isAdmin: boolean }>(notes: T[] | undefined): T[] {
+  return (notes ?? []).filter(note => note.isAdmin)
+}

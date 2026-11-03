@@ -170,9 +170,9 @@ is part of each product's organization path. Tests switch readiness on locally o
 | --- | --- |
 | Server isolation tests on the restricted role | Pass |
 | Migration upgrade verifier | Pass (November 3, after checkpoint 6: 42 tables enforce forced RLS) |
-| Browser walkthrough with fictional local accounts (two organizations plus Personal) | Local Replay walkthrough done November 3 (commit `0f3472a`); Elevate and Interviews opened locally only. Not human-verified with Google or a microphone |
+| Browser walkthrough with fictional local accounts (two organizations plus Personal) | Local Replay/Pulse/Feedback HTTP and Interview bank ready; Elevate/Interview microphone not yet human-checked |
 | Product readiness flags (`WORKSPACE_FEATURE_READINESS`) | All organization products still `false` in product code. Local `WORKSPACE_READY_OVERRIDE` is ignored in production |
-| Real Google sign-in, microphone, LiveKit room and agent in an organization | Human check, not done |
+| Real Google sign-in, microphone, LiveKit room and agent in an organization | Local stack targeted at walkthrough API/DB; human microphone check not done |
 | Merge to `main` | Not done |
 | Deployment (backup, active-session check, migration, runtime role, rollback plan) | Not authorized |
 
@@ -197,6 +197,10 @@ see no products. That is still the production posture. The local override is wal
 - Interview database suites are hard-wired to the other checkout's database on 55441 and are not run there.
 
 ## Local walkthrough (November 3, latest commit `0f3472a`)
+
+Prior Replay/Pulse/Elevate/Interview navigation evidence is below. The later same-day checkpoint adds voice-stack
+targeting, a fictional published Interview bank, fail-closed organization clients, Replay/Pulse honesty labels, and
+a finished local-only Feedback path.
 
 Isolated stack only: API `:4100` as `walkthrough_app` on `127.0.0.1:55443/spasht_walkthrough` (`NOSUPERUSER`,
 `NOBYPASSRLS`), web `:5273`, `NODE_ENV=development`, `DEV_LOGIN=true`. Production host and the editor checkout at
@@ -240,12 +244,64 @@ were unhidden in `spasht_walkthrough` only. After `WORKSPACE_READY_OVERRIDE=repl
 `GET /api/interviews/options` is 200 in Northwind and 403 in Personal. Learner nav shows Interviews; the page
 opens and reports no reviewed questions for this selection. No bank content and no microphone yet.
 
-**Unfinished.** Feedback submission stays disabled (readiness false). Prepare and Coach stay off. Organization
-readiness table is unchanged. No production feature is enabled.
+**Unfinished (as of `0f3472a`).** Feedback submission stayed disabled in that checkpoint. Prepare and Coach stay off.
+
+## Local walkthrough (November 3, voice / bank / Feedback checkpoint)
+
+Isolated stack only. Production host and the editor checkout at `81c393b` were not touched. Organization
+`WORKSPACE_FEATURE_READINESS` is still all `false` except `pro`/`ultra`. Local override is now
+`replay,elevate,interviews,feedback` and is ignored in production.
+
+**Voice stack targeting (not `/ready` alone).** Walkthrough API `:4100` uses `walkthrough_app` on
+`127.0.0.1:55443/spasht_walkthrough` (`NOSUPERUSER`, `NOBYPASSRLS`), `SERVER_URL=http://localhost:4100`,
+`DEV_LOGIN=true`. Local LiveKit is `ws://localhost:7880` (shared local compose, `livekit` + `livekit-egress` +
+`livekit-redis`; not LiveKit Cloud and not production). The worktree agent (`apps/agent/main.py dev`) is registered
+on that local LiveKit with `SERVER_URL=http://localhost:4100`, `LIVEKIT_URL=ws://localhost:7880`,
+`LOCAL_AUDIO_PATH=/tmp/spasht-walkthrough/audio`, automatic dispatch. Agent callbacks use
+`x-internal-agent-token` plus signed `x-spasht-workspace-scope` for organization rooms. In-process Signal API starts
+with the agent; Gentle is on `:8765`. Local STT/TTS containers (`:8001`/`:8002`) are not running; the worker uses
+the configured AWS Nova Sonic plugin. Egress health `:9090` is not published on the host; the `livekit-egress`
+container is running and writes `/out` to the existing local compose volume. Port `:4000` is not listening. No
+credentials are recorded here.
+
+**Interview bank.** Three fictional `automation-pilot` questions (`WT-NW-001`–`003`), labelled
+`WALKTHROUGH FICTIONAL`, were created, provenance-confirmed, approved and activated through the normal admin HTTP
+workflow in `spasht_walkthrough` only. No production bank content was copied. `GET /api/interviews/options` in
+Northwind is 200 with coverage count 3 (Automation Testing). Personal options remain 403.
+
+**Replay honesty.** Browser Replay checks used a mix of real HTTP and seeded rows:
+- Northwind history/results/delete and the Brightpath cross-id “not found” check were live API/UI against walkthrough
+  rows.
+- Brightpath `tone.wav` upload was a real upload (200, results/speaker-confirm UI) and was deleted afterward. That
+  exercised upload + results routing, not a confirmed Transcribe-from-audio-only playback of that file.
+- Northwind text-paste upload reached `confirmation_required` results. Northwind audio denial was a real 403.
+- “Pulse source” Replay history rows are seeded completed sessions without analysis results. They are not evidence
+  that a practice produced those scores.
+
+**Pulse honesty.** Displayed Clarity/Confidence numbers are aggregation evidence over seeded `progressPulse` rows
+(timezone-correct). They are not evidence that a real Elevate/Replay/Interview practice produced a score.
+
+**Fail-closed organization clients.** On `/w/:slug`, `workspaceHeaders()` / `getAuthHeaders()` / recording URL
+helpers throw or return null when the in-memory workspace token is missing, expired, or for another slug. They never
+omit the header (which the server would treat as Personal). An explicit Personal navigation (`/coach`, `/elevate`,
+…) omits the header even if a leftover token is still in memory. 11 web tests cover this, including “no fetch is
+sent from an organization URL while recovering the token.”
+
+**Feedback (implementation, then local enable).** Learner submit + attachments, list/detail visibility,
+staff-note boundaries (`isAdmin: false` internal notes never returned to learners or workspace admins), and delete
+of Open submissions are implemented and covered by the organization admin analytics database suite. Live walkthrough
+HTTP: Northwind submit 201, visible only in Northwind mine + Northwind owner admin (no notes field), absent from
+Personal and Brightpath, delete 204. Local override then includes `feedback`. Production readiness remains `false`.
+
+**Prepare and Coach.** Still unfinished. Organization readiness stays `false`. No local override. No claim they work.
+
+**Microphone check.** Not done. Prerequisites above are complete. The first human check is one Northwind Elevate
+session (URL and expected evidence in the conversation), then Brightpath/Personal isolation, then a real local
+Interview run. Recording playback, transcript persistence, workspace-bound callbacks and absence of cross-workspace
+rows still need that human session — they are not claimed from navigation or HTTP status codes.
 
 ## Blockers
 
-- Elevate and Interviews still need a human microphone check (script in the walkthrough notes) before any
-  production readiness flip.
-- Feedback remains unfinished while organization readiness is false.
+- Elevate and Interviews still need a human microphone check before any production readiness flip.
+- Prepare and Coach remain unfinished.
 - Deployment needs explicit authorization in the Cursor conversation.

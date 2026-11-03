@@ -2,6 +2,11 @@
  * The organization this tab is working in. Product requests made while it is set carry the
  * workspace token next to the identity token; the server rechecks membership on every request
  * and never falls back to Personal. The token lives in memory only, never in shared storage.
+ *
+ * Organization pages (`/w/:slug`) fail closed when that token is missing, expired, or for a
+ * different slug — helpers throw instead of omitting the header (which the server would treat
+ * as Personal). An explicit navigation to Personal omits the header even if a token is still
+ * in memory.
  */
 export interface ActiveWorkspace {
   slug: string
@@ -12,6 +17,14 @@ export interface ActiveWorkspace {
 }
 
 export const WORKSPACE_HEADER = 'x-spasht-workspace'
+
+export class WorkspaceContextError extends Error {
+  readonly code = 'WORKSPACE_TOKEN_REQUIRED'
+  constructor(message = 'Open the workspace again to continue') {
+    super(message)
+    this.name = 'WorkspaceContextError'
+  }
+}
 
 let active: ActiveWorkspace | null = null
 const failureListeners = new Set<(code: string) => void>()
@@ -24,8 +37,25 @@ export function setActiveWorkspace(next: ActiveWorkspace | null) {
   active = next
 }
 
+/** Organization slug from `/w/:slug`, or null on Personal paths. */
+export function organizationSlugFromPath(pathname?: string): string | null {
+  const path = pathname ?? (typeof window === 'undefined' ? '' : window.location.pathname)
+  const match = /^\/w\/([^/]+)/.exec(path)
+  if (!match) return null
+  try {
+    return decodeURIComponent(match[1])
+  } catch {
+    return match[1]
+  }
+}
+
 export function workspaceHeaders(): Record<string, string> {
-  return active ? { [WORKSPACE_HEADER]: active.token } : {}
+  const slug = organizationSlugFromPath()
+  if (slug) {
+    if (!active?.token || active.slug !== slug) throw new WorkspaceContextError()
+    return { [WORKSPACE_HEADER]: active.token }
+  }
+  return {}
 }
 
 /**

@@ -1,4 +1,4 @@
-import { workspaceHeaders, appPath } from '@/workspaces/activeWorkspace'
+import { workspaceHeaders, appPath, WorkspaceContextError } from '@/workspaces/activeWorkspace'
 import { useState, useEffect, useCallback, useContext } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -8,8 +8,10 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { ArrowLeft, Loader2, AlertCircle, Upload, X, Save } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { ArrowLeft, Loader2, AlertCircle, Upload, X, Save, Trash2 } from 'lucide-react'
 import { apiClient } from '@/lib/api-client'
+import { useConfirm } from '@/hooks/useConfirm'
 import { FeedbackAttachmentLink } from '@/components/feedback/FeedbackAttachmentLink'
 import { FeedbackLinkedSession } from '@/components/feedback/FeedbackLinkedSession'
 import { FEEDBACK_STATUS_BADGE, FEEDBACK_TYPE_LABELS } from '@/lib/feedback-constants'
@@ -49,6 +51,7 @@ interface FeedbackData {
 export function FeedbackDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const confirmDialog = useConfirm()
   const { updateUser } = useContext(AuthContext)!
   const [feedback, setFeedback] = useState<FeedbackData | null>(null)
   const [editable, setEditable] = useState(false)
@@ -104,7 +107,11 @@ export function FeedbackDetail() {
       const token = localStorage.getItem('spashtai_token')
       const headers: Record<string, string> = {}
       if (token) headers.Authorization = `Bearer ${token}`
-      Object.assign(headers, workspaceHeaders())
+      try {
+        Object.assign(headers, workspaceHeaders())
+      } catch (e) {
+        throw e instanceof WorkspaceContextError ? e : new Error('Open the workspace again to continue')
+      }
 
       const res = await fetch(`${API}/api/feedback/${id}`, {
         method: 'PUT',
@@ -124,6 +131,24 @@ export function FeedbackDetail() {
       toast.error(e instanceof Error ? e.message : 'Failed to save')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!id) return
+    const ok = await confirmDialog({
+      title: 'Delete feedback',
+      description: 'Delete this submission and its attachments? This cannot be undone.',
+      confirmLabel: 'Delete',
+      variant: 'destructive',
+    })
+    if (!ok) return
+    try {
+      await apiClient(`/api/feedback/${id}`, { method: 'DELETE' })
+      toast.success('Feedback deleted')
+      navigate(appPath('/feedback'))
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to delete')
     }
   }
 
@@ -206,18 +231,18 @@ export function FeedbackDetail() {
             <>
               <div className="space-y-1">
                 <Label htmlFor="type">Type</Label>
-                <select
-                  id="type"
-                  className="flex h-9 w-full rounded-md border bg-background px-3 text-sm"
-                  value={type}
-                  onChange={(e) => setType(e.target.value)}
-                >
-                  {TYPES.map((t) => (
-                    <option key={t.value} value={t.value}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
+                <Select value={type} onValueChange={setType}>
+                  <SelectTrigger id="type">
+                    <SelectValue placeholder="Choose a type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TYPES.map((t) => (
+                      <SelectItem key={t.value} value={t.value}>
+                        {t.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-1">
                 <Label htmlFor="subject">Subject (optional)</Label>
@@ -272,6 +297,10 @@ export function FeedbackDetail() {
                 </Button>
                 <Button variant="outline" onClick={() => navigate(appPath('/feedback'))}>
                   Cancel
+                </Button>
+                <Button variant="destructive" onClick={handleDelete}>
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete
                 </Button>
               </div>
             </>

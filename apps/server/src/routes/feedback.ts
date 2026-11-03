@@ -3,7 +3,7 @@ import multer from 'multer'
 import path from 'path'
 import fs from 'fs'
 import { prisma } from '../lib/prisma'
-import { generateFeedbackNumber, isFeedbackEditable } from '../lib/feedback'
+import { generateFeedbackNumber, isFeedbackDeletable, isFeedbackEditable, learnerVisibleNotes } from '../lib/feedback'
 import { resolveFeedbackSessionLink } from '../lib/feedbackSession'
 import { recordFeatureUsage } from '../middleware/tracking'
 import { reenterDataScope } from '../workspaces/requestScope'
@@ -107,7 +107,7 @@ router.post('/', upload.array('attachments', 5), reenterDataScope, async (req: R
       outcome: 'completed',
       metadata: { type: feedbackType, hasAttachment: files.length > 0 },
     })
-    res.status(201).json({ feedback: full })
+    res.status(201).json({ feedback: full ? { ...full, notes: learnerVisibleNotes(full.notes) } : full })
   } catch (err) {
     console.error('Create feedback error:', err)
     res.status(500).json({ error: 'Failed to submit feedback' })
@@ -126,7 +126,7 @@ router.get('/mine', async (req: Request, res: Response) => {
         notes: { orderBy: { createdAt: 'asc' } },
       },
     })
-    res.json({ feedback: items })
+    res.json({ feedback: items.map(item => ({ ...item, notes: learnerVisibleNotes(item.notes) })) })
   } catch (err) {
     console.error('List feedback error:', err)
     res.status(500).json({ error: 'Failed to load feedback' })
@@ -148,7 +148,7 @@ router.get('/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Not found' })
     }
     res.json({
-      feedback: item,
+      feedback: { ...item, notes: learnerVisibleNotes(item.notes) },
       editable: isFeedbackEditable(item.status),
     })
   } catch (err) {
@@ -217,10 +217,35 @@ router.put('/:id', upload.array('attachments', 5), reenterDataScope, async (req:
       include: { attachments: true, notes: { orderBy: { createdAt: 'asc' } } },
     })
 
-    res.json({ feedback: full, editable: true })
+    res.json({ feedback: full ? { ...full, notes: learnerVisibleNotes(full.notes) } : full, editable: true })
   } catch (err) {
     console.error('Update feedback error:', err)
     res.status(500).json({ error: 'Failed to update feedback' })
+  }
+})
+
+// DELETE /api/feedback/:id — owner may remove an Open submission
+router.delete('/:id', async (req: Request, res: Response) => {
+  try {
+    const uid = userId(req)
+    const existing = await prisma.userFeedback.findUnique({
+      where: { id: req.params.id },
+      include: { attachments: true },
+    })
+    if (!existing || existing.userId !== uid) {
+      return res.status(404).json({ error: 'Not found' })
+    }
+    if (!isFeedbackDeletable(existing.status)) {
+      return res.status(403).json({ error: 'Feedback can only be deleted while status is Open' })
+    }
+    await prisma.userFeedback.delete({ where: { id: existing.id } })
+    for (const file of existing.attachments) {
+      try { fs.unlinkSync(file.storedPath) } catch { /* file may already be gone */ }
+    }
+    res.status(204).end()
+  } catch (err) {
+    console.error('Delete feedback error:', err)
+    res.status(500).json({ error: 'Failed to delete feedback' })
   }
 })
 

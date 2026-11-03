@@ -4,13 +4,15 @@
  * Identity Bearer (`Authorization`) is the signed-in person. Organization product
  * requests also send the workspace JWT in `x-spasht-workspace`. The server rechecks
  * membership and never falls back to Personal. Missing, invalid, expired or mismatched
- * workspace credentials fail closed (`isWorkspaceFailure`).
+ * workspace credentials fail closed (`isWorkspaceFailure`). On `/w/:slug` pages the
+ * client helpers also fail closed when the in-memory workspace token is missing or
+ * belongs to a different slug — they never emit a Personal request from that URL.
  *
  * Workspace administration (`/api/workspaces/current/...`) uses the workspace JWT
  * as the Bearer instead. Use `workspaceCall` / `currentWorkspaceRequest` for those
  * routes — do not send the identity token as Bearer there.
  */
-import { getActiveWorkspace, isWorkspaceFailure, reportWorkspaceFailure, scopedStorageKey, workspaceHeaders } from '@/workspaces/activeWorkspace'
+import { getActiveWorkspace, isWorkspaceFailure, organizationSlugFromPath, reportWorkspaceFailure, scopedStorageKey, workspaceHeaders, WorkspaceContextError } from '@/workspaces/activeWorkspace'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:4000'
 
@@ -59,7 +61,7 @@ export function getAuthHeaders(extra: Record<string, string> = {}): Record<strin
 /** Authenticated Personal media URL for `<audio src>` (cannot send Authorization headers). */
 export function getAuthenticatedMediaUrl(path: string): string | null {
   const token = localStorage.getItem('spashtai_token')
-  if (!token || getActiveWorkspace()) return null
+  if (!token || organizationSlugFromPath()) return null
   const base = API_BASE.replace(/\/$/, '')
   const normalized = path.startsWith('/') ? path : `/${path}`
   return `${base}${normalized}?access_token=${encodeURIComponent(token)}`
@@ -71,7 +73,13 @@ export function getAuthenticatedMediaUrl(path: string): string | null {
  */
 export async function getSessionRecordingUrl(sessionId: string): Promise<string | null> {
   const path = `/sessions/${encodeURIComponent(sessionId)}/recording/stream`
-  if (!getActiveWorkspace()) return getAuthenticatedMediaUrl(path)
+  const slug = organizationSlugFromPath()
+  const workspace = getActiveWorkspace()
+  if (slug) {
+    if (!workspace || workspace.slug !== slug) return null
+  } else {
+    return getAuthenticatedMediaUrl(path)
+  }
   const token = localStorage.getItem('spashtai_token')
   if (!token) return null
   const { ticket } = await apiClient<{ ticket: string }>(`/sessions/${encodeURIComponent(sessionId)}/recording/ticket`, { method: 'POST' })
@@ -99,9 +107,18 @@ export async function apiClient<T = unknown>(
 ): Promise<T> {
   const { skipAuth = false, headers: extraHeaders, ...rest } = options
 
-  const headers: Record<string, string> = skipAuth
-    ? { 'Content-Type': 'application/json', ...getCorrelationHeaders(), ...(extraHeaders as Record<string, string>) }
-    : getAuthHeaders(extraHeaders as Record<string, string>)
+  let headers: Record<string, string>
+  try {
+    headers = skipAuth
+      ? { 'Content-Type': 'application/json', ...getCorrelationHeaders(), ...(extraHeaders as Record<string, string>) }
+      : getAuthHeaders(extraHeaders as Record<string, string>)
+  } catch (error) {
+    if (error instanceof WorkspaceContextError) {
+      reportWorkspaceFailure(error.code)
+      throw new ApiError(error.message, 401, error.code)
+    }
+    throw error
+  }
 
   const url = path.startsWith('http') ? path : `${API_BASE}${path}`
 

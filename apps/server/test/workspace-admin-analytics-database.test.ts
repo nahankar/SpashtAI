@@ -261,5 +261,46 @@ suite('organization admin reports and AI Analytics', () => {
     expect((await api.get('/api/admin/feedback').set(forged)).status).toBe(403)
   })
 
+  it('hides staff-only notes from learners and workspace admins, and lets the owner delete Open feedback', async () => {
+    readiness.feedback = true
+    await admin.workspaceFeature.upsert({
+      where: { workspaceId_feature: { workspaceId: alpha, feature: 'feedback' } },
+      update: { entitled: true, enabled: true },
+      create: { workspaceId: alpha, feature: 'feedback', entitled: true, enabled: true },
+    })
+    const learnerHeaders = (workspaceId: string | null) => ({
+      Authorization: `Bearer ${signToken({ userId: users.learner, email: `${tag}-learner@example.invalid`, role: 'USER' })}`,
+      ...(workspaceId ? { 'x-spasht-workspace': signWorkspaceToken({ userId: users.learner, workspaceId, membershipId: members[`${workspaceId}:learner`] }) } : {}),
+    })
+    const staff = { Authorization: `Bearer ${signToken({ userId: users.staff, email: 'staff@example.invalid', role: 'ADMIN' })}` }
+    const created = await api.post('/api/feedback').set(learnerHeaders(alpha)).field('body', 'Delete-me organization note')
+    expect(created.status).toBe(201)
+    const id = created.body.feedback.id as string
+    expect((await api.post(`/api/admin/feedback/${id}/notes`).set(staff).send({ body: 'Visible reply to the learner' })).status).toBe(201)
+    expect((await api.post(`/api/admin/feedback/${id}/notes`).set(staff).send({ body: 'Internal triage only', internal: true })).status).toBe(201)
+
+    const mine = await api.get(`/api/feedback/${id}`).set(learnerHeaders(alpha))
+    expect(mine.status).toBe(200)
+    expect(mine.body.feedback.notes.map((n: { body: string }) => n.body)).toEqual(['Visible reply to the learner'])
+    const listed = await api.get('/api/workspaces/current/admin/feedback').set(token(alpha, 'owner'))
+    const row = listed.body.items.find((item: { id: string }) => item.id === id)
+    expect(row).toMatchObject({ body: 'Delete-me organization note' })
+    expect(row).not.toHaveProperty('notes')
+    expect(row).not.toHaveProperty('sessionUrl')
+    expect(row).not.toHaveProperty('attachments')
+    const staffView = await api.get(`/api/admin/feedback/${id}`).set(staff)
+    expect(staffView.body.feedback.notes.map((n: { body: string; isAdmin: boolean }) => [n.body, n.isAdmin]))
+      .toEqual(expect.arrayContaining([['Visible reply to the learner', true], ['Internal triage only', false]]))
+
+    expect((await api.delete(`/api/feedback/${id}`).set(learnerHeaders(null))).status).toBe(404)
+    expect((await api.delete(`/api/feedback/${id}`).set(learnerHeaders(alpha))).status).toBe(204)
+    expect((await api.get(`/api/feedback/${id}`).set(learnerHeaders(alpha))).status).toBe(404)
+    expect((await api.get('/api/feedback/mine').set(learnerHeaders(alpha))).body.feedback.map((f: { id: string }) => f.id)).not.toContain(id)
+
+    const acknowledged = await api.post('/api/feedback').set(learnerHeaders(alpha)).field('body', 'Already seen')
+    await api.put(`/api/admin/feedback/${acknowledged.body.feedback.id}`).set(staff).send({ status: 'ACKNOWLEDGED' })
+    expect((await api.delete(`/api/feedback/${acknowledged.body.feedback.id}`).set(learnerHeaders(alpha))).status).toBe(403)
+  })
+
   const betaId = () => beta
 })

@@ -188,10 +188,10 @@ router.put('/:id', async (req: Request, res: Response) => {
   }
 })
 
-// POST /api/admin/feedback/:id/notes — optional admin comment to user
+// POST /api/admin/feedback/:id/notes — public admin reply, or internal staff note
 router.post('/:id/notes', async (req: Request, res: Response) => {
   try {
-    const { body } = req.body as { body?: string }
+    const { body, internal } = req.body as { body?: string; internal?: boolean }
     if (!body?.trim()) {
       return res.status(400).json({ error: 'body is required' })
     }
@@ -203,7 +203,7 @@ router.post('/:id/notes', async (req: Request, res: Response) => {
         data: {
           feedbackId: req.params.id,
           authorId: adminId,
-          isAdmin: true,
+          isAdmin: internal !== true,
           body: body.trim(),
         },
       })
