@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { activeSessionKey, apiClient, getAuthHeaders, getSessionRecordingUrl } from '@/lib/api-client'
+import { activeSessionKey, apiClient, getAuthHeaders, getSessionRecordingUrl, identityAuthHeaders } from '@/lib/api-client'
 import {
   appPath, onWorkspaceFailure, organizationSlugFromPath, productPathname, scopedStorageKey, setActiveWorkspace,
   workspaceHeadersFor, WorkspaceContextError, type ActiveWorkspace,
@@ -52,6 +52,8 @@ describe('active workspace', () => {
   it('fails closed on an organization page when the workspace token is missing or for another slug', () => {
     location.pathname = '/w/klsvdit/elevate'
     expect(() => getAuthHeaders()).toThrow(WorkspaceContextError)
+    expect(identityAuthHeaders()).toMatchObject({ Authorization: 'Bearer identity' })
+    expect(identityAuthHeaders()).not.toHaveProperty('x-spasht-workspace')
     setActiveWorkspace(beta)
     expect(() => getAuthHeaders()).toThrow(expect.objectContaining({ code: 'WORKSPACE_TOKEN_REQUIRED' }))
     expect(fetchMock).not.toHaveBeenCalled()

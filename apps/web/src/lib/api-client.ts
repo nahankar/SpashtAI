@@ -45,18 +45,24 @@ export function getCorrelationHeaders(): Record<string, string> {
   return headers
 }
 
-export function getAuthHeaders(extra: Record<string, string> = {}): Record<string, string> {
+/** Identity only. Use for platform routes that must not carry a workspace token. */
+export function identityAuthHeaders(extra: Record<string, string> = {}): Record<string, string> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...getCorrelationHeaders(),
     ...extra,
   }
   const token = localStorage.getItem('spashtai_token')
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`
-  }
-  return { ...headers, ...workspaceHeaders() }
+  if (token) headers.Authorization = `Bearer ${token}`
+  return headers
 }
+
+/** Identity plus workspace header. Use for organization product routes. */
+export function getAuthHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  return { ...identityAuthHeaders(extra), ...workspaceHeaders() }
+}
+
+export const productAuthHeaders = getAuthHeaders
 
 /** Authenticated Personal media URL for `<audio src>` (cannot send Authorization headers). */
 export function getAuthenticatedMediaUrl(path: string): string | null {

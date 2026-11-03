@@ -2,6 +2,7 @@ import type { Request, Response } from 'express'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/prisma'
 import { isPrivilegedRole } from '../lib/userExportFlags'
+import { currentDataScope } from '../lib/dataScope'
 import { reserveWorkspaceVoiceSlot } from '../workspaces/quotas'
 import { WorkspaceError } from '../workspaces/contracts'
 import {
@@ -32,12 +33,72 @@ async function ownedSession(req: Request, sessionId: string) {
   return { session }
 }
 
+/** Matches `workspace_open_voice_segments`: a slot is live only if updated within 6 hours. */
+const VOICE_STALE_MS = 6 * 60 * 60 * 1000
+
+async function closeOpenSegments(
+  tx: Prisma.TransactionClient,
+  leftover: Array<{ id: string; startedAt: Date; audioStatus: string }>,
+  endedAt: Date,
+): Promise<void> {
+  for (const open of leftover) {
+    await tx.sessionSegment.update({
+      where: { id: open.id },
+      data: {
+        endedAt,
+        activeDurationSec: activeSegmentDurationSec(open.startedAt, endedAt),
+        audioStatus: open.audioStatus === 'pending' ? 'unavailable' : open.audioStatus,
+      },
+    })
+  }
+}
+
+/**
+ * Same-learner leftovers occupy the org voice slot after refresh. Close only
+ * stale segments, or recently updated ones after an explicit takeover.
+ */
+async function claimOwnWorkspaceVoiceSlot(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  exceptSessionId: string,
+  endedAt: Date,
+  takeover: boolean,
+): Promise<void> {
+  if (!currentDataScope()) return
+  const leftover = await tx.sessionSegment.findMany({
+    where: {
+      endedAt: null,
+      session: {
+        id: { not: exceptSessionId },
+        userId,
+        endedAt: null,
+        discardedAt: null,
+      },
+    },
+    select: { id: true, sessionId: true, startedAt: true, updatedAt: true, audioStatus: true },
+  })
+  const stale = leftover.filter(open => endedAt.getTime() - open.updatedAt.getTime() >= VOICE_STALE_MS)
+  const active = leftover.filter(open => endedAt.getTime() - open.updatedAt.getTime() < VOICE_STALE_MS)
+  await closeOpenSegments(tx, stale, endedAt)
+  if (!active.length) return
+  if (!takeover) {
+    throw new WorkspaceError(
+      409,
+      'VOICE_SESSION_ACTIVE',
+      'You already have a live session in this workspace. Resume it, or confirm starting a new one to end the other take.',
+      { openSessions: [...new Set(active.map(open => open.sessionId))] },
+    )
+  }
+  await closeOpenSegments(tx, active, endedAt)
+}
+
 export async function createSessionSegment(req: Request, res: Response) {
   try {
     const { sessionId } = req.params
     const id = String(req.body?.segmentId || '').trim()
     const roomName = String(req.body?.roomName || '').trim()
     const startedAt = req.body?.startedAt ? new Date(req.body.startedAt) : new Date()
+    const takeover = req.body?.takeover === true
     if (
       !id ||
       id.length > 128 ||
@@ -83,6 +144,7 @@ export async function createSessionSegment(req: Request, res: Response) {
               },
             })
           }
+          await claimOwnWorkspaceVoiceSlot(tx, ownership.session.userId, sessionId, startedAt, takeover)
           await reserveWorkspaceVoiceSlot(tx)
           const latest = await tx.sessionSegment.findFirst({
             where: { sessionId },
@@ -114,7 +176,7 @@ export async function createSessionSegment(req: Request, res: Response) {
       )
     } catch (error) {
       if (error instanceof WorkspaceError) {
-        return res.status(error.status).json({ error: error.message, code: error.code })
+        return res.status(error.status).json({ error: error.message, code: error.code, ...error.details })
       }
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') {
         return res.status(409).json({ error: 'Live practice is starting elsewhere. Try again.', code: 'SEGMENT_RETRY' })

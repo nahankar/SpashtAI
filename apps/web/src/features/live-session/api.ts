@@ -10,7 +10,7 @@ export function createLiveSessionApi(deps: LiveSessionApiDependencies) {
   const { baseUrl, now, randomId } = deps
   const getAuthHeaders = deps.headers
   const request: typeof fetch = (input, init) => deps.fetch(input, init)
-async function createSessionSegment(sessionId: string, roomName: string): Promise<string> {
+async function createSessionSegment(sessionId: string, roomName: string, takeover = false): Promise<string> {
   const segmentId = randomId()
   const response = await request(`${baseUrl}/sessions/${sessionId}/segments`, {
     method: 'POST',
@@ -19,8 +19,15 @@ async function createSessionSegment(sessionId: string, roomName: string): Promis
       segmentId,
       roomName,
       startedAt: now().toISOString(),
+      ...(takeover ? { takeover: true } : {}),
     }),
   })
+  if (response.status === 409) {
+    const body = await response.json().catch(() => ({})) as { error?: string; code?: string }
+    const error = new Error(body.error || 'Failed to start session segment')
+    ;(error as Error & { code?: string }).code = body.code
+    throw error
+  }
   if (!response.ok) throw new Error('Failed to start session segment')
   return segmentId
 }

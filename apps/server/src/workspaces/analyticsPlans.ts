@@ -11,6 +11,8 @@ import {
 } from './analytics'
 import { completeWorkspaceAnalytics } from './analyticsModel'
 
+export { completeWorkspaceAnalytics }
+
 type Scope = Awaited<ReturnType<typeof establishWorkspace>>
 
 /** Every plan names one predefined report; the model never writes queries, fields or identifiers. */
@@ -61,34 +63,48 @@ ${JSON.stringify({ question })}`
 const interpretSchema = z.object({ question: z.string().trim().min(1).max(1_000), learner: idSchema.optional() }).strict()
 const EMAIL = /[^\s@]+@[^\s@]+\.[^\s@]+/g
 
-/** Identity is bound to a member of this workspace before the model sees the text; the model sees only a placeholder. */
-export async function interpretWorkspaceQuestion(tx: WorkspaceTx, scope: Scope, input: unknown) {
+export type InterpretMember = { id: string; name: string }
+export type InterpretBinding =
+  | { kind: 'early'; value: { status: 'clarification'; question: string } | { status: 'choose_learner'; reason: string } }
+  | { kind: 'bound'; prompt: string; member: InterpretMember | null }
+
+/** Authorize and bind the learner inside a short transaction. The model call happens outside. */
+export async function bindWorkspaceInterpret(tx: WorkspaceTx, scope: Scope, input: unknown): Promise<InterpretBinding> {
   await asWorkspaceManager(tx, scope)
   const body = interpretSchema.parse(input)
   const emails = body.question.match(EMAIL) ?? []
-  if (emails.length > 1) return { status: 'clarification' as const, question: 'Ask about one learner at a time.' }
-  let member: { id: string; name: string } | null = null
+  if (emails.length > 1) return { kind: 'early', value: { status: 'clarification', question: 'Ask about one learner at a time.' } }
+  let member: InterpretMember | null = null
   const where = body.learner ? { id: body.learner } : emails[0] ? { user: { email: { equals: emails[0], mode: 'insensitive' as const } } } : null
   if (where) {
     const row = await tx.workspaceMember.findFirst({ where: { ...where, workspaceId: scope.workspace.id },
       select: { id: true, user: { select: { firstName: true, lastName: true, email: true } } } })
-    if (!row) return { status: 'choose_learner' as const, reason: 'That learner is not a member of this workspace.' }
+    if (!row) return { kind: 'early', value: { status: 'choose_learner', reason: 'That learner is not a member of this workspace.' } }
     member = { id: row.id, name: [row.user.firstName, row.user.lastName].filter(Boolean).join(' ') || row.user.email }
   }
-  const text = body.question.replace(EMAIL, PLACEHOLDER)
+  return { kind: 'bound', prompt: buildWorkspaceAnalyticsPrompt(body.question.replace(EMAIL, PLACEHOLDER), Boolean(member)), member }
+}
+
+/** Recheck membership and role before returning the plan produced outside the transaction. */
+export async function finishWorkspaceInterpret(tx: WorkspaceTx, scope: Scope, bound: Extract<InterpretBinding, { kind: 'bound' }>, raw: string) {
+  await asWorkspaceManager(tx, scope)
+  if (bound.member) {
+    const still = await tx.workspaceMember.findFirst({ where: { id: bound.member.id, workspaceId: scope.workspace.id, state: 'ACTIVE' }, select: { id: true } })
+    if (!still) throw new WorkspaceError(422, 'ANALYTICS_PLAN_REJECTED', 'That question could not be turned into a report. Try rephrasing it.')
+  }
   let parsed: z.infer<typeof modelSchema>
   try {
-    parsed = modelSchema.parse(extractJsonObject(await completeWorkspaceAnalytics(buildWorkspaceAnalyticsPrompt(text, Boolean(member)))))
+    parsed = modelSchema.parse(extractJsonObject(raw))
   } catch (error) {
     if (error instanceof z.ZodError) throw new WorkspaceError(422, 'ANALYTICS_PLAN_REJECTED', 'That question could not be turned into a report. Try rephrasing it.')
     throw new WorkspaceError(503, 'ANALYTICS_AI_UNAVAILABLE', 'AI Analytics is temporarily unavailable. Please retry.')
   }
   if (parsed.status !== 'ready') return parsed
   const { learner, ...plan } = parsed.plan
-  if (learner && !member) throw new WorkspaceError(422, 'ANALYTICS_PLAN_REJECTED', 'That question could not be turned into a report. Try rephrasing it.')
+  if (learner && !bound.member) throw new WorkspaceError(422, 'ANALYTICS_PLAN_REJECTED', 'That question could not be turned into a report. Try rephrasing it.')
   return { status: 'ready' as const, plan: workspacePlanSchema.parse({ ...plan,
     title: plan.title.replaceAll(PLACEHOLDER, 'Learner'), explanation: plan.explanation.replaceAll(PLACEHOLDER, 'the selected learner'),
-    learnerMemberId: learner ? member!.id : null }), ...(member && learner ? { learner: member } : {}) }
+    learnerMemberId: learner ? bound.member!.id : null }), ...(bound.member && learner ? { learner: bound.member } : {}) }
 }
 
 export function planHash(plan: WorkspacePlan) {

@@ -51,8 +51,9 @@ export const updateMemberSchema = z.object({
 export class WorkspaceError extends Error {
   status: number
   code: string
-  constructor(status: number, code: string, message: string) {
-    super(message); this.status = status; this.code = code
+  details?: Record<string, unknown>
+  constructor(status: number, code: string, message: string, details?: Record<string, unknown>) {
+    super(message); this.status = status; this.code = code; this.details = details
   }
 }
 

@@ -170,9 +170,9 @@ is part of each product's organization path. Tests switch readiness on locally o
 | --- | --- |
 | Server isolation tests on the restricted role | Pass |
 | Migration upgrade verifier | Pass (November 3, after checkpoint 6: 42 tables enforce forced RLS) |
-| Browser walkthrough with fictional local accounts (two organizations plus Personal) | Local Replay/Pulse/Feedback HTTP and Interview bank ready; Elevate/Interview microphone not yet human-checked |
+| Browser walkthrough with fictional local accounts (two organizations plus Personal) | Local Replay/Pulse/Feedback and Interview bank ready. Northwind Elevate microphone checked on Transcribe + Nova Lite + Polly (`session_1793698728660_k17qya9k1`). Delivery alignment still independently queued. |
 | Product readiness flags (`WORKSPACE_FEATURE_READINESS`) | All organization products still `false` in product code. Local `WORKSPACE_READY_OVERRIDE` is ignored in production |
-| Real Google sign-in, microphone, LiveKit room and agent in an organization | Local stack targeted at walkthrough API/DB; human microphone check not done |
+| Real Google sign-in, microphone, LiveKit room and agent in an organization | Local stack targeted at walkthrough API/DB. Human Elevate microphone check done on the walkthrough stack; production Google sign-in not exercised. |
 | Merge to `main` | Not done |
 | Deployment (backup, active-session check, migration, runtime role, rollback plan) | Not authorized |
 
@@ -181,8 +181,9 @@ see no products. That is still the production posture. The local override is wal
 
 ## Known gaps and decisions
 
-- Platform Admin analytics run without a workspace context and therefore show Personal activity only. Organization
-  analytics are on the workspace admin pages.
+- Platform Admin overview practice totals are now explicit platform-wide aggregates (`platform_practice_totals`) with
+  an optional workspace filter. Raw learner content remains tenant-isolated. Organization analytics stay on workspace
+  admin pages.
 - A playback ticket lasts two hours; a Replay page left open longer must be reopened to seek.
 - Microsoft Clarity: the workspace shell reloads the page once if Clarity was already loaded, so organization pages
   are not recorded. Platform `/admin` has the same pre-existing gap and is unchanged.

@@ -1,4 +1,4 @@
-import { getAuthHeaders } from '@/lib/api-client'
+import { identityAuthHeaders as getAuthHeaders } from '@/lib/api-client'
 import { useAuth } from '@/hooks/useAuth'
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 

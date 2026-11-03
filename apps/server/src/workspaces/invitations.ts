@@ -5,7 +5,7 @@ import type { Prisma } from '@prisma/client'
 import type { WorkspaceTokenPayload } from '../lib/jwt'
 import { deliverAttempt, effectiveStatus, expiryFrom, INVITATION_VIEWS, newToken, serializeInvitation, viewWhere } from '../lib/invitations'
 import { featureSchema, idSchema, WorkspaceError } from './contracts'
-import { requireWorkspaceManager, withWorkspaceAccess, type WorkspaceTx, type establishWorkspace } from './context'
+import { requireWorkspaceManager, withLockedWorkspaceAccess, type WorkspaceTx, type establishWorkspace } from './context'
 
 type Scope = Awaited<ReturnType<typeof establishWorkspace>>
 export const workspaceInvitationInput = z.object({
@@ -46,7 +46,7 @@ export async function listWorkspaceInvitations(tx: WorkspaceTx, scope: Scope, in
 /** Prepare under the workspace lock; send after commit, using the shared mailer and attempt fencing. */
 export async function createWorkspaceInvitation(claims: WorkspaceTokenPayload, input: unknown) {
   const body = workspaceInvitationInput.parse(input), { token, tokenHash } = newToken(), now = new Date()
-  const attempt = await withWorkspaceAccess(claims, async (tx, scope) => {
+  const attempt = await withLockedWorkspaceAccess(claims, async (tx, scope) => {
     mayManage(scope, body.role)
     reserveInvitationSend(claims.userId)
     const existing = await tx.user.findUnique({ where: { email: body.email }, select: { id: true } })
@@ -70,12 +70,12 @@ export async function createWorkspaceInvitation(claims: WorkspaceTokenPayload, i
     await audit(tx, scope, 'invitation_create', invitation.id, { role: body.role, attempt: 1 })
     return { invitation, token, workspaceName: scope.workspace.name }
   })
-  return presentWorkspaceInvitation(await deliverAttempt(claims.userId, attempt, work => withWorkspaceAccess(claims, tx => work(tx))))
+  return presentWorkspaceInvitation(await deliverAttempt(claims.userId, attempt, work => withLockedWorkspaceAccess(claims, tx => work(tx))))
 }
 export async function changeWorkspaceInvitation(claims: WorkspaceTokenPayload, id: string, action: 'resend' | 'revoke') {
   idSchema.parse(id)
   const { token, tokenHash } = newToken(), now = new Date()
-  const attempt = await withWorkspaceAccess(claims, async (tx, scope) => {
+  const attempt = await withLockedWorkspaceAccess(claims, async (tx, scope) => {
     requireWorkspaceManager(scope)
     await tx.$queryRaw`SELECT id FROM "UserInvitation" WHERE id=${id} AND "workspaceId"=${scope.workspace.id} FOR UPDATE`
     const current = await tx.userInvitation.findFirst({ where: { id, workspaceId: scope.workspace.id } })
@@ -91,13 +91,13 @@ export async function changeWorkspaceInvitation(claims: WorkspaceTokenPayload, i
     await audit(tx, scope, `invitation_${action}`, id, { attempt: invitation.sendCount })
     return { invitation, token, workspaceName: scope.workspace.name }
   })
-  return presentWorkspaceInvitation(action === 'revoke' ? attempt.invitation : await deliverAttempt(claims.userId, attempt, work => withWorkspaceAccess(claims, tx => work(tx))))
+  return presentWorkspaceInvitation(action === 'revoke' ? attempt.invitation : await deliverAttempt(claims.userId, attempt, work => withLockedWorkspaceAccess(claims, tx => work(tx))))
 }
 
 export const workspaceInvitationBatchInput = workspaceInvitationInput.omit({ email: true, name: true }).extend({ emails: batchEmailsSchema })
 export async function createWorkspaceInvitationBatch(claims: WorkspaceTokenPayload, input: unknown) {
   const { emails, ...settings } = workspaceInvitationBatchInput.parse(input)
   // Authorize before starting a batch, then recheck membership/seat limits per recipient.
-  await withWorkspaceAccess(claims, async (_tx, scope) => mayManage(scope, settings.role))
+  await withLockedWorkspaceAccess(claims, async (_tx, scope) => mayManage(scope, settings.role))
   return runInvitationBatch(emails, email => createWorkspaceInvitation(claims, { ...settings, email }))
 }

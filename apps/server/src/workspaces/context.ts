@@ -43,7 +43,11 @@ export async function establishWorkspace(tx: WorkspaceTx, actorId: string, slug:
   return { workspace, member }
 }
 
-export function withWorkspaceAccess<T>(claims: WorkspaceTokenPayload, work: (tx: WorkspaceTx, scope: Awaited<ReturnType<typeof establishWorkspace>>) => Promise<T>) {
+export function withWorkspaceAccess<T>(
+  claims: WorkspaceTokenPayload,
+  work: (tx: WorkspaceTx, scope: Awaited<ReturnType<typeof establishWorkspace>>) => Promise<T>,
+  options: { lockWorkspace?: boolean } = {},
+) {
   return withWorkspaceActor(claims.userId, async tx => {
     // Membership id prevents an old token from surviving deletion and re-enrollment.
     const membership = await tx.workspaceMember.findUnique({ where: { id: claims.membershipId } })
@@ -55,12 +59,22 @@ export function withWorkspaceAccess<T>(claims: WorkspaceTokenPayload, work: (tx:
     // Context must precede SELECT FOR UPDATE: UPDATE RLS otherwise filters out
     // the row without taking a lock. Recheck membership after waiting.
     await establishWorkspace(tx, claims.userId, workspace.slug)
-    const locked = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "Workspace" WHERE id=${workspace.id} FOR UPDATE`
-    if (locked.length !== 1) throw new WorkspaceError(403, 'MEMBERSHIP_INACTIVE', 'Your workspace membership is no longer active')
+    if (options.lockWorkspace) {
+      const locked = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "Workspace" WHERE id=${workspace.id} FOR UPDATE`
+      if (locked.length !== 1) throw new WorkspaceError(403, 'MEMBERSHIP_INACTIVE', 'Your workspace membership is no longer active')
+    }
     const scope = await establishWorkspace(tx, claims.userId, workspace.slug)
     if (scope.member.id !== claims.membershipId || scope.member.state !== 'ACTIVE') throw new WorkspaceError(403, 'MEMBERSHIP_INACTIVE', 'Your workspace membership is no longer active')
     return work(tx, scope)
   })
+}
+
+/** Membership, seat and invitation mutations serialize on the Workspace row. */
+export function withLockedWorkspaceAccess<T>(
+  claims: WorkspaceTokenPayload,
+  work: (tx: WorkspaceTx, scope: Awaited<ReturnType<typeof establishWorkspace>>) => Promise<T>,
+) {
+  return withWorkspaceAccess(claims, work, { lockWorkspace: true })
 }
 
 export function requireWorkspaceManager(scope: Awaited<ReturnType<typeof establishWorkspace>>, ownerOnly = false) {

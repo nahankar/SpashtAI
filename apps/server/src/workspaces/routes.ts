@@ -50,17 +50,25 @@ function workspaceClaims(req: Request) {
   const token = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : ''
   try { return verifyWorkspaceToken(token) } catch { throw new WorkspaceError(401, 'WORKSPACE_TOKEN_REQUIRED', 'Open the workspace again to continue') }
 }
-function scoped(handler: (tx: Parameters<Parameters<typeof withWorkspaceAccess>[1]>[0], scope: Parameters<Parameters<typeof withWorkspaceAccess>[1]>[1], req: Request) => Promise<unknown>) {
+function scoped(
+  handler: (tx: Parameters<Parameters<typeof withWorkspaceAccess>[1]>[0], scope: Parameters<Parameters<typeof withWorkspaceAccess>[1]>[1], req: Request) => Promise<unknown>,
+  options: { lockWorkspace?: boolean } = {},
+) {
   return route(async req => {
     const claims = workspaceClaims(req)
-    return withWorkspaceAccess(claims, (tx, scope) => handler(tx, scope, req))
+    return withWorkspaceAccess(claims, (tx, scope) => handler(tx, scope, req), options)
   })
+}
+function scopedWrite(
+  handler: (tx: Parameters<Parameters<typeof withWorkspaceAccess>[1]>[0], scope: Parameters<Parameters<typeof withWorkspaceAccess>[1]>[1], req: Request) => Promise<unknown>,
+) {
+  return scoped(handler, { lockWorkspace: true })
 }
 workspaceRouter.post('/current/invitations/preview', scoped(async (_tx, scope, req) => {
   requireWorkspaceManager(scope)
   return invitationPreview(scope.workspace.name, req.body)
 }))
-workspaceRouter.put('/current/enrollment', scoped((tx, scope, req) => saveManagedEnrollment(tx, scope, req.body)))
+workspaceRouter.put('/current/enrollment', scopedWrite((tx, scope, req) => saveManagedEnrollment(tx, scope, req.body)))
 workspaceRouter.post('/current/invitations/bulk', workspaceInvitationSendLimiter, route(req => invitations.createWorkspaceInvitationBatch(workspaceClaims(req), req.body)))
 workspaceRouter.get('/current/invitations', scoped((tx, scope, req) => invitations.listWorkspaceInvitations(tx, scope, req.query)))
 workspaceRouter.post('/current/invitations', workspaceInvitationSendLimiter, route(req => invitations.createWorkspaceInvitation(workspaceClaims(req), req.body)))
@@ -78,17 +86,28 @@ workspaceRouter.get('/current/admin/activity/learners', scoped((tx, scope, req) 
 workspaceRouter.get('/current/admin/feature-usage', scoped((tx, scope, req) => analytics.workspaceFeatureUsage(tx, scope, req.query)))
 workspaceRouter.get('/current/admin/progress-pulse', scoped((tx, scope, req) => analytics.workspaceProgressPulse(tx, scope, req.query)))
 workspaceRouter.get('/current/admin/feedback', scoped((tx, scope, req) => analytics.workspaceFeedback(tx, scope, req.query)))
-workspaceRouter.post('/current/admin/analytics/interpret', workspaceAnalyticsLimiter, scoped((tx, scope, req) => plans.interpretWorkspaceQuestion(tx, scope, req.body)))
-workspaceRouter.post('/current/admin/analytics/run', scoped((tx, scope, req) => plans.runWorkspacePlan(tx, scope, req.body)))
+workspaceRouter.post('/current/admin/analytics/interpret', workspaceAnalyticsLimiter, route(async req => {
+  const claims = workspaceClaims(req)
+  const bound = await withWorkspaceAccess(claims, (tx, scope) => plans.bindWorkspaceInterpret(tx, scope, req.body))
+  if (bound.kind === 'early') return bound.value
+  let raw: string
+  try {
+    raw = await plans.completeWorkspaceAnalytics(bound.prompt)
+  } catch {
+    throw new WorkspaceError(503, 'ANALYTICS_AI_UNAVAILABLE', 'AI Analytics is temporarily unavailable. Please retry.')
+  }
+  return withWorkspaceAccess(claims, (tx, scope) => plans.finishWorkspaceInterpret(tx, scope, bound, raw))
+}))
+workspaceRouter.post('/current/admin/analytics/run', scopedWrite((tx, scope, req) => plans.runWorkspacePlan(tx, scope, req.body)))
 workspaceRouter.get('/current/admin/analytics/saved', scoped((tx, scope) => plans.listWorkspacePlans(tx, scope)))
-workspaceRouter.post('/current/admin/analytics/saved/:id/run', scoped((tx, scope, req) => plans.rerunWorkspacePlan(tx, scope, idSchema.parse(req.params.id))))
-workspaceRouter.patch('/current/admin/analytics/saved/:id', scoped((tx, scope, req) => plans.updateWorkspacePlan(tx, scope, idSchema.parse(req.params.id), req.body)))
-workspaceRouter.delete('/current/admin/analytics/saved/:id', scoped((tx, scope, req) => plans.deleteWorkspacePlan(tx, scope, idSchema.parse(req.params.id))))
-workspaceRouter.post('/current/members', scoped((tx, scope, req) => service.addExistingMember(tx, scope, req.body)))
-workspaceRouter.patch('/current/branding', scoped((tx, scope, req) => service.updateWorkspaceBranding(tx, scope, req.body)))
-workspaceRouter.put('/current/features/:feature', scoped((tx, scope, req) => service.configureWorkspaceFeature(tx, scope, String(req.params.feature), req.body)))
-workspaceRouter.patch('/current/members/:memberId', scoped((tx, scope, req) => service.changeWorkspaceMember(tx, scope, idSchema.parse(req.params.memberId), req.body)))
-workspaceRouter.put('/current/members/:memberId/features/:feature', scoped((tx, scope, req) => service.configureMemberFeature(tx, scope, idSchema.parse(req.params.memberId), String(req.params.feature), req.body)))
+workspaceRouter.post('/current/admin/analytics/saved/:id/run', scopedWrite((tx, scope, req) => plans.rerunWorkspacePlan(tx, scope, idSchema.parse(req.params.id))))
+workspaceRouter.patch('/current/admin/analytics/saved/:id', scopedWrite((tx, scope, req) => plans.updateWorkspacePlan(tx, scope, idSchema.parse(req.params.id), req.body)))
+workspaceRouter.delete('/current/admin/analytics/saved/:id', scopedWrite((tx, scope, req) => plans.deleteWorkspacePlan(tx, scope, idSchema.parse(req.params.id))))
+workspaceRouter.post('/current/members', scopedWrite((tx, scope, req) => service.addExistingMember(tx, scope, req.body)))
+workspaceRouter.patch('/current/branding', scopedWrite((tx, scope, req) => service.updateWorkspaceBranding(tx, scope, req.body)))
+workspaceRouter.put('/current/features/:feature', scopedWrite((tx, scope, req) => service.configureWorkspaceFeature(tx, scope, String(req.params.feature), req.body)))
+workspaceRouter.patch('/current/members/:memberId', scopedWrite((tx, scope, req) => service.changeWorkspaceMember(tx, scope, idSchema.parse(req.params.memberId), req.body)))
+workspaceRouter.put('/current/members/:memberId/features/:feature', scopedWrite((tx, scope, req) => service.configureMemberFeature(tx, scope, idSchema.parse(req.params.memberId), String(req.params.feature), req.body)))
 platformWorkspacesRouter.put('/:workspaceId/enrollment', route(req => withPlatformWorkspaceAdmin(req.user!.userId, tx => saveEnrollmentSettings(tx, idSchema.parse(req.params.workspaceId), req.user!.userId, req.body))))
 platformWorkspacesRouter.post('/:workspaceId/invitations/preview', route(req => withPlatformWorkspaceAdmin(req.user!.userId, async tx => {
   const workspace = await tx.workspace.findUnique({ where: { id: idSchema.parse(req.params.workspaceId), kind: 'ORGANIZATION' } })
@@ -102,7 +121,7 @@ platformWorkspacesRouter.patch('/:workspaceId', route(req => service.updatePlatf
 platformWorkspacesRouter.put('/:workspaceId/features/:feature', route(req => service.configurePlatformFeature(req.user!.userId, idSchema.parse(req.params.workspaceId), String(req.params.feature), req.body)))
 
 export function workspaceErrorHandler(error: unknown, _req: Request, res: Response, next: NextFunction) {
-  if (error instanceof WorkspaceError) { res.status(error.status).json({ error: error.message, code: error.code }); return }
+  if (error instanceof WorkspaceError) { res.status(error.status).json({ error: error.message, code: error.code, ...error.details }); return }
   if (error instanceof ZodError) { res.status(400).json({ error: 'Invalid workspace settings', code: 'INVALID_INPUT', issues: error.issues.map(i => ({ path: i.path, message: i.message })) }); return }
   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
     res.status(409).json({ error: 'That workspace address or membership already exists', code: 'WORKSPACE_CONFLICT' }); return

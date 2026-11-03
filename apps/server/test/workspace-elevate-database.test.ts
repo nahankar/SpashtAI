@@ -149,6 +149,35 @@ suite('organization Elevate voice path', () => {
     expect((await request(app).get(`/sessions/${session.id}/recording/stream`).set(headers(alpha, learner))).status).toBe(404)
   })
 
+  it('refuses to close a recent leftover session unless the learner takes it over', async () => {
+    const first = await orgSession(alpha, learner)
+    const started = await request(app).post(`/sessions/${first.id}/segments`).set(headers(alpha, learner)).send({ segmentId: `${tag}-own-a`, roomName: `${tag}-own-a` })
+    expect(started.status).toBe(201)
+    const second = await orgSession(alpha, learner)
+    const blocked = await request(app).post(`/sessions/${second.id}/segments`).set(headers(alpha, learner)).send({ segmentId: `${tag}-own-b`, roomName: `${tag}-own-b` })
+    expect(blocked.status).toBe(409)
+    expect(blocked.body).toMatchObject({ code: 'VOICE_SESSION_ACTIVE', openSessions: [first.id] })
+    expect((await admin.sessionSegment.findUniqueOrThrow({ where: { id: `${tag}-own-a` } })).endedAt).toBeNull()
+
+    const taken = await request(app).post(`/sessions/${second.id}/segments`).set(headers(alpha, learner))
+      .send({ segmentId: `${tag}-own-c`, roomName: `${tag}-own-c`, takeover: true })
+    expect(taken.status).toBe(201)
+    const closed = await admin.sessionSegment.findUniqueOrThrow({ where: { id: `${tag}-own-a` } })
+    expect(closed.endedAt).not.toBeNull()
+    expect(closed.activeDurationSec).toBeGreaterThanOrEqual(0)
+    expect((await admin.sessionSegment.findUniqueOrThrow({ where: { id: `${tag}-own-c` } })).endedAt).toBeNull()
+    await admin.sessionSegment.update({ where: { id: `${tag}-own-c` }, data: { endedAt: new Date() } })
+
+    const stale = await orgSession(alpha, learner)
+    await request(app).post(`/sessions/${stale.id}/segments`).set(headers(alpha, learner)).send({ segmentId: `${tag}-own-d`, roomName: `${tag}-own-d` })
+    await admin.$executeRaw`UPDATE "SessionSegment" SET "updatedAt" = NOW() - interval '7 hours' WHERE id = ${`${tag}-own-d`}`
+    const third = await orgSession(alpha, learner)
+    const abandoned = await request(app).post(`/sessions/${third.id}/segments`).set(headers(alpha, learner)).send({ segmentId: `${tag}-own-e`, roomName: `${tag}-own-e` })
+    expect(abandoned.status).toBe(201)
+    expect((await admin.sessionSegment.findUniqueOrThrow({ where: { id: `${tag}-own-d` } })).endedAt).not.toBeNull()
+    await admin.sessionSegment.updateMany({ where: { id: { in: [`${tag}-own-c`, `${tag}-own-e`] } }, data: { endedAt: new Date() } })
+  })
+
   it('enforces organization voice concurrency under a race', async () => {
     const [first, second] = [await orgSession(alpha, learner), await orgSession(alpha, other)]
     const responses = await Promise.all([

@@ -28,6 +28,18 @@ export class LiveSessionController {
     if (this.state.sessionId !== previous) this.deps.effects.sessionChanged(this.state.sessionId)
     for (const listener of this.listeners) listener()
   }
+  private async createSegment(sessionId: string, room: string) {
+    try {
+      return await this.deps.api.createSessionSegment(sessionId, room)
+    } catch (error) {
+      const code = error instanceof Error ? (error as Error & { code?: string }).code : undefined
+      if (code !== 'VOICE_SESSION_ACTIVE') throw error
+      const message = error instanceof Error ? error.message : 'You already have a live session in this workspace.'
+      const confirmed = await this.deps.effects.confirmTakeover?.(message)
+      if (!confirmed) throw error
+      return this.deps.api.createSessionSegment(sessionId, room, true)
+    }
+  }
   private roomName() { return `room_${this.deps.now().getTime()}_${this.deps.random().toString(36).substr(2, 5)}` }
   private query(sessionId: string, segmentId: string, room: string) {
     return { room, sessionId, segmentId }
@@ -42,7 +54,7 @@ export class LiveSessionController {
       const room = this.state.roomName || this.roomName()
       await adapter.createActivity(id, this.deps.now().toISOString())
       linked = adapter.kind === 'prepare'
-      segment = await this.deps.api.createSessionSegment(id, room)
+      segment = await this.createSegment(id, room)
       const connection = await this.deps.api.fetchLiveToken(this.query(id, segment, room))
       this.patch({ token: connection.token, url: connection.url, sessionId: id, roomName: room, segmentId: segment,
         isSessionPaused: false, pauseReason: null })
@@ -65,7 +77,7 @@ export class LiveSessionController {
     try {
       if (cancelled()) return
       const room = this.roomName()
-      segment = await this.deps.api.createSessionSegment(sessionId, room)
+      segment = await this.createSegment(sessionId, room)
       if (cancelled()) return
       const connection = await this.deps.api.fetchLiveToken(this.query(sessionId, segment, room), signal)
       if (cancelled()) return

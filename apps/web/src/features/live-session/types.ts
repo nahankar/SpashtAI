@@ -46,6 +46,7 @@ export interface LiveSessionEffects {
   resetMetrics(): void; clearMessages(): void; hideHistory(): void
   sessionChanged(id: string | null): void
   toast(kind: 'info' | 'error' | 'success', message: string): void
+  confirmTakeover?(message: string): Promise<boolean>
   log(kind: 'event' | 'error', name: string, data: unknown): void
   messages(): readonly { id?: string; role: string; content: string }[]
   addMessage(role: 'user' | 'assistant', text: string, id?: string, persist?: boolean): Promise<void>

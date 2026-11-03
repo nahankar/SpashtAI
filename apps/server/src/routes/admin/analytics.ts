@@ -10,7 +10,6 @@ import { hasCurrentAdminRole, requireCurrentAdmin } from '../../middleware/admin
 import {
   loadFeatureReport,
   loadFeatureUsers,
-  loadOverviewHeadlines,
   loadPageViewReport,
   loadProgressPulseReport,
 } from '../../analytics/adminProductAnalytics'
@@ -26,34 +25,24 @@ import {
   saveAdminAnalyticsQuery,
   trimAdminAnalyticsRecent,
 } from '../../analytics/adminAnalyticsSavedQueries'
+import { loadPlatformPracticeTotals } from '../../analytics/platformPracticeTotals'
+import { WorkspaceError } from '../../workspaces/contracts'
 
 const router = Router()
 
 // GET /api/admin/analytics/overview
-router.get('/overview', async (_req: Request, res: Response) => {
+router.get('/overview', async (req: Request, res: Response) => {
   try {
     const enabled = await getEnabledFeatures()
     const now = new Date()
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
     const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-    const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+    const workspaceId = typeof req.query.workspaceId === 'string' && req.query.workspaceId.trim()
+      ? req.query.workspaceId.trim()
+      : null
+    const practice = await loadPlatformPracticeTotals(req.user!.userId, workspaceId)
 
-    const [
-      totalUsers,
-      newUsersToday,
-      newUsersWeek,
-      activeUsersWeek,
-      totalElevateSessions,
-      totalReplaySessions,
-      recentElevate,
-      recentReplay,
-      totalPrepareJourneys,
-      recentPrepareJourneys,
-      totalEventPractices,
-      recentEventPractices,
-      totalEventRecordings,
-      recentEventRecordings,
-    ] = await Promise.all([
+    const [totalUsers, newUsersToday, newUsersWeek, activeUsersWeek] = await Promise.all([
       prisma.user.count(),
       prisma.user.count({ where: { createdAt: { gte: todayStart } } }),
       prisma.user.count({ where: { createdAt: { gte: weekAgo } } }),
@@ -63,57 +52,36 @@ router.get('/overview', async (_req: Request, res: Response) => {
           role: { notIn: ['ADMIN', 'SUPER_ADMIN'] },
         },
       }),
-      enabled.includes('elevate')
-        ? prisma.session.count({ where: { discardedAt: null, purpose: 'COMMUNICATION', preparationPractice: null } })
-        : Promise.resolve(0),
-      enabled.includes('replay') ? prisma.replaySession.count({ where: { purpose: 'COMMUNICATION', preparationRecording: null } }) : Promise.resolve(0),
-      enabled.includes('elevate')
-        ? prisma.session.count({
-            where: { startedAt: { gte: monthAgo }, discardedAt: null, purpose: 'COMMUNICATION', preparationPractice: null },
-          })
-        : Promise.resolve(0),
-      enabled.includes('replay')
-        ? prisma.replaySession.count({ where: { createdAt: { gte: monthAgo }, purpose: 'COMMUNICATION', preparationRecording: null } })
-        : Promise.resolve(0),
-      enabled.includes('prepare') ? prisma.preparation.count() : Promise.resolve(0),
-      enabled.includes('prepare')
-        ? prisma.preparation.count({ where: { createdAt: { gte: monthAgo } } })
-        : Promise.resolve(0),
-      enabled.includes('prepare')
-        ? prisma.preparationPractice.count({ where: { session: { discardedAt: null } } })
-        : Promise.resolve(0),
-      enabled.includes('prepare')
-        ? prisma.preparationPractice.count({ where: { createdAt: { gte: monthAgo }, session: { discardedAt: null } } })
-        : Promise.resolve(0),
-      enabled.includes('prepare') ? prisma.preparationRecording.count() : Promise.resolve(0),
-      enabled.includes('prepare')
-        ? prisma.preparationRecording.count({ where: { createdAt: { gte: monthAgo } } })
-        : Promise.resolve(0),
     ])
 
     const sessions: Record<string, unknown> = { enabledFeatures: enabled }
     if (enabled.includes('elevate')) {
-      sessions.elevate = { total: totalElevateSessions, thisMonth: recentElevate }
+      sessions.elevate = { total: practice.totals.elevateTotal, thisMonth: practice.totals.elevateMonth }
     }
     if (enabled.includes('replay')) {
-      sessions.replay = { total: totalReplaySessions, thisMonth: recentReplay }
+      sessions.replay = { total: practice.totals.replayTotal, thisMonth: practice.totals.replayMonth }
     }
-    if (enabled.includes('prepare')) {
-      sessions.prepare = {
-        journeys: { total: totalPrepareJourneys, thisMonth: recentPrepareJourneys },
-        eventPractices: { total: totalEventPractices, thisMonth: recentEventPractices },
-        eventRecordings: { total: totalEventRecordings, thisMonth: recentEventRecordings },
-      }
-    }
-
-    const headlines = await loadOverviewHeadlines().catch(() => ({ pulseParticipants: 0, interviewRuns: 0 }))
 
     res.json({
-      users: { total: totalUsers, newToday: newUsersToday, newThisWeek: newUsersWeek, activeThisWeek: activeUsersWeek },
+      scope: practice.scope,
+      users: {
+        total: totalUsers,
+        newToday: newUsersToday,
+        newThisWeek: newUsersWeek,
+        activeThisWeek: activeUsersWeek,
+        ...(practice.membersInWorkspace !== null ? { inWorkspace: practice.membersInWorkspace } : {}),
+      },
       sessions,
-      headlines,
+      headlines: {
+        pulseParticipants: practice.totals.pulseParticipants,
+        interviewRuns: practice.totals.interviewRuns,
+      },
     })
   } catch (err) {
+    if (err instanceof WorkspaceError) {
+      res.status(err.status).json({ error: err.message, code: err.code })
+      return
+    }
     console.error('Analytics overview error:', err)
     res.status(500).json({ error: 'Failed to load analytics' })
   }

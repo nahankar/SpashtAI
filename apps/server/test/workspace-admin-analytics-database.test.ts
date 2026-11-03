@@ -216,6 +216,47 @@ suite('organization admin reports and AI Analytics', () => {
     expect((await api.delete(`/api/workspaces/current/admin/analytics/saved/${id}`).set(token(alpha, 'admin'))).status).toBe(200)
   })
 
+  it('calls the analytics model outside the workspace lock and rechecks membership before returning', async () => {
+    const plan = { version: 1, title: 'Overview', report: 'overview', days: 30, product: null, skill: null, learner: null, explanation: 'Totals' }
+    let release!: (value: string) => void
+    const held = new Promise<string>(resolve => { release = resolve })
+    model.complete.mockImplementationOnce(() => held)
+    const pending = api.post('/api/workspaces/current/admin/analytics/interpret').set(token(alpha, 'owner')).send({ question: 'Show overview' })
+    const started = Date.now()
+    const mutated = await api.patch(`/api/workspaces/current/members/${members[`${alpha}:second`]}`).set(token(alpha, 'owner')).send({ state: 'SUSPENDED' })
+    expect(mutated.status).toBe(200)
+    expect(Date.now() - started).toBeLessThan(2_000)
+    await api.patch(`/api/workspaces/current/members/${members[`${alpha}:second`]}`).set(token(alpha, 'owner')).send({ state: 'ACTIVE' })
+    release(JSON.stringify({ status: 'ready', plan }))
+    expect((await pending).status).toBe(200)
+
+    let releaseAfter!: (value: string) => void
+    const afterSuspend = new Promise<string>(resolve => { releaseAfter = resolve })
+    model.complete.mockImplementationOnce(() => afterSuspend)
+    const stale = api.post('/api/workspaces/current/admin/analytics/interpret').set(token(alpha, 'admin')).send({ question: 'Show overview again' })
+    await admin.workspaceMember.update({ where: { id: members[`${alpha}:admin`] }, data: { state: 'SUSPENDED' } })
+    releaseAfter(JSON.stringify({ status: 'ready', plan }))
+    expect((await stale).status).toBe(403)
+    await admin.workspaceMember.update({ where: { id: members[`${alpha}:admin`] }, data: { state: 'ACTIVE' } })
+  })
+
+  it('lets platform staff read explicit all-workspace practice totals without raw learner rows', async () => {
+    const { loadPlatformPracticeTotals } = await import('../src/analytics/platformPracticeTotals')
+    const all = await loadPlatformPracticeTotals(users.staff, null)
+    expect(all.scope).toEqual({ kind: 'platform', workspaceId: null, practice: 'all-workspaces' })
+    expect(all.totals.elevateTotal).toBeGreaterThanOrEqual(4)
+    const filtered = await loadPlatformPracticeTotals(users.staff, alpha)
+    expect(filtered.scope).toEqual({ kind: 'platform', workspaceId: alpha, practice: 'workspace' })
+    expect(filtered.totals.elevateTotal).toBeGreaterThanOrEqual(2)
+    expect(filtered.totals.elevateTotal).toBeLessThan(all.totals.elevateTotal)
+    await expect(loadPlatformPracticeTotals(users.owner, null)).rejects.toMatchObject({ code: 'PLATFORM_ADMIN_REQUIRED' })
+    const empty = await scopes.runWithDataScope({
+      actorId: users.learner, workspaceId: alpha, membershipId: members[`${alpha}:learner`],
+      role: 'LEARNER', slug: '', timeZone: tz, features: {}, origin: 'request',
+    }, () => db.$queryRaw<unknown[]>`SELECT * FROM public.platform_practice_totals(NULL)`)
+    expect(empty).toEqual([])
+  })
+
   it('accepts organization feedback only where enabled, numbers it globally and stores attachments under the workspace', async () => {
     const learnerHeaders = (workspaceId: string | null) => ({ Authorization: `Bearer ${signToken({ userId: users.learner, email: `${tag}-learner@example.invalid`, role: 'USER' })}`,
       ...(workspaceId ? { 'x-spasht-workspace': signWorkspaceToken({ userId: users.learner, workspaceId, membershipId: members[`${workspaceId}:learner`] }) } : {}) })

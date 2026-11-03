@@ -148,6 +148,40 @@ suite('workspace product plane isolation', () => {
     expect(await access.withJobScope(beta, other, async () => 'ran')).toBeNull()
   })
 
+  it('discovers only due jobs in stable pages so later learners are reached while earlier ones retry', async () => {
+    await admin.session.updateMany({
+      where: { paceReconciliationStatus: { in: ['pending', 'processing', 'retry', 'waiting_for_evidence'] } },
+      data: { nextPaceReconciliationAt: new Date(Date.now() + 24 * 60 * 60_000) },
+    })
+    const later = `${tag}-later`
+    const sooner = `${tag}-sooner`
+    await asScope(scope(alpha, learner), () => db.session.create({
+      data: { id: sooner, userId: learner, module: 'elevate', endedAt: new Date(),
+        paceReconciliationStatus: 'retry', nextPaceReconciliationAt: new Date(Date.now() + 60 * 60_000) },
+    }))
+    await asScope(scope(alpha, other), () => db.session.create({
+      data: { id: later, userId: other, module: 'elevate', endedAt: new Date(), paceReconciliationStatus: 'pending' },
+    }))
+    const ours = (rows: Array<{ workspaceId: string; userId: string }>) =>
+      rows.filter(row => row.workspaceId === alpha && (row.userId === learner || row.userId === other))
+    const due = ours(await db.$queryRaw<Array<{ workspaceId: string; userId: string }>>`
+      SELECT * FROM public.workspace_job_scopes('pace_reconciliation')`)
+    expect(due).toEqual([{ workspaceId: alpha, userId: other }])
+
+    await admin.session.update({ where: { id: sooner }, data: { nextPaceReconciliationAt: new Date(Date.now() - 1_000) } })
+    const first = await db.$queryRaw<Array<{ workspaceId: string; userId: string }>>`
+      SELECT * FROM public.workspace_job_scopes('pace_reconciliation', NULL, NULL, 1)`
+    expect(first).toHaveLength(1)
+    const next = await db.$queryRaw<Array<{ workspaceId: string; userId: string }>>`
+      SELECT * FROM public.workspace_job_scopes('pace_reconciliation', ${first[0].workspaceId}, ${first[0].userId}, 1)`
+    expect(next).toHaveLength(1)
+    expect(next[0]).not.toEqual(first[0])
+    expect(ours([...first, ...next])).toEqual(expect.arrayContaining([
+      { workspaceId: alpha, userId: learner },
+      { workspaceId: alpha, userId: other },
+    ]))
+  })
+
   it('binds product requests only from a current membership matching the identity', async () => {
     const app = express()
     app.use(access.bindWorkspaceRequest)
