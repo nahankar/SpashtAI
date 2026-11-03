@@ -246,7 +246,7 @@ opens and reports no reviewed questions for this selection. No bank content and 
 
 **Unfinished (as of `0f3472a`).** Feedback submission stayed disabled in that checkpoint. Prepare and Coach stay off.
 
-## Local walkthrough (November 3, voice / bank / Feedback checkpoint)
+## Local walkthrough (November 3, voice / bank / Feedback checkpoint, commit `dc9e658`)
 
 Isolated stack only. Production host and the editor checkout at `81c393b` were not touched. Organization
 `WORKSPACE_FEATURE_READINESS` is still all `false` except `pro`/`ultra`. Local override is now

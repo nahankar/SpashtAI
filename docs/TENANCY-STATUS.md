@@ -3,8 +3,9 @@
 Current production status: reviewed control-plane release deployed November 2, 2026 (code `cd2acd5`); production
 is now `d90bccf`. See `TENANCY-RELEASE-2026-11-02.md`.
 
-**Organization product plane (November 3, 2026):** branch `codex/workspace-product-access`. Data isolation,
-Elevate/Replay/Interviews organization paths, workspace admin APIs/pages and the `/w/:slug` shell are implemented
+**Organization product plane (November 3, 2026):** branch `codex/workspace-product-access`, latest local commit
+`dc9e658`. Data isolation, Elevate/Replay/Interviews organization paths, workspace admin APIs/pages and the
+`/w/:slug` shell are implemented
 and tested. Local walkthrough now also has a published fictional Interview bank, fail-closed organization client
 helpers, and a finished Feedback path enabled only via `WORKSPACE_READY_OVERRIDE`. `WORKSPACE_FEATURE_READINESS`
 is still `false` for those products in product code. Prepare and Coach stay unfinished. Not human-verified with
