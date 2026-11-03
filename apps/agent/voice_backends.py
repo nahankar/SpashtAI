@@ -160,11 +160,17 @@ class SessionBuildResult:
 # Backend builders
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _nova_modalities(model_id: str) -> str:
+    """Nova Sonic 1.0 rejects mixed I/O. 2.x accepts text+audio."""
+    return "mixed" if "nova-2" in (model_id or "") else "audio"
+
+
 def _build_nova_sonic(cfg: VoiceBackendConfig) -> AgentSession:
     region = _bedrock_region()
     voice = cfg.voice_name or "tiffany"
     turn_detection = _nova_turn_detection(cfg.turn_detection)
     model_id = os.getenv("BEDROCK_NOVASONIC_MODEL_ID", "amazon.nova-2-sonic-v1:0")
+    modalities = _nova_modalities(model_id)
     realtime_model = aws.realtime.RealtimeModel(
         model=model_id,
         region=region,
@@ -173,12 +179,14 @@ def _build_nova_sonic(cfg: VoiceBackendConfig) -> AgentSession:
         top_p=0.9,
         max_tokens=1024,
         turn_detection=turn_detection,
+        modalities=modalities,
     )
     logger.info(
-        "✅ Backend=nova-sonic | voice=%s region=%s model=%s turn_detection=%s (requested=%s)",
+        "✅ Backend=nova-sonic | voice=%s region=%s model=%s modalities=%s turn_detection=%s (requested=%s)",
         voice,
         region,
         model_id,
+        modalities,
         turn_detection,
         cfg.turn_detection,
     )

@@ -2,7 +2,16 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from voice_backends import VoiceBackendConfig, build_session
+from voice_backends import VoiceBackendConfig, _nova_modalities, build_session
+
+
+class NovaSonicModalitiesTests(unittest.TestCase):
+    def test_v1_is_audio_only(self):
+        self.assertEqual(_nova_modalities("amazon.nova-sonic-v1:0"), "audio")
+
+    def test_v2_is_mixed(self):
+        self.assertEqual(_nova_modalities("amazon.nova-2-sonic-v1:0"), "mixed")
+        self.assertEqual(_nova_modalities("amazon.nova-2-5-sonic"), "mixed")
 
 
 class VoiceBackendResolutionTests(unittest.IsolatedAsyncioTestCase):

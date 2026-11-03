@@ -23,7 +23,10 @@ from dotenv import load_dotenv
 
 # Load process configuration before importing any module that snapshots
 # environment variables at import time (notably analytics.signal_api).
+# `.env.development` comments out AWS on purpose in some checkouts — `.env`
+# is the file that actually carries static Bedrock credentials.
 load_dotenv()
+load_dotenv(".env.development", override=False)
 
 from livekit import rtc, api
 from livekit.agents import (
@@ -104,6 +107,13 @@ logger.setLevel(logging.INFO)
 SERVER_URL = os.getenv("SERVER_URL", "http://localhost:4000")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 INTERNAL_AGENT_TOKEN = os.getenv("INTERNAL_AGENT_TOKEN", "dev-internal-agent-token")
+logger.info(
+    "AWS static creds present=%s region=%s bedrock_region=%s nova_model=%s",
+    bool(os.getenv("AWS_ACCESS_KEY_ID")),
+    os.getenv("AWS_REGION") or "unset",
+    os.getenv("BEDROCK_REGION") or "unset",
+    os.getenv("BEDROCK_NOVASONIC_MODEL_ID") or "amazon.nova-2-sonic-v1:0",
+)
 from agent_scope import agent_headers, set_workspace_scope
 
 # Timezone configuration - Indian Standard Time
@@ -653,9 +663,16 @@ class CoachingAgent(Agent):
                 await self._publish_assistant_line(greeting, message_id="assistant_greeting")
                 logger.info("👋 Coach opening greeting via say() [%s]", self._voice_backend)
             else:
-                await self.session.generate_reply(
-                    instructions=self.opening_greeting_instructions(),
+                greeting = self.opening_greeting_text()
+                self._last_greeting_text = greeting
+                await self._publish_assistant_line(greeting, message_id="assistant_greeting")
+                await asyncio.wait_for(
+                    self.session.generate_reply(
+                        instructions=self.opening_greeting_instructions(),
+                    ),
+                    timeout=12,
                 )
+                record_assistant_speech(self._assistant_speech_history, greeting)
                 logger.info("👋 Coach opening greeting via generate_reply [%s]", self._voice_backend)
         except Exception as greet_err:
             self._greeting_sent = False
