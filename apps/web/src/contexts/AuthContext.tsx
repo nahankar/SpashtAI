@@ -43,6 +43,7 @@ export interface AuthContextType {
   user: AuthUser | null
   loading: boolean
   login: (email: string, password: string) => Promise<AuthUser>
+  loginForDevelopment: (email: string, password: string) => Promise<AuthUser>
   loginWithGoogle: (credential: string) => Promise<AuthUser>
   register: (data: RegisterData) => Promise<AuthUser>
   logout: () => void
@@ -93,6 +94,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return data.user
   }, [])
 
+  const loginForDevelopment = useCallback(async (email: string, password: string): Promise<AuthUser> => {
+    const data = await apiClient<{ token: string; user: AuthUser }>('/api/auth/dev-login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+      skipAuth: true,
+    })
+    localStorage.setItem(TOKEN_KEY, data.token)
+    setUser(data.user)
+    return data.user
+  }, [])
+
   const loginWithGoogle = useCallback(async (credential: string): Promise<AuthUser> => {
     const data = await apiClient<{ token: string; user: AuthUser }>('/api/auth/google', {
       method: 'POST',
@@ -133,6 +145,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         loading,
         login,
+        loginForDevelopment,
         loginWithGoogle,
         register,
         logout,

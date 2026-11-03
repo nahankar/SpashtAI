@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express'
 import crypto from 'crypto'
 import { prisma } from '../lib/prisma'
 import { hashPassword, comparePassword } from '../lib/password'
+import { developmentLoginEnabled, isWalkthroughAccount, verifyDevelopmentPassword } from '../lib/devLogin'
 import { signToken } from '../lib/jwt'
 import { logger, reqLog } from '../lib/logger'
 import { requireAuth } from '../middleware/auth'
@@ -112,6 +113,43 @@ router.post('/register', authLimiter, async (req: Request, res: Response) => {
   } catch (err) {
     logger.error({ err: err }, 'Register error:')
     res.status(500).json({ error: 'Registration failed' })
+  }
+})
+
+// POST /api/auth/dev-login — local walkthrough accounts only. Hidden forms are not enough.
+router.post('/dev-login', authLimiter, async (req: Request, res: Response) => {
+  try {
+    if (!developmentLoginEnabled()) {
+      res.status(404).json({ error: 'Not found', code: 'DEV_LOGIN_DISABLED' })
+      return
+    }
+    const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : ''
+    const password = typeof req.body?.password === 'string' ? req.body.password : ''
+    if (!email || !password || !isWalkthroughAccount(email)) {
+      await verifyDevelopmentPassword(password || 'x', null)
+      reqLog(req).warn({ event: 'auth.dev_login_failed', reason: 'rejected' }, 'development login failed')
+      res.status(401).json({ error: 'Invalid credentials', code: 'DEV_LOGIN_REJECTED' })
+      return
+    }
+    const user = await prisma.user.findUnique({ where: { email } })
+    const valid = await verifyDevelopmentPassword(password, user?.passwordHash ?? null)
+    if (!user || !valid) {
+      reqLog(req).warn({ event: 'auth.dev_login_failed', reason: user ? 'bad_password' : 'no_user' }, 'development login failed')
+      res.status(401).json({ error: 'Invalid credentials', code: 'DEV_LOGIN_REJECTED' })
+      return
+    }
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date(), loginCount: { increment: 1 } },
+    })
+    await prisma.userActivity.create({
+      data: { userId: user.id, action: 'login', ipAddress: req.ip || null, userAgent: req.headers['user-agent'] || null },
+    })
+    reqLog(req).info({ event: 'auth.dev_login_succeeded', userId: user.id }, 'development login ok')
+    res.json({ token: signToken({ userId: user.id, email: user.email, role: user.role }), user: await authUserForClient(user) })
+  } catch (err) {
+    reqLog(req).error({ err, event: 'auth.dev_login_error' }, 'development login error')
+    res.status(500).json({ error: 'Login failed' })
   }
 })
 

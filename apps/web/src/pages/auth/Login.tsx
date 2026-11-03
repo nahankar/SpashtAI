@@ -1,15 +1,21 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { safeAppPath } from '@/lib/safe-next-path'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardDescription } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
 import { LogoWithBeta } from '@/components/brand/LogoWithBeta'
 
 export function Login() {
   const [error, setError] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [submitting, setSubmitting] = useState(false)
   const [signupsPaused, setSignupsPaused] = useState(false)
-  const { loginWithGoogle } = useAuth()
+  const { loginForDevelopment, loginWithGoogle } = useAuth()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const next = safeAppPath(searchParams.get('next'))
@@ -29,6 +35,24 @@ export function Login() {
       return
     }
     navigate(next || (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN' ? '/admin' : '/'))
+  }
+
+  async function handleLocalSignIn(event: FormEvent) {
+    event.preventDefault()
+    setError('')
+    setSubmitting(true)
+    try {
+      const user = await loginForDevelopment(email.trim().toLowerCase(), password)
+      if (user.needsProfileCompletion) {
+        navigate(next ? `/auth/complete-profile?next=${encodeURIComponent(next)}` : '/auth/complete-profile')
+        return
+      }
+      navigate(next || (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN' ? '/admin' : '/'))
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Invalid credentials')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -54,6 +78,21 @@ export function Login() {
             onCredential={handleGoogleCredential}
             onError={setError}
           />
+
+          {import.meta.env.DEV && (
+            <form onSubmit={handleLocalSignIn} className="space-y-3 border-t pt-4">
+              <p className="text-sm text-muted-foreground">{`Local walkthrough sign-in for fictional @walkthrough.test accounts. The server refuses this route in production.`}</p>
+              <div className="space-y-2">
+                <Label htmlFor="dev-email">Email</Label>
+                <Input id="dev-email" type="email" autoComplete="username" value={email} onChange={event => setEmail(event.target.value)} required />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="dev-password">Password</Label>
+                <Input id="dev-password" type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required />
+              </div>
+              <Button type="submit" className="w-full" disabled={submitting}>{submitting ? 'Signing in…' : 'Sign in for local development'}</Button>
+            </form>
+          )}
 
           <div className="text-center text-sm text-muted-foreground">
             {!signupsPaused && (
