@@ -1,3 +1,15 @@
+/**
+ * Product and identity HTTP helpers.
+ *
+ * Identity Bearer (`Authorization`) is the signed-in person. Organization product
+ * requests also send the workspace JWT in `x-spasht-workspace`. The server rechecks
+ * membership and never falls back to Personal. Missing, invalid, expired or mismatched
+ * workspace credentials fail closed (`isWorkspaceFailure`).
+ *
+ * Workspace administration (`/api/workspaces/current/...`) uses the workspace JWT
+ * as the Bearer instead. Use `workspaceCall` / `currentWorkspaceRequest` for those
+ * routes — do not send the identity token as Bearer there.
+ */
 import { getActiveWorkspace, isWorkspaceFailure, reportWorkspaceFailure, scopedStorageKey, workspaceHeaders } from '@/workspaces/activeWorkspace'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:4000'

@@ -10,6 +10,16 @@ export type WorkspaceFeatureId = typeof WORKSPACE_FEATURES[number]
  * scoped and tested. This is product code, identical for every organization;
  * tenant settings cannot override it.
  */
+/**
+ * Local walkthrough switch only. Production ignores it, and no tenant setting can set it.
+ * Comma-separated feature ids, for example `replay`.
+ */
+export function workspaceFeatureReady(feature: WorkspaceFeatureId): boolean {
+  if (WORKSPACE_FEATURE_READINESS[feature]) return true
+  if (process.env.NODE_ENV === 'production') return false
+  return (process.env.WORKSPACE_READY_OVERRIDE ?? '').split(',').map(item => item.trim()).includes(feature)
+}
+
 export const WORKSPACE_FEATURE_READINESS: Record<WorkspaceFeatureId, boolean> = {
   elevate: false,
   replay: false,
@@ -71,7 +81,7 @@ export async function memberFeatureDecisions(
   return WORKSPACE_FEATURES.map(feature => {
     const policy = policies.find(row => row.feature === feature) as FeatureDecision | undefined
     const override = overrides.find(row => row.feature === feature)?.allowed
-    const ready = WORKSPACE_FEATURE_READINESS[feature]
+    const ready = workspaceFeatureReady(feature)
     const decision = effectiveWorkspaceFeature({
       workspaceActive: workspace.state === 'ACTIVE' && workspace.kind === 'ORGANIZATION',
       memberActive: member.state === 'ACTIVE',

@@ -1,3 +1,12 @@
+/**
+ * Control-plane and workspace-admin HTTP helpers.
+ *
+ * Entry, acceptance and the workspace list use the identity Bearer and ignore
+ * `x-spasht-workspace`. After entry, `/api/workspaces/current/*` (members, invitations,
+ * branding, admin reports, AI Analytics) use the workspace JWT as the Bearer.
+ * Product routes must not use these helpers: they need the identity Bearer plus
+ * the workspace header from `getAuthHeaders`.
+ */
 import type { EnrollmentSettings } from './EnrollmentForm'
 import { ApiError } from '@/lib/api-client'
 import { isWorkspaceFailure, reportWorkspaceFailure } from './activeWorkspace'
