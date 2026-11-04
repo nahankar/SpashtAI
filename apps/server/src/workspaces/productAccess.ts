@@ -21,11 +21,11 @@ export function workspaceFeatureReady(feature: WorkspaceFeatureId): boolean {
 }
 
 export const WORKSPACE_FEATURE_READINESS: Record<WorkspaceFeatureId, boolean> = {
-  elevate: false,
-  replay: false,
-  interviews: false,
-  progress_pulse: false,
-  feedback: false,
+  elevate: true,
+  replay: true,
+  interviews: true,
+  progress_pulse: true,
+  feedback: true,
   pro: true,
   ultra: true,
   audio_export: false,

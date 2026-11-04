@@ -37,6 +37,13 @@ vi.mock('../src/lib/prisma', () => ({ prisma: {
   adminAnalyticsQuery: { update: db.savedUpdate, delete: db.savedDelete },
 } }))
 vi.mock('../src/lib/featureFlags', () => ({ getEnabledFeatures: vi.fn().mockResolvedValue(['elevate', 'replay', 'prepare', 'interviews']) }))
+vi.mock('../src/analytics/platformPracticeTotals', () => ({
+  loadPlatformPracticeTotals: vi.fn().mockResolvedValue({
+    scope: { kind: 'platform', workspaceId: null, practice: 'all-workspaces' },
+    totals: { elevateTotal: 0, elevateMonth: 0, replayTotal: 0, replayMonth: 0, interviewRuns: 2, pulseParticipants: 6 },
+    membersInWorkspace: null,
+  }),
+}))
 vi.mock('../src/analytics/adminProductAnalytics', () => reports)
 vi.mock('../src/analytics/adminAnalyticsInterpreter', async () => {
   const actual = await vi.importActual<typeof import('../src/analytics/adminAnalyticsInterpreter')>('../src/analytics/adminAnalyticsInterpreter')

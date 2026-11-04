@@ -58,6 +58,9 @@ try {
   await db.$executeRaw`INSERT INTO "RecordingAcknowledgment" (id,"userId",version,scope,"textHash",source) VALUES ('old-ack','preexisting-user','v1','{}','h','test')`
   await db.$executeRaw`INSERT INTO "UserFeedback" (id,"feedbackNumber","userId",body,"updatedAt") VALUES ('old-feedback','FB-00042','preexisting-user','Earlier feedback',CURRENT_TIMESTAMP)`
   execute(resolve(root, 'apps/server/prisma/migrations/20261103090000_workspace_product_plane/migration.sql'))
+  execute(resolve(root, 'apps/server/prisma/migrations/20261103120000_pilot_review_fixes/migration.sql'))
+  execute(resolve(root, 'apps/server/prisma/migrations/20261103150000_workspace_job_scopes_compat/migration.sql'))
+  execute(resolve(root, 'apps/server/prisma/migrations/20261103160000_workspace_job_scopes_unambiguous/migration.sql'))
   const personalOf = async user => (await db.workspace.findUniqueOrThrow({ where: { personalOwnerId: user } })).id
   for (const [table, id, user] of [['ReplaySession', 'old-replay', 'preexisting-user'], ['ProgressPulse', 'old-pulse', 'after-foundation'], ['FeatureUsage', 'old-usage', 'preexisting-user'], ['RecordingAcknowledgment', 'old-ack', 'preexisting-user']]) {
     const [row] = await db.$queryRawUnsafe(`SELECT "workspaceId","workspaceKind"::text AS kind FROM "${table}" WHERE id=$1`, id)
@@ -71,6 +74,15 @@ try {
     'InterviewRun','InterviewAttempt','InterviewCaptureReceipt','InterviewAnswerChunk','InterviewTranscriptIssue','InterviewAnswerSnapshot','InterviewAssessment','InterviewEvaluatorUsage','BankFollowUpJob','WorkspaceAnalyticsQuery']
   const policies = await db.$queryRawUnsafe(`SELECT relname FROM pg_class WHERE relname = ANY($1) AND relrowsecurity AND relforcerowsecurity`, isolated)
   assert.deepEqual(policies.map(p => p.relname).sort(), [...isolated].sort())
+  const fns = await db.$queryRaw`SELECT p.proname, pg_get_function_identity_arguments(p.oid) AS args
+    FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+    WHERE n.nspname='public' AND p.proname IN ('platform_practice_totals','workspace_job_scopes')
+    ORDER BY 1,2`
+  assert.deepEqual(fns.map(f => `${f.proname}(${f.args})`), [
+    'platform_practice_totals(p_workspace text)',
+    'workspace_job_scopes(p_job text)',
+    'workspace_job_scopes(p_job text, p_after_workspace text, p_after_user text, p_limit integer)',
+  ])
   console.log(`Upgrade/backfill passed: Personal ownership preserved; ${isolated.length} workspace, session, product and invitation tables enforce RLS.`)
 } finally {
   await db?.$disconnect()

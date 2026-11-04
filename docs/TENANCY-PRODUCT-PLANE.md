@@ -171,13 +171,12 @@ is part of each product's organization path. Tests switch readiness on locally o
 | Server isolation tests on the restricted role | Pass |
 | Migration upgrade verifier | Pass (November 3, after checkpoint 6: 42 tables enforce forced RLS) |
 | Browser walkthrough with fictional local accounts (two organizations plus Personal) | Local Replay/Pulse/Feedback and Interview bank ready. Northwind Elevate microphone checked on Transcribe + Nova Lite + Polly (`session_1793698728660_k17qya9k1`, then `session_1793728690320_rst8dgeyq`). Brightpath Interview asked `WT-NW-003` then exhausted at `0-2`. Delivery alignment still independently queued. |
-| Product readiness flags (`WORKSPACE_FEATURE_READINESS`) | All organization products still `false` in product code. Local `WORKSPACE_READY_OVERRIDE` is ignored in production |
+| Product readiness flags (`WORKSPACE_FEATURE_READINESS`) | `elevate`, `replay`, `interviews`, `feedback`, and `progress_pulse` are ready in product code. Prepare and Coach stay unfinished. Organizations still require entitlements. Local `WORKSPACE_READY_OVERRIDE` is ignored in production |
 | Real Google sign-in, microphone, LiveKit room and agent in an organization | Local stack targeted at walkthrough API/DB. Human Elevate microphone check done on the walkthrough stack; production Google sign-in not exercised. |
-| Merge to `main` | Not done |
-| Deployment (backup, active-session check, migration, runtime role, rollback plan) | Not authorized |
+| Merge to `main` | Authorized with this release; see `TENANCY-PILOT-RELEASE.md` |
+| Deployment (backup, active-session check, migration, runtime role, rollback plan) | Authorized with this release; KLSVDIT entitlements only |
 
-With readiness `false`, a deployed build would give Owners/Admins the admin pages (with empty reports) while learners
-see no products. That is still the production posture. The local override is walkthrough-only.
+Organizations see ready products only after entitlements. This release entitles KLSVDIT only. Prepare and Coach stay off. Production Interviews use Finish / Skip / Next (`interview_conversation` remains hidden/disabled). The local override is walkthrough-only.
 
 ## Known gaps and decisions
 

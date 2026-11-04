@@ -13,14 +13,20 @@ const prismaMock = vi.hoisted(() => ({
 }))
 
 const getEnabledFeaturesMock = vi.hoisted(() => vi.fn())
+const loadPlatformPracticeTotals = vi.hoisted(() => vi.fn())
 
 vi.mock('../src/lib/prisma', () => ({ prisma: prismaMock }))
 vi.mock('../src/lib/featureFlags', () => ({ getEnabledFeatures: getEnabledFeaturesMock }))
+vi.mock('../src/analytics/platformPracticeTotals', () => ({ loadPlatformPracticeTotals }))
 
 import analyticsRouter from '../src/routes/admin/analytics'
 
 function appForAnalytics() {
   const app = express()
+  app.use((req, _res, next) => {
+    req.user = { userId: 'admin-1', email: 'admin@example.com', role: 'ADMIN' }
+    next()
+  })
   app.use('/api/admin/analytics', analyticsRouter)
   return app
 }
@@ -34,31 +40,26 @@ describe('admin analytics', () => {
       .mockResolvedValueOnce(2)
       .mockResolvedValueOnce(8)
       .mockResolvedValueOnce(36)
-    prismaMock.session.count.mockResolvedValueOnce(40).mockResolvedValueOnce(7)
-    prismaMock.replaySession.count.mockResolvedValueOnce(20).mockResolvedValueOnce(4)
-    prismaMock.preparation.count.mockResolvedValueOnce(12).mockResolvedValueOnce(3)
-    prismaMock.preparationPractice.count.mockResolvedValueOnce(18).mockResolvedValueOnce(5)
-    prismaMock.preparationRecording.count.mockResolvedValueOnce(9).mockResolvedValueOnce(2)
+    loadPlatformPracticeTotals.mockResolvedValue({
+      scope: { kind: 'platform', workspaceId: null, practice: 'all-workspaces' },
+      totals: { elevateTotal: 40, elevateMonth: 7, replayTotal: 20, replayMonth: 4, interviewRuns: 0, pulseParticipants: 0 },
+      membersInWorkspace: null,
+    })
   })
 
-  it('keeps Prepare-owned activity out of standalone Elevate and Replay totals', async () => {
+  it('presents platform practice totals and does not invent Prepare session counts', async () => {
     const response = await request(appForAnalytics()).get('/api/admin/analytics/overview')
 
     expect(response.status).toBe(200)
-    expect(response.body.sessions).toMatchObject({
+    expect(loadPlatformPracticeTotals).toHaveBeenCalledWith('admin-1', null)
+    expect(response.body.scope).toEqual({ kind: 'platform', workspaceId: null, practice: 'all-workspaces' })
+    expect(response.body.sessions).toEqual({
+      enabledFeatures: ['elevate', 'replay', 'prepare'],
       elevate: { total: 40, thisMonth: 7 },
       replay: { total: 20, thisMonth: 4 },
-      prepare: {
-        journeys: { total: 12, thisMonth: 3 },
-        eventPractices: { total: 18, thisMonth: 5 },
-        eventRecordings: { total: 9, thisMonth: 2 },
-      },
     })
-    expect(prismaMock.session.count).toHaveBeenNthCalledWith(1, {
-      where: { discardedAt: null, purpose: 'COMMUNICATION', preparationPractice: null },
-    })
-    expect(prismaMock.replaySession.count).toHaveBeenNthCalledWith(1, {
-      where: { purpose: 'COMMUNICATION', preparationRecording: null },
-    })
+    expect(response.body.sessions).not.toHaveProperty('prepare')
+    expect(prismaMock.session.count).not.toHaveBeenCalled()
+    expect(prismaMock.replaySession.count).not.toHaveBeenCalled()
   })
 })

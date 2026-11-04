@@ -9,21 +9,24 @@ describe('local workspace readiness override', () => {
     else process.env.WORKSPACE_READY_OVERRIDE = env.override
   })
 
-  it('stays off unless a local override names the feature', () => {
+  it('keeps unfinished products off unless a local override names them', () => {
     delete process.env.WORKSPACE_READY_OVERRIDE
     process.env.NODE_ENV = 'development'
     expect(workspaceFeatureReady('replay')).toBe(WORKSPACE_FEATURE_READINESS.replay)
-    process.env.WORKSPACE_READY_OVERRIDE = 'replay'
-    expect(workspaceFeatureReady('replay')).toBe(true)
-    expect(workspaceFeatureReady('elevate')).toBe(false)
     expect(workspaceFeatureReady('coach')).toBe(false)
+    expect(workspaceFeatureReady('prepare')).toBe(false)
+    process.env.WORKSPACE_READY_OVERRIDE = 'coach'
+    expect(workspaceFeatureReady('coach')).toBe(true)
+    expect(workspaceFeatureReady('prepare')).toBe(false)
   })
 
   it('is ignored in production', () => {
     process.env.NODE_ENV = 'production'
     process.env.WORKSPACE_READY_OVERRIDE = 'replay,elevate,interviews,coach,prepare'
-    expect(workspaceFeatureReady('replay')).toBe(false)
-    expect(workspaceFeatureReady('elevate')).toBe(false)
+    expect(workspaceFeatureReady('replay')).toBe(WORKSPACE_FEATURE_READINESS.replay)
+    expect(workspaceFeatureReady('elevate')).toBe(WORKSPACE_FEATURE_READINESS.elevate)
+    expect(workspaceFeatureReady('coach')).toBe(false)
+    expect(workspaceFeatureReady('prepare')).toBe(false)
     expect(workspaceFeatureReady('pro')).toBe(true)
   })
 })
