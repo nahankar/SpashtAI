@@ -11,8 +11,7 @@ Deployment, merge, and production enablement are **not** authorized by this conc
 ## Candidate
 
 - **Branch:** `tenancy-pilot-rc`
-- **SHA:** recorded after this report commit (`git rev-parse tenancy-pilot-rc`)
-- **Code parent of this report:** `117455e` — conversation/turns 404 plus tests; checks below were run on that tree
+- **SHA:** `a64eaa1` (this report). Checks ran on code parent `117455e` (404 guard and tests; no further code change)
 - **Excludes** Nova Sonic / agent greeting `95170b3` (`git merge-base --is-ancestor` exit 1)
 - **Does not include** working-branch HEAD `6278e90` / `6e8c881` (those still contain `95170b3`)
 - Production revision: `origin/main` `d90bccf`
