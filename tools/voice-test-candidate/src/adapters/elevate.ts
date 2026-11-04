@@ -55,7 +55,24 @@ export class ElevateAdapter implements ExperienceAdapter {
     const tracksBefore = ctx.bridge.incomingStreamCount()
     await start.click()
     evidence.event('browser', 'start_clicked', { control: 'Start Session' })
-    const joined = await pollUntil(async () => { await activateAudio(ctx); return ctx.bridge.incomingStreamCount() > tracksBefore }, 90_000, 1000)
+    // A leftover live take (e.g. from an interrupted earlier run) makes the app ask before ending it — the same
+    // decision a learner makes. Confirm it only with --close-unfinished, and record it; never decide silently.
+    let takeover: unknown = null
+    const joined = await pollUntil(async () => {
+      if (!takeover && await page.getByText('End the other live session?').isVisible().catch(() => false)) {
+        if (!cfg.closeUnfinished) {
+          takeover = new BlockedError('Another live Elevate session exists for this account in this workspace. End it in the UI or re-run with --close-unfinished.')
+          return true
+        }
+        await ctx.screenshot('elevate-takeover-prompt')
+        await page.getByRole('button', { name: 'Take over this session' }).click()
+        evidence.event('browser', 'elevate_takeover_confirmed', { control: 'Take over this session' })
+        takeover = true
+      }
+      await activateAudio(ctx)
+      return ctx.bridge.incomingStreamCount() > tracksBefore
+    }, 90_000, 1000)
+    if (takeover instanceof BlockedError) throw takeover
     if (!joined) {
       await ctx.screenshot('elevate-no-audio')
       throw new AttributedError('No audio track from the coach arrived within 90 s (agent worker, dispatch or LiveKit targeting).', 'setup')
