@@ -60,7 +60,15 @@ npm run vtc -- diagnose               # provider-free audio transport check
 - Google-only accounts or remote stacks: `npm run vtc -- login --manual --target <url>` opens a visible
   browser; sign in yourself and the session is saved.
 
-`.auth/`, `.env.local` and `runs/` are git-ignored.
+- **Manual Interview account.** The Interview mode is decided per run by the account's `interview_conversation`
+  access. `manual-interview` needs a second fictional account *without* that access:
+  `npm run vtc -- register-local --account manual` then `npm run vtc -- login --account manual`
+  (credentials `VTC_MANUAL_EMAIL` / `VTC_MANUAL_PASSWORD`, session `.auth/manual-<host>_<port>.json`).
+  Automatic scenarios need an account *with* it. Preflight blocks when an account is in the wrong mode.
+  Granting/removing that access is a one-time setup on a dedicated test database (see isolated stack); the tool
+  never changes flags or grants itself.
+
+`.auth/`, `.env.local` and `runs/` are git-ignored; evidence files are written owner-only (0600/0700).
 
 ## Running
 
@@ -105,13 +113,26 @@ cd ../../apps/server && LIVEKIT_URL=ws://localhost:7980 SIGNAL_API_URL=http://lo
 cd ../../apps/web && npx vite --port 5173 --strictPort                                            # terminal 4
 ```
 
-The server still uses `apps/server/.env` for everything else (database, AWS voice pipeline, JWT).
+The server still uses `apps/server/.env` for everything else (AWS voice pipeline, JWT). To use a **dedicated test
+database**, clone the local dev database once and point only this API at it (nothing shared is changed):
+
+```bash
+# once, while nothing is connected to the source database; then run the API with
+# DATABASE_URL pointing at spashtai_vtc instead of spashtai
+docker exec -i spashtai-postgres psql "<admin connection to postgres>" -c 'CREATE DATABASE spashtai_vtc TEMPLATE spashtai'
+```
+
+On that clone only, make automatic conversation per-account (audience `SELECTED_USERS` for
+`interview_conversation`) and grant it to the automatic test account, so the manual account runs manual mode.
+A cloned database still references the checkout's local `apps/server/audio_storage`; its workers read those
+files, and nothing is deleted unless sessions are pending deletion (check before reusing).
 
 ## Scenarios
 
 | Scenario | Experience | Behaviour |
 |---|---|---|
-| `confident-interview` | Interview | Direct answers with one concrete example (40–75 words). |
+| `confident-interview` | Interview (automatic) | Direct answers with one concrete example (40–75 words); the interviewer finishes answers and moves on. |
+| `manual-interview` | Interview (manual) | Answers Q1 → **Finish answer** → **Next question**; says it will skip Q2 → **Skip question** → **Next question**; answers Q3 → **Finish answer** → **End practice**. Verifies saved statuses ANSWERED/SKIPPED/ANSWERED, the run's saved mode, per-reply saved answers, feedback, recording and playback. Needs ≥ 3 reviewed questions in the default selection. |
 | `hesitant-interview` | Interview | Fillers ("um", "uh") written into the reply text, and 0.9–1.8 s of real silence inserted at hesitation markers. Inserted and measured pauses are reported per turn. Pauses stay below the ~5 s automatic-finish silence. |
 | `silence-interview` | Interview | Stays silent for 20 s after the first question, records whether SpashtAI spoke during the silence, then answers. |
 | `elevate-learner` | Elevate | Follows the coach's instructions turn by turn; ends with **Leave** when the coach's audio says the exercise is over. |
@@ -139,12 +160,32 @@ Each run writes `runs/<run-id>/`:
 | `browser/page-text-at-stop.txt` | Visible page text when the conversation stopped (secondary diagnostics) |
 | `errors.json` | Sanitized console errors, page errors, failed requests, HTTP 5xx |
 
-**Outcome rules**: *passed* only when the application itself ended the session (e.g. "Practice time is up"),
-the session was ended through the UI, and every required check passed. A run stopped by `--max-turns` or
+**Outcome rules**: *passed* only when the application itself ended the session (e.g. "Practice time is up") —
+or, for `manual-interview`, the scripted learner plan completed and the learner pressed End practice — the
+session was ended through the UI, and every required check passed. Every non-pass reason is prefixed with what
+it points at: **[application]** (e.g. the reply is on the app microphone track but missing from the saved
+transcript), **[tool]**, **[setup]** (accounts, stack targeting, origin binding) or **[unknown]**. A run stopped by `--max-turns` or
 `--max-minutes` is *inconclusive*, never passed. Results that do not appear within `--verify-timeout`
 (recording, evaluation) are *pending* → *inconclusive*. Checks are labelled by basis: **browser** (displayed),
 **audio** (measured), **api** (read-only API with the test session — diagnostic, not user-visible) or **tool**.
 Evaluation checks confirm that results exist; scores are never judged. Answer relevance is advisory.
+
+**Coverage areas** (column in the checks table, kept distinct): **live-audio** — audio exchanged during the
+session as captured in the test browser, including how much of each reply was actually carried by the app's own
+microphone track; **saved-recording** — the stored recording after the session: availability (range request),
+browser playback advancing via the page's own control, and decoded content containing the candidate's speech;
+**app-data** — saved answers/transcript per reply (potentially missing turns are named), feedback, analysis
+(*pending* vs *completed* vs *failed*), history; **mode** — automatic vs manual Interview actually exercised.
+Physical speaker output is never covered.
+
+**Application under test**: each report lists web/API/agent with endpoint, process, source directory, commit
+and a status — **verified** (clean source directory at HEAD and the process started after HEAD moved, or HEAD
+moved but that directory's tree is identical to the one at process start), **unverified** (running code may
+differ) or **unknown** (remote/containerized). The test tool's own revision is shown separately and is never the
+application revision. `--app-source` records a declared checkout for stacks that cannot be inspected.
+
+**State at stop**: last SpashtAI speech received, last recognized words, last candidate speech on the app
+microphone track, the last reply, and the app microphone state when the conversation stopped.
 
 **Timings**: SpashtAI speech boundaries come from the VAD on received audio (20 ms frames; end = last voiced
 frame followed by ≥ 0.9 s of silence). Candidate boundaries are virtual-microphone playback start/end. Reported
@@ -235,18 +276,29 @@ accept invitations or kill/start services behind your back.
 - Omit `--workspace` for Personal. Organizations are entered using the normal workspace picker and UI links,
   not inserted browser state. Refresh/deep-link coverage is separate and must also be checked when affected.
 - Supply `--auth-file .auth/<private-session>.json` when not using the default target-specific state.
-- `--experience interview|elevate|both` selects the scope; `--scenario hesitant-interview` or
-  `--scenario silence-interview` selects the additional Interview regressions. Automatic progression scenarios
-  require that mode to be enabled on the selected fictional local account; they do not certify manual Next.
-- Preflight checks app/API/LiveKit reachability, candidate provider availability, browser installation, actual
-  identity validity, frontend/API targeting, workspace-scoped requests and Interview access when selected.
-  It requires readable local API/agent logs. It does not prove LiveKit agent dispatch, model generation,
-  bank suitability or successful audio: only the subsequent candidate run establishes those.
+- `--experience interview|elevate|both` selects the default set (both = `confident-interview`,
+  `manual-interview`, `elevate-learner`); repeat `--scenario <id>` to choose exactly. `manual-interview` uses
+  `--manual-auth-file` (default `.auth/manual-<host>_<port>.json`). Automatic and manual Interview coverage are
+  separate scenarios with separate reports; neither certifies the other.
+- Preflight (`npm run voice:help` lists every option) reports each item with an evidence level:
+  **reachable** (endpoint answered), **configured** (provider lists the configured model; processes target
+  this stack's API/LiveKit — web→API, API→LiveKit, agent→LiveKit and API callback; exactly one agent worker on
+  that LiveKit; Interview coverage of the default selection meets the scenario; account mode matches),
+  **observed-registered** (the agent log shows registration with this LiveKit after its latest worker start, no
+  later failure, log fresher than the process). It also records each component's revision status and checks
+  authentication, Elevate/Interview access, workspace scope and frontend API binding in the real browser, per
+  account. **verified-by-live-audio** is never claimed by preflight: only a run's live-audio checks prove that
+  the agent was dispatched, spoke, and heard the candidate. An old registration line or a healthy HTTP endpoint
+  is never treated as dispatch.
+- Not verifiable automatically (state in your report): running code equal to a commit when its directory is
+  dirty, components inside containers, provider generation quality, physical devices, production readiness.
 - `preflight` is **preflight-only**, never a passed end-to-end test. Missing prerequisites exit 2 with actionable
   diagnostics. Live outcomes retain CLI exit codes 0/1/2/3; both scenarios are attempted even when one fails.
-- Conversation defaults to 8 minutes, maximum 20 through the launcher, with bounded provider budgets and
-  verification (1–600 seconds). Each whole scenario has a 25-minute termination deadline plus a one-minute
-  shutdown grace. A killed or unfinished scenario is not passed. No automatic session retries.
+- Conversation defaults to 8 minutes (12 for `manual-interview`), maximum 20 through the launcher, with bounded
+  provider budgets and verification (1–600 seconds). Every run also has a whole-run watchdog (`--run-timeout`,
+  default conversation + 2 × verification + 6 minutes) that closes the browser and still writes the report; the
+  launcher adds an outer kill deadline. Timed-out, interrupted or unfinished runs are never passed. No automatic
+  session retries; the launcher passes `--close-unfinished` so a leftover practice is ended through the UI.
 - Evidence is saved only below ignored `tools/voice-test-candidate/runs/workflow-*/`: individual run reports,
   original audio evidence/conversation/trace plus `workflow.json` and sanitized API/agent run-window log tails
   (at most 256 KB each). A truncated tail is not a complete log; inspect the originals privately when needed.

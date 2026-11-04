@@ -23,7 +23,7 @@ export async function loginWithForm(opts: { targetUrl: string; email: string; pa
     await page.getByLabel('Password').fill(opts.password)
     await page.getByRole('button', { name: 'Sign In' }).click()
     if (!await waitForToken(page, 20_000)) {
-      const message = await page.locator('.text-destructive').first().textContent().catch(() => null)
+      const message = await page.locator('.text-destructive').first().textContent({ timeout: 2000 }).catch(() => null)
       throw new Error(`Sign-in did not complete${message ? `: ${message.trim()}` : ''}`)
     }
     await page.waitForURL(url => !url.pathname.startsWith('/auth/admin'), { timeout: 20_000 }).catch(() => undefined)

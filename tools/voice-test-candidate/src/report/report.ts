@@ -104,7 +104,7 @@ export function renderMarkdown(r: RunReport, t0: number): string {
 
   if (r.failureSources.length) lines.push(`**Failure points at:** ${r.failureSources.join(', ')} (see bracketed reasons above).`, '')
 
-  lines.push('## Application under test', '', 'Revision status: **verified** = a local process serves the endpoint from a clean checkout started after HEAD last moved; **unverified** = process found but the running code may differ; **unknown** = not inspectable. The test tool revision above is never the application revision.', '',
+  lines.push('## Application under test', '', 'Revision status: **verified** = a local process serves the endpoint and its source directory is clean at HEAD, unchanged since the process started; **unverified** = process found but the running code may differ (uncommitted changes, or the directory changed after the process started); **unknown** = not inspectable (remote or containerized). The test tool revision above is never the application revision.', '',
     '| Component | Endpoint | Status | Revision / source | Targets | Basis |', '|---|---|---|---|---|---|')
   for (const a of r.application) {
     const targets = a.targets ? Object.entries(a.targets).map(([k, v]) => `${k}=${v.value} (${v.source})`).join('<br>') : '—'

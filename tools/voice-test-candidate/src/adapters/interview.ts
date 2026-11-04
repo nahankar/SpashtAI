@@ -82,7 +82,8 @@ export class InterviewAdapter implements ExperienceAdapter {
     const outcome = await pollUntil(async () => {
       const text = await page.evaluate(() => document.body.innerText).catch(() => '')
       if (/Your answer is saved\. Continue with another question or end practice\./.test(text) || await page.getByRole('button', { name: 'Next question' }).isVisible().catch(() => false)) return 'saved'
-      const alert = await page.locator('[role=alert]').first().textContent().catch(() => null)
+      // allTextContents() does not wait; a missing alert must not stall the poll.
+      const alert = (await page.locator('[role=alert]').allTextContents().catch(() => [])).join(' ').trim() || null
       if (alert && /could not|unavailable|still being transcribed|Retry/i.test(alert)) return `error: ${alert.trim().slice(0, 200)}`
       const notice = await page.getByText(/No answer has been heard for this question yet/).first().isVisible().catch(() => false)
       return notice ? 'error: the app reported that no answer was heard' : null

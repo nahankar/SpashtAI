@@ -150,6 +150,9 @@ describe('application provenance', () => {
     expect(judge({ commit: 'abc', dirty: false, processStartedAt: '2026-11-04T04:00:00Z', headMovedAt: '2026-11-04T05:00:00Z' }).status).toBe('unverified')
     expect(judge({ commit: undefined, dirty: false }).status).toBe('unknown')
     expect(judge({ commit: 'abc', dirty: false, processStartedAt: '2026-11-04T06:00:00Z', headMovedAt: '2026-11-04T05:00:00Z' }).status).toBe('verified')
+    // A later commit elsewhere keeps a component verified only if its own source tree is unchanged.
+    expect(judge({ commit: 'abc', dirty: false, processStartedAt: '2026-11-04T04:00:00Z', headMovedAt: '2026-11-04T05:00:00Z', start: { rev: 'f'.repeat(40), sameTree: true } }).status).toBe('verified')
+    expect(judge({ commit: 'abc', dirty: false, processStartedAt: '2026-11-04T04:00:00Z', headMovedAt: '2026-11-04T05:00:00Z', start: { rev: 'f'.repeat(40), sameTree: false } }).status).toBe('unverified')
   })
 })
 

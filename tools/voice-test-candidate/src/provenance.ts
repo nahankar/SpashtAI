@@ -119,12 +119,33 @@ export function processStart(pid: number, exec: Exec = defaultExec): string | nu
   return date && !Number.isNaN(date.getTime()) ? date.toISOString() : null
 }
 
-export function judge(p: Pick<ComponentProvenance, 'commit' | 'dirty' | 'processStartedAt' | 'headMovedAt'>): { status: ComponentProvenance['status']; basis: string } {
+/**
+ * Revision HEAD pointed to when the process started (from the reflog), and whether the component directory's
+ * tree there equals HEAD's. Lets a later unrelated commit keep a running component verified.
+ */
+export function startRevision(top: string, dir: string, processStartedAt: string, exec: Exec = defaultExec): { rev: string; sameTree: boolean } | null {
+  const log = tryExec(exec, 'git', ['-C', top, 'reflog', '--date=iso-strict', '--format=%H %gd', '-n', '200'])
+  if (!log) return null
+  const start = new Date(processStartedAt).getTime()
+  for (const line of log.split('\n')) {
+    const m = /^([0-9a-f]{40}) .*\{(.+)\}$/.exec(line.trim())
+    if (!m || new Date(m[2]).getTime() > start) continue
+    const rel = tryExec(exec, 'git', ['-C', dir, 'rev-parse', '--show-prefix']) ?? ''
+    const path = rel.replace(/\/$/, '')
+    const at = tryExec(exec, 'git', ['-C', top, 'rev-parse', `${m[1]}:${path}`])
+    const head = tryExec(exec, 'git', ['-C', top, 'rev-parse', `HEAD:${path}`])
+    return { rev: m[1], sameTree: Boolean(at && head && at === head) }
+  }
+  return null
+}
+
+export function judge(p: Pick<ComponentProvenance, 'commit' | 'dirty' | 'processStartedAt' | 'headMovedAt'> & { start?: { rev: string; sameTree: boolean } | null }): { status: ComponentProvenance['status']; basis: string } {
   if (!p.commit) return { status: 'unknown', basis: 'process found but its directory is not a Git checkout' }
   if (p.dirty) return { status: 'unverified', basis: 'its source directory has uncommitted changes; the running code is not a single commit' }
   if (!p.processStartedAt || !p.headMovedAt) return { status: 'unverified', basis: 'could not compare process start with the last HEAD movement' }
   if (new Date(p.processStartedAt).getTime() < new Date(p.headMovedAt).getTime()) {
-    return { status: 'unverified', basis: 'HEAD moved after the process started; it may be running an older revision' }
+    if (p.start?.sameTree) return { status: 'verified', basis: `HEAD moved after the process started, but its source directory is identical at the start revision ${p.start.rev.slice(0, 7)} and at HEAD` }
+    return { status: 'unverified', basis: `HEAD moved after the process started${p.start ? ` (it started at ${p.start.rev.slice(0, 7)}, whose source directory differs)` : ''}; it may be running an older revision` }
   }
   return { status: 'verified', basis: 'its source directory is clean at HEAD and the process started after HEAD last moved (shared code outside that directory is not checked)' }
 }
@@ -145,7 +166,8 @@ function inspectProcess(component: ComponentProvenance['component'], pid: number
   const processStartedAt = processStart(pid, exec) ?? undefined
   const base = { component, endpoint, pid, sourceDir: cwd ?? undefined, branch: git?.branch, commit: git?.commit, dirty: git?.dirty,
     processStartedAt, headMovedAt: git?.headMovedAt, targets: keys.length ? effectiveTargets(pid, cwd, keys, exec) : undefined }
-  return { ...base, ...judge(base) }
+  const start = git?.top && cwd && processStartedAt ? startRevision(git.top, cwd, processStartedAt, exec) : null
+  return { ...base, ...judge({ ...base, start }) }
 }
 
 /** Agent workers have no fixed port: find `main.py` workers whose effective LIVEKIT_URL is the target LiveKit. */
