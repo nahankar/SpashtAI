@@ -1,5 +1,6 @@
 import { createContext, useEffect, useState, useCallback, type ReactNode } from 'react'
-import { apiClient } from '@/lib/api-client'
+import { ApiError, apiClient } from '@/lib/api-client'
+import { isWorkspaceFailure, WorkspaceContextError } from '@/workspaces/activeWorkspace'
 
 export interface AuthUser {
   id: string
@@ -58,17 +59,30 @@ export const AuthContext = createContext<AuthContextType | null>(null)
 
 const TOKEN_KEY = 'spashtai_token'
 
+/** Sign out only when the identity itself was rejected — not missing workspace context or a dropped connection. */
+export function isGenuineIdentityRejection(error: unknown): boolean {
+  if (error instanceof WorkspaceContextError) return false
+  if (error instanceof TypeError) return false
+  if (error instanceof ApiError) {
+    if (isWorkspaceFailure(error.code)) return false
+    return error.status === 401
+  }
+  return error instanceof Error && error.message === 'Authentication required'
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [loading, setLoading] = useState(true)
 
   const fetchCurrentUser = useCallback(async () => {
     try {
-      const data = await apiClient<{ user: AuthUser }>('/api/auth/me')
+      const data = await apiClient<{ user: AuthUser }>('/api/auth/me', { identityOnly: true })
       setUser(data.user)
-    } catch {
-      localStorage.removeItem(TOKEN_KEY)
-      setUser(null)
+    } catch (error) {
+      if (isGenuineIdentityRejection(error)) {
+        localStorage.removeItem(TOKEN_KEY)
+        setUser(null)
+      }
     } finally {
       setLoading(false)
     }
@@ -128,7 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const logout = useCallback(() => {
-    apiClient('/api/auth/logout', { method: 'POST' }).catch(() => {})
+    apiClient('/api/auth/logout', { method: 'POST', identityOnly: true }).catch(() => {})
     localStorage.removeItem(TOKEN_KEY)
     setUser(null)
   }, [])

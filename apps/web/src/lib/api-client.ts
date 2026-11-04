@@ -95,6 +95,8 @@ export async function getSessionRecordingUrl(sessionId: string): Promise<string 
 
 interface RequestOptions extends RequestInit {
   skipAuth?: boolean
+  /** Identity Bearer only. Use for /api/auth/me and other bootstrap calls that must not demand workspace state. */
+  identityOnly?: boolean
 }
 
 export class ApiError extends Error {
@@ -111,13 +113,15 @@ export async function apiClient<T = unknown>(
   path: string,
   options: RequestOptions = {}
 ): Promise<T> {
-  const { skipAuth = false, headers: extraHeaders, ...rest } = options
+  const { skipAuth = false, identityOnly = false, headers: extraHeaders, ...rest } = options
 
   let headers: Record<string, string>
   try {
     headers = skipAuth
       ? { 'Content-Type': 'application/json', ...getCorrelationHeaders(), ...(extraHeaders as Record<string, string>) }
-      : getAuthHeaders(extraHeaders as Record<string, string>)
+      : identityOnly
+        ? identityAuthHeaders(extraHeaders as Record<string, string>)
+        : getAuthHeaders(extraHeaders as Record<string, string>)
   } catch (error) {
     if (error instanceof WorkspaceContextError) {
       reportWorkspaceFailure(error.code)

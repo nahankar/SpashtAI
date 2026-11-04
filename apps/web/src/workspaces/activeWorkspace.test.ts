@@ -103,6 +103,23 @@ describe('active workspace', () => {
     expect(store.has('spashtai_token')).toBe(false)
   })
 
+  it('loads identity on an organization URL without a workspace token and keeps the saved login', async () => {
+    location.pathname = '/w/klsvdit/elevate'
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ user: { id: 'u1', email: 'a@example.invalid' } }), { status: 200 }))
+    await expect(apiClient('/api/auth/me', { identityOnly: true })).resolves.toMatchObject({ user: { id: 'u1' } })
+    const [, init] = fetchMock.mock.calls[0]
+    expect(init.headers).toMatchObject({ Authorization: 'Bearer identity' })
+    expect(init.headers).not.toHaveProperty('x-spasht-workspace')
+    expect(store.get('spashtai_token')).toBe('identity')
+  })
+
+  it('still fails closed for organization product requests when the workspace token is missing', async () => {
+    location.pathname = '/w/klsvdit/elevate'
+    await expect(apiClient('/api/replay/sessions')).rejects.toMatchObject({ code: 'WORKSPACE_TOKEN_REQUIRED' })
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(store.get('spashtai_token')).toBe('identity')
+  })
+
   it('streams organization recordings through a session-bound ticket, not the workspace token', async () => {
     expect(await getSessionRecordingUrl('s1')).toContain('/sessions/s1/recording/stream?access_token=identity')
     expect(fetchMock).not.toHaveBeenCalled()
