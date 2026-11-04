@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   claim: vi.fn(), lease: vi.fn(), findJob: vi.fn(), findSession: vi.fn(),
   update: vi.fn(), updateMany: vi.fn(), metrics: vi.fn(), metricUpdate: vi.fn(),
-  upsert: vi.fn(), resolve: vi.fn(), signature: vi.fn(), spawn: vi.fn(),
+  upsert: vi.fn(), ensureLease: vi.fn(), resolve: vi.fn(), signature: vi.fn(), spawn: vi.fn(),
   envelopes: vi.fn(),
 }))
 vi.mock('child_process', () => ({ spawn: mocks.spawn }))
@@ -16,7 +16,7 @@ vi.mock('../src/analytics/insightProviders/resolveSessionAudio', () => ({
 vi.mock('../src/analytics/recordingClockAudio', () => ({ loadSegmentEnvelopes: mocks.envelopes }))
 vi.mock('../src/lib/prisma', () => {
   const tx = {
-    deliveryAlignmentLease: { updateMany: mocks.claim, findUnique: mocks.lease },
+    deliveryAlignmentLease: { upsert: mocks.ensureLease, updateMany: mocks.claim, findUnique: mocks.lease },
     session: { findFirst: mocks.findJob, findUnique: mocks.findSession,
       update: mocks.update, updateMany: mocks.updateMany },
     sessionMetrics: { upsert: mocks.upsert, findUnique: mocks.metrics, update: mocks.metricUpdate },
@@ -42,6 +42,7 @@ const snapshot = () => ({ id: 'session', endedAt: new Date(), discardedAt: null,
 describe('durable automatic delivery alignment', () => {
   beforeEach(() => {
     vi.resetAllMocks()
+    mocks.ensureLease.mockResolvedValue({ id: 'automatic' })
     mocks.claim.mockImplementation(async ({ data }) => {
       if (data.owner) mocks.lease.mockResolvedValue({ owner: data.owner, expiresAt: data.expiresAt })
       return { count: 1 }
@@ -81,6 +82,17 @@ describe('durable automatic delivery alignment', () => {
       deliveryAlignmentStatus: 'completed', deliveryAlignmentResult: expect.objectContaining({ inputSignature: 'audio-v1' }),
     }) }))
   })
+  it('creates the automatic lease when the database was never seeded', async () => {
+    mocks.claim.mockResolvedValue({ count: 0 })
+    await sweepDeliveryAlignment()
+    expect(mocks.ensureLease).toHaveBeenCalledWith({
+      where: { id: 'automatic' },
+      create: { id: 'automatic' },
+      update: {},
+    })
+    expect(mocks.findJob).not.toHaveBeenCalled()
+  })
+
   it('can run a specifically selected recording without claiming a different pending session',async()=> {
     await sweepDeliveryAlignment('session')
     expect(mocks.findJob.mock.calls[0][0].where.id).toBe('session')
