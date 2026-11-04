@@ -102,3 +102,33 @@ export function verifyWorkspaceMediaToken(token: string): WorkspaceMediaTokenPay
   }
   return payload as WorkspaceMediaTokenPayload
 }
+
+export interface WorkspaceReviewMediaTokenPayload {
+  tokenUse: 'workspace-review-media'
+  userId: string
+  workspaceId: string
+  membershipId: string
+  product: string
+  sessionId: string
+  recordingId: string
+}
+
+/**
+ * Owner/Admin review playback ticket for `<audio src>`. It names one recording of one
+ * organization activity; the reviewer's role and membership are rechecked on every range request.
+ */
+export function signWorkspaceReviewMediaToken(input: Omit<WorkspaceReviewMediaTokenPayload, 'tokenUse'>): string {
+  return jwt.sign({ ...input, tokenUse: 'workspace-review-media' }, JWT_SECRET, {
+    expiresIn: '1h', audience: 'workspace-review-media', issuer: 'spashtai-workspace',
+  })
+}
+
+export function verifyWorkspaceReviewMediaToken(token: string): WorkspaceReviewMediaTokenPayload {
+  const payload = jwt.verify(token, JWT_SECRET, { audience: 'workspace-review-media', issuer: 'spashtai-workspace' })
+  if (typeof payload === 'string' || payload.tokenUse !== 'workspace-review-media'
+    || ![payload.userId, payload.workspaceId, payload.membershipId, payload.product, payload.sessionId, payload.recordingId]
+      .every(v => typeof v === 'string' && v.length > 0)) {
+    throw new Error('A workspace review media token is required')
+  }
+  return payload as WorkspaceReviewMediaTokenPayload
+}

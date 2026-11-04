@@ -28,7 +28,54 @@ export function recordingByteRange(value: string | undefined, size: number) {
   return start >= size || start > end ? null : { start, end, partial: true }
 }
 const unavailable = () => new WorkspaceError(404, 'RECORDING_UNAVAILABLE', 'Recording is not available')
-type OpenRecording = { handle: FileHandle; size: number; mime: string }
+export type OpenRecording = { handle: FileHandle; size: number; mime: string }
+
+const inside = (root: string, candidate: string) => {
+  const rel = path.relative(root, candidate)
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel)
+}
+
+/**
+ * Opens a stored media file only when it lies beneath `<root>/<prefix>/` with no symlink
+ * anywhere below the root (including links into another workspace). Absolute stored paths
+ * and root-relative keys are both accepted; anything else is unavailable.
+ */
+export async function openContainedMedia(root: string, prefix: string, storedPath: string, mime: string): Promise<OpenRecording> {
+  const configuredRoot = path.resolve(root)
+  const candidate = path.isAbsolute(storedPath) ? path.resolve(storedPath) : path.resolve(configuredRoot, storedPath)
+  if (!inside(path.resolve(configuredRoot, prefix), candidate)) throw unavailable()
+  let handle: FileHandle | undefined
+  try {
+    const realRoot = await realpath(configuredRoot)
+    const expected = path.resolve(realRoot, path.relative(configuredRoot, candidate))
+    if (await realpath(expected) !== expected) throw unavailable()
+    handle = await open(expected, constants.O_RDONLY | constants.O_NOFOLLOW)
+    const stat = await handle.stat()
+    if (!stat.isFile() || stat.size <= 0) throw unavailable()
+    return { handle, size: stat.size, mime }
+  } catch (error) {
+    await handle?.close()
+    if (error instanceof WorkspaceError) throw error
+    throw unavailable()
+  }
+}
+
+/** Private, non-cacheable byte-range response for an opened file; closes the handle in every path. */
+export async function sendOpenRecording(req: Request, res: Response, file: OpenRecording) {
+  const range = recordingByteRange(req.headers.range, file.size)
+  res.setHeader('Cache-Control', 'private, no-store')
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  if (!range) { await file.handle.close(); res.status(416).setHeader('Content-Range', `bytes */${file.size}`); res.end(); return }
+  res.status(range.partial ? 206 : 200)
+  res.setHeader('Accept-Ranges', 'bytes'); res.setHeader('Content-Type', file.mime)
+  res.setHeader('Content-Length', String(range.end - range.start + 1))
+  if (range.partial) res.setHeader('Content-Range', `bytes ${range.start}-${range.end}/${file.size}`)
+  if (req.method === 'HEAD') { await file.handle.close(); res.end(); return }
+  const stream = file.handle.createReadStream({ start: range.start, end: range.end, autoClose: true })
+  stream.on('error', () => { if (res.headersSent) res.destroy(); else res.status(500).end() })
+  res.on('close', () => stream.destroy())
+  stream.pipe(res)
+}
 async function openOwnedRecording(tx: WorkspaceTx, scope: Awaited<ReturnType<typeof establishWorkspace>>, sessionId: string, recordingId: string): Promise<OpenRecording> {
   await ownedArchiveSession(tx, scope, sessionId)
   const owner = await tx.user.findUniqueOrThrow({ where: { id: scope.member.userId }, select: { hideAudioDownload: true } })
@@ -67,19 +114,6 @@ export async function streamWorkspaceRecording(req: Request, res: Response, next
     const sessionId = idSchema.parse(req.params.sessionId), recordingId = idSchema.parse(req.params.recordingId)
     // Track the open descriptor outside the transaction so a failed commit closes it too.
     await withWorkspaceAccess(claims, async (tx, scope) => { recording = await openOwnedRecording(tx, scope, sessionId, recordingId) })
-    const file = recording!
-    const range = recordingByteRange(req.headers.range, file.size)
-    res.setHeader('Cache-Control', 'private, no-store')
-    res.setHeader('X-Content-Type-Options', 'nosniff')
-    if (!range) { await file.handle.close(); res.status(416).setHeader('Content-Range', `bytes */${file.size}`); res.end(); return }
-    res.status(range.partial ? 206 : 200)
-    res.setHeader('Accept-Ranges', 'bytes'); res.setHeader('Content-Type', file.mime)
-    res.setHeader('Content-Length', String(range.end - range.start + 1))
-    if (range.partial) res.setHeader('Content-Range', `bytes ${range.start}-${range.end}/${file.size}`)
-    if (req.method === 'HEAD') { await file.handle.close(); res.end(); return }
-    const stream = file.handle.createReadStream({ start: range.start, end: range.end, autoClose: true })
-    stream.on('error', () => { if (res.headersSent) res.destroy(); else res.status(500).end() })
-    res.on('close', () => stream.destroy())
-    stream.pipe(res)
+    await sendOpenRecording(req, res, recording!)
   } catch (error) { await recording?.handle.close().catch(() => {}); next(error) }
 }

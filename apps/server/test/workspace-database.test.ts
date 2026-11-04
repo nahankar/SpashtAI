@@ -1,4 +1,5 @@
 import { prepareWorkspaceTestRole } from './workspace-test-role'
+import { RESTRICTED_TEST_URL, workspaceTestUrls } from './workspace-test-db'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { PrismaClient } from '@prisma/client'
 import express from 'express'
@@ -7,7 +8,7 @@ import { signToken, signWorkspaceToken } from '../src/lib/jwt'
 
 // This test can never touch Claude's local database or production.
 const url = process.env.WORKSPACE_TEST_DATABASE_URL
-if (url && !/^postgresql:\/\/postgres@127\.0\.0\.1:55443\/postgres$/.test(url)) throw new Error('Use the dedicated tenancy container on port 55443')
+workspaceTestUrls(url)
 const suite = url ? describe : describe.skip
 suite('workspace database and API isolation', () => {
   const originalDatabaseUrl = process.env.DATABASE_URL
@@ -27,7 +28,7 @@ suite('workspace database and API isolation', () => {
   }
   beforeAll(async () => {
     await prepareWorkspaceTestRole(adminDb)
-    process.env.DATABASE_URL = 'postgresql://tenancy_test_app@127.0.0.1:55443/postgres'
+    process.env.DATABASE_URL = RESTRICTED_TEST_URL
     process.env.WORKSPACES_ENABLED = 'true'
     const module = await import('../src/lib/prisma'); db = module.prisma
     const routes = await import('../src/workspaces/routes')

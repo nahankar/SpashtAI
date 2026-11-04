@@ -1,4 +1,5 @@
 import { prepareWorkspaceTestRole } from './workspace-test-role'
+import { RESTRICTED_TEST_URL, workspaceTestUrls } from './workspace-test-db'
 import { WebSocket, WebSocketServer } from 'ws'
 import { once } from 'node:events'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -16,10 +17,11 @@ import { SessionSubscriptions } from '../src/lib/sessionSubscriptions'
 
 vi.mock('../src/lib/prisma', async () => {
   const { PrismaClient } = await import('@prisma/client')
-  return { prisma: new PrismaClient({ datasourceUrl: 'postgresql://tenancy_test_app@127.0.0.1:55443/postgres' }) }
+  const { RESTRICTED_TEST_URL } = await import('./workspace-test-db')
+  return { prisma: new PrismaClient({ datasourceUrl: RESTRICTED_TEST_URL }) }
 })
 const url = process.env.WORKSPACE_TEST_DATABASE_URL
-if (url && url !== 'postgresql://postgres@127.0.0.1:55443/postgres') throw new Error('Use only the isolated tenancy container')
+workspaceTestUrls(url)
 const suite = url ? describe : describe.skip
 suite('workspace Session aggregate and media isolation', () => {
   const admin = new PrismaClient({ datasourceUrl: url || 'postgresql://unused:5432/unused' })
@@ -31,7 +33,7 @@ suite('workspace Session aggregate and media isolation', () => {
   const bearer = (token: string) => ({ Authorization: `Bearer ${token}` })
   const mediaPath = (session: string, recording: string) => `/api/workspaces/current/sessions/${session}/recordings/${recording}/stream`
   beforeAll(async () => {
-    process.env.DATABASE_URL = 'postgresql://tenancy_test_app@127.0.0.1:55443/postgres'
+    process.env.DATABASE_URL = RESTRICTED_TEST_URL
     process.env.WORKSPACES_ENABLED = 'true'; process.env.WORKSPACE_SESSION_ARCHIVE_ENABLED = 'true'
     // This file is independently runnable, without another test's role setup.
     await prepareWorkspaceTestRole(admin)

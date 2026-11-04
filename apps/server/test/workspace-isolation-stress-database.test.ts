@@ -1,4 +1,5 @@
 import { prepareWorkspaceTestRole } from './workspace-test-role'
+import { RESTRICTED_TEST_URL, workspaceTestUrls } from './workspace-test-db'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { PrismaClient } from '@prisma/client'
 import express from 'express'
@@ -8,9 +9,9 @@ import { signToken, signWorkspaceToken } from '../src/lib/jwt'
 import type { DataScope } from '../src/lib/dataScope'
 
 const url = process.env.WORKSPACE_TEST_DATABASE_URL
-if (url && url !== 'postgresql://postgres@127.0.0.1:55443/postgres') throw new Error('Use only the isolated tenancy container')
+workspaceTestUrls(url)
 const suite = url ? describe : describe.skip
-const RESTRICTED = 'postgresql://tenancy_test_app@127.0.0.1:55443/postgres'
+const RESTRICTED = RESTRICTED_TEST_URL
 
 suite('workspace isolation under pooling, concurrency and failure', () => {
   const admin = new PrismaClient({ datasourceUrl: url || 'postgresql://unused:5432/unused' })

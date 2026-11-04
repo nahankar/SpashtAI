@@ -7,6 +7,7 @@ import { withPlatformWorkspaceAdmin } from './context'
 import { workspaceAnalyticsLimiter, workspaceInvitationSendLimiter } from '../middleware/rate-limit'
 import { archiveSessionDetail, archiveSessionTranscript, listArchiveSessions } from './sessionArchive'
 import { streamWorkspaceRecording } from './sessionMedia'
+import * as review from './sessionReview'
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { ZodError } from 'zod'
 import { Prisma } from '@prisma/client'
@@ -78,6 +79,12 @@ workspaceRouter.get('/current/sessions', scoped((tx, scope, req) => listArchiveS
 workspaceRouter.get('/current/sessions/:sessionId', scoped((tx, scope, req) => archiveSessionDetail(tx, scope, idSchema.parse(req.params.sessionId))))
 workspaceRouter.get('/current/sessions/:sessionId/transcript', scoped((tx, scope, req) => archiveSessionTranscript(tx, scope, idSchema.parse(req.params.sessionId))))
 workspaceRouter.get('/current/sessions/:sessionId/recordings/:recordingId/stream', streamWorkspaceRecording)
+// Owner/Admin read-only review of organization learner activity (Elevate, Replay, Interviews).
+workspaceRouter.get('/current/review/sessions', route(req => review.listReviewSessions(workspaceClaims(req), req.query)))
+workspaceRouter.get('/current/review/sessions/:product/:sessionId', route(req => review.reviewSessionDetail(workspaceClaims(req), req.params.product, req.params.sessionId)))
+workspaceRouter.post('/current/review/sessions/:product/:sessionId/recordings/:recordingId/ticket', route(req =>
+  review.issueReviewMediaTicket(workspaceClaims(req), req.params.product, req.params.sessionId, req.params.recordingId)))
+workspaceRouter.get('/current/review/sessions/:product/:sessionId/recordings/:recordingId/stream', review.streamReviewRecording)
 workspaceRouter.get('/current', scoped((tx, scope) => service.workspaceSnapshot(tx, scope)))
 workspaceRouter.get('/current/members', scoped((tx, scope, req) => service.listWorkspaceMembers(tx, scope, req.query)))
 workspaceRouter.get('/current/admin/overview', scoped((tx, scope, req) => analytics.workspaceOverview(tx, scope, req.query)))

@@ -26,6 +26,7 @@ export const REQUEST_REDACT_PATHS = [
   'req.headers["x-spasht-workspace-scope"]',
   'req.query.access_token',
   'req.query.workspace_media',
+  'req.query.review_media',
   'res.headers["set-cookie"]',
 ] as const
 
@@ -67,8 +68,8 @@ export function requestLogOptions(log = logger): PinoHttpOptions {
     },
     serializers: {
       req: pino.stdSerializers.wrapRequestSerializer((req) => {
-        if (typeof req.url === 'string' && /(access_token|workspace_media)=/.test(req.url)) {
-          req.url = req.url.replace(/([?&](?:access_token|workspace_media)=)[^&]+/gi, '$1[redacted]')
+        if (typeof req.url === 'string' && /(access_token|workspace_media|review_media)=/.test(req.url)) {
+          req.url = req.url.replace(/([?&](?:access_token|workspace_media|review_media)=)[^&]+/gi, '$1[redacted]')
         }
         return req
       }),

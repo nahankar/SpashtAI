@@ -64,3 +64,6 @@ docs/SECURITY-ISSUES.md
 .deploy-migration.env
 backups/
 infra/ec2/env/postgres.env
+
+# Local test scratch (TMPDIR for test runs)
+.test-tmp/

@@ -40,7 +40,7 @@ describe('request log redaction', () => {
 
     expect((await request(app).get('/ok').set(credentials)).status).toBe(200)
     expect((await request(app).get('/denied').set(credentials)).status).toBe(401)
-    expect((await request(app).get('/sessions/s1/recording/stream?access_token=play-secret&workspace_media=ticket-secret').set(credentials)).status).toBe(404)
+    expect((await request(app).get('/sessions/s1/recording/stream?access_token=play-secret&workspace_media=ticket-secret&review_media=review-secret').set(credentials)).status).toBe(404)
 
     const records = parsedRequests(lines)
     expect(records.map(record => record.res?.statusCode).sort()).toEqual([200, 401, 404])
@@ -52,6 +52,7 @@ describe('request log redaction', () => {
       expect(serialized).not.toContain('internal-secret')
       expect(serialized).not.toContain('play-secret')
       expect(serialized).not.toContain('ticket-secret')
+      expect(serialized).not.toContain('review-secret')
       expect(record.req?.headers?.authorization).toBe('[redacted]')
       expect(record.req?.headers?.['x-spasht-workspace']).toBe('[redacted]')
       expect(record.req?.headers?.['x-spasht-workspace-scope']).toBe('[redacted]')
@@ -60,5 +61,6 @@ describe('request log redaction', () => {
     const media = records.find(record => record.req?.url?.includes('recording/stream'))
     expect(media?.req?.url).toContain('access_token=[redacted]')
     expect(media?.req?.url).toContain('workspace_media=[redacted]')
+    expect(media?.req?.url).toContain('review_media=[redacted]')
   })
 })

@@ -1,4 +1,5 @@
 import { prepareWorkspaceTestRole } from './workspace-test-role'
+import { RESTRICTED_TEST_URL, workspaceTestUrls } from './workspace-test-db'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { PrismaClient } from '@prisma/client'
 import { randomUUID } from 'node:crypto'
@@ -7,7 +8,7 @@ import { readyDraft } from './fixtures/bank-draft'
 import { CURRENT_LEARNER_POLICY, LEARNER_POLICIES, hash } from '../src/interviews/evaluator/contracts'
 
 const url = process.env.WORKSPACE_TEST_DATABASE_URL
-if (url && url !== 'postgresql://postgres@127.0.0.1:55443/postgres') throw new Error('Use only the isolated tenancy container')
+workspaceTestUrls(url)
 const suite = url ? describe : describe.skip
 
 vi.mock('../src/interviews/evaluator/model', async original => ({
@@ -51,7 +52,7 @@ suite('organization Interviews path', () => {
 
   beforeAll(async () => {
     await prepareWorkspaceTestRole(admin)
-    process.env.DATABASE_URL = 'postgresql://tenancy_test_app@127.0.0.1:55443/postgres'
+    process.env.DATABASE_URL = RESTRICTED_TEST_URL
     process.env.WORKSPACES_ENABLED = 'true'
     db = (await import('../src/lib/prisma')).prisma
     scopes = await import('../src/lib/dataScope')

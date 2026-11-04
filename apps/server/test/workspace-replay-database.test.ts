@@ -1,4 +1,5 @@
 import { prepareWorkspaceTestRole } from './workspace-test-role'
+import { RESTRICTED_TEST_URL, workspaceTestUrls } from './workspace-test-db'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { PrismaClient } from '@prisma/client'
 import express from 'express'
@@ -12,7 +13,7 @@ import { randomUUID } from 'node:crypto'
 import { signToken, signWorkspaceToken } from '../src/lib/jwt'
 
 const url = process.env.WORKSPACE_TEST_DATABASE_URL
-if (url && url !== 'postgresql://postgres@127.0.0.1:55443/postgres') throw new Error('Use only the isolated tenancy container')
+workspaceTestUrls(url)
 const suite = url ? describe : describe.skip
 
 suite('organization Replay path', () => {
@@ -36,7 +37,7 @@ suite('organization Replay path', () => {
     await prepareWorkspaceTestRole(admin)
     uploads = await mkdtemp(path.join(tmpdir(), 'spasht-replay-'))
     process.env.REPLAY_UPLOAD_PATH = uploads
-    process.env.DATABASE_URL = 'postgresql://tenancy_test_app@127.0.0.1:55443/postgres'
+    process.env.DATABASE_URL = RESTRICTED_TEST_URL
     process.env.WORKSPACES_ENABLED = 'true'
     readiness = (await import('../src/workspaces/productAccess')).WORKSPACE_FEATURE_READINESS
     readiness.replay = true
