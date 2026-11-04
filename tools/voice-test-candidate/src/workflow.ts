@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /** Bounded orchestration only: the existing CLI remains the real audio candidate. */
-import { closeSync, existsSync, mkdirSync, openSync, readSync, statSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { parseArgs } from 'node:util'
@@ -209,6 +209,7 @@ function child(s: WorkflowSettings, scenario: string, dir: string): Promise<numb
   if (s.appSource) args.push('--app-source', s.appSource)
   if (s.allowProduction) args.push('--allow-production')
   if (s.channel) args.push('--browser-channel', s.channel)
+  const spawnedAt = Date.now()
   return new Promise<number>(resolveCode => {
     const proc = spawn(process.execPath, args, { stdio: 'inherit' })
     // Outer guard in case the run's own watchdog cannot act (e.g. the process hangs outside the event loop).
@@ -216,8 +217,28 @@ function child(s: WorkflowSettings, scenario: string, dir: string): Promise<numb
     const timer = setTimeout(() => proc.kill('SIGTERM'), bound)
     const killer = setTimeout(() => proc.kill('SIGKILL'), bound + 60_000)
     proc.on('error', () => { clearTimeout(timer); clearTimeout(killer); resolveCode(2) })
-    proc.on('exit', code => { clearTimeout(timer); clearTimeout(killer); resolveCode(code ?? 3) })
+    proc.on('exit', code => { clearTimeout(timer); clearTimeout(killer); resolveCode(confirmedExit(code ?? 3, dir, scenario, spawnedAt)) })
   })
+}
+
+/** Exit 0 counts only with this scenario's written report saying passed; anything else is inconclusive (3). */
+export function confirmedExit(code: number, dir: string, scenario: string, since: number): number {
+  if (code !== 0) return code
+  const outcomes: string[] = []
+  for (const entry of existsSync(dir) ? readdirSync(dir, { withFileTypes: true }) : []) {
+    if (!entry.isDirectory()) continue
+    const run = resolve(dir, entry.name)
+    try {
+      if (statSync(run).mtimeMs < since) continue
+      const manifest = JSON.parse(readFileSync(resolve(run, 'manifest.json'), 'utf8')) as { scenario?: string }
+      if (manifest.scenario !== scenario) continue
+      const report = JSON.parse(readFileSync(resolve(run, 'report.json'), 'utf8')) as { outcome?: string }
+      outcomes.push(report.outcome ?? 'missing')
+    } catch { outcomes.push('missing') }
+  }
+  if (outcomes.length === 1 && outcomes[0] === 'passed') return 0
+  process.stderr.write(`warning: ${scenario} exited 0 but its report is ${outcomes.join(', ') || 'missing'}; recorded as inconclusive\n`)
+  return 3
 }
 
 export function workflowOutcome(ready: boolean, command: string, results: Array<{ exit: number }>): 'blocked' | 'preflight-ready' | 'passed' | 'not-passed' {

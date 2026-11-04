@@ -314,6 +314,9 @@ accept invitations or kill/start services behind your back.
   is never treated as dispatch.
 - Not verifiable automatically (state in your report): running code equal to a commit when its directory is
   dirty, components inside containers, provider generation quality, physical devices, production readiness.
+- A scenario counts as passed only when its process exits 0 **and** its `report.json` says `passed`; a run that
+  exits without writing a report (e.g. an unsettled await after the whole-run watchdog) is recorded as inconclusive.
+  Each reply decision is also bounded independently of the provider timeout.
 - `preflight` is **preflight-only**, never a passed end-to-end test. Missing prerequisites exit 2 with actionable
   diagnostics. Live outcomes retain CLI exit codes 0/1/2/3; both scenarios are attempted even when one fails.
 - Conversation defaults to 8 minutes (12 for `manual-interview`), maximum 20 through the launcher, with bounded

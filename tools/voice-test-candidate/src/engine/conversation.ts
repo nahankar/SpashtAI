@@ -38,6 +38,8 @@ export interface EngineOptions {
   silentTurns: number[]
   silenceMs: number
   completionPollMs: number
+  /** Hard bound on one reply decision, independent of the provider's own timeout (a hung fetch must not stall the run). */
+  decideTimeoutMs?: number
 }
 
 export type StopReason = StopKind & { /** Who the stop points at, when known (e.g. an app error banner). */ source?: 'application' | 'tool' | 'setup' }
@@ -189,6 +191,16 @@ export class ConversationEngine {
     return this.stopReason!
   }
 
+  private boundedDecide(heard: string, signal: AbortSignal): Promise<Decision> {
+    const limit = this.opts.decideTimeoutMs
+    if (!limit) return this.ports.decide(heard, signal)
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const bound = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`response generation did not settle within ${Math.round(limit / 1000)} s`)), limit)
+    })
+    return Promise.race([this.ports.decide(heard, signal), bound]).finally(() => clearTimeout(timer))
+  }
+
   private readyForTurn(now: number): boolean {
     if (!this.pending.length || this.ports.appSpeaking()) return false
     if (now - this.lastAppSpeechEnd < this.opts.replyAfterSilenceMs) return false
@@ -216,7 +228,7 @@ export class ConversationEngine {
     try {
       const g0 = this.ports.now()
       const scripted = this.ports.scriptedReply?.(this.candidateTurns + 1) ?? null
-      const decision: Decision = scripted ? { action: 'answer', text: scripted, sessionComplete: false, note: 'scripted reply for this scenario step' } : await this.ports.decide(heard, signal)
+      const decision: Decision = scripted ? { action: 'answer', text: scripted, sessionComplete: false, note: 'scripted reply for this scenario step' } : await this.boundedDecide(heard, signal)
       record.generationMs = this.ports.now() - g0
       record.decision = decision.action
       record.sessionCompleteHint = decision.sessionComplete

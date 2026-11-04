@@ -4,7 +4,7 @@ import type { Utterance } from '../src/browser/bridge.js'
 import type { Decision } from '../src/candidate/brain.js'
 
 /** Real timers with short durations: the engine's timing logic runs unmodified, tests stay fast. */
-function harness(over: Partial<EngineOptions> = {}, behaviour: { micOpen?: () => boolean; decideMs?: number; playMs?: number; decide?: (h: string) => Decision; complete?: () => boolean } = {}) {
+function harness(over: Partial<EngineOptions> = {}, behaviour: { micOpen?: () => boolean; decideMs?: number; playMs?: number; decide?: (h: string) => Decision; complete?: () => boolean; decideNever?: boolean } = {}) {
   const texts = new Map<string, string>()
   const log: Array<{ kind: string; data?: Record<string, unknown> }> = []
   const decided: string[] = []
@@ -22,6 +22,8 @@ function harness(over: Partial<EngineOptions> = {}, behaviour: { micOpen?: () =>
     transcribe: async u => texts.get(u.id) ?? '',
     decide: async (heard, signal) => {
       decided.push(heard)
+      // A provider call that never settles and ignores cancellation (seen with a hung fetch body read).
+      if (behaviour.decideNever) return new Promise<Decision>(() => undefined)
       await new Promise((resolve, reject) => {
         const t = setTimeout(resolve, behaviour.decideMs ?? 10)
         signal?.addEventListener('abort', () => { clearTimeout(t); reject(signal.reason) }, { once: true })
@@ -66,6 +68,16 @@ function harness(over: Partial<EngineOptions> = {}, behaviour: { micOpen?: () =>
 }
 
 describe('ConversationEngine', () => {
+  it('stops with an error when a reply decision never settles, instead of stalling past every bound', async () => {
+    const h = harness({ decideTimeoutMs: 150, maxDurationMs: 60_000, appSilenceTimeoutMs: 60_000 }, { decideNever: true })
+    const run = h.engine.run()
+    await h.say('Tell me about your week?')
+    const stop = await run
+    expect(stop.kind).toBe('error')
+    expect(stop.detail).toMatch(/response generation did not settle within/)
+    expect(h.kinds()).toContain('turn_failed')
+  })
+
   it('answers a question exactly once and ignores duplicate utterance events', async () => {
     const h = harness({ maxTurns: 1 })
     const run = h.engine.run()

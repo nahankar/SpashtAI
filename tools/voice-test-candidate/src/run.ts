@@ -212,6 +212,7 @@ export async function runSession(cfg: RunConfig): Promise<RunReport> {
       silentTurns: scenario.silentTurns ?? [],
       silenceMs: scenario.silenceMs ?? 0,
       completionPollMs: 1000,
+      decideTimeoutMs: (cfg.providers.llm.timeoutMs + 750) * 2 + 15_000,
     })
     const eng = engine
     adapter.attach?.(eng)

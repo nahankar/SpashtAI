@@ -188,7 +188,17 @@ process.on('uncaughtException', error => {
   process.exit(70)
 })
 
-main(process.argv.slice(2)).then(code => { process.exitCode = code }, error => {
+// A run whose main() never settles (an awaited promise left without timers or I/O) must not exit 0 and be read as
+// passed: the process would otherwise drain its event loop and exit successfully without writing a report.
+let settled = false
+process.exitCode = 70
+process.on('beforeExit', () => {
+  if (settled) return
+  process.stderr.write('error: the run ended without completing (no report was written); treat it as not passed\n')
+  process.exitCode = 70
+})
+main(process.argv.slice(2)).then(code => { settled = true; process.exitCode = code }, error => {
+  settled = true
   process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
   process.exitCode = 64
 })

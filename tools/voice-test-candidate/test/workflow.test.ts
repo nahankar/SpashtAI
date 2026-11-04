@@ -2,8 +2,30 @@ import { describe, expect, it } from 'vitest'
 import { boundedNumber, productUrl } from '../src/config.js'
 import { classify } from '../src/report/report.js'
 import { redact } from '../src/redact.js'
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { confirmedExit } from '../src/workflow.js'
 
 describe('workflow safety', () => {
+  it('records exit 0 as passed only when that scenario wrote a passed report', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vtc-confirm-'))
+    const since = Date.now() - 1000
+    const run = (name: string, scenario: string, outcome?: string) => {
+      mkdirSync(join(dir, name))
+      writeFileSync(join(dir, name, 'manifest.json'), JSON.stringify({ scenario }))
+      if (outcome) writeFileSync(join(dir, name, 'report.json'), JSON.stringify({ outcome }))
+    }
+    run('a', 'elevate-learner')
+    expect(confirmedExit(0, dir, 'elevate-learner', since)).toBe(3)
+    expect(confirmedExit(1, dir, 'elevate-learner', since)).toBe(1)
+    run('b', 'confident-interview', 'passed')
+    expect(confirmedExit(0, dir, 'confident-interview', since)).toBe(0)
+    run('c', 'manual-interview', 'inconclusive')
+    expect(confirmedExit(0, dir, 'manual-interview', since)).toBe(3)
+    expect(confirmedExit(0, dir, 'silence-interview', since)).toBe(3)
+  })
+
   it('keeps all navigation in the selected workspace, including playback queries', () => {
     expect(productUrl({ targetUrl: 'http://localhost:5273', workspace: 'northwind' }, '/interviews?run=one'))
       .toBe('http://localhost:5273/w/northwind/interviews?run=one')
