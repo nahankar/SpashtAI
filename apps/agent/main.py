@@ -44,6 +44,7 @@ from text_sanitize import StreamingThinkingStripper, is_thinking_only, strip_thi
 from voice_backends import VoiceBackendConfig, apply_turn_detection_update, build_session, metadata_label
 from hush_audio import HushRuntime, prepare_hush_audio
 from backend_profiles import BackendProfile, SttMode, profile_for
+from elevate_recognizer_watch import ElevateRecognizerMonitor
 from elevate_live_words import LiveWordEvidenceCollector
 from elevate_stream_clock import StreamClockTracker
 from elevate_turn_upload import attach_stream_clocks, build_turn_upload_batches
@@ -426,6 +427,7 @@ class CoachingAgent(Agent):
             provider=stt_provider or voice_backend
         )
         self._stream_clocks = StreamClockTracker()
+        self.recognizer_monitor: ElevateRecognizerMonitor | None = None
 
     async def _observe_stream_clock(self, audio, epoch: int):
         """Forward every frame unchanged while measuring its sample envelope."""
@@ -434,6 +436,8 @@ class CoachingAgent(Agent):
                 self._stream_clocks.push(epoch, frame)
             except Exception:
                 logger.warning("Live stream clock frame skipped")
+            if self.recognizer_monitor is not None:
+                self.recognizer_monitor.frame()
             yield frame
 
     async def stt_node(self, audio, model_settings: ModelSettings):
@@ -445,7 +449,16 @@ class CoachingAgent(Agent):
         except Exception:
             logger.warning("Live stream clock unavailable")
         observed = self._observe_stream_clock(audio, epoch) if audio is not None else audio
+        if self.recognizer_monitor is not None:
+            self.recognizer_monitor.new_stream()
         async for ev in Agent.default.stt_node(self, observed, model_settings):
+            monitor = self.recognizer_monitor
+            if monitor is not None and isinstance(ev, stt.SpeechEvent) and ev.alternatives:
+                has_words = bool((ev.alternatives[0].text or "").strip())
+                if ev.type == stt.SpeechEventType.FINAL_TRANSCRIPT:
+                    monitor.result(True)
+                elif ev.type == stt.SpeechEventType.INTERIM_TRANSCRIPT and has_words:
+                    monitor.result(False)
             try:
                 if (
                     isinstance(ev, stt.SpeechEvent)
@@ -1955,6 +1968,13 @@ async def entrypoint(ctx: JobContext):
         session_build = await build_session(voice_cfg)
         session = session_build.session
         effective_backend = session_build.effective_backend
+        if effective_backend == "pipeline-bedrock" and voice_cfg.stt_provider == "transcribe":
+            agent.recognizer_monitor = ElevateRecognizerMonitor()
+            _recognizer_monitor_task = asyncio.create_task(agent.recognizer_monitor.run())
+
+            @session.on("close")
+            def _stop_recognizer_monitor(_ev):  # noqa: ANN001
+                _recognizer_monitor_task.cancel()
 
         if hush_requested:
             if session_build.effective_backend == "pipeline-bedrock":
@@ -2043,6 +2063,12 @@ async def entrypoint(ctx: JobContext):
         def _on_user_state(ev):  # noqa: ANN001
             try:
                 new_state = getattr(ev, "new_state", "") or ""
+                monitor = agent.recognizer_monitor
+                if monitor is not None:
+                    if new_state == "speaking":
+                        monitor.speech_started(getattr(ev, "created_at", None))
+                    elif getattr(ev, "old_state", "") == "speaking":
+                        monitor.speech_ended(getattr(ev, "created_at", None))
                 pacing_tracker.on_user_state_changed(new_state)
                 if new_state != "speaking":
                     _schedule_pending_user_metrics()
