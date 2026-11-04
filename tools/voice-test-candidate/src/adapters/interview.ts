@@ -1,3 +1,4 @@
+import { navigateProduct } from '../browser/navigation.js'
 import type { Page } from 'playwright'
 import type { ConversationEngine, StopReason } from '../engine/conversation.js'
 import { BlockedError, pollUntil, wordRecall, type AdapterContext, type Check, type ExperienceAdapter } from './types.js'
@@ -41,7 +42,7 @@ export class InterviewAdapter implements ExperienceAdapter {
         if (body?.id) { this.runId = body.id; this.sessionId = body.sessionId ?? null; evidence.event('app', 'interview_run_created', { runId: body.id, sessionId: body.sessionId }) }
       }
     })
-    await page.goto(new URL('/interviews', cfg.targetUrl).toString())
+    await navigateProduct(page, cfg, '/interviews')
     evidence.event('browser', 'navigated', { path: '/interviews' })
     if (/\/auth\//.test(new URL(page.url()).pathname)) throw new BlockedError('The browser session is not signed in. Run the login command for this target first.')
     await page.getByRole('heading', { name: 'Interviews', exact: true }).waitFor({ timeout: 30_000 })
@@ -105,12 +106,12 @@ export class InterviewAdapter implements ExperienceAdapter {
     const open = runs.body?.runs.find(r => !r.endedAt)
     if (!open) return
     ctx.evidence.event('tool', 'closing_unfinished_interview', { runId: open.id })
-    await ctx.page.goto(new URL(`/interviews?run=${encodeURIComponent(open.id)}`, ctx.cfg.targetUrl).toString())
+    await navigateProduct(ctx.page, ctx.cfg, `/interviews?run=${encodeURIComponent(open.id)}`)
     const end = ctx.page.getByRole('button', { name: 'End practice' }).first()
     await pollUntil(async () => await end.isEnabled().catch(() => false), 60_000, 1000)
     await end.click()
     await ctx.page.getByRole('link', { name: /Review recordings and technical feedback/ }).waitFor({ timeout: 60_000 })
-    await ctx.page.goto(new URL('/interviews', ctx.cfg.targetUrl).toString())
+    await navigateProduct(ctx.page, ctx.cfg, '/interviews')
     await ctx.page.getByRole('button', { name: 'Start practice' }).waitFor({ timeout: 30_000 })
   }
 
@@ -176,7 +177,7 @@ export class InterviewAdapter implements ExperienceAdapter {
     const history = await ctx.api.get<{ runs: Array<{ id: string }> }>('/api/interviews/runs')
     const listed = Boolean(history.body?.runs.some(r => r.id === this.runId))
     add({ name: 'history_entry_api', status: listed ? 'passed' : 'failed', required: true, basis: 'api', detail: listed ? 'run listed by /api/interviews/runs' : 'run missing from history API' })
-    await ctx.page.goto(new URL('/interviews/history', ctx.cfg.targetUrl).toString())
+    await navigateProduct(ctx.page, ctx.cfg, '/interviews/history')
     const link = ctx.page.locator(`a[href*="${run.sessionId}"], a[href*="${this.runId}"]`).first()
     const shown = await link.waitFor({ timeout: 20_000 }).then(() => true, () => false)
     await ctx.screenshot('interview-history')
@@ -198,7 +199,7 @@ export class InterviewAdapter implements ExperienceAdapter {
         detail: assessments ? `${assessments.length} assessment(s) produced (existence only; scores are not judged)` : `no assessment within ${ctx.cfg.verifyTimeoutMs / 1000} s` })
     } else add({ name: 'evaluation_available', status: 'skipped', required: false, basis: 'api', detail: 'evaluation not enabled for this run' })
 
-    await ctx.page.goto(new URL(`/interviews/playback/${encodeURIComponent(run.sessionId)}`, ctx.cfg.targetUrl).toString())
+    await navigateProduct(ctx.page, ctx.cfg, `/interviews/playback/${encodeURIComponent(run.sessionId)}`)
     const player = await ctx.page.locator('audio').first().waitFor({ state: 'attached', timeout: 30_000 }).then(() => true, () => false)
     await ctx.page.waitForTimeout(3000)
     await ctx.screenshot('interview-playback')

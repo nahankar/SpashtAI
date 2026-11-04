@@ -12,6 +12,7 @@ export interface RunReport {
   durationMs: number
   target: string
   targetKind: string
+  workspace?: string
   experience: string
   scenario: string
   profile: string
@@ -45,6 +46,10 @@ export function classify(input: { blocked?: string; stop: StopReason | null; fin
     reasons.push(`bounded run: stopped by the tool (${input.stop.kind}: ${input.stop.detail}) before the application completed the session`)
   }
   for (const c of pendingRequired) reasons.push(`still pending after the verification window: ${c.name} — ${c.detail}`)
+  if (!input.stop || !input.finish || !input.checks.some(c => c.required && c.status === 'passed')) {
+    reasons.push('missing completion, session-end or required verification evidence')
+  }
+  if (input.checks.some(c => c.required && c.status === 'skipped')) reasons.push('required verification was skipped')
   if (reasons.length) return { outcome: 'inconclusive', reasons }
   return { outcome: 'passed', reasons: ['application completed the session naturally and every required check passed'] }
 }
@@ -64,6 +69,7 @@ export function renderMarkdown(r: RunReport, t0: number): string {
   for (const reason of r.outcomeReasons) lines.push(`- ${reason}`)
   lines.push('', '| Field | Value |', '|---|---|',
     `| Target | ${r.target} (${r.targetKind}) |`,
+    `| Workspace | ${r.workspace ?? 'Personal'} |`,
     `| Experience / scenario / profile | ${r.experience} / ${r.scenario} / ${r.profile} |`,
     `| Started / duration | ${r.startedAt} / ${fmt(r.durationMs)} |`,
     `| Tool | ${r.tool.version} @ ${r.tool.commit}${r.tool.dirty ? ' (uncommitted changes)' : ''} |`,

@@ -28,9 +28,9 @@ export class Evidence {
   constructor(root: string, readonly runId: string, private readonly secrets: string[] = [], t0 = Date.now(), private readonly echo = true) {
     this.dir = join(root, runId)
     this.t0 = t0
-    for (const sub of ['audio', 'screenshots', 'browser']) mkdirSync(join(this.dir, sub), { recursive: true })
+    for (const sub of ['audio', 'screenshots', 'browser']) mkdirSync(join(this.dir, sub), { recursive: true, mode: 0o700 })
     this.timelineFile = join(this.dir, 'timeline.jsonl')
-    writeFileSync(this.timelineFile, '')
+    writeFileSync(this.timelineFile, '', { mode: 0o600 })
   }
 
   rel(epochMs: number): number { return Math.round(epochMs - this.t0) }

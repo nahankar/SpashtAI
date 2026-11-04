@@ -4,9 +4,9 @@
  */
 const JWT = /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g
 const BEARER = /(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi
-const QUERY_SECRET = /([?&](?:access_token|token|key|api_key|apikey|signature|sig|code|password|secret)=)[^&#\s"']+/gi
+const QUERY_SECRET = /([?&](?:workspace_media|access_token|token|key|api_key|apikey|signature|sig|code|password|secret)=)[^&#\s"']+/gi
 const JSON_SECRET = /("(?:token|accessToken|refreshToken|access_token|password|secret|apiKey|api_key|authorization|cookie|set-cookie|spashtai_token)"\s*:\s*")[^"]*(")/gi
-const HEADER_SECRET = /((?:authorization|cookie|set-cookie|x-internal-agent-token|x-api-key)\s*[:=]\s*)[^\n\r"]+/gi
+const HEADER_SECRET = /((?:authorization|cookie|set-cookie|x-spasht-workspace-scope|x-spasht-workspace|x-internal-agent-token|x-api-key)\s*[:=]\s*)[^\n\r"]+/gi
 const AWS_KEY = /\b(AKIA|ASIA)[A-Z0-9]{16}\b/g
 
 export function redact(text: string, extraSecrets: string[] = []): string {

@@ -189,3 +189,74 @@ The same agent-side recognizer stall (`AWS_ERROR_HTTP_STREAM_HAS_COMPLETED`, ans
 End practice not completing) occurred in 2 of 6 live Interview runs. Response gaps (SpashtAI speech end →
 candidate audio) were ~7–8 s median with local CPU providers; the first turn of a run can be ~30 s while Ollama
 loads the model.
+
+## Standard agent workflow
+
+Root `AGENTS.md` and `.cursor/rules/automated-voice-validation.mdc` require this workflow for Elevate/Interview
+voice changes. Do not hand routine spoken tests to the owner. Ask only for an unresolvable prerequisite,
+physical device coverage or subjective judgment, explaining the exact need.
+
+The root shortcuts invoke this separate tool package (it remains excluded from app builds/deployments):
+
+```bash
+# Once per tool checkout; preserve existing ignored configuration and private sessions.
+npm --prefix tools/voice-test-candidate ci
+cd tools/voice-test-candidate
+npx playwright install chromium
+# Create .env.local from config.example.env ONLY if it does not already exist; set a fictional account.
+# Password login saves private state; Google login may require a one-time interactive --manual login.
+npm run vtc -- login --target http://localhost:5273
+cd ../..
+
+# Check prerequisites without starting a practice or stopping/restarting any service.
+npm run voice:preflight -- \
+  --target http://localhost:5273 --api-url http://localhost:4100 \
+  --livekit-url ws://localhost:7880 --workspace northwind \
+  --api-log /private/tmp/spasht-walkthrough/api.log \
+  --agent-log /private/tmp/spasht-walkthrough/agent-logs/agent.log
+
+# Same options; real audio in both directions, one Interview followed by one Elevate.
+npm run voice:test -- \
+  --target http://localhost:5273 --api-url http://localhost:4100 \
+  --livekit-url ws://localhost:7880 --workspace northwind \
+  --api-log /private/tmp/spasht-walkthrough/api.log \
+  --agent-log /private/tmp/spasht-walkthrough/agent-logs/agent.log \
+  --experience both --max-minutes 7 --verify-timeout 90
+```
+
+These ports and log paths describe the existing walkthrough stack, **not universal defaults**. If it belongs
+to another active task, first verify it can be reused; otherwise use the isolated LiveKit setup above plus
+separate web/API/signal ports, a dedicated migrated test database, and a single agent targeting that LiveKit
+and API. Point `VITE_API_BASE_URL` at that API. Do not use root `dev`/`agent:kill`/`signal:kill`: they stop shared
+processes. Never run migrations concurrently with suites using the same database. Do not print `.env` contents.
+The launcher intentionally does not provision databases, change feature flags, seed production content,
+accept invitations or kill/start services behind your back.
+
+- Omit `--workspace` for Personal. Organizations are entered using the normal workspace picker and UI links,
+  not inserted browser state. Refresh/deep-link coverage is separate and must also be checked when affected.
+- Supply `--auth-file .auth/<private-session>.json` when not using the default target-specific state.
+- `--experience interview|elevate|both` selects the scope; `--scenario hesitant-interview` or
+  `--scenario silence-interview` selects the additional Interview regressions. Automatic progression scenarios
+  require that mode to be enabled on the selected fictional local account; they do not certify manual Next.
+- Preflight checks app/API/LiveKit reachability, candidate provider availability, browser installation, actual
+  identity validity, frontend/API targeting, workspace-scoped requests and Interview access when selected.
+  It requires readable local API/agent logs. It does not prove LiveKit agent dispatch, model generation,
+  bank suitability or successful audio: only the subsequent candidate run establishes those.
+- `preflight` is **preflight-only**, never a passed end-to-end test. Missing prerequisites exit 2 with actionable
+  diagnostics. Live outcomes retain CLI exit codes 0/1/2/3; both scenarios are attempted even when one fails.
+- Conversation defaults to 8 minutes, maximum 20 through the launcher, with bounded provider budgets and
+  verification (1–600 seconds). Each whole scenario has a 25-minute termination deadline plus a one-minute
+  shutdown grace. A killed or unfinished scenario is not passed. No automatic session retries.
+- Evidence is saved only below ignored `tools/voice-test-candidate/runs/workflow-*/`: individual run reports,
+  original audio evidence/conversation/trace plus `workflow.json` and sanitized API/agent run-window log tails
+  (at most 256 KB each). A truncated tail is not a complete log; inspect the originals privately when needed.
+  Direct CLI users should also retain the default ignored output. Never commit state, logs, audio or recordings.
+- Review the report, independent conversation, incoming/microphone audio, screenshots and log excerpts.
+  Preserve failed evidence; fix in-scope issues and rerun affected scenarios. Do not weaken required checks.
+  Report the tool revision, app revision (or explicitly unknown if reusing an unversioned running stack),
+  selected workspace/account role, scenario, outcome, evidence path and limits. Scores/subjective quality,
+  physical microphone/speaker paths and room acoustics remain outside this tool's coverage.
+
+Production remains forbidden without explicit authorization from the user. `--allow-production` is an
+additional technical guard, not authorization. The workflow also rejects other remote endpoints by default
+and refuses a frontend bound to a different API. Do not use a local proxy to bypass this boundary.

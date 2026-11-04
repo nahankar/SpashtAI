@@ -23,7 +23,9 @@
     "signal:dev": "npm run signal:kill; cd apps/agent && . .venv312/bin/activate && python -m analytics.signal_api",
     "agent:kill": "pkill -f 'python.*main.py' 2>/dev/null; sleep 1; echo 'agents killed'",
     "agent:dev": "npm run agent:kill; cd apps/agent && . .venv312/bin/activate && python main.py dev",
-    "agent:dev:ext": "npm run agent:kill; cd apps/agent && . .venv312/bin/activate && SIGNAL_API_INPROCESS=0 python main.py dev"
+    "agent:dev:ext": "npm run agent:kill; cd apps/agent && . .venv312/bin/activate && SIGNAL_API_INPROCESS=0 python main.py dev",
+    "voice:preflight": "npm --prefix tools/voice-test-candidate run preflight --",
+    "voice:test": "npm --prefix tools/voice-test-candidate run test:voice --"
   },
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",

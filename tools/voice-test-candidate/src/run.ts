@@ -11,7 +11,7 @@ import { CandidateBrain } from './candidate/brain.js'
 import { getProfile } from './candidate/profiles.js'
 import { between, getScenario, seededRandom } from './candidate/scenarios.js'
 import { streamReply } from './candidate/speech.js'
-import { knownSecrets, type RunConfig } from './config.js'
+import { classifyTarget, knownSecrets, type RunConfig } from './config.js'
 import { ConversationEngine, type StopReason } from './engine/conversation.js'
 import { createChat, createStt, createTts, probe } from './providers/index.js'
 import { Evidence, newRunId } from './report/evidence.js'
@@ -56,7 +56,7 @@ export async function runSession(cfg: RunConfig): Promise<RunReport> {
     'Speech synthesis': tts.description,
   }
   evidence.writeJson('manifest.json', {
-    runId, startedAt, target: safeUrl(cfg.targetUrl), targetKind: cfg.targetKind, experience: cfg.experience, scenario: scenario.id,
+    runId, startedAt, target: safeUrl(cfg.targetUrl), targetKind: cfg.targetKind, workspace: cfg.workspace ?? 'Personal', experience: cfg.experience, scenario: scenario.id,
     profile: profile.id, tool: { version: TOOL_VERSION, ...gitInfo() }, providers, seed: cfg.seed,
     limits: { maxDurationMs: cfg.maxDurationMs, maxTurns: cfg.maxTurns, verifyTimeoutMs: cfg.verifyTimeoutMs,
       requests: { stt: cfg.providers.stt.maxRequests, llm: cfg.providers.llm.maxRequests, tts: cfg.providers.tts.maxRequests } },
@@ -78,7 +78,7 @@ export async function runSession(cfg: RunConfig): Promise<RunReport> {
     const turns = engine?.turns ?? []
     return {
       runId, outcome: verdict.outcome, outcomeReasons: verdict.reasons, startedAt, endedAt: new Date().toISOString(),
-      durationMs: Date.now() - evidence.t0, target: safeUrl(cfg.targetUrl), targetKind: cfg.targetKind, experience: cfg.experience,
+      durationMs: Date.now() - evidence.t0, target: safeUrl(cfg.targetUrl), targetKind: cfg.targetKind, workspace: cfg.workspace ?? 'Personal', experience: cfg.experience,
       scenario: scenario.id, profile: profile.id, tool: { version: TOOL_VERSION, ...gitInfo() }, providers, identifiers: adapter.identifiers(),
       stop, finish, checks, turns,
       independentTranscript: (engine?.transcripts ?? []).sort((a, b) => a.startEpoch - b.startEpoch).map(t => ({ id: t.id, tMs: evidence.rel(t.startEpoch), text: t.text, ...(t.error ? { error: t.error } : {}) })),
@@ -111,6 +111,18 @@ export async function runSession(cfg: RunConfig): Promise<RunReport> {
       storageState: cfg.authFile, viewport: { width: 1360, height: 900 },
       ...(cfg.video ? { recordVideo: { dir: evidence.path('browser'), size: { width: 1360, height: 900 } } } : {}),
     })
+    await context.route('**/*', async route => {
+      const url = new URL(route.request().url())
+      if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/sessions')) {
+        const wrongApi = cfg.apiUrl && url.origin !== new URL(cfg.apiUrl).origin
+        const remoteFromLocal = cfg.targetKind === 'local' && classifyTarget(url.toString()) !== 'local'
+        if (wrongApi || remoteFromLocal) {
+          errors.push('Refused app request to an unexpected API origin')
+          return route.abort()
+        }
+      }
+      return route.continue()
+    })
     await context.grantPermissions(['microphone'], { origin: new URL(cfg.targetUrl).origin })
     if (cfg.trace) await context.tracing.start({ screenshots: cfg.traceFull, snapshots: cfg.traceFull, sources: false })
     await bridge.install(context)
@@ -122,7 +134,7 @@ export async function runSession(cfg: RunConfig): Promise<RunReport> {
     page.on('response', res => { if (res.status() >= 500) errors.push(evidence.sanitize(`HTTP ${res.status()} ${res.request().method()} ${safeUrl(res.url())}`)) })
     let shot = 0
     const ctx: AdapterContext = {
-      page, context, evidence, bridge, cfg, api: new AppApi(page, context),
+      page, context, evidence, bridge, cfg, api: new AppApi(page, context, cfg.workspace),
       screenshot: async name => {
         const file = `screenshots/${String(++shot).padStart(2, '0')}-${name}.png`
         await page!.screenshot({ path: evidence.path(file), fullPage: true }).then(() => evidence.event('browser', 'screenshot', { file }), () => undefined)

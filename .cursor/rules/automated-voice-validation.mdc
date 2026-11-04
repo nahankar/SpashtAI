@@ -1,0 +1,15 @@
+---
+description: Require real automated audio validation for Elevate and Interview voice changes
+alwaysApply: true
+---
+
+# Voice validation
+
+Follow the repository root `AGENTS.md` Automated voice validation requirements and
+`tools/voice-test-candidate/README.md`. These are completion requirements for agents, not optional
+owner acceptance checks. Use the existing candidate to listen and speak in a browser; run relevant
+scenarios, inspect reports/audio/conversation/application logs, fix in-scope failures and rerun.
+Do not replace audio validation with API-only checks, inserted transcripts or routine owner mic tests.
+Preserve other worktrees/services; default to isolated local development and bounded runs. Report exact
+evidence and honest outcomes. Production needs explicit user authorization. Human help is limited to
+unresolvable prerequisites, hardware or subjective checks, with an explanation of the specific need.

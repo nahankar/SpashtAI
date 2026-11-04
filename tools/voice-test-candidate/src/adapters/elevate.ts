@@ -1,3 +1,4 @@
+import { navigateProduct } from '../browser/navigation.js'
 import type { ConversationEngine, StopReason } from '../engine/conversation.js'
 import { activateAudio } from './interview.js'
 import { BlockedError, pollUntil, wordRecall, type AdapterContext, type Check, type ExperienceAdapter } from './types.js'
@@ -27,10 +28,13 @@ export class ElevateAdapter implements ExperienceAdapter {
         if (body.id && body.module === 'elevate') { this.sessionId = body.id; evidence.event('app', 'elevate_session_created', { sessionId: body.id }) }
       } catch { /* not JSON */ }
     })
-    await page.goto(new URL('/elevate?newSession=true', cfg.targetUrl).toString())
+    await navigateProduct(page, cfg, '/elevate?newSession=true')
     evidence.event('browser', 'navigated', { path: '/elevate?newSession=true' })
     if (/\/auth\//.test(new URL(page.url()).pathname)) throw new BlockedError('The browser session is not signed in. Run the login command for this target first.')
+    const create = page.getByRole('button', { name: /New Elevate Session/ })
     const name = page.getByPlaceholder('e.g. Interview Practice, Pitch Rehearsal')
+    await Promise.race([create.waitFor({ timeout: 15000 }), name.waitFor({ timeout: 15000 })]).catch(() => undefined)
+    if (await create.isVisible().catch(() => false)) await create.click()
     const ready = await name.waitFor({ timeout: 30_000 }).then(() => true, () => false)
     if (!ready) {
       await ctx.screenshot('elevate-setup-missing')
@@ -130,7 +134,7 @@ export class ElevateAdapter implements ExperienceAdapter {
     await ctx.page.getByRole('tab', { name: /Session Analytics/ }).click().catch(() => undefined)
     await ctx.page.waitForTimeout(3000)
     await ctx.screenshot('elevate-analytics')
-    await ctx.page.goto(new URL('/elevate', ctx.cfg.targetUrl).toString())
+    await navigateProduct(ctx.page, ctx.cfg, '/elevate')
     const listed = await ctx.page.getByText(this.sessionName).first().waitFor({ timeout: 30_000 }).then(() => true, () => false)
     await ctx.screenshot('elevate-history')
     add({ name: 'history_entry_displayed', status: listed ? 'passed' : 'failed', required: true, basis: 'browser', detail: listed ? `Elevate history lists "${this.sessionName}"` : 'session name not found in Elevate history' })

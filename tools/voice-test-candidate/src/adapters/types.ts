@@ -47,12 +47,15 @@ export interface ExperienceAdapter {
  */
 export class AppApi {
   origin: string | null = null
+  private workspaceToken: string | null = null
 
-  constructor(private readonly page: Page, private readonly context: BrowserContext) {
+  constructor(private readonly page: Page, private readonly context: BrowserContext, private readonly workspace?: string) {
     page.on('request', req => {
-      if (this.origin) return
       const url = new URL(req.url())
-      if (url.pathname.startsWith('/api/')) this.origin = url.origin
+      if (!this.origin && url.pathname.startsWith('/api/')) this.origin = url.origin
+      if (url.origin === this.origin && req.headers()['x-spasht-workspace']) {
+        this.workspaceToken = req.headers()['x-spasht-workspace']!
+      }
     })
   }
 
@@ -62,9 +65,13 @@ export class AppApi {
 
   async get<T = unknown>(path: string, headers: Record<string, string> = {}): Promise<{ status: number; body: T | null }> {
     if (!this.origin) throw new Error('API origin not observed yet')
+    if (this.workspace && !new URL(this.page.url()).pathname.startsWith(`/w/${this.workspace}/`)) {
+      throw new BlockedError('Selected workspace was lost; refusing diagnostic API fallback to Personal')
+    }
+    if (this.workspace && !this.workspaceToken) throw new BlockedError('Workspace token was not observed; refusing Personal diagnostics')
     const token = await this.token()
     const res = await this.context.request.get(`${this.origin}${path}`, {
-      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers }, timeout: 20_000, failOnStatusCode: false,
+      headers: { ...(this.workspace ? { 'x-spasht-workspace': this.workspaceToken! } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers }, timeout: 20_000, failOnStatusCode: false,
     })
     let body: T | null = null
     const type = res.headers()['content-type'] ?? ''

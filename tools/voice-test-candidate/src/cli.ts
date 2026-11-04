@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { resolve } from 'node:path'
 import { parseArgs } from 'node:util'
-import { assertTargetAllowed, classifyTarget, DEFAULT_TARGET, loadLocalEnv, providerConfig, type Experience, type RunConfig } from './config.js'
+import { assertTargetAllowed, boundedNumber, classifyTarget, DEFAULT_TARGET, loadLocalEnv, providerConfig, type Experience, type RunConfig } from './config.js'
 import { getScenario, SCENARIOS } from './candidate/scenarios.js'
 import { PROFILES } from './candidate/profiles.js'
 import { probe } from './providers/index.js'
@@ -20,6 +20,7 @@ Commands
 
 Common options
   --target <url>            App URL (default ${DEFAULT_TARGET}); production hosts need --allow-production
+  --workspace <slug>        Organization workspace; omit for Personal
   --auth-file <path>        Browser session file (default .auth/<host>_<port>.json)
   --headed                  Show the browser (speaker output stays muted unless --speakers)
   --speakers                Let the browser play SpashtAI audio through the speakers
@@ -65,7 +66,7 @@ async function main(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
     args: argv, allowPositionals: true, strict: true,
     options: {
-      help: { type: 'boolean', short: 'h' }, target: { type: 'string' }, 'auth-file': { type: 'string' }, headed: { type: 'boolean' },
+      workspace: { type: 'string' }, help: { type: 'boolean', short: 'h' }, target: { type: 'string' }, 'auth-file': { type: 'string' }, headed: { type: 'boolean' },
       speakers: { type: 'boolean' }, 'browser-channel': { type: 'string' }, output: { type: 'string' }, experience: { type: 'string' },
       scenario: { type: 'string' }, profile: { type: 'string' }, 'max-minutes': { type: 'string' }, 'max-turns': { type: 'string' },
       'interview-minutes': { type: 'string' }, 'elevate-focus': { type: 'string' }, 'verify-timeout': { type: 'string' },
@@ -141,15 +142,15 @@ async function main(argv: string[]): Promise<number> {
     const experience = (values.experience ?? scenario.experience) as Experience
     if (!['interview', 'elevate'].includes(experience)) { process.stderr.write('--experience must be interview or elevate\n'); return 64 }
     if (experience !== scenario.experience) { process.stderr.write(`Scenario ${scenario.id} is for ${scenario.experience}.\n`); return 64 }
-    const interviewMinutes = Number(values['interview-minutes'] ?? 5)
-    const maxMinutes = Number(values['max-minutes'] ?? (experience === 'interview' ? interviewMinutes + 5 : 12))
+    const interviewMinutes = boundedNumber(values['interview-minutes'] ?? 5, 'interview-minutes', 1, 30)
+    const maxMinutes = boundedNumber(values['max-minutes'] ?? (experience === 'interview' ? interviewMinutes + 5 : 12), 'max-minutes', 0.1, 30)
     const cfg: RunConfig = {
-      targetUrl: target, targetKind, experience, scenario: scenario.id, profile: values.profile ?? scenario.defaultProfile, authFile,
+      targetUrl: target, targetKind, apiUrl: values['api-url'], workspace: values.workspace ?? process.env.VTC_WORKSPACE, experience, scenario: scenario.id, profile: values.profile ?? scenario.defaultProfile, authFile,
       headed: Boolean(values.headed), muteSpeakers: !values.speakers, browserChannel: values['browser-channel'],
-      maxDurationMs: maxMinutes * 60_000, maxTurns: Number(values['max-turns'] ?? (experience === 'interview' ? 14 : 10)), outputDir: output,
+      maxDurationMs: maxMinutes * 60_000, maxTurns: boundedNumber(values['max-turns'] ?? (experience === 'interview' ? 14 : 10), 'max-turns', 1, 60), outputDir: output,
       trace: !values['no-trace'], traceFull: Boolean(values['trace-full']), video: Boolean(values.video), seed: Number(values.seed ?? 1), interviewMinutes,
       elevateFocus: values['elevate-focus'] ?? 'clarity', closeUnfinished: Boolean(values['close-unfinished']),
-      verifyTimeoutMs: Number(values['verify-timeout'] ?? 240) * 1000, providers,
+      verifyTimeoutMs: boundedNumber(values['verify-timeout'] ?? 240, 'verify-timeout', 1, 600) * 1000, providers,
     }
     const { runSession } = await import('./run.js')
     const report = await runSession(cfg)

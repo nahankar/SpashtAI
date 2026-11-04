@@ -13,6 +13,9 @@ export interface ProviderConfig {
 export interface RunConfig {
   targetUrl: string
   targetKind: TargetKind
+  apiUrl?: string
+  /** Explicit organization slug; absence means Personal. */
+  workspace?: string
   experience: Experience
   scenario: string
   profile: string
@@ -108,4 +111,17 @@ export function providerConfig(env: NodeJS.ProcessEnv = process.env, overrides: 
 export function knownSecrets(env: NodeJS.ProcessEnv = process.env): string[] {
   return ['VTC_PASSWORD', 'VTC_STT_API_KEY', 'VTC_LLM_API_KEY', 'VTC_TTS_API_KEY']
     .map(k => env[k] ?? '').filter(v => v && v !== 'local')
+}
+
+/** Product navigation never drops the explicitly selected organization. */
+export function productUrl(cfg: Pick<RunConfig, 'targetUrl' | 'workspace'>, path: string): string {
+  if (!path.startsWith('/') || path.startsWith('//')) throw new Error('Expected a product-relative path')
+  if (cfg.workspace && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(cfg.workspace)) throw new Error('Invalid workspace slug')
+  return new URL(`${cfg.workspace ? `/w/${cfg.workspace}` : ''}${path}`, cfg.targetUrl).toString()
+}
+
+export function boundedNumber(value: string | number, label: string, min: number, max: number): number {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n < min || n > max) throw new Error(`${label} must be between ${min} and ${max}`)
+  return n
 }
