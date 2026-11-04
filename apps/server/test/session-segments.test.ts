@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  acceptedEventTime,
   activeSegmentDurationSec,
   compareSegmentTurns,
+  EVENT_CLOCK_SKEW_MS,
   mergeSegmentAudioStatus,
   recordingPayloadMatches,
   segmentRecordingFilename,
@@ -39,6 +41,14 @@ describe('Elevate session segments', () => {
     expect(first).toMatch(/^elevate-segment-[a-f0-9]{64}\.audio$/)
     expect(segmentRecordingFilename('segment-123')).toBe(first)
     expect(segmentRecordingFilename('../segment/123')).not.toBe(first)
+  })
+
+  it('rejects client event times that are too far in the future', () => {
+    const now = new Date('2026-11-04T10:00:00Z')
+    expect(acceptedEventTime(undefined, now)?.toISOString()).toBe(now.toISOString())
+    expect(acceptedEventTime('2026-11-04T10:01:00Z', now)?.toISOString()).toBe('2026-11-04T10:01:00.000Z')
+    expect(acceptedEventTime(new Date(now.getTime() + EVENT_CLOCK_SKEW_MS + 1).toISOString(), now)).toBeNull()
+    expect(acceptedEventTime('not-a-date', now)).toBeNull()
   })
 
   it('counts active segment time without including the gap between segments', () => {

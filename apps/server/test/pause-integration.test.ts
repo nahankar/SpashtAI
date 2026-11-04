@@ -104,6 +104,16 @@ describe('Pause integration contracts', () => {
       activeDurationSec: null,
       audioStatus: 'available',
     })
+    const current = {
+      id: 'segment-1',
+      sessionId: 'session-1',
+      startedAt,
+      recordingStartedAt: new Date('2026-09-20T10:00:12Z'),
+      endedAt: null,
+      activeDurationSec: null,
+      audioStatus: 'available',
+    }
+    mocks.prisma.sessionSegment.findUnique.mockResolvedValue(current)
     const update = vi.fn().mockImplementation(({ data }) => ({
       id: 'segment-1',
       ...data,
@@ -112,6 +122,7 @@ describe('Pause integration contracts', () => {
       callback({
         $queryRaw: vi.fn().mockResolvedValue([{ discardedAt: null }]),
         sessionSegment: {
+          findUnique: vi.fn().mockResolvedValue(current),
           update,
           aggregate: vi.fn().mockResolvedValue({ _sum: { activeDurationSec: 120 } }),
         },

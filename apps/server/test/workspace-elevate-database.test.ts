@@ -183,7 +183,7 @@ suite('organization Elevate voice path', () => {
     expect((await admin.sessionSegment.findUniqueOrThrow({ where: { id: `${tag}-own-a` } })).endedAt).toBeNull()
 
     const rooms = await import('../src/lib/livekitRooms')
-    const released = vi.spyOn(rooms, 'releaseLivekitRooms').mockResolvedValue(undefined)
+    const released = vi.spyOn(rooms, 'deleteLivekitRoomsWithRetry').mockResolvedValue(undefined)
     const taken = await request(app).post(`/sessions/${second.id}/segments`).set(headers(alpha, learner))
       .send({ segmentId: `${tag}-own-c`, roomName: `${tag}-own-c`, takeover: true })
     expect(taken.status).toBe(201)
@@ -300,5 +300,58 @@ suite('organization Elevate voice path', () => {
     expect(seen[0]).toBe('personal')
     expect(seen).toContain(`${alpha}:${learner}`)
     expect(seen).not.toContain(`${alpha}:${suspended}`)
+  })
+
+  it('uses server time so a future client clock cannot abandon another live take', async () => {
+    const first = await orgSession(alpha, learner)
+    expect((await request(app).post(`/sessions/${first.id}/segments`).set(headers(alpha, learner)).send({ segmentId: `${tag}-skew-a`, roomName: `${tag}-skew-a` })).status).toBe(201)
+    const second = await orgSession(alpha, learner)
+    const future = new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString()
+    const rejected = await request(app).post(`/sessions/${second.id}/segments`).set(headers(alpha, learner))
+      .send({ segmentId: `${tag}-skew-b`, roomName: `${tag}-skew-b`, startedAt: future })
+    expect(rejected.status).toBe(400)
+    const blocked = await request(app).post(`/sessions/${second.id}/segments`).set(headers(alpha, learner))
+      .send({ segmentId: `${tag}-skew-c`, roomName: `${tag}-skew-c`, startedAt: future, takeover: true })
+    expect(blocked.status).toBe(400)
+    expect((await admin.sessionSegment.findUniqueOrThrow({ where: { id: `${tag}-skew-a` } })).endedAt).toBeNull()
+    await admin.sessionSegment.update({ where: { id: `${tag}-skew-a` }, data: { endedAt: new Date() } })
+  })
+
+  it('keeps first-close time and available audio when close and upload race', async () => {
+    const session = await orgSession(alpha, learner)
+    expect((await request(app).post(`/sessions/${session.id}/segments`).set(headers(alpha, learner)).send({ segmentId: `${tag}-race-close`, roomName: `${tag}-race-close` })).status).toBe(201)
+    const firstEnd = new Date().toISOString()
+    const [closeA, closeB, upload] = await Promise.all([
+      request(app).patch(`/sessions/${session.id}/segments/${tag}-race-close`).set(headers(alpha, learner))
+        .send({ endedAt: firstEnd, audioStatus: 'pending' }),
+      request(app).patch(`/sessions/${session.id}/segments/${tag}-race-close`).set(headers(alpha, learner))
+        .send({ endedAt: new Date(Date.now() + 120_000).toISOString(), audioStatus: 'unavailable' }),
+      request(app).post(`/sessions/${session.id}/recording/upload`).set(headers(alpha, learner))
+        .field('segmentId', `${tag}-race-close`).field('durationSec', '1').attach('audio', wav(), { filename: 'race.wav', contentType: 'audio/wav' }),
+    ])
+    expect([closeA.status, closeB.status].every(status => status === 200)).toBe(true)
+    expect([200, 201].includes(upload.status)).toBe(true)
+    const segment = await admin.sessionSegment.findUniqueOrThrow({ where: { id: `${tag}-race-close` } })
+    expect(segment.endedAt).not.toBeNull()
+    expect(segment.audioStatus).toBe('available')
+    const firstClosed = [closeA.body.segment, closeB.body.segment].sort((a, b) => new Date(a.endedAt).getTime() - new Date(b.endedAt).getTime())[0]
+    expect(new Date(segment.endedAt!).getTime()).toBe(new Date(firstClosed.endedAt).getTime())
+    expect(segment.activeDurationSec).toBe(firstClosed.activeDurationSec)
+  })
+
+  it('retains occupancy when LiveKit cannot confirm the old room closed', async () => {
+    const first = await orgSession(alpha, learner)
+    expect((await request(app).post(`/sessions/${first.id}/segments`).set(headers(alpha, learner)).send({ segmentId: `${tag}-lk-a`, roomName: `${tag}-lk-a` })).status).toBe(201)
+    const rooms = await import('../src/lib/livekitRooms')
+    const failed = vi.spyOn(rooms, 'deleteLivekitRoomsWithRetry').mockRejectedValue(new Error('livekit unavailable'))
+    const second = await orgSession(alpha, learner)
+    const taken = await request(app).post(`/sessions/${second.id}/segments`).set(headers(alpha, learner))
+      .send({ segmentId: `${tag}-lk-b`, roomName: `${tag}-lk-b`, takeover: true })
+    expect(taken.status).toBe(503)
+    expect(taken.body.code).toBe('VOICE_ROOM_RELEASE_FAILED')
+    expect((await admin.sessionSegment.findUniqueOrThrow({ where: { id: `${tag}-lk-a` } })).endedAt).toBeNull()
+    expect(await admin.sessionSegment.count({ where: { id: `${tag}-lk-b` } })).toBe(0)
+    failed.mockRestore()
+    await admin.sessionSegment.update({ where: { id: `${tag}-lk-a` }, data: { endedAt: new Date() } })
   })
 })
