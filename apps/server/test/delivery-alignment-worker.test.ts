@@ -21,7 +21,7 @@ vi.mock('../src/lib/prisma', () => {
       update: mocks.update, updateMany: mocks.updateMany },
     sessionMetrics: { upsert: mocks.upsert, findUnique: mocks.metrics, update: mocks.metricUpdate },
   }
-  return { prisma: { ...tx, $transaction: (fn: (db: unknown) => unknown) => fn(tx) } }
+  return { prisma: { ...tx, $executeRaw: mocks.ensureLease, $transaction: (fn: (db: unknown) => unknown) => fn(tx) } }
 })
 
 import { alignmentRetry, requestDeliveryAlignment, sweepDeliveryAlignment } from '../src/lib/deliveryAlignmentWorker'
@@ -85,11 +85,7 @@ describe('durable automatic delivery alignment', () => {
   it('creates the automatic lease when the database was never seeded', async () => {
     mocks.claim.mockResolvedValue({ count: 0 })
     await sweepDeliveryAlignment()
-    expect(mocks.ensureLease).toHaveBeenCalledWith({
-      where: { id: 'automatic' },
-      create: { id: 'automatic' },
-      update: {},
-    })
+    expect(mocks.ensureLease).toHaveBeenCalledOnce()
     expect(mocks.findJob).not.toHaveBeenCalled()
   })
 

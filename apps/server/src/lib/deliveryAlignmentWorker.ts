@@ -276,11 +276,8 @@ export async function sweepDeliveryAlignment(sessionId?: string): Promise<void> 
   let claimed = false
   try {
     const now = new Date()
-    await prisma.deliveryAlignmentLease.upsert({
-      where: { id: 'automatic' },
-      create: { id: 'automatic' },
-      update: {},
-    })
+    // ON CONFLICT: two workers may both see no row. INSERT races must not fail the sweep.
+    await prisma.$executeRaw`INSERT INTO "DeliveryAlignmentLease" (id) VALUES ('automatic') ON CONFLICT (id) DO NOTHING`
     const claim = await prisma.deliveryAlignmentLease.updateMany({ where: {
       id: 'automatic', OR: [{ expiresAt: null }, { expiresAt: { lte: now } }],
     }, data: { owner, expiresAt: new Date(Date.now() + LEASE_MS) } })
