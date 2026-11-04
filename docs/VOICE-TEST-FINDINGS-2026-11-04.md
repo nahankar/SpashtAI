@@ -62,3 +62,49 @@ registered on LiveKit `ws://localhost:7980`, which this tool's isolated stack wa
 also targets :7980. With two unnamed workers on one LiveKit, dispatch is random. Preflight blocked; this tool's
 stack moved to :7990 and left the :7980 container and the other processes running. If that stack is yours,
 keep using :7980 — it is no longer shared.
+
+## 7. Tool defect (fixed): the candidate missed the end of a long Elevate instruction
+
+Not an application defect. Run `20261104-063150-035fe5` (Elevate, Northwind, session
+`session_1793773911299_ddqcapklx`; tool 7b57aaf from the `spashtai-voice-workflow` worktree; stack web :5283 /
+API :4110 / LiveKit :7980 / agent from `spashtai-candidate-5351b92`, revision not recorded by that tool version).
+Evidence preserved in place and copied for analysis.
+
+- Capture: complete. Incoming stream started at 3.9 s; no gap fills; the coach instruction is fully present in
+  `audio/incoming-1.wav` and in the recognition clip `audio/app-utterance-002.wav`.
+- Segmentation: correct. Internal pauses 160–600 ms (< 900 ms end-silence) → one utterance 46.65–68.03 s
+  (21.68 s clip with padding).
+- Recognition: defective input length. The whole 21.68 s clip, sent to `Systran/faster-distil-whisper-small.en`,
+  returns "… Here's your topic. Let's see." deterministically (3/3); its last segment is timestamped 19.0–48.0 s
+  inside a 21.68 s clip. The clip's last 12 s / 5 s return "Here's your topic. Blockchain technology. Let's see
+  how you do."
+- Decision: correct for what was heard. At 76.23 s the candidate decided `wait` (no topic given); the coach then
+  waited for the learner; the tool stopped after 90 s of silence.
+- Fix `051039a`: utterances > 12 s are recognized in windows split at their quietest pause. On the real clip the
+  windows are 0–6.36 / 6.36–17.30 / 17.30–21.68 s and the text includes "Blockchain technology. Let's see how you
+  do." Regression `test/long-utterance.test.ts` (observed timing through the real capture path) failed before and
+  passes after.
+
+Separate and still unresolved: §1 (Northwind `session_1793768850376_v90vec3ax`, learner turn on the app microphone
+track but never transcribed by the agent) — no evidence links it to this tool defect.
+
+**For Cursor:** the `spashtai-voice-workflow` worktree is still on 7b57aaf and lacks this fix and everything in §5.
+Run the tool from `codex/voice-test-candidate` (≥ 051039a), or fast-forward your branch to it (it contains 7b57aaf).
+
+Live validation of `051039a` (isolated stack web :5173 / API :4000 on `spashtai_vtc` / LiveKit :7990 / one agent;
+Personal workspace; web/API/agent verified at 051039a, apps tree identical to 81c393b). Evidence:
+`tools/voice-test-candidate/runs/workflow-2026-11-04T07-03-59-282Z/` (workflow outcome passed).
+
+| Run | Scenario | Outcome | Long coach utterances (> 12 s) windowed | Coach-word recall (evaluation only) |
+|---|---|---|---|---|
+| `20261104-070404-4f4a4d` | elevate-learner | passed 15/15 | 4 of 5 (17–23 s) | 94–100% |
+| `20261104-070942-fab529` | elevate-learner | passed 15/15 | 4 of 5 (33–49 s) | 88–100% |
+| `20261104-071742-d79779` | elevate-learner | passed 15/15 | 7 of 8 (14–25 s) | 88–100% |
+| `20261104-072646-b8ef21` | confident-interview | passed 18/18 | 0 of 7 (unchanged single-window path) | — |
+| `20261104-073258-7f43a8` | manual-interview | passed 20/20 | 0 of 3 | — |
+
+Every Elevate prompt was answered; all replies were saved by the app (saved-transcript coverage passed),
+recording/playback/history/analysis passed and processing completed. The original failure needs a long coach
+instruction whose words fall late in the window; three reruns exercised 15 such utterances, but the Northwind
+replay-context instruction from the failed run was not reproduced verbatim. The failure was deterministic for that
+exact clip, which the fix demonstrably handles; other model omissions inside a ≤ 12 s window remain possible.

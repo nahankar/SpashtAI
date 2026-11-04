@@ -25,6 +25,11 @@ workspace, it is not imported by `apps/*`, and nothing here is built or deployed
   Node as PCM. An energy VAD finds SpashtAI's utterances; each one is transcribed independently. DOM
   transcripts and agent state are **never** used to decide what to say (the page text is saved only as
   secondary diagnostics).
+- **Recognition windows** (`src/audio/recognition.ts`): an utterance longer than 12 s is recognized in windows
+  split at its quietest pause (never mid-word); shorter utterances are sent whole. The local Whisper model
+  deterministically dropped the end of a 21.7 s coach instruction (run `20261104-063150-035fe5`), while ≤ 12 s
+  windows of the same audio returned every word. Each request is logged as `recognition_request` with its window
+  bounds and text.
 - **Turn taking** (`src/engine/conversation.ts`): the candidate replies once SpashtAI has been quiet for
   1.4 s after an utterance, after a natural think delay, and only when the app's microphone track is enabled.
   New SpashtAI speech cancels a reply in preparation (the heard text is merged into the next turn), duplicate
