@@ -26,7 +26,11 @@ vi.mock('../src/lib/platformSettings', () => ({
   getSignupsPausedMessage: async () => 'Signups are paused',
   areRewardPointsEnabled: async () => false,
 }))
-vi.mock('../src/lib/email', () => ({ sendEmail: mocks.sendEmail }))
+vi.mock('../src/lib/email', () => ({ sendEmail: mocks.sendEmail, buildPasswordResetEmail: vi.fn() }))
+vi.mock('../src/middleware/rate-limit', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../src/middleware/rate-limit')>(),
+  authLimiter: (_req: unknown, _res: unknown, next: () => void) => next(),
+}))
 // Lets a test make audit persistence fail inside the acceptance transaction.
 vi.mock('../src/lib/invitationAudit', async (importOriginal) => {
   const real = await importOriginal<typeof import('../src/lib/invitationAudit')>()
@@ -55,12 +59,14 @@ import { signToken } from '../src/lib/jwt'
 import adminInvitationsRouter from '../src/routes/admin/invitations'
 import adminUsersRouter from '../src/routes/admin/users'
 import invitationsRouter from '../src/routes/invitations'
+import authRouter from '../src/routes/auth'
 import { capturedInvitationEmails, clearCapturedInvitationEmails, createInvitation, hashInvitationToken, invitationDeliveryMode, purgeClosedInvitations, resendInvitation, invitationTestHooks } from '../src/lib/invitations'
 
 const app = express(); app.use(express.json())
 app.use('/api/admin/invitations', requireAuth, requireCurrentAdmin, adminInvitationsRouter)
 app.use('/api/invitations', invitationsRouter)
 app.use('/api/admin/users', requireAuth, requireCurrentAdmin, adminUsersRouter)
+app.use('/api/auth', authRouter)
 
 const tag = `inv_${randomUUID().replaceAll('-', '').slice(0, 12)}`
 const addr = (name: string) => `${tag}_${name}@example.invalid`
@@ -221,6 +227,45 @@ describe.skipIf(!testDb.url)('learner invitations (PostgreSQL)', () => {
     expect(await prisma.user.findUniqueOrThrow({ where: { email: existingEmail } })).toMatchObject({
       city: 'Mysuru', state: 'Karnataka', country: 'India', phone: SIGNUP_PROFILE.phone, pincode: SIGNUP_PROFILE.pincode,
     })
+  })
+
+  it('fills location for an incomplete existing profile but never rewrites a complete profile', async () => {
+    const incomplete = await prisma.user.create({ data: { email: addr('incomplete'), role: 'USER' } })
+    await invite(incomplete.email, { confirmExistingUser: true })
+    expect((await accept(tokenFor(incomplete.email), google(incomplete.email))).status).toBe(200)
+    expect(await prisma.user.findUniqueOrThrow({ where: { id: incomplete.id } })).toMatchObject({
+      phone: SIGNUP_PROFILE.phone, pincode: SIGNUP_PROFILE.pincode, city: 'Bengaluru', state: 'Karnataka', country: 'India',
+    })
+
+    const complete = await prisma.user.create({ data: {
+      email: addr('complete'), role: 'USER', phone: '9999999999', dateOfBirth: new Date('1990-01-01'), gender: 'MALE',
+      pincode: '570001', city: 'Mysuru', state: 'Karnataka', country: 'India',
+    } })
+    await invite(complete.email, { confirmExistingUser: true })
+    expect((await accept(tokenFor(complete.email), google(complete.email))).status).toBe(200)
+    expect(await prisma.user.findUniqueOrThrow({ where: { id: complete.id } })).toMatchObject({
+      phone: '9999999999', gender: 'MALE', pincode: '570001', city: 'Mysuru', state: 'Karnataka', country: 'India',
+    })
+  })
+
+  it('applies the same location rules to Personal Google sign-up and sign-in', async () => {
+    const email = addr('personal-new')
+    const created = await request(app).post('/api/auth/google').send({ credential: google(email), ...SIGNUP_PROFILE })
+    expect(created.status).toBe(200)
+    expect(await prisma.user.findUniqueOrThrow({ where: { email } })).toMatchObject({
+      pincode: SIGNUP_PROFILE.pincode, city: 'Bengaluru', state: 'Karnataka', country: 'India',
+    })
+
+    const kept = await prisma.user.create({ data: { email: addr('personal-kept'), role: 'USER', city: 'Mysuru', state: 'Karnataka', country: 'India' } })
+    locationMocks.resolve.mockImplementation(async () => ({ city: null, state: null, country: 'India' }))
+    expect((await request(app).post('/api/auth/google').send({ credential: google(kept.email), ...SIGNUP_PROFILE })).status).toBe(200)
+    expect(await prisma.user.findUniqueOrThrow({ where: { id: kept.id } })).toMatchObject({
+      phone: SIGNUP_PROFILE.phone, city: 'Mysuru', state: 'Karnataka', country: 'India',
+    })
+
+    const signIn = await request(app).post('/api/auth/google').send({ credential: google(kept.email) })
+    expect(signIn.status).toBe(200)
+    expect(await prisma.user.count({ where: { email: kept.email } })).toBe(1)
   })
 
   it('signs an existing account in without changing its role, permissions or history', async () => {
