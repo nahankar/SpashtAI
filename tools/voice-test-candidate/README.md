@@ -234,6 +234,20 @@ End practice not completing) occurred in 2 of 6 live Interview runs. Response ga
 candidate audio) were ~7–8 s median with local CPU providers; the first turn of a run can be ~30 s while Ollama
 loads the model.
 
+## Validation record (2026-11-04)
+
+Isolated stack from this checkout (apps tree identical to 81c393b; web/API/agent provenance verified), cloned
+database `spashtai_vtc`, own LiveKit and agent. All four scenarios passed after tool fixes; see
+`docs/VOICE-TEST-WORKFLOW-VALIDATION.md` for paths and `docs/VOICE-TEST-FINDINGS-2026-11-04.md` for application
+findings. Median SpashtAI-end → candidate-start gap ≈ 8–10 s with local CPU providers.
+
+| Scenario | Outcome |
+|---|---|
+| manual-interview | passed 20/20 (Finish/Next/Skip/End through the UI, manual mode saved) |
+| confident-interview | passed 18/18 (automatic, 6 questions, practice time up) |
+| silence-interview | passed 18/18 |
+| elevate-learner | passed 15/15 (all 5 replies saved, processing completed) |
+
 ## Standard agent workflow
 
 Root `AGENTS.md` and `.cursor/rules/automated-voice-validation.mdc` require this workflow for Elevate/Interview

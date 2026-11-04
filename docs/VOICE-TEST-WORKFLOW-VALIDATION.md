@@ -54,3 +54,49 @@ Final tool checks: 45 tests across 7 files passed; tool typecheck and `git diff 
 Interview was repeated after API-origin protection was added and passed again. Captured incoming/microphone
 WAV durations and signal energy were inspected alongside the independent conversation and API/agent logs.
 No subjective audio-quality claim is made. Neither recordings nor private authentication/log state are tracked.
+
+## Follow-up — 4 November 2026 (branch `codex/voice-test-candidate`, fast-forwarded to 7b57aaf)
+
+7b57aaf was reviewed and reused (no second launcher). Its preflight, launcher, workspace navigation and
+API-origin guard are extended; an origin violation now blocks the run instead of only being logged.
+
+### Added
+
+- `manual-interview`: listens to real questions, speaks, then uses **Finish answer → Next question**,
+  **Skip question → Next question**, **Finish answer → End practice**. Verifies the saved run mode (manual),
+  ANSWERED/SKIPPED/ANSWERED, per-reply saved answers, feedback, recording content and browser playback.
+  Automatic (`confident-interview`) and manual coverage are separate scenarios and reports.
+- Preflight levels **reachable / configured / observed-registered** (never "verified by live audio"): provider
+  model listing, process targeting (web→API, API→LiveKit, agent→LiveKit + API callback, exactly one worker),
+  agent registration since its latest start, per-account access, Interview coverage of the default selection
+  and account mode. `npm run voice:help` documents options and what cannot be verified automatically.
+- Application provenance per component (verified / unverified / unknown), separate from the tool revision.
+- Saved-recording checks: availability, playback advancing via the page's main transport control, decoded
+  content containing the candidate's speech. Live capture, saved recording and speakers are labelled apart.
+- Failure evidence: voiced time on the app microphone track per reply, saved-transcript coverage with
+  potentially missing turns, state at stop, pending vs completed vs failed processing, and
+  application/tool/setup attribution on every non-pass reason. Whole-run watchdog; owner-only evidence files.
+- 68 unit/integration tests (safety boundaries: wrong/production API binding, workspace scope loss, auth and
+  access failures, invalid limits, whole-run timeout, interruption, redaction/private output, missing evidence).
+
+### Live validation (isolated stack; apps tree identical to 81c393b; web/API/agent verified)
+
+Isolated: web :5173, API :4000 on a cloned database `spashtai_vtc` (automatic conversation granted per account
+there), signal :4011, own LiveKit (:7980, later :7990) and one agent. Accounts are fictional. Evidence is under
+ignored `tools/voice-test-candidate/runs/`.
+
+| Scenario | Outcome | Evidence (`runs/…`) |
+| --- | --- | --- |
+| manual-interview | passed (20/20 checks; Finish/Skip saved in ~1–2 s) | `workflow-2026-11-04T06-17-03-331Z/20261104-061708-e830fa/` |
+| confident-interview (automatic) | passed (6 questions; practice time up; 18/18) | `workflow-2026-11-04T05-52-16-500Z/20261104-055609-b9b916/` |
+| silence-interview | passed (20 s silence, no re-prompt; 6 questions) | `workflow-2026-11-04T06-17-03-331Z/20261104-061924-75c9ac/` |
+| elevate-learner (clarity) | passed (5 replies all saved; recording content, playback, processing completed; 15/15) | `workflow-2026-11-04T06-38-08-325Z/20261104-063812-b6a320/` |
+
+Tool defects found by these runs and fixed (failures preserved, not reclassified): playback baseline read during
+the page's WebM duration probe; a 30 s Playwright wait on a missing alert in the manual flow; play-control
+selection hitting the Playback tab and moment clips. Another session's agent registered on this stack's first
+LiveKit (:7980); preflight blocked, and this stack moved to :7990 without touching the other session.
+
+Application findings for the owners are in `docs/VOICE-TEST-FINDINGS-2026-11-04.md`. Not re-run today:
+`hesitant-interview` (unchanged code paths) and the Northwind walkthrough stack (one reviewed question; owned by
+another task).

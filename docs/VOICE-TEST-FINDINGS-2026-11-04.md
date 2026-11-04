@@ -50,6 +50,15 @@ redacted logs only. Nothing here was changed in application code by the tool wor
 
 | Scenario | Outcome | Evidence (`/Users/neelesh.ahankari/Applications/SpashtAI/tools/voice-test-candidate/runs/…`) |
 |---|---|---|
-| manual-interview (Finish → Next, Skip → Next, Finish → End) | passed | see tool README validation record |
-| confident-interview (automatic, 6 questions, practice time up) | passed | see tool README validation record |
-| elevate-learner (clarity) | see tool README validation record | |
+| manual-interview (Finish → Next, Skip → Next, Finish → End) | passed, 20/20 | `workflow-2026-11-04T06-17-03-331Z/20261104-061708-e830fa/` |
+| confident-interview (automatic, 6 questions, practice time up) | passed, 18/18 | `workflow-2026-11-04T05-52-16-500Z/20261104-055609-b9b916/` |
+| silence-interview (20 s silence, then 6 answers) | passed, 18/18 | `workflow-2026-11-04T06-17-03-331Z/20261104-061924-75c9ac/` |
+| elevate-learner (clarity, 5 replies, processing completed) | passed, 15/15 | `workflow-2026-11-04T06-38-08-325Z/20261104-063812-b6a320/` |
+
+## 6. Shared LiveKit collision (process, not code)
+
+At 11:39 IST an agent worker from worktree `spashtai-candidate-5351b92` (pid 14827, `SERVER_URL=http://localhost:4110`)
+registered on LiveKit `ws://localhost:7980`, which this tool's isolated stack was using; that stack's API (:4110)
+also targets :7980. With two unnamed workers on one LiveKit, dispatch is random. Preflight blocked; this tool's
+stack moved to :7990 and left the :7980 container and the other processes running. If that stack is yours,
+keep using :7980 — it is no longer shared.
