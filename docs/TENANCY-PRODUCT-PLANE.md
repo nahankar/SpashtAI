@@ -38,6 +38,10 @@ Nothing on this branch is merged, deployed or human-verified yet. No deployment 
   only under `app.workspace_reader='manager'`, which the database rechecks against the current role. Child tables with
   raw content (transcripts, turns, recordings, Replay results, interview answers) are never visible in that mode.
   Root rows still contain some learner context, so workspace admin services must select allowlisted columns only.
+- **Review reads.** Read-only Owner/Admin review of organization Elevate, Interviews and Replay sessions uses a
+  separate `app.workspace_reader='reviewer'`, honoured only inside a READ ONLY transaction for an active Owner/Admin of
+  the current active organization (`20261104120000_workspace_session_review`). It is audited per access and never
+  changes the manager reader. See [WORKSPACE-SESSION-REVIEW.md](WORKSPACE-SESSION-REVIEW.md).
 - **Jobs.** `workspace_job_scopes(job)` returns only (workspace, learner) pairs with due work. Each job re-establishes a
   fresh verified scope (`withJobScope`); an ended membership stops processing. Deletion uses `withCleanupScope`.
 - **Feature decision.** Platform switch operational → active workspace and member → entitled and enabled → member
@@ -186,8 +190,9 @@ Organizations see ready products only after entitlements. This release entitles 
 - A playback ticket lasts two hours; a Replay page left open longer must be reopened to seek.
 - Microsoft Clarity: the workspace shell reloads the page once if Clarity was already loaded, so organization pages
   are not recorded. Platform `/admin` has the same pre-existing gap and is unchanged.
-- Admins see progress and usage, not raw content: transcripts, recordings, Replay results and interview answers stay
-  learner-only by database policy.
+- Admin reports (manager reader) see progress and usage, not raw content. Raw transcripts, recordings, Replay results
+  and interview answers are available to Owners/Admins only through the audited read-only review
+  ([WORKSPACE-SESSION-REVIEW.md](WORKSPACE-SESSION-REVIEW.md)); Prepare is not reviewable yet.
 - Flaky under parallel load: invitation database suites (shared mailbox and fixtures across parallel files) and once a
   `socket hang up` in the in-memory `preparations.test.ts`. Each passes alone; three consecutive full runs after
   checkpoint 4 were clean (714 passed, 124 skipped). After checkpoint 6, `replay-workflow-evidence.test.ts` failed once

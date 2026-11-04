@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { signWorkspaceReviewMediaToken, signWorkspaceToken } from '../src/lib/jwt'
+import { signToken, signWorkspaceReviewMediaToken, signWorkspaceToken } from '../src/lib/jwt'
 
 const url = process.env.WORKSPACE_TEST_DATABASE_URL
 workspaceTestUrls(url)
@@ -182,6 +182,14 @@ suite('read-only Owner/Admin review of organization learner sessions', () => {
       REPLAY_UPLOAD_PATH: env.replay, WORKSPACE_SESSION_ARCHIVE_ENABLED: env.archive })) {
       if (value === undefined) delete process.env[key]; else process.env[key] = value
     }
+  })
+
+  it('tells learners on entry and on the workspace home that Owners and Admins can review their organization sessions', async () => {
+    const entry = await api.post(`/api/workspaces/entry/${tag}-alpha`).set({ Authorization: `Bearer ${signToken({ userId: users.learner, email: `${tag}-learner@example.invalid`, role: 'USER' })}` })
+    expect(entry.status).toBe(200)
+    expect(entry.body.notice).toMatch(/Owners and Admins can review your sessions/)
+    expect(entry.body.notice).toMatch(/Personal history remains separate and private/)
+    expect((await api.get('/api/workspaces/current').set(token(alpha, 'learner'))).body.notice).toMatch(/Owners and Admins can review your sessions/)
   })
 
   it('refuses learners, outsiders and platform staff without an active Owner/Admin membership', async () => {

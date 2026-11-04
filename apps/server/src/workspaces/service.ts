@@ -11,7 +11,7 @@ import {
 import { memberFeatureDecisions } from './productAccess'
 import { establishWorkspace, requireWorkspaceManager, withPlatformWorkspaceAdmin, withWorkspaceActor, type WorkspaceTx } from './context'
 
-export const WORKSPACE_PRIVACY_NOTICE = 'Organization activity stays in this workspace. Your Personal history remains separate and private.'
+export const WORKSPACE_PRIVACY_NOTICE = 'Organization activity stays in this workspace, and its Owners and Admins can review your sessions here. Your Personal history remains separate and private.'
 
 export function presentWorkspace(workspace: Workspace) {
   return { id: workspace.id, slug: workspace.kind === 'PERSONAL' ? 'personal' : workspace.slug,
