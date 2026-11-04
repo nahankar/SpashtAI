@@ -10,7 +10,7 @@ import { authLimiter } from '../middleware/rate-limit'
 import { sendEmail, buildPasswordResetEmail } from '../lib/email'
 import { verifyGoogleIdToken } from '../lib/google-auth'
 import { signInWithGoogleUser } from '../lib/googleSignIn'
-import { validateProfileFields, resolveProfileLocation, authUserForClient, readSignupProfile } from '../lib/profile'
+import { validateProfileFields, resolveProfileLocation, authUserForClient, readSignupProfile, attachSignupLocation } from '../lib/profile'
 import { areSignupsPaused, getSignupsPausedMessage } from '../lib/platformSettings'
 
 const router = Router()
@@ -228,11 +228,17 @@ router.post('/google', authLimiter, async (req: Request, res: Response) => {
       res.status(400).json({ error: profileRead.error })
       return
     }
-    const profile = profileRead.data
-      ? { ...profileRead.data, ...await resolveProfileLocation(profileRead.data.pincode) }
-      : null
 
     const googleUser = await verifyGoogleIdToken(credential)
+    const existingLocation = profileRead.data
+      ? await prisma.user.findFirst({
+        where: { email: googleUser.email },
+        select: { city: true, state: true, country: true },
+      })
+      : null
+    const profile = profileRead.data
+      ? await attachSignupLocation(profileRead.data, existingLocation)
+      : null
     const result = await signInWithGoogleUser(googleUser, req, profile)
     if (!result.ok) {
       res.status(result.status).json(result.body)

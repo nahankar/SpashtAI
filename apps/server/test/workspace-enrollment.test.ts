@@ -38,6 +38,16 @@ describe('workspace enrollment contract', () => {
     expect(email.html).not.toContain('Google Account')
     expect(email.text).not.toContain('You have been invited')
   })
+  it('still produces an understandable invitation when the optional custom message is empty', () => {
+    const email = buildInvitationEmail({ workspaceName: 'KLS VDIT', acceptUrl: 'https://example.invalid/invite#token=abc', expiresAt: new Date('2026-12-01'), emailSubject: '', emailMessage: '' })
+    expect(email.subject).toBe("You're invited to KLS VDIT on SpashtAI")
+    expect(email.text.startsWith('https://example.invalid/invite#token=abc')).toBe(true)
+    expect(email.html).toContain('Accept invitation')
+    expect(email.text).toContain('This link works once and expires on Tue, 01 Dec 2026 00:00:00 GMT')
+    expect(email.text).toContain("If you weren't expecting this invitation, you can ignore this email.")
+    expect(email.text).toContain('Replies to this mailbox are not routinely monitored')
+    expect(email.html).not.toMatch(/<p>\s*<\/p>/)
+  })
   it('normalizes batches and reports partial errors without exposing internal errors', async () => {
     expect(batchEmailsSchema.parse([' A@EXAMPLE.INVALID ', 'b@example.invalid'])).toEqual(['a@example.invalid', 'b@example.invalid'])
     expect(batchEmailsSchema.safeParse(['a@example.invalid', 'A@example.invalid']).success).toBe(false)

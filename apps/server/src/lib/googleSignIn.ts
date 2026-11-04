@@ -59,9 +59,9 @@ export async function resolveGoogleAccount(
       dateOfBirth: opts.profile.dateOfBirth,
       gender: opts.profile.gender,
       pincode: opts.profile.pincode,
-      city: opts.profile.city,
-      state: opts.profile.state,
-      country: opts.profile.country,
+      city: opts.profile.city ?? user.city,
+      state: opts.profile.state ?? user.state,
+      country: opts.profile.country ?? user.country,
     } : {}
     user = await db.user.update({
       where: { id: user.id },

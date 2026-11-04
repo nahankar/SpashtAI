@@ -8,6 +8,13 @@ const testDb = vi.hoisted(() => {
   return { url }
 })
 const mocks = vi.hoisted(() => ({ signupsPaused: false, sendEmail: vi.fn(), onPauseCheck: null as null | (() => Promise<void>), auditFailures: 0, failAdminAudit: null as null | string }))
+const locationMocks = vi.hoisted(() => ({
+  resolve: vi.fn(async (_pincode: string) => ({ city: 'Bengaluru', state: 'Karnataka', country: 'India' })),
+}))
+vi.mock('../src/lib/pincode', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../src/lib/pincode')>()
+  return { ...real, resolvePincodeLocation: (pincode: string) => locationMocks.resolve(pincode) }
+})
 vi.mock('../src/lib/prisma', async () => {
   const { PrismaClient } = await import('@prisma/client')
   return { prisma: new PrismaClient({ datasourceUrl: testDb.url || 'postgresql://postgres@127.0.0.1:55441/simple_bank' }) }
@@ -84,6 +91,7 @@ describe.skipIf(!testDb.url)('learner invitations (PostgreSQL)', () => {
     mocks.onPauseCheck = null
     mocks.auditFailures = 0
     mocks.failAdminAudit = null
+    locationMocks.resolve.mockImplementation(async () => ({ city: 'Bengaluru', state: 'Karnataka', country: 'India' }))
     invitationTestHooks.afterResendUpdate = undefined
     process.env.NODE_ENV = 'test'
     delete process.env.INVITATION_EMAIL_DELIVERY
@@ -192,6 +200,27 @@ describe.skipIf(!testDb.url)('learner invitations (PostgreSQL)', () => {
     expect(await prisma.user.count({ where: { email } })).toBe(1)
     const row = await prisma.userInvitation.findFirstOrThrow({ where: { email } })
     expect(row).toMatchObject({ status: 'ACCEPTED', acceptedUserId: first.body.user.id, pendingKey: null })
+  })
+
+  it('resolves a new invitee location before the acceptance lock and keeps an existing city when lookup is empty', async () => {
+    const email = addr('located')
+    await invite(email)
+    const first = await accept(tokenFor(email), google(email))
+    expect(first.status).toBe(200)
+    expect(await prisma.user.findUniqueOrThrow({ where: { email } })).toMatchObject({
+      city: 'Bengaluru', state: 'Karnataka', country: 'India', pincode: '560001',
+    })
+
+    const existingEmail = addr('kept-city')
+    await prisma.user.create({ data: { email: existingEmail, role: 'USER', city: 'Mysuru', state: 'Karnataka', country: 'India' } })
+    await invite(existingEmail, { confirmExistingUser: true })
+    locationMocks.resolve.mockImplementation(async () => ({ city: null, state: null, country: 'India' }))
+    const kept = await accept(tokenFor(existingEmail), google(existingEmail))
+    expect(kept.status).toBe(200)
+    expect(kept.body.newAccount).toBe(false)
+    expect(await prisma.user.findUniqueOrThrow({ where: { email: existingEmail } })).toMatchObject({
+      city: 'Mysuru', state: 'Karnataka', country: 'India', phone: SIGNUP_PROFILE.phone, pincode: SIGNUP_PROFILE.pincode,
+    })
   })
 
   it('signs an existing account in without changing its role, permissions or history', async () => {

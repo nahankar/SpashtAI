@@ -4,8 +4,9 @@ import { WorkspaceError } from '../workspaces/contracts'
 import type { Request } from 'express'
 import type { User } from '@prisma/client'
 import type { GoogleUserInfo } from './google-auth'
+import { prisma } from './prisma'
 import { loadSignupPolicy, resolveGoogleAccount, withAccountRaceRetry } from './googleSignIn'
-import type { SignupProfile } from './profile'
+import { attachSignupLocation, type SignupProfile } from './profile'
 import { effectiveStatus } from './invitations'
 import { writeAcceptanceAudit } from './invitationAudit'
 
@@ -41,6 +42,14 @@ export async function acceptInvitation(
   // Read once, outside the transaction, so the transaction never needs a second pool connection. Whether an
   // invitation may create an account while paused depends on the invitation being pending, checked under the lock.
   const policy = await loadSignupPolicy()
+  // Lookup is network I/O — keep it outside the invitation row lock.
+  const existingLocation = profile
+    ? await prisma.user.findFirst({
+      where: { email: googleUser.email },
+      select: { city: true, state: true, country: true },
+    })
+    : null
+  const located = profile ? await attachSignupLocation(profile, existingLocation) : null
   try {
     return await withAccountRaceRetry(async (tx) => {
       await tx.$queryRaw`SELECT set_config('app.invitation_hash', ${invitation.tokenHash}, true)`
@@ -79,7 +88,7 @@ export async function acceptInvitation(
       const account = await resolveGoogleAccount(tx, googleUser, req, {
         policy,
         invitationBypassesSignupPause: !workspace,
-        profile: profile ?? null,
+        profile: located,
       })
       if (!account.ok) return account
       const bypassed = account.created && policy.paused

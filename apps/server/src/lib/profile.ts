@@ -91,6 +91,24 @@ export async function resolveProfileLocation(pincode: string) {
   return resolvePincodeLocation(pincode)
 }
 
+export function mergeResolvedLocation(
+  incoming: { city: string | null; state: string | null; country: string | null },
+  lookedUp: { city: string | null; state: string | null; country: string | null },
+  existing?: { city?: string | null; state?: string | null; country?: string | null } | null,
+) {
+  return {
+    city: lookedUp.city ?? existing?.city ?? incoming.city,
+    state: lookedUp.state ?? existing?.state ?? incoming.state,
+    country: lookedUp.country ?? existing?.country ?? incoming.country,
+  }
+}
+
+/** External pincode lookup. Call this before any locked signup/acceptance transaction. */
+export async function attachSignupLocation(profile: SignupProfile, existing?: { city?: string | null; state?: string | null; country?: string | null } | null): Promise<SignupProfile> {
+  const lookedUp = await resolveProfileLocation(profile.pincode)
+  return { ...profile, ...mergeResolvedLocation(profile, lookedUp, existing) }
+}
+
 export function toAuthUser(user: {
   id: string
   email: string
