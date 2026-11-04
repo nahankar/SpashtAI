@@ -5,7 +5,8 @@ import { OwnerAccessPanel } from './OwnerAccessPanel'
 describe('recipient and Owner access previews', () => {
   it('shows actual custom controls and normal profile details as separate, disabled steps', () => {
     const html = renderToStaticMarkup(<SignupFieldsPreview workspaceName="College" fields={[{ id: 'department', label: 'Department', type: 'dropdown', required: true, options: ['CS', 'ECE'] }]} />)
-    for (const label of ['Department', 'Phone number', 'Date of birth', 'Gender', 'Pincode', 'Continue with Google', 'already complete']) expect(html).toContain(label)
+    for (const label of ['Department', 'Phone number', 'Date of birth', 'Gender', 'Pincode', 'Accept invitation', 'already complete']) expect(html).toContain(label)
+    expect(html).not.toContain('Continue with Google')
     expect(html.match(/<fieldset disabled=""/g)).toHaveLength(2)
     expect(html).not.toContain('<form')
   })

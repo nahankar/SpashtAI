@@ -70,7 +70,9 @@ function tokenFor(email: string) {
   if (!mail) throw new Error(`no captured invitation for ${email}`)
   return new URL(mail.acceptUrl).hash.replace('#token=', '')
 }
-const accept = (token: string, credential: string) => request(app).post('/api/invitations/accept').send({ token, credential })
+const SIGNUP_PROFILE = { phone: '9876543210', dateOfBirth: '1995-06-15', gender: 'FEMALE', pincode: '560001' }
+const LOCATED_PROFILE = { ...SIGNUP_PROFILE, dateOfBirth: new Date(SIGNUP_PROFILE.dateOfBirth), gender: 'FEMALE' as const, city: null, state: null, country: null }
+const accept = (token: string, credential: string) => request(app).post('/api/invitations/accept').send({ token, credential, ...SIGNUP_PROFILE })
 
 describe.skipIf(!testDb.url)('learner invitations (PostgreSQL)', () => {
   beforeAll(async () => {
@@ -123,8 +125,11 @@ describe.skipIf(!testDb.url)('learner invitations (PostgreSQL)', () => {
     expect(JSON.stringify(audit)).not.toContain(token)
     const mail = capturedInvitationEmails().find((m) => m.to === email)!
     expect(mail.developmentOnly).toBe(true)
-    expect(mail.text).toContain('invited to join SpashtAI')
-    expect(mail.text).toMatch(/requires a Google Account/)
+    expect(mail.text).toContain('This link works once and expires on')
+    expect(mail.text).toContain("If you weren't expecting this invitation, you can ignore this email.")
+    expect(mail.text).toContain('Replies to this mailbox are not routinely monitored')
+    expect(mail.text).not.toMatch(/requires a Google Account/)
+    expect(mail.text).not.toContain('invited to join SpashtAI')
   })
 
   it('rejects invalid email and a second pending invitation for the same address', async () => {
@@ -169,10 +174,17 @@ describe.skipIf(!testDb.url)('learner invitations (PostgreSQL)', () => {
     // The link holder sees exactly which address to sign in with.
     expect(lookup.body.invitedEmail).toBe(email)
 
+    expect(await prisma.user.count({ where: { email } })).toBe(0)
+    const withoutProfile = await request(app).post('/api/invitations/accept').send({ token, credential: google(email) })
+    expect(withoutProfile.status).toBe(400)
+    expect(withoutProfile.body.error).toBe('PROFILE_REQUIRED')
+    expect(await prisma.user.count({ where: { email } })).toBe(0)
+    expect((await prisma.userInvitation.findFirstOrThrow({ where: { email } })).status).toBe('PENDING')
+
     const first = await accept(token, google(email))
     expect(first.status).toBe(200)
     expect(first.body).toMatchObject({ alreadyAccepted: false, newAccount: true })
-    expect(first.body.user).toMatchObject({ email, role: 'USER', needsProfileCompletion: true })
+    expect(first.body.user).toMatchObject({ email, role: 'USER', needsProfileCompletion: false, profileComplete: true })
     const second = await accept(token, google(email))
     expect(second.status).toBe(200)
     expect(second.body).toMatchObject({ alreadyAccepted: true, newAccount: false })
@@ -256,7 +268,7 @@ describe.skipIf(!testDb.url)('learner invitations (PostgreSQL)', () => {
 
     const res = await accept(token, google(email))
     expect(res.status).toBe(200)
-    expect(res.body.user).toMatchObject({ email, role: 'USER', needsProfileCompletion: true })
+    expect(res.body.user).toMatchObject({ email, role: 'USER', needsProfileCompletion: false, profileComplete: true })
     const activity = await prisma.userActivity.findFirstOrThrow({ where: { userId: res.body.user.id, action: 'invitation_accepted' } })
     expect(activity.metadata).toEqual({ newAccount: true, signupsPausedBypass: true })
     expect(JSON.stringify(activity)).not.toContain(email)
@@ -266,9 +278,25 @@ describe.skipIf(!testDb.url)('learner invitations (PostgreSQL)', () => {
     const { signInWithGoogleUser } = await import('../src/lib/googleSignIn')
     const req = { ip: '127.0.0.1', headers: {} } as unknown as express.Request
     const outsider = addr('paused-outsider')
-    const blocked = await signInWithGoogleUser({ googleId: `g-${outsider}`, email: outsider, emailVerified: true, firstName: null, lastName: null, avatar: null }, req)
+    const blocked = await signInWithGoogleUser({ googleId: `g-${outsider}`, email: outsider, emailVerified: true, firstName: null, lastName: null, avatar: null }, req, LOCATED_PROFILE)
     expect(blocked).toMatchObject({ ok: false, status: 403, body: { error: 'signups_paused' } })
     expect(await prisma.user.count({ where: { email: outsider } })).toBe(0)
+  })
+
+  it('does not create a personal Google account until profile details are provided', async () => {
+    const { signInWithGoogleUser } = await import('../src/lib/googleSignIn')
+    const req = { ip: '127.0.0.1', headers: {} } as unknown as express.Request
+    const email = addr('personal-google')
+    const identity = { googleId: `g-${email}`, email, emailVerified: true, firstName: null, lastName: null, avatar: null }
+    const missing = await signInWithGoogleUser(identity, req)
+    expect(missing).toMatchObject({ ok: false, status: 400, body: { error: 'PROFILE_REQUIRED' } })
+    expect(await prisma.user.count({ where: { email } })).toBe(0)
+    const created = await signInWithGoogleUser(identity, req, LOCATED_PROFILE)
+    expect(created).toMatchObject({ ok: true })
+    if (created.ok) {
+      expect(created.user.phone).toBe(SIGNUP_PROFILE.phone)
+      expect(created.user.pincode).toBe(SIGNUP_PROFILE.pincode)
+    }
   })
 
   it('does not bypass paused signups for expired or revoked invitations', async () => {
@@ -462,7 +490,7 @@ describe.skipIf(!testDb.url)('learner invitations (PostgreSQL)', () => {
         const g = JSON.parse(google(email))
         const [acc, login] = await Promise.all([
           accept(tokenFor(email), google(email)),
-          signInWithGoogleUser({ googleId: g.sub, email, emailVerified: true, firstName: null, lastName: null, avatar: null }, req),
+          signInWithGoogleUser({ googleId: g.sub, email, emailVerified: true, firstName: null, lastName: null, avatar: null }, req, LOCATED_PROFILE),
         ])
         const users = await prisma.user.findMany({ where: { email } })
         expect(users).toHaveLength(1)

@@ -32,7 +32,8 @@ suite('workspace email invitation boundaries with a restricted runtime role', ()
     const mail = captured(workspaceId).find(m => m.to === email)
     expect(mail).toBeDefined(); return new URL(mail!.acceptUrl).hash.slice('#token='.length)
   }
-  const accept = (token: string, email: string, verified = true) => request(app).post('/api/invitations/accept').send({ token, credential: JSON.stringify({ email, verified }) })
+  const SIGNUP_PROFILE = { phone: '9876543210', dateOfBirth: '1995-06-15', gender: 'FEMALE', pincode: '560001' }
+  const accept = (token: string, email: string, verified = true) => request(app).post('/api/invitations/accept').send({ token, credential: JSON.stringify({ email, verified }), ...SIGNUP_PROFILE })
   beforeAll(async () => {
     process.env.WORKSPACES_ENABLED = 'true'; delete process.env.INVITATION_EMAIL_DELIVERY
     await prepareWorkspaceTestRole(admin)
@@ -221,7 +222,7 @@ suite('workspace email invitation boundaries with a restricted runtime role', ()
     expect((await accept(token, email)).status).toBe(400)
     expect(await admin.user.findUnique({ where: { email } })).toBeNull()
     const responses = { department: 'CS', skills: ['Java', 'Python'], roll: 'CS-42' }
-    const accepted = await request(app).post('/api/invitations/accept').send({ token, credential: JSON.stringify({ email }), enrollmentResponses: responses })
+    const accepted = await request(app).post('/api/invitations/accept').send({ token, credential: JSON.stringify({ email }), enrollmentResponses: responses, ...SIGNUP_PROFILE })
     expect(accepted.status, JSON.stringify(accepted.body)).toBe(200)
     const user = await admin.user.findUniqueOrThrow({ where: { email } })
     const m = await admin.workspaceMember.findUniqueOrThrow({ where: { workspaceId_userId: { workspaceId: alpha, userId: user.id } } })

@@ -11,16 +11,24 @@ const LEARNER_NAV: NavItem[] = [
   { to: 'feedback', label: 'Feedback', feature: 'feedback' },
 ]
 
-export const ADMIN_NAV: NavItem[] = [
-  { to: 'admin', label: 'Dashboard' },
-  { to: 'admin/users', label: 'Users' },
-  { to: 'admin/invitations', label: 'Invitations' },
-  { to: 'admin/feedback', label: 'Feedback' },
-  { to: 'admin/feature-usage', label: 'Feature usage' },
-  { to: 'admin/progress-pulse', label: 'Progress Pulse' },
-  { to: 'admin/ai-analytics', label: 'AI Analytics' },
-  { to: 'admin/settings', label: 'Workspace settings' },
+export const ADMIN_NAV_GROUPS: { label: string; links: NavItem[] }[] = [
+  { label: 'Overview', links: [
+    { to: 'admin', label: 'Dashboard' },
+    { to: 'admin/users', label: 'Users' },
+    { to: 'admin/invitations', label: 'Invitations' },
+    { to: 'admin/feedback', label: 'Feedback' },
+  ] },
+  { label: 'Analytics', links: [
+    { to: 'admin/feature-usage', label: 'Feature usage' },
+    { to: 'admin/progress-pulse', label: 'Progress Pulse' },
+    { to: 'admin/ai-analytics', label: 'AI Analytics' },
+  ] },
+  { label: 'Administration', links: [
+    { to: 'admin/settings', label: 'Workspace settings' },
+  ] },
 ]
+
+export const ADMIN_NAV: NavItem[] = ADMIN_NAV_GROUPS.flatMap(group => group.links)
 
 export function allowedFeatures(features: Feature[]): Record<string, boolean> {
   return Object.fromEntries(features.map(f => [f.feature, f.allowed === true]))

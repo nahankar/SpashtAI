@@ -109,9 +109,9 @@ export function InviteUserDialog({
               <Input id="invite-name" value={name} maxLength={120} onChange={(e) => setName(e.target.value)} placeholder="Recipient's name" />
             </div>
             <label className="block text-sm">Email subject (optional)<Input maxLength={150} value={subject} onChange={e => setSubject(e.target.value)} /></label>
-            <label className="block text-sm">Email message (optional)<textarea className="w-full rounded border p-2" rows={4} maxLength={5000} value={message} onChange={e => setMessage(e.target.value)} /></label>
+            <label className="block text-sm">Email message<textarea className="w-full rounded border p-2" rows={4} maxLength={5000} value={message} onChange={e => setMessage(e.target.value)} placeholder="This is the email body the recipient reads." /></label>
             <RecipientExperiencePreview key={JSON.stringify({ subject, message, name })} emailContent={{ subject, message }} onEmailPreview={body => apiClient('/api/admin/invitations/preview', { method: 'POST', body: JSON.stringify({ ...body, name }) })} />
-            <p className="text-xs text-muted-foreground">The acceptance link, expiry and sign-in instructions are always included.</p>
+            <p className="text-xs text-muted-foreground">This message is the email body. SpashtAI only adds the Accept invitation button and the expiry notice.</p>
             <p className="text-xs text-muted-foreground">
               The recipient signs in with Google using this address, so it must be a Google Account (Gmail, Google Workspace, or
               another address registered with Google). Email code and magic-link sign-in are not available yet.

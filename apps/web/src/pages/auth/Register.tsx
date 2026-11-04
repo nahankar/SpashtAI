@@ -2,8 +2,12 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { safeAppPath } from '@/lib/safe-next-path'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
+import { ProfileDetailsRow, type ProfileGender } from '@/components/auth/ProfileDetailsRow'
 import { LogoWithBeta } from '@/components/brand/LogoWithBeta'
 
 export function Register() {
@@ -11,6 +15,11 @@ export function Register() {
   const [signupsPaused, setSignupsPaused] = useState(false)
   const [pausedMessage, setPausedMessage] = useState('')
   const [checkingPlatform, setCheckingPlatform] = useState(true)
+  const [detailsReady, setDetailsReady] = useState(false)
+  const [phone, setPhone] = useState('')
+  const [dateOfBirth, setDateOfBirth] = useState('')
+  const [gender, setGender] = useState<ProfileGender>('')
+  const [pincode, setPincode] = useState('')
   const { loginWithGoogle } = useAuth()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -32,8 +41,7 @@ export function Register() {
   }, [])
 
   async function handleGoogleCredential(credential: string) {
-    const user = await loginWithGoogle(credential)
-    // New Google users still complete phone, DOB, gender and pincode before entering.
+    const user = await loginWithGoogle(credential, { phone, dateOfBirth, gender, pincode })
     if (user.needsProfileCompletion) {
       navigate(next ? `/auth/complete-profile?next=${encodeURIComponent(next)}` : '/auth/complete-profile')
       return
@@ -77,11 +85,29 @@ export function Register() {
                 </div>
               )}
 
-              <GoogleSignInButton
-                label="signup_with"
-                onCredential={handleGoogleCredential}
-                onError={setError}
-              />
+              <form className="space-y-4" onSubmit={e => { e.preventDefault(); setDetailsReady(true) }}>
+                <div className="space-y-2">
+                  <Label htmlFor="register-phone">Phone number</Label>
+                  <Input id="register-phone" type="tel" inputMode="tel" placeholder="10-digit mobile number" value={phone} onChange={e => { setPhone(e.target.value); setDetailsReady(false) }} required autoComplete="tel" />
+                </div>
+                <ProfileDetailsRow
+                  dateOfBirth={dateOfBirth}
+                  onDateOfBirthChange={value => { setDateOfBirth(value); setDetailsReady(false) }}
+                  gender={gender}
+                  onGenderChange={value => { setGender(value); setDetailsReady(false) }}
+                  pincode={pincode}
+                  onPincodeChange={value => { setPincode(value); setDetailsReady(false) }}
+                />
+                {!detailsReady && <Button type="submit" className="w-full">Continue</Button>}
+              </form>
+
+              {detailsReady && (
+                <GoogleSignInButton
+                  label="signup_with"
+                  onCredential={handleGoogleCredential}
+                  onError={setError}
+                />
+              )}
 
               <p className="text-xs text-muted-foreground text-center leading-relaxed">
                 By continuing, you agree to the{' '}
@@ -92,7 +118,7 @@ export function Register() {
                 <Link to="/privacy?from=signup" className="text-foreground font-medium hover:underline">
                   Privacy Policy
                 </Link>
-                . You&apos;ll add a few details (phone, date of birth, gender, pincode) next.
+                . Your account is created only after these details and sign-in.
               </p>
 
               <div className="text-center text-sm text-muted-foreground">

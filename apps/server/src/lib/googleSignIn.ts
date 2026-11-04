@@ -3,6 +3,7 @@ import { Prisma, type User } from '@prisma/client'
 import { prisma } from './prisma'
 import type { GoogleUserInfo } from './google-auth'
 import { areSignupsPaused, getSignupsPausedMessage } from './platformSettings'
+import { isProfileComplete, type SignupProfile } from './profile'
 
 export type GoogleSignInResult =
   | { ok: true; user: User; created: boolean }
@@ -37,6 +38,8 @@ export async function resolveGoogleAccount(
      * be created while signups are paused. Every other signup path must leave this unset.
      */
     invitationBypassesSignupPause?: boolean
+    /** Required to create an account. Existing accounts may sign in without it. */
+    profile?: SignupProfile | null
   },
 ): Promise<GoogleSignInResult> {
   let user = await db.user.findFirst({
@@ -51,6 +54,15 @@ export async function resolveGoogleAccount(
 
   let created = false
   if (user) {
+    const fillProfile = opts.profile && !isProfileComplete(user) ? {
+      phone: opts.profile.phone,
+      dateOfBirth: opts.profile.dateOfBirth,
+      gender: opts.profile.gender,
+      pincode: opts.profile.pincode,
+      city: opts.profile.city,
+      state: opts.profile.state,
+      country: opts.profile.country,
+    } : {}
     user = await db.user.update({
       where: { id: user.id },
       data: {
@@ -61,9 +73,20 @@ export async function resolveGoogleAccount(
         avatar: user.avatar ?? googleUser.avatar,
         lastLoginAt: new Date(),
         loginCount: { increment: 1 },
+        ...fillProfile,
       },
     })
   } else {
+    if (!opts.profile) {
+      return {
+        ok: false,
+        status: 400,
+        body: {
+          error: 'PROFILE_REQUIRED',
+          message: 'Add your phone, date of birth, gender and pincode before creating an account.',
+        },
+      }
+    }
     if (!opts.invitationBypassesSignupPause && opts.policy.paused) {
       return { ok: false, status: 403, body: { error: 'signups_paused', message: opts.policy.message } }
     }
@@ -76,6 +99,13 @@ export async function resolveGoogleAccount(
         firstName: googleUser.firstName,
         lastName: googleUser.lastName,
         avatar: googleUser.avatar,
+        phone: opts.profile.phone,
+        dateOfBirth: opts.profile.dateOfBirth,
+        gender: opts.profile.gender,
+        pincode: opts.profile.pincode,
+        city: opts.profile.city,
+        state: opts.profile.state,
+        country: opts.profile.country,
         lastLoginAt: new Date(),
         loginCount: 1,
         enablePro: true,
@@ -119,7 +149,11 @@ export async function withAccountRaceRetry<T>(fn: (tx: Prisma.TransactionClient)
 }
 
 /** `POST /api/auth/google`: one transaction per attempt, so a racing signup of the same address never duplicates. */
-export async function signInWithGoogleUser(googleUser: GoogleUserInfo, req: Request): Promise<GoogleSignInResult> {
+export async function signInWithGoogleUser(
+  googleUser: GoogleUserInfo,
+  req: Request,
+  profile?: SignupProfile | null,
+): Promise<GoogleSignInResult> {
   const policy = await loadSignupPolicy()
-  return withAccountRaceRetry((tx) => resolveGoogleAccount(tx, googleUser, req, { policy }))
+  return withAccountRaceRetry((tx) => resolveGoogleAccount(tx, googleUser, req, { policy, profile: profile ?? null }))
 }

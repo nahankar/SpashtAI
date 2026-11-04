@@ -10,7 +10,7 @@ import { authLimiter } from '../middleware/rate-limit'
 import { sendEmail, buildPasswordResetEmail } from '../lib/email'
 import { verifyGoogleIdToken } from '../lib/google-auth'
 import { signInWithGoogleUser } from '../lib/googleSignIn'
-import { validateProfileFields, resolveProfileLocation, authUserForClient } from '../lib/profile'
+import { validateProfileFields, resolveProfileLocation, authUserForClient, readSignupProfile } from '../lib/profile'
 import { areSignupsPaused, getSignupsPausedMessage } from '../lib/platformSettings'
 
 const router = Router()
@@ -223,8 +223,17 @@ router.post('/google', authLimiter, async (req: Request, res: Response) => {
       return
     }
 
+    const profileRead = readSignupProfile(req.body)
+    if (!profileRead.ok) {
+      res.status(400).json({ error: profileRead.error })
+      return
+    }
+    const profile = profileRead.data
+      ? { ...profileRead.data, ...await resolveProfileLocation(profileRead.data.pincode) }
+      : null
+
     const googleUser = await verifyGoogleIdToken(credential)
-    const result = await signInWithGoogleUser(googleUser, req)
+    const result = await signInWithGoogleUser(googleUser, req, profile)
     if (!result.ok) {
       res.status(result.status).json(result.body)
       return

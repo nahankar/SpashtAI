@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Link, Navigate, NavLink, Outlet, Route, Routes } from 'react-router-dom'
-import { ArrowLeftRight, Loader2, ShieldCheck, User } from 'lucide-react'
+import { Link, Navigate, NavLink, Outlet, Route, Routes, useLocation } from 'react-router-dom'
+import { Activity, ArrowLeftRight, BarChart3, BrainCircuit, LayoutDashboard, Loader2, MailPlus, MessageSquareText, Settings2, ShieldCheck, User, Users } from 'lucide-react'
+import { AdminSideNav } from '@/components/admin/AdminSideNav'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -24,7 +25,7 @@ import { WorkspaceAIAnalytics } from '../admin/AIAnalyticsPage'
 import { WorkspaceSettings } from '../admin/SettingsPage'
 import { WorkspaceUsers } from '../admin/UsersPage'
 import { useWorkspaceShell, WorkspaceShellContext, type WorkspaceShellValue } from './context'
-import { allowedFeatures, isManager, unavailableReason, workspaceNav, type WorkspaceProductFeature } from './model'
+import { ADMIN_NAV_GROUPS, allowedFeatures, isManager, unavailableReason, workspaceNav, type WorkspaceProductFeature } from './model'
 import { createWorkspaceSession, type WorkspaceSessionState } from './session'
 
 export function WorkspaceShell({ slug }: { slug: string }) {
@@ -98,16 +99,29 @@ function Centered({ children }: { children: ReactNode }) {
   return <main className="flex min-h-[60vh] items-center justify-center p-6">{children}</main>
 }
 
-function ShellLayout({ children }: { children: ReactNode }) {
+const ADMIN_ICONS = {
+  admin: LayoutDashboard,
+  'admin/users': Users,
+  'admin/invitations': MailPlus,
+  'admin/feedback': MessageSquareText,
+  'admin/feature-usage': BarChart3,
+  'admin/progress-pulse': Activity,
+  'admin/ai-analytics': BrainCircuit,
+  'admin/settings': Settings2,
+} as const
+
+export function ShellLayout({ children }: { children: ReactNode }) {
   const { slug, snapshot } = useWorkspaceShell()
   const { workspace, membership } = snapshot
   const nav = workspaceNav(membership.role, snapshot.features)
+  const location = useLocation()
   const base = `/w/${encodeURIComponent(slug)}`
+  const adminSection = location.pathname === `${base}/admin` || location.pathname.startsWith(`${base}/admin/`)
   const link = ({ isActive }: { isActive: boolean }) => cn('whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
     isActive ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground')
   return <div className="min-h-screen">
     <header className="border-b bg-card" style={{ borderTop: `4px solid ${workspace.accentColor}` }}>
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-3 px-4 py-3 sm:px-6">
+      <div className={cn('flex flex-wrap items-center gap-3 px-4 py-3 sm:px-6', adminSection ? '' : 'mx-auto max-w-6xl')}>
         <Link to={base} className="flex min-w-0 items-center gap-3">
           {workspace.logoDataUrl ? <img src={workspace.logoDataUrl} alt="" className="h-9 w-9 rounded object-contain" />
             : <span className="flex h-9 w-9 items-center justify-center rounded text-sm font-bold text-white" style={{ background: workspace.accentColor }}>{workspace.name.slice(0, 1).toUpperCase()}</span>}
@@ -119,15 +133,19 @@ function ShellLayout({ children }: { children: ReactNode }) {
           <Button asChild variant="ghost" size="sm"><Link to="/coach"><User className="mr-1.5 h-4 w-4" />Personal</Link></Button>
         </div>
       </div>
-      <nav aria-label="Workspace" className="mx-auto flex max-w-6xl items-center gap-1 overflow-x-auto px-4 pb-2 sm:px-6">
+      <nav aria-label="Workspace" className={cn('flex items-center gap-1 overflow-x-auto px-4 pb-2 sm:px-6', adminSection ? '' : 'mx-auto max-w-6xl')}>
         <NavLink end to={base} className={link}>Home</NavLink>
         {nav.learner.map(item => <NavLink key={item.to} to={`${base}/${item.to}`} className={link}>{item.label}</NavLink>)}
-        {nav.admin.length > 0 && <><span className="mx-2 h-5 w-px shrink-0 bg-border" aria-hidden />
-          <span className="flex shrink-0 items-center gap-1 px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground"><ShieldCheck className="h-3.5 w-3.5" />Admin</span>
-          {nav.admin.map(item => <NavLink key={item.to} end={item.to === 'admin'} to={`${base}/${item.to}`} className={link}>{item.label}</NavLink>)}</>}
+        {nav.admin.length > 0 && <NavLink to={`${base}/admin`} className={link}><span className="inline-flex items-center gap-1"><ShieldCheck className="h-3.5 w-3.5" />Admin</span></NavLink>}
       </nav>
     </header>
-    <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">{children}</main>
+    {adminSection ? <div className="flex min-h-[calc(100vh-65px)] flex-col md:flex-row">
+      <AdminSideNav title="Admin Panel" groups={ADMIN_NAV_GROUPS.map(group => ({
+        label: group.label,
+        links: group.links.map(item => ({ to: `${base}/${item.to}`, label: item.label, end: item.to === 'admin', icon: ADMIN_ICONS[item.to as keyof typeof ADMIN_ICONS] })),
+      }))} />
+      <main className="min-w-0 flex-1 overflow-auto p-4 sm:p-6">{children}</main>
+    </div> : <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">{children}</main>}
   </div>
 }
 

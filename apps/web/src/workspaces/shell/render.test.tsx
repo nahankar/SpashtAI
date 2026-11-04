@@ -5,7 +5,7 @@ import type { Feature, Membership, Snapshot } from '../client'
 import { FeaturesCard } from '../admin/SettingsPage'
 import { DailyActivityView, OverviewView, ProgressPulseView } from '../admin/reports'
 import { WorkspaceShellContext } from './context'
-import { WorkspaceHome } from './WorkspaceShell'
+import { ShellLayout, WorkspaceHome } from './WorkspaceShell'
 
 const workspace = { id: 'ws-1', slug: 'klsvdit', name: 'KLS VDIT', kind: 'ORGANIZATION' as const, state: 'ACTIVE' as const, logoDataUrl: null, accentColor: '#123456', timeZone: 'Asia/Kolkata', isolationStage: 'PRODUCT_PLANE', limits: { maxMembers: 10, dailyEvaluations: 5, concurrentVoice: 2 } }
 const feature = (name: string, change: Partial<Feature> = {}): Feature => ({ feature: name, entitled: true, enabled: true, memberDefault: true, allowed: true, ready: true, ...change })
@@ -27,6 +27,25 @@ describe('workspace pages', () => {
   it('shows Admins the dashboard entry even before any product is turned on', () => {
     const html = home('ADMIN', [])
     expect(html).toContain('href="/w/klsvdit/admin"'); expect(html).toContain('No products yet')
+  })
+
+  it('keeps the product bar on workspace administration and puts admin pages in the side navigation', () => {
+    const snapshot: Snapshot = { workspace, membership: { id: 'm-1', role: 'OWNER', state: 'ACTIVE' }, notice: 'Workspace records stay here.', counts: null, features: [feature('elevate'), feature('replay'), feature('interviews')] }
+    const chrome = (path: string) => renderToStaticMarkup(<MemoryRouter initialEntries={[path]}><WorkspaceShellContext.Provider value={{ slug: 'klsvdit', entry: { ...snapshot, accessToken: 't' }, snapshot, reload: async () => {} }}>
+      <ShellLayout><p>page</p></ShellLayout></WorkspaceShellContext.Provider></MemoryRouter>)
+    const admin = chrome('/w/klsvdit/admin/settings')
+    expect(admin).toContain('aria-label="Workspace"')
+    expect(admin).toContain('href="/w/klsvdit/elevate"')
+    expect(admin).toContain('href="/w/klsvdit/replay"')
+    expect(admin).toContain('href="/w/klsvdit/interviews"')
+    expect(admin).toContain('Admin Panel')
+    expect(admin).toContain('Overview')
+    expect(admin).toContain('href="/w/klsvdit/admin/users"')
+    expect(admin).toContain('Workspace settings')
+    const learner = chrome('/w/klsvdit')
+    expect(learner).toContain('aria-label="Workspace"')
+    expect(learner).toContain('Admin')
+    expect(learner).not.toContain('href="/w/klsvdit/admin/users"')
   })
 
   it('lets administrators switch only products in the plan, and marks unfinished ones', () => {

@@ -5,6 +5,7 @@ import type { Request } from 'express'
 import type { User } from '@prisma/client'
 import type { GoogleUserInfo } from './google-auth'
 import { loadSignupPolicy, resolveGoogleAccount, withAccountRaceRetry } from './googleSignIn'
+import type { SignupProfile } from './profile'
 import { effectiveStatus } from './invitations'
 import { writeAcceptanceAudit } from './invitationAudit'
 
@@ -35,6 +36,7 @@ export async function acceptInvitation(
   invitation: { id: string; tokenHash: string },
   googleUser: GoogleUserInfo,
   req: Request,
+  profile?: SignupProfile | null,
 ): Promise<AcceptanceResult> {
   // Read once, outside the transaction, so the transaction never needs a second pool connection. Whether an
   // invitation may create an account while paused depends on the invitation being pending, checked under the lock.
@@ -74,7 +76,11 @@ export async function acceptInvitation(
       const responses = workspace ? validateEnrollmentResponses(inv.enrollmentFields, req.body?.enrollmentResponses) : {}
       // The approved paused-signup exception applies only to platform invitations. Organization invitations
       // respect the public pause for new identities; see docs/INVITATIONS.md.
-      const account = await resolveGoogleAccount(tx, googleUser, req, { policy, invitationBypassesSignupPause: !workspace })
+      const account = await resolveGoogleAccount(tx, googleUser, req, {
+        policy,
+        invitationBypassesSignupPause: !workspace,
+        profile: profile ?? null,
+      })
       if (!account.ok) return account
       const bypassed = account.created && policy.paused
       if (workspace) await acceptInvitedMembership(tx, inv, account.user.id, workspace.maxMembers, false, responses)

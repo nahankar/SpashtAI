@@ -3,7 +3,7 @@ import { signToken } from '../lib/jwt'
 import { logger } from '../lib/logger'
 import { verifyGoogleIdToken, type GoogleUserInfo } from '../lib/google-auth'
 import { INVALID_LINK, acceptInvitation } from '../lib/invitationAcceptance'
-import { authUserForClient } from '../lib/profile'
+import { authUserForClient, readSignupProfile } from '../lib/profile'
 import { effectiveStatus, findInvitationByToken } from '../lib/invitations'
 import { invitationAcceptLimiter } from '../middleware/rate-limit'
 
@@ -47,6 +47,12 @@ router.post('/accept', invitationAcceptLimiter, async (req: Request, res: Respon
       return
     }
 
+    const profileRead = readSignupProfile(req.body)
+    if (!profileRead.ok) {
+      res.status(400).json({ error: 'PROFILE_REQUIRED', message: profileRead.error })
+      return
+    }
+
     let googleUser: GoogleUserInfo
     try {
       googleUser = await verifyGoogleIdToken(credential)
@@ -55,7 +61,7 @@ router.post('/accept', invitationAcceptLimiter, async (req: Request, res: Respon
       return
     }
     // Validation, account resolution, acceptance and audit happen in one locked transaction.
-    const result = await acceptInvitation(inv, googleUser, req)
+    const result = await acceptInvitation(inv, googleUser, req, profileRead.data)
     if (!result.ok) {
       res.status(result.status).json(result.body)
       return

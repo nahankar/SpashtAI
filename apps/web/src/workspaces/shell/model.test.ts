@@ -16,6 +16,7 @@ describe('workspace navigation', () => {
       const nav = workspaceNav(role, [])
       expect(nav.learner).toEqual([])
       expect(nav.admin.map(i => i.label)).toEqual(['Dashboard', 'Users', 'Invitations', 'Feedback', 'Feature usage', 'Progress Pulse', 'AI Analytics', 'Workspace settings'])
+      expect(nav.admin.every(item => item.to.startsWith('admin'))).toBe(true)
     }
   })
 

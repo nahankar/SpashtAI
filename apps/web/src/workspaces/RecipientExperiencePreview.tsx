@@ -18,19 +18,18 @@ export function SignupFieldsPreview({ workspaceName, fields = [] }: { workspaceN
     <p className="text-sm">Preview only. These controls cannot submit or change an account.</p>
     <div className="mx-auto max-w-lg rounded-lg border p-5 space-y-4">
       <h3 className="text-lg font-semibold">1. Accept {workspaceName ? `${workspaceName} workspace` : 'your'} invitation</h3>
-      <p>Sign in with the Google Account matching the invited email address.</p>
+      <p>First complete any workspace details. Opening the invitation page does not add the recipient.</p>
       <fieldset disabled className="space-y-3">
-        {fields.length > 0 ? <><h4 className="font-semibold">Workspace details</h4><EnrollmentFields fields={fields} values={{}} onChange={() => {}} /><Button type="button">Continue with these details</Button></> : <p>No additional workspace fields are configured.</p>}
-        <Button type="button" variant="outline">Continue with Google</Button>
+        {fields.length > 0 ? <><h4 className="font-semibold">Workspace details</h4><EnrollmentFields fields={fields} values={{}} onChange={() => {}} /><Button type="button">Continue</Button></> : <p>No additional workspace fields are configured.</p>}
       </fieldset>
     </div>
     <div className="mx-auto max-w-lg rounded-lg border p-5 space-y-4">
       <h3 className="text-lg font-semibold">2. Almost there</h3>
-      <p>Add a few details to finish setting up your account. This step is skipped if your regular profile is already complete.</p>
+      <p>Then add regular profile details. The account is created only after this step and sign-in. This step is skipped if the regular profile is already complete.</p>
       <fieldset disabled className="space-y-4">
         <label htmlFor={`${prefix}phone`} className="block">Phone number</label><Input id={`${prefix}phone`} type="tel" placeholder="10-digit mobile number" />
         <ProfileDetailsRow idPrefix={prefix} dateOfBirth="" gender="" pincode="" onDateOfBirthChange={() => {}} onGenderChange={() => {}} onPincodeChange={() => {}} />
-        <Button type="button">Continue</Button>
+        <Button type="button">Accept invitation</Button>
       </fieldset>
     </div>
     {workspaceName && <p>After these steps, the recipient opens {workspaceName}. Workspace responses stay with that workspace; Personal history stays separate.</p>}
@@ -53,7 +52,7 @@ export function RecipientExperiencePreview({ workspaceName, fields, emailContent
         <Button type="button" variant={tab === 'signup' ? 'default' : 'outline'} onClick={() => setTab('signup')}>Signup fields</Button>
       </div>
       {tab === 'email' ? <div className="space-y-3">
-        <p>Uses the same template as the received email, with a sample recipient and expiry. No email is sent and the acceptance link is inactive.</p>
+        <p>Uses the same template as the received email: your message, the Accept invitation button, and the expiry notice. No email is sent and the acceptance link is inactive.</p>
         <Button type="button" variant="outline" disabled={busy} onClick={load}>{busy ? 'Loading preview…' : 'Generate email preview'}</Button>
         {error && <p role="alert" className="text-red-700">{error}</p>}
         {email && <><p className="break-words"><strong>Subject:</strong> {email.subject}</p><iframe title="Invitation email preview" sandbox="" referrerPolicy="no-referrer" srcDoc={email.html} className="w-full h-[620px] rounded border bg-white" /><Accordion type="single" collapsible><AccordionItem value="text"><AccordionTrigger>Plain text version</AccordionTrigger><AccordionContent><pre className="whitespace-pre-wrap break-words text-sm">{email.text}</pre></AccordionContent></AccordionItem></Accordion></>}

@@ -1,11 +1,14 @@
 import { EnrollmentFields, type EnrollmentField, type EnrollmentResponses } from '@/workspaces/EnrollmentForm'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Loader2, MailCheck, TriangleAlert, UserRoundCog } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
+import { ProfileDetailsRow, type ProfileGender } from '@/components/auth/ProfileDetailsRow'
 import { LogoWithBeta } from '@/components/brand/LogoWithBeta'
 import { formatDate } from '@/lib/invitations'
 
@@ -23,6 +26,7 @@ interface Lookup {
 }
 
 type Problem = { kind: 'wrong_account' | 'blocked' | 'error'; message: string }
+type Step = 'workspace' | 'profile'
 
 /** Reads the token from the link fragment (never sent to servers), then forgets it from the address bar. */
 function takeToken(): string {
@@ -47,14 +51,20 @@ export function AcceptInvitation() {
   const [problem, setProblem] = useState<Problem | null>(null)
   const [accepting, setAccepting] = useState(false)
   const [responses, setResponses] = useState<EnrollmentResponses>({})
-  const [detailsReady, setDetailsReady] = useState(false)
+  const [step, setStep] = useState<Step>('workspace')
+  const [phone, setPhone] = useState('')
+  const [dateOfBirth, setDateOfBirth] = useState('')
+  const [gender, setGender] = useState<ProfileGender>('')
+  const [pincode, setPincode] = useState('')
   const { fetchCurrentUser } = useAuth()
 
   useEffect(() => {
     if (!token) return
     post<Lookup>('/api/invitations/lookup', { token }).then(({ ok, data }) => {
-      if (ok) setLookup(data)
-      else setLoadError(data.message || 'This invitation link is not valid.')
+      if (ok) {
+        setLookup(data)
+        if (!data.enrollmentFields?.length) setStep('profile')
+      } else setLoadError(data.message || 'This invitation link is not valid.')
     }).catch(() => setLoadError('Could not check this invitation. Please try again.'))
   }, [token])
 
@@ -62,7 +72,15 @@ export function AcceptInvitation() {
     setProblem(null)
     setAccepting(true)
     try {
-      const { ok, data } = await post<{ token: string; user: { needsProfileCompletion?: boolean }; workspacePath?: string }>('/api/invitations/accept', { token, credential, enrollmentResponses: responses })
+      const { ok, data } = await post<{ token: string; user: { needsProfileCompletion?: boolean }; workspacePath?: string }>('/api/invitations/accept', {
+        token,
+        credential,
+        enrollmentResponses: responses,
+        phone,
+        dateOfBirth,
+        gender,
+        pincode,
+      })
       if (!ok) {
         const kind = data.error === 'wrong_account' ? 'wrong_account' : data.error ? 'blocked' : 'error'
         setProblem({ kind, message: data.message || data.error || 'Could not accept this invitation.' })
@@ -71,7 +89,6 @@ export function AcceptInvitation() {
       localStorage.setItem('spashtai_token', data.token)
       try { sessionStorage.removeItem(TOKEN_KEY) } catch { /* ignore */ }
       await fetchCurrentUser()
-      // New accounts finish the normal onboarding (profile details) before using SpashtAI.
       const next = data.workspacePath?.startsWith('/w/') ? data.workspacePath : '/'
       window.location.assign(data.user.needsProfileCompletion ? `/auth/complete-profile?next=${encodeURIComponent(next)}` : next)
     } catch {
@@ -82,6 +99,8 @@ export function AcceptInvitation() {
   }
 
   const closed = lookup && (lookup.status === 'expired' || lookup.status === 'revoked')
+  const hasWorkspaceFields = !!lookup?.enrollmentFields?.length
+  const profileReady = Boolean(phone && dateOfBirth && gender && pincode)
 
   return (
     <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center bg-background px-4 py-8">
@@ -110,7 +129,7 @@ export function AcceptInvitation() {
               <p className="text-sm text-muted-foreground">
                 {lookup.status === 'accepted'
                   ? 'This invitation has already been accepted. Sign in with the invited Google Account to continue.'
-                  : <>Accept by signing in with the Google Account for <span className="font-medium text-foreground">{lookup.invitedEmail}</span>. The invitation expires on {formatDate(lookup.expiresAt)}.</>}
+                  : <>Complete every required detail, then sign in with the Google Account for <span className="font-medium text-foreground">{lookup.invitedEmail}</span>. The invitation expires on {formatDate(lookup.expiresAt)}.</>}
               </p>
 
               {problem?.kind === 'wrong_account' && (
@@ -124,12 +143,35 @@ export function AcceptInvitation() {
                 <p className="flex gap-2 rounded-md bg-destructive/10 p-3 text-sm text-destructive"><TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />{problem.message}</p>
               )}
 
-              {!!lookup.enrollmentFields?.length && <form className="space-y-3" onSubmit={e => { e.preventDefault(); setDetailsReady(true) }}><h2 className="font-semibold">Workspace details</h2><p className="text-sm">Shared with this workspace’s administrators. Your regular profile details are completed separately if needed.</p><EnrollmentFields fields={lookup.enrollmentFields} values={responses} onChange={v => { setResponses(v); setDetailsReady(false) }} /><Button type="submit" disabled={accepting}>{detailsReady ? 'Details ready' : 'Continue with these details'}</Button></form>}
-              {lookup.enrollmentFields?.length && !detailsReady ? <p className="text-sm">Complete the workspace details above to continue with Google.</p> : accepting ? (
-                <div className="flex items-center justify-center gap-2 py-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Accepting invitation…</div>
-              ) : (
-                <GoogleSignInButton label="signin_with" onCredential={handleCredential} onError={(message) => setProblem({ kind: 'error', message })} />
+              {lookup.status !== 'accepted' && hasWorkspaceFields && step === 'workspace' && (
+                <form className="space-y-3" onSubmit={e => { e.preventDefault(); setStep('profile') }}>
+                  <h2 className="font-semibold">1. Workspace details</h2>
+                  <p className="text-sm">Shared with this workspace’s administrators. Your regular profile details come next.</p>
+                  <EnrollmentFields fields={lookup.enrollmentFields ?? []} values={responses} onChange={setResponses} />
+                  <Button type="submit" disabled={accepting}>Continue</Button>
+                </form>
               )}
+
+              {lookup.status !== 'accepted' && step === 'profile' && (
+                <form className="space-y-3" onSubmit={e => { e.preventDefault() }}>
+                  <h2 className="font-semibold">{hasWorkspaceFields ? '2. Almost there' : 'Almost there'}</h2>
+                  <p className="text-sm">Add these details to finish. Opening this page does not create an account.</p>
+                  {hasWorkspaceFields && <Button type="button" variant="ghost" className="h-auto p-0 text-sm" onClick={() => setStep('workspace')}>Back to workspace details</Button>}
+                  <div className="space-y-2">
+                    <Label htmlFor="invite-phone">Phone number</Label>
+                    <Input id="invite-phone" type="tel" inputMode="tel" placeholder="10-digit mobile number" value={phone} onChange={e => setPhone(e.target.value)} required autoComplete="tel" />
+                  </div>
+                  <ProfileDetailsRow dateOfBirth={dateOfBirth} onDateOfBirthChange={setDateOfBirth} gender={gender} onGenderChange={setGender} pincode={pincode} onPincodeChange={setPincode} />
+                </form>
+              )}
+
+              {accepting ? (
+                <div className="flex items-center justify-center gap-2 py-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Accepting invitation…</div>
+              ) : lookup.status === 'accepted' || (step === 'profile' && profileReady) ? (
+                <GoogleSignInButton label="signin_with" onCredential={handleCredential} onError={(message) => setProblem({ kind: 'error', message })} />
+              ) : step === 'profile' ? (
+                <p className="text-sm">Complete the details above to accept this invitation.</p>
+              ) : null}
 
               <div className="flex gap-2 rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
                 <MailCheck className="mt-0.5 h-4 w-4 shrink-0" />
@@ -142,7 +184,6 @@ export function AcceptInvitation() {
                 By continuing, you agree to the{' '}
                 <Link to="/terms" className="text-foreground font-medium hover:underline">Terms and Conditions</Link> and{' '}
                 <Link to="/privacy" className="text-foreground font-medium hover:underline">Privacy Policy</Link>.
-                New accounts add a few profile details next.
               </p>
             </>
           )}

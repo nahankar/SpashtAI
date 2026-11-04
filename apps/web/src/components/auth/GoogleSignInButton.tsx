@@ -121,7 +121,7 @@ export function GoogleSignInButton({
   if (!GOOGLE_CLIENT_ID) {
     return (
       <Button type="button" variant="outline" className="w-full" disabled title="Set VITE_GOOGLE_CLIENT_ID">
-        Continue with Google (not configured)
+        Google sign-in is not configured
       </Button>
     )
   }

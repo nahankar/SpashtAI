@@ -30,6 +30,7 @@ const app = express(); app.use(express.json()); app.use('/api/invitations', invi
 const tag = `pool_${randomUUID().replaceAll('-', '').slice(0, 12)}`
 const addr = (name: string) => `${tag}_${name}@example.invalid`
 const identity = (email: string) => ({ googleId: `g-${email}`, email, emailVerified: true, firstName: null, lastName: null, avatar: null })
+const SIGNUP_PROFILE = { phone: '9876543210', dateOfBirth: new Date('1995-06-15'), gender: 'FEMALE' as const, pincode: '560001', city: null, state: null, country: null }
 const req = { ip: '127.0.0.1', headers: {} } as unknown as express.Request
 let adminId: string
 
@@ -52,12 +53,12 @@ describe.skipIf(!testDb.url)('Google sign-in and invitation acceptance with a on
     const mail = capturedInvitationEmails().find((m) => m.to === invited)!
     const token = new URL(mail.acceptUrl).hash.replace('#token=', '')
     const results = await Promise.all([
-      signInWithGoogleUser(identity(addr('a')), req),
-      signInWithGoogleUser(identity(addr('b')), req),
-      signInWithGoogleUser(identity(addr('same')), req),
-      signInWithGoogleUser(identity(addr('same')), req),
-      request(app).post('/api/invitations/accept').send({ token, credential: JSON.stringify({ sub: `g-${invited}`, email: invited }) }),
-      signInWithGoogleUser(identity(invited), req),
+      signInWithGoogleUser(identity(addr('a')), req, SIGNUP_PROFILE),
+      signInWithGoogleUser(identity(addr('b')), req, SIGNUP_PROFILE),
+      signInWithGoogleUser(identity(addr('same')), req, SIGNUP_PROFILE),
+      signInWithGoogleUser(identity(addr('same')), req, SIGNUP_PROFILE),
+      request(app).post('/api/invitations/accept').send({ token, credential: JSON.stringify({ sub: `g-${invited}`, email: invited }), phone: '9876543210', dateOfBirth: '1995-06-15', gender: 'FEMALE', pincode: '560001' }),
+      signInWithGoogleUser(identity(invited), req, SIGNUP_PROFILE),
     ])
     expect(results.slice(0, 4).every((r) => 'ok' in r && r.ok)).toBe(true)
     expect((results[4] as request.Response).status).toBe(200)

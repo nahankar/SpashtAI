@@ -67,6 +67,26 @@ export function validateProfileFields(body: {
   }
 }
 
+export type SignupProfile = NonNullable<ReturnType<typeof validateProfileFields>['data']>
+
+/** Missing profile is allowed for existing-account sign-in. A new account must send every field. */
+export function readSignupProfile(body: unknown): { ok: true; data: SignupProfile | null } | { ok: false; error: string } {
+  const source = body && typeof body === 'object' ? body as Record<string, unknown> : {}
+  const provided = ['phone', 'dateOfBirth', 'gender', 'pincode'].some((key) => {
+    const value = source[key]
+    return value != null && String(value).trim() !== ''
+  })
+  if (!provided) return { ok: true, data: null }
+  const result = validateProfileFields({
+    phone: String(source.phone ?? ''),
+    dateOfBirth: String(source.dateOfBirth ?? ''),
+    gender: String(source.gender ?? ''),
+    pincode: String(source.pincode ?? ''),
+  })
+  if (result.error || !result.data) return { ok: false, error: result.error || 'Phone, date of birth, gender, and pincode are required' }
+  return { ok: true, data: result.data }
+}
+
 export async function resolveProfileLocation(pincode: string) {
   return resolvePincodeLocation(pincode)
 }

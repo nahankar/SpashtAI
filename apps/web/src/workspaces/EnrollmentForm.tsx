@@ -28,8 +28,8 @@ export function EnrollmentSettingsEditor({ settings, onSave, busy, workspaceName
     </fieldset>)}
     <Button type="button" variant="outline" disabled={busy || draft.fields.length >= 20} onClick={() => setDraft(d => ({ ...d, fields: [...d.fields, { id: `field_${crypto.randomUUID().replaceAll('-', '').slice(0, 24)}`, type: 'text', label: '', required: false, options: [] }] }))}>Add field</Button>
     <div className="space-y-1.5"><Label htmlFor="enrollment-subject">Invitation subject (optional)</Label><Input id="enrollment-subject" maxLength={150} value={draft.email.subject} onChange={e => setDraft(d => ({ ...d, email: { ...d.email, subject: e.target.value } }))} /></div>
-    <div className="space-y-1.5"><Label htmlFor="enrollment-message">Invitation message (optional)</Label><Textarea id="enrollment-message" rows={5} maxLength={5000} value={draft.email.message} onChange={e => setDraft(d => ({ ...d, email: { ...d.email, message: e.target.value } }))} /></div>
-    <p>Plain text only. The workspace identity, acceptance link, expiry and sign-in instructions are always included.</p>
+    <div className="space-y-1.5"><Label htmlFor="enrollment-message">Invitation message</Label><Textarea id="enrollment-message" rows={5} maxLength={5000} value={draft.email.message} onChange={e => setDraft(d => ({ ...d, email: { ...d.email, message: e.target.value } }))} placeholder="This is the email body the recipient reads." /></div>
+    <p>This message is the email body. SpashtAI only adds the Accept invitation button and the expiry notice.</p>
     {onEmailPreview && <RecipientExperiencePreview key={JSON.stringify(draft)} workspaceName={workspaceName} fields={draft.fields} emailContent={draft.email} onEmailPreview={onEmailPreview} />}
     <Button disabled={busy}>Save signup and email settings</Button>
   </form>
