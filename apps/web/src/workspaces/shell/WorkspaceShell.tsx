@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, Navigate, NavLink, Outlet, Route, Routes, useLocation } from 'react-router-dom'
-import { Activity, ArrowLeftRight, BarChart3, BrainCircuit, LayoutDashboard, Loader2, MailPlus, MessageSquareText, Settings2, ShieldCheck, User, Users } from 'lucide-react'
+import { Activity, ArrowLeftRight, BarChart3, BrainCircuit, FileAudio, LayoutDashboard, Loader2, MailPlus, MessageSquareText, Settings2, ShieldCheck, User, Users } from 'lucide-react'
 import { AdminSideNav } from '@/components/admin/AdminSideNav'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -24,6 +24,7 @@ import { WorkspaceDashboard, WorkspaceFeatureUsage, WorkspaceFeedback, Workspace
 import { WorkspaceAIAnalytics } from '../admin/AIAnalyticsPage'
 import { WorkspaceSettings } from '../admin/SettingsPage'
 import { WorkspaceUsers } from '../admin/UsersPage'
+import { WorkspaceSessionReview, WorkspaceSessions } from '../admin/SessionsPage'
 import { useWorkspaceShell, WorkspaceShellContext, type WorkspaceShellValue } from './context'
 import { ADMIN_NAV_GROUPS, allowedFeatures, isManager, unavailableReason, workspaceNav, type WorkspaceProductFeature } from './model'
 import { createWorkspaceSession, type WorkspaceSessionState } from './session'
@@ -81,6 +82,8 @@ export function WorkspaceShell({ slug }: { slug: string }) {
           <Route path="admin" element={<ManagersOnly />}>
             <Route index element={<WorkspaceDashboard />} />
             <Route path="users" element={<WorkspaceUsers />} />
+            <Route path="sessions" element={<WorkspaceSessions />} />
+            <Route path="sessions/:product/:sessionId" element={<WorkspaceSessionReview />} />
             <Route path="invitations" element={<InvitationsPage />} />
             <Route path="feedback" element={<WorkspaceFeedback />} />
             <Route path="feature-usage" element={<WorkspaceFeatureUsage />} />
@@ -102,6 +105,7 @@ function Centered({ children }: { children: ReactNode }) {
 const ADMIN_ICONS = {
   admin: LayoutDashboard,
   'admin/users': Users,
+  'admin/sessions': FileAudio,
   'admin/invitations': MailPlus,
   'admin/feedback': MessageSquareText,
   'admin/feature-usage': BarChart3,

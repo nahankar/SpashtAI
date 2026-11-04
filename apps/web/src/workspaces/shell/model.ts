@@ -15,6 +15,7 @@ export const ADMIN_NAV_GROUPS: { label: string; links: NavItem[] }[] = [
   { label: 'Overview', links: [
     { to: 'admin', label: 'Dashboard' },
     { to: 'admin/users', label: 'Users' },
+    { to: 'admin/sessions', label: 'Sessions' },
     { to: 'admin/invitations', label: 'Invitations' },
     { to: 'admin/feedback', label: 'Feedback' },
   ] },

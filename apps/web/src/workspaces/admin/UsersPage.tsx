@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
@@ -15,6 +16,7 @@ import type { Feature, Membership } from '../client'
 import { useWorkspaceShell, workspaceCall } from '../shell/context'
 import { featureLabel, canManage } from '../shell/model'
 import { EmptyState, ErrorAlert, Loading, PageHeader } from './parts'
+import { learnerSessionsPath } from './sessionReview'
 
 interface Member extends Membership {
   name: string; email: string; acceptedAt: string | null
@@ -80,6 +82,7 @@ function MemberRow({ member, actor, features, busy, change }: {
   member: Member; actor: Membership['role']; features: Feature[]; busy: boolean
   change: (path: string, method: string, body: unknown, done: string) => Promise<void>
 }) {
+  const { slug } = useWorkspaceShell()
   const editable = canManage(actor, member.role)
   const path = `/api/workspaces/current/members/${member.id}`
   const fields = (member.enrollmentFields ?? []).filter(f => f.type !== 'message')
@@ -91,6 +94,7 @@ function MemberRow({ member, actor, features, busy, change }: {
         <SelectTrigger aria-label={`Role for ${member.email}`} className="w-32"><SelectValue /></SelectTrigger>
         <SelectContent>{ROLES.map(r => <SelectItem key={r} value={r} disabled={r !== 'LEARNER' && actor !== 'OWNER'}>{words(r)}</SelectItem>)}</SelectContent>
       </Select>
+      {member.state !== 'INVITED' && <Button asChild variant="ghost" size="sm"><Link to={learnerSessionsPath(`/w/${encodeURIComponent(slug)}`, member.id)} aria-label={`Sessions of ${member.email}`}>Sessions</Link></Button>}
       {member.state !== 'INVITED' && (member.state === 'SUSPENDED'
         ? <Button variant="outline" size="sm" disabled={busy || !editable} onClick={() => change(path, 'PATCH', { state: 'ACTIVE' }, `${member.email} can use the workspace again.`)}>Reactivate</Button>
         : <AlertDialog>

@@ -31,6 +31,8 @@ export async function currentWorkspaceRequest<T>(token: string, path: string, me
     throw error
   }
 }
+/** Absolute API URL, for media elements that cannot send headers (they use a short-lived ticket in the URL). */
+export function workspaceApiUrl(path: string) { return `${BASE}${path}` }
 export function identityToken() { return localStorage.getItem('spashtai_token') || '' }
 export interface Workspace {
   id: string; slug: string; name: string; kind: 'PERSONAL' | 'ORGANIZATION'; state: 'ACTIVE' | 'SUSPENDED';

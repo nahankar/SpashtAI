@@ -41,6 +41,7 @@ describe('workspace pages', () => {
     expect(admin).toContain('Admin Panel')
     expect(admin).toContain('Overview')
     expect(admin).toContain('href="/w/klsvdit/admin/users"')
+    expect(admin).toContain('href="/w/klsvdit/admin/sessions"')
     expect(admin).toContain('Workspace settings')
     const learner = chrome('/w/klsvdit')
     expect(learner).toContain('aria-label="Workspace"')
