@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { appendFileSync, chmodSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { redact, redactValue } from '../redact.js'
@@ -27,6 +27,7 @@ export class Evidence {
 
   constructor(root: string, readonly runId: string, private readonly secrets: string[] = [], t0 = Date.now(), private readonly echo = true) {
     this.dir = join(root, runId)
+    mkdirSync(this.dir, { recursive: true, mode: 0o700 })
     this.t0 = t0
     for (const sub of ['audio', 'screenshots', 'browser']) mkdirSync(join(this.dir, sub), { recursive: true, mode: 0o700 })
     this.timelineFile = join(this.dir, 'timeline.jsonl')
@@ -50,21 +51,31 @@ export class Evidence {
 
   writeJson(name: string, value: unknown): string {
     const file = this.path(name)
-    writeFileSync(file, redact(JSON.stringify(value, null, 2), this.secrets) + '\n')
+    writeFileSync(file, redact(JSON.stringify(value, null, 2), this.secrets) + '\n', { mode: 0o600 })
     return file
   }
 
   writeText(name: string, text: string): string {
     const file = this.path(name)
-    writeFileSync(file, redact(text, this.secrets))
+    writeFileSync(file, redact(text, this.secrets), { mode: 0o600 })
     return file
   }
 
   writeBinary(name: string, data: Buffer): string {
     const file = this.path(name)
-    writeFileSync(file, data)
+    writeFileSync(file, data, { mode: 0o600 })
     return file
   }
 
   sanitize(text: string): string { return redact(text, this.secrets) }
+
+  /** Evidence is private to the operator: files 0600, directories 0700 (Playwright writes with default modes). */
+  lockDown(dir = this.dir): void {
+    chmodSync(dir, 0o700)
+    for (const name of readdirSync(dir)) {
+      const path = join(dir, name)
+      if (statSync(path).isDirectory()) this.lockDown(path)
+      else chmodSync(path, 0o600)
+    }
+  }
 }

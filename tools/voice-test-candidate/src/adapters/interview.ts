@@ -1,7 +1,9 @@
 import { navigateProduct } from '../browser/navigation.js'
 import type { Page } from 'playwright'
 import type { ConversationEngine, StopReason } from '../engine/conversation.js'
-import { BlockedError, pollUntil, wordRecall, type AdapterContext, type Check, type ExperienceAdapter } from './types.js'
+import { getScenario, SKIP_REPLY, type ManualStep, type Scenario } from '../candidate/scenarios.js'
+import { verifyBrowserPlayback, verifySavedRecording } from '../recording.js'
+import { AttributedError, BlockedError, pollUntil, wordRecall, type AdapterContext, type Check, type ExperienceAdapter } from './types.js'
 
 const COMPLETION = [
   { re: /Practice time is up\. End practice to review your answers\./, reason: 'PRACTICE_DURATION_REACHED' },
@@ -31,8 +33,84 @@ export class InterviewAdapter implements ExperienceAdapter {
   private sessionId: string | null = null
   private stalledSeen = false
   private setup: Record<string, string> = {}
+  private savedMode: boolean | undefined
+  /** What the learner did through the UI in manual mode, with the outcome the page showed. */
+  readonly controlLog: Array<{ turn: number; step: ManualStep; actions: string[]; outcome: string; ok: boolean }> = []
+  private readonly scenario: Scenario | null
+
+  constructor(scenarioId?: string) { this.scenario = scenarioId ? getScenario(scenarioId) : null }
 
   identifiers() { return { runId: this.runId, sessionId: this.sessionId } }
+
+  mode(): 'automatic' | 'manual' | 'unknown' {
+    return this.savedMode === undefined ? 'unknown' : this.savedMode ? 'automatic' : 'manual'
+  }
+
+  private get plan(): ManualStep[] | null {
+    return this.scenario?.interviewMode === 'manual' ? this.scenario.manualPlan ?? null : null
+  }
+
+  scriptedReply(turn: number): string | null {
+    return this.plan?.[turn - 1] === 'skip-next' ? SKIP_REPLY : null
+  }
+
+  /**
+   * Manual flow after a spoken reply: the learner pauses briefly, then uses the page's own controls
+   * (Finish answer / Skip question, then Next question or End practice). Outcomes are read from the page.
+   */
+  async afterCandidateTurn(ctx: AdapterContext, turn: number): Promise<{ action: 'continue' } | { action: 'stop'; reason: StopReason }> {
+    const plan = this.plan
+    if (!plan) return { action: 'continue' }
+    const step = plan[turn - 1]
+    if (!step) return { action: 'stop', reason: { kind: 'plan_complete', detail: `manual plan of ${plan.length} step(s) completed` } }
+    const { page, evidence } = ctx
+    const entry = { turn, step, actions: [] as string[], outcome: '', ok: false }
+    this.controlLog.push(entry)
+    // Let the last words reach the recognizer before sealing the answer, as a person would.
+    await page.waitForTimeout(1500)
+    const control = step === 'skip-next' ? 'Skip question' : 'Finish answer'
+    const button = page.getByRole('button', { name: control, exact: true })
+    if (!await pollUntil(async () => await button.isEnabled().catch(() => false), 20_000, 500)) {
+      entry.outcome = `${control} was not enabled`
+      await ctx.screenshot(`manual-${turn}-control-disabled`)
+      return { action: 'stop', reason: { kind: 'error', detail: `manual step ${turn}: ${control} stayed disabled`, source: 'application' } }
+    }
+    await button.click()
+    entry.actions.push(control)
+    evidence.event('browser', 'manual_control_clicked', { turn, control })
+    const wanted = step === 'skip-next' ? 'SKIPPED' : 'ANSWERED'
+    const outcome = await pollUntil(async () => {
+      const text = await page.evaluate(() => document.body.innerText).catch(() => '')
+      if (/Your answer is saved\. Continue with another question or end practice\./.test(text) || await page.getByRole('button', { name: 'Next question' }).isVisible().catch(() => false)) return 'saved'
+      const alert = await page.locator('[role=alert]').first().textContent().catch(() => null)
+      if (alert && /could not|unavailable|still being transcribed|Retry/i.test(alert)) return `error: ${alert.trim().slice(0, 200)}`
+      const notice = await page.getByText(/No answer has been heard for this question yet/).first().isVisible().catch(() => false)
+      return notice ? 'error: the app reported that no answer was heard' : null
+    }, 60_000, 1000)
+    await ctx.screenshot(`manual-${turn}-${wanted.toLowerCase()}`)
+    if (outcome !== 'saved') {
+      entry.outcome = outcome ?? `no saved state within 60 s after ${control}`
+      return { action: 'stop', reason: { kind: 'error', detail: `manual step ${turn} (${control}): ${entry.outcome}`, source: 'application' } }
+    }
+    entry.outcome = `page shows the answer saved (${wanted.toLowerCase()})`
+    if (step === 'finish-end') {
+      entry.ok = true
+      return { action: 'stop', reason: { kind: 'plan_complete', detail: `manual plan completed: ${plan.join(' → ')}` } }
+    }
+    const next = page.getByRole('button', { name: 'Next question' })
+    if (!await pollUntil(async () => await next.isEnabled().catch(() => false), 20_000, 500)) {
+      const message = await page.locator('[role=status]').allTextContents().catch(() => [])
+      const done = message.find(m => /answered every|no more questions|duration reached|completed the questions/i.test(m))
+      entry.outcome += done ? `; Next unavailable: ${done.trim()}` : '; Next question did not become available'
+      if (done) return { action: 'stop', reason: { kind: 'natural', detail: `the app ended the question sequence: ${done.trim()}` } }
+      return { action: 'stop', reason: { kind: 'error', detail: `manual step ${turn}: Next question not available after saving`, source: 'application' } }
+    }
+    await next.click()
+    entry.actions.push('Next question')
+    evidence.event('browser', 'manual_control_clicked', { turn, control: 'Next question' })
+    entry.ok = true
+    return { action: 'continue' }
+  }
 
   async prepare(ctx: AdapterContext): Promise<void> {
     const { page, evidence, cfg } = ctx
@@ -79,6 +157,16 @@ export class InterviewAdapter implements ExperienceAdapter {
     if (await page.getByText(/I agree to my answers being recorded/).isVisible().catch(() => false)) {
       await consent.check(); evidence.event('browser', 'recording_consent_checked')
     }
+    const expectedMode = this.scenario?.interviewMode
+    if (expectedMode) {
+      const options = await ctx.api.get<{ conversationAvailable?: boolean }>('/api/interviews/options')
+      const automaticAvailable = options.body?.conversationAvailable === true
+      evidence.event('app', 'interview_mode_available', { automaticConversation: automaticAvailable })
+      if ((expectedMode === 'automatic') !== automaticAvailable) {
+        throw new BlockedError(`Scenario ${this.scenario!.id} needs ${expectedMode} Interview mode, but this account ${automaticAvailable ? 'has' : 'does not have'} automatic conversation access. ` +
+          (expectedMode === 'manual' ? 'Use a dedicated account without interview_conversation access (README: manual Interview account).' : 'Use an account with interview_conversation access.'))
+      }
+    }
     const start = page.getByRole('button', { name: 'Start practice' })
     await start.waitFor({ timeout: 15_000 })
     await pollUntil(async () => await start.isEnabled(), 15_000, 500)
@@ -95,10 +183,19 @@ export class InterviewAdapter implements ExperienceAdapter {
     const joined = await pollUntil(async () => { await activateAudio(ctx); return ctx.bridge.incomingStreamCount() > tracksBefore }, 90_000, 1000)
     if (!joined) {
       await ctx.screenshot('interview-no-audio')
-      throw new Error('No audio track from the interviewer arrived within 90 s (room, agent or dispatch problem).')
+      throw new AttributedError('No audio track from the interviewer arrived within 90 s (agent worker, dispatch or LiveKit targeting).', 'setup')
     }
     evidence.event('browser', 'interviewer_audio_track_received')
     await ctx.screenshot('interview-connected')
+    const automatic = await page.getByText(/^Automatic conversation: after you finish/).first().isVisible().catch(() => false)
+    evidence.event('browser', 'interview_mode_displayed', { mode: automatic ? 'automatic' : 'manual' })
+    const expected = this.scenario?.interviewMode
+    if (expected && (expected === 'automatic') !== automatic) {
+      // Do not leave a practice running: end it through the UI, then report the setup mismatch.
+      await this.finish(ctx, { kind: 'cancelled', detail: 'interview mode mismatch' }).catch(() => undefined)
+      throw new BlockedError(`Scenario ${this.scenario!.id} needs ${expected} Interview mode, but this account's practice started in ${automatic ? 'automatic conversation' : 'manual'} mode. ` +
+        (expected === 'manual' ? 'Use an account without interview_conversation access (see README: manual Interview account).' : 'Use an account with interview_conversation access.'))
+    }
   }
 
   private async closeUnfinished(ctx: AdapterContext): Promise<void> {
@@ -149,63 +246,84 @@ export class InterviewAdapter implements ExperienceAdapter {
 
   async verify(ctx: AdapterContext, engine: ConversationEngine): Promise<Check[]> {
     const checks: Check[] = []
-    const add = (c: Check) => { checks.push(c); ctx.evidence.event('verify', c.name, { status: c.status, required: c.required, basis: c.basis, detail: c.detail }) }
-    if (!this.runId) { add({ name: 'interview_run_identified', status: 'failed', required: true, basis: 'browser', detail: 'No run id was observed' }); return checks }
+    const add = (c: Check) => { checks.push(c); ctx.evidence.event('verify', c.name, { status: c.status, required: c.required, basis: c.basis, area: c.area, detail: c.detail }) }
+    if (!this.runId) { add({ name: 'interview_run_identified', status: 'failed', required: true, basis: 'browser', area: 'app-data', detail: 'No run id was observed' }); return checks }
     const runRes = await ctx.api.get<Run>(`/api/interviews/runs/${encodeURIComponent(this.runId)}`)
     const run = runRes.body
-    if (!run) { add({ name: 'interview_run_readable', status: 'failed', required: true, basis: 'api', detail: `HTTP ${runRes.status}` }); return checks }
+    if (!run) { add({ name: 'interview_run_readable', status: 'failed', required: true, basis: 'api', area: 'app-data', detail: `HTTP ${runRes.status}` }); return checks }
     this.sessionId ??= run.sessionId
+    this.savedMode = run.conversationMode === true
     ctx.evidence.writeJson('app-interview-run.json', run)
+
+    const expected = this.scenario?.interviewMode
+    add({ name: 'interview_mode_exercised', status: !expected || (expected === 'automatic') === this.savedMode ? 'passed' : 'failed', required: true, basis: 'api', area: 'mode', attribution: 'setup',
+      detail: `run saved as ${this.savedMode ? 'automatic conversation' : 'manual'} mode${expected ? `; scenario certifies ${expected} mode` : ''}` })
     const wantedMinutes = ctx.cfg.interviewMinutes
-    add({ name: 'practice_settings_applied', status: run.durationMinutes === wantedMinutes ? 'passed' : 'failed', required: true, basis: 'api',
+    add({ name: 'practice_settings_applied', status: run.durationMinutes === wantedMinutes ? 'passed' : 'failed', required: true, basis: 'api', area: 'setup', attribution: 'tool',
       detail: `requested ${wantedMinutes} min; run stored ${run.durationMinutes === null ? 'no time limit' : `${run.durationMinutes} min`} (track ${run.track}, experience ${run.experienceBand}, difficulty ${run.startingDifficulty})` })
-    add({ name: 'practice_ended', status: run.endedAt ? 'passed' : 'failed', required: true, basis: 'api', detail: run.endedAt ? `endedAt ${run.endedAt}` : 'run has no endedAt' })
+    add({ name: 'practice_ended', status: run.endedAt ? 'passed' : 'failed', required: true, basis: 'api', area: 'app-data', detail: run.endedAt ? `endedAt ${run.endedAt}` : 'run has no endedAt' })
+    const asked = run.attempts.filter(a => a.status !== 'PREPARED')
     const answered = run.attempts.filter(a => a.status === 'ANSWERED' && a.capturedText.trim())
-    add({ name: 'answers_captured_by_app', status: answered.length ? 'passed' : 'failed', required: true, basis: 'api',
-      detail: `${answered.length} answered attempt(s) with app transcript; statuses: ${run.attempts.map(a => a.status).join(', ')}` })
-    const spoken = engine.turns.filter(t => t.spoken).map(t => t.spoken!).join(' ')
+    add({ name: 'answers_captured_by_app', status: answered.length ? 'passed' : 'failed', required: true, basis: 'api', area: 'app-data',
+      detail: `${answered.length} answered attempt(s) with app transcript; statuses: ${run.attempts.map(a => a.status).join(', ') || 'none'}` })
+
+    const plan = this.plan
+    if (plan) {
+      const expectedStatuses = plan.map(step => (step === 'skip-next' ? 'SKIPPED' : 'ANSWERED'))
+      const actual = asked.slice(0, plan.length).map(a => a.status)
+      const ok = expectedStatuses.every((st, i) => actual[i] === st) && this.controlLog.length === plan.length && this.controlLog.every(c => c.ok)
+      add({ name: 'manual_controls_outcomes', status: ok ? 'passed' : 'failed', required: true, basis: 'api', area: 'mode',
+        detail: `plan ${plan.join(' → ')}; UI: ${this.controlLog.map(c => `turn ${c.turn} ${c.actions.join(' + ') || 'no click'} → ${c.outcome}`).join('; ') || 'no controls used'}; saved statuses ${actual.join(', ') || 'none'} (expected ${expectedStatuses.join(', ')})` })
+      add({ name: 'manual_flow_covered_questions', status: asked.length >= 2 && this.controlLog.some(c => c.actions.includes('Next question')) && this.controlLog.some(c => c.actions.includes('Skip question')) && this.controlLog.some(c => c.actions.includes('Finish answer')) ? 'passed' : 'failed',
+        required: true, basis: 'browser', area: 'mode', detail: `${asked.length} question(s) asked; controls used: ${[...new Set(this.controlLog.flatMap(c => c.actions))].join(', ') || 'none'}` })
+    }
+
+    // Per reply: is what the candidate said in the app's saved answers? Scripted skip requests are excluded.
     const captured = run.attempts.map(a => a.capturedText).join(' ')
-    const recall = wordRecall(spoken, captured)
-    add({ name: 'app_transcript_matches_candidate_speech', status: recall >= 0.6 ? 'passed' : 'failed', required: false, basis: 'api',
-      detail: `${Math.round(recall * 100)}% of the candidate's content words appear in the app's transcript (advisory; ASR differences expected)` })
-    const askedTexts = run.attempts.filter(a => a.status !== 'PREPARED').map(a => a.question.text)
+    const answers = engine.turns.filter(t => t.spoken && !(plan && this.scriptedReply(engineTurnIndex(engine, t)) !== null))
+    for (const t of answers) t.savedRecall = Math.max(0, ...run.attempts.map(a => wordRecall(t.spoken!, a.capturedText)))
+    const missing = answers.filter(t => (t.savedRecall ?? 0) < 0.3)
+    add({ name: 'saved_answers_cover_spoken_replies', status: answers.length && !missing.length ? 'passed' : 'failed', required: true, basis: 'api', area: 'app-data',
+      detail: answers.length ? `${answers.length - missing.length}/${answers.length} spoken answers found in saved answers` + (missing.length ? `; potentially missing: ${missing.map(t => `turn ${t.turn} (${Math.round((t.savedRecall ?? 0) * 100)}%, ${((t.micTrackVoicedMs ?? 0) / 1000).toFixed(1)} s on the app mic track)`).join(', ')}` : '') : 'no spoken answers' })
+    const spoken = answers.map(t => t.spoken!).join(' ')
+    add({ name: 'app_transcript_matches_candidate_speech', status: wordRecall(spoken, captured) >= 0.6 ? 'passed' : 'failed', required: false, basis: 'api', area: 'app-data',
+      detail: `${Math.round(wordRecall(spoken, captured) * 100)}% of the candidate's content words appear in the app's transcript (advisory; ASR differences expected)` })
     const heardAll = engine.transcripts.map(t => t.text).join(' ')
-    const questionRecall = askedTexts.length ? askedTexts.reduce((n, q) => n + wordRecall(q, heardAll), 0) / askedTexts.length : 0
-    add({ name: 'independent_recognition_matches_questions', status: questionRecall >= 0.6 ? 'passed' : 'failed', required: false, basis: 'audio',
+    const questionRecall = asked.length ? asked.reduce((n, a) => n + wordRecall(a.question.text, heardAll), 0) / asked.length : 0
+    add({ name: 'independent_recognition_matches_questions', status: questionRecall >= 0.6 ? 'passed' : 'failed', required: false, basis: 'audio', area: 'live-audio',
       detail: `${Math.round(questionRecall * 100)}% of saved question words were independently recognized from the interviewer audio (advisory)` })
 
     const history = await ctx.api.get<{ runs: Array<{ id: string }> }>('/api/interviews/runs')
     const listed = Boolean(history.body?.runs.some(r => r.id === this.runId))
-    add({ name: 'history_entry_api', status: listed ? 'passed' : 'failed', required: true, basis: 'api', detail: listed ? 'run listed by /api/interviews/runs' : 'run missing from history API' })
+    add({ name: 'history_entry_api', status: listed ? 'passed' : 'failed', required: true, basis: 'api', area: 'app-data', detail: listed ? 'run listed by /api/interviews/runs' : 'run missing from history API' })
     await navigateProduct(ctx.page, ctx.cfg, '/interviews/history')
     const link = ctx.page.locator(`a[href*="${run.sessionId}"], a[href*="${this.runId}"]`).first()
     const shown = await link.waitFor({ timeout: 20_000 }).then(() => true, () => false)
     await ctx.screenshot('interview-history')
-    add({ name: 'history_entry_displayed', status: shown ? 'passed' : 'failed', required: true, basis: 'browser', detail: shown ? 'Interview history shows the practice' : 'practice not found on /interviews/history' })
+    add({ name: 'history_entry_displayed', status: shown ? 'passed' : 'failed', required: true, basis: 'browser', area: 'app-data', detail: shown ? 'Interview history shows the practice' : 'practice not found on /interviews/history' })
 
-    const recording = await pollUntil(async () => {
-      const r = await ctx.api.get(`/sessions/${encodeURIComponent(run.sessionId)}/recording/stream`, { Range: 'bytes=0-0' })
-      return r.status === 200 || r.status === 206 ? r.status : null
-    }, ctx.cfg.verifyTimeoutMs, 5000)
-    add({ name: 'recording_available', status: recording ? 'passed' : 'pending', required: true, basis: 'api', detail: recording ? `recording stream HTTP ${recording}` : `no recording within ${ctx.cfg.verifyTimeoutMs / 1000} s` })
+    const expectedVoiced = engine.turns.reduce((n, t) => n + (t.micTrackVoicedMs ?? 0), 0)
+    for (const c of await verifySavedRecording(ctx, run.sessionId, answers.map(t => t.spoken!), expectedVoiced)) add(c)
 
     if (run.evaluationEnabled) {
       const assessments = await pollUntil(async () => {
         const r = await ctx.api.get<{ assessments: unknown[] }>(`/api/interviews/runs/${encodeURIComponent(this.runId!)}/assessments`)
-        return r.body?.assessments?.length ? r.body.assessments : null
+        return r.body?.assessments && r.body.assessments.length >= answered.length && r.body.assessments.length ? r.body.assessments : null
       }, ctx.cfg.verifyTimeoutMs, 5000)
-      if (assessments) ctx.evidence.writeJson('app-interview-assessments.json', assessments)
-      add({ name: 'evaluation_available', status: assessments ? 'passed' : 'pending', required: true, basis: 'api',
-        detail: assessments ? `${assessments.length} assessment(s) produced (existence only; scores are not judged)` : `no assessment within ${ctx.cfg.verifyTimeoutMs / 1000} s` })
-    } else add({ name: 'evaluation_available', status: 'skipped', required: false, basis: 'api', detail: 'evaluation not enabled for this run' })
+      const partial = assessments ? null : (await ctx.api.get<{ assessments: unknown[] }>(`/api/interviews/runs/${encodeURIComponent(this.runId!)}/assessments`)).body?.assessments ?? []
+      if (assessments ?? partial) ctx.evidence.writeJson('app-interview-assessments.json', assessments ?? partial)
+      add({ name: 'feedback_available', status: assessments ? 'passed' : 'pending', required: true, basis: 'api', area: 'app-data',
+        detail: assessments ? `${assessments.length} assessment(s) for ${answered.length} answered question(s) (existence only; scores are not judged)` : `${partial?.length ?? 0} of ${answered.length} expected assessment(s) after ${ctx.cfg.verifyTimeoutMs / 1000} s (processing pending)` })
+    } else add({ name: 'feedback_available', status: 'skipped', required: false, basis: 'api', area: 'app-data', detail: 'evaluation not enabled for this run' })
 
     await navigateProduct(ctx.page, ctx.cfg, `/interviews/playback/${encodeURIComponent(run.sessionId)}`)
-    const player = await ctx.page.locator('audio').first().waitFor({ state: 'attached', timeout: 30_000 }).then(() => true, () => false)
-    await ctx.page.waitForTimeout(3000)
+    add(await verifyBrowserPlayback(ctx.page))
     await ctx.screenshot('interview-playback')
-    const empty = await visible(ctx.page, /No playback available/)
-    add({ name: 'playback_page_displayed', status: player && !empty ? 'passed' : 'failed', required: false, basis: 'browser',
-      detail: empty ? 'playback page shows "No playback available"' : player ? 'playback page rendered an audio player' : 'no audio player on the playback page' })
     return checks
   }
+}
+
+/** 1-based candidate-turn number of a spoken record (matches the numbering used by scripted replies). */
+function engineTurnIndex(engine: ConversationEngine, turn: { turn: number }): number {
+  return engine.turns.filter(t => t.spoken).findIndex(t => t.turn === turn.turn) + 1
 }

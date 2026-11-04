@@ -1,161 +1,262 @@
 #!/usr/bin/env node
 /** Bounded orchestration only: the existing CLI remains the real audio candidate. */
-import { existsSync, mkdirSync, openSync, readSync, closeSync, writeFileSync, statSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readSync, statSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { parseArgs } from 'node:util'
 import { chromium } from 'playwright'
-import { assertTargetAllowed, boundedNumber, classifyTarget, loadLocalEnv, providerConfig, knownSecrets } from './config.js'
+import { assertTargetAllowed, boundedNumber, classifyTarget, knownSecrets, loadLocalEnv, providerConfig } from './config.js'
+import { getScenario, SCENARIOS } from './candidate/scenarios.js'
 import { navigateProduct } from './browser/navigation.js'
-import { probe } from './providers/index.js'
+import { accessItems, httpOk, inspectStack, providerItems, readLog, registrationItem, stackSummary, targetingItems, type PreflightItem } from './preflight.js'
 import { redact, safeUrl } from './redact.js'
 
-loadLocalEnv()
-const { values, positionals } = parseArgs({ allowPositionals: true, options: {
-  target: { type: 'string' }, 'api-url': { type: 'string' }, 'livekit-url': { type: 'string' },
-  workspace: { type: 'string' }, 'auth-file': { type: 'string' }, output: { type: 'string' },
-  experience: { type: 'string' }, scenario: { type: 'string' }, 'max-minutes': { type: 'string' },
-  'verify-timeout': { type: 'string' }, 'agent-log': { type: 'string' }, 'api-log': { type: 'string' },
-  'browser-channel': { type: 'string' }, 'allow-production': { type: 'boolean' },
-} })
-const command = positionals[0] ?? 'preflight'
-const target = values.target ?? process.env.VTC_TARGET_URL ?? 'http://localhost:5173'
-const api = values['api-url'] ?? process.env.VTC_API_URL ?? 'http://localhost:4000'
-const livekit = values['livekit-url'] ?? process.env.VTC_LIVEKIT_URL ?? 'ws://localhost:7880'
-const workspace = values.workspace ?? process.env.VTC_WORKSPACE
-const auth = resolve(values['auth-file'] ?? process.env.VTC_AUTH_FILE ?? `.auth/${new URL(target).hostname}_${new URL(target).port || '443'}.json`)
-const output = resolve(values.output ?? 'runs')
-const dir = resolve(output, `workflow-${new Date().toISOString().replace(/[:.]/g, '-')}`)
-const secrets = knownSecrets()
-const checks: Array<{ name: string; ok: boolean; detail: string }> = []
-const starts: Record<string, number> = {}
-const check = (name: string, ok: boolean, detail: string) => {
-  checks.push({ name, ok, detail: redact(detail, secrets) })
-  process.stdout.write(`${ok ? 'OK' : 'BLOCKED'} ${name}: ${redact(detail, secrets)}\n`)
+export const WORKFLOW_HELP = `SpashtAI voice workflow (developer tool)
+
+  npm run voice:preflight -- [options]   check prerequisites only (never a passed voice test)
+  npm run voice:test -- [options]        preflight, then run each selected scenario serially
+  npm run voice:help                     this help
+
+Options
+  --target <url>          app (default VTC_TARGET_URL or http://localhost:5173)
+  --api-url <url>         this stack's API (default VTC_API_URL or http://localhost:4000)
+  --livekit-url <url>     this stack's LiveKit (default VTC_LIVEKIT_URL or ws://localhost:7880)
+  --workspace <slug>      organization workspace; omit for Personal (never falls back silently)
+  --auth-file <path>      signed-in browser state (default .auth/<host>_<port>.json)
+  --manual-auth-file <p>  account WITHOUT automatic Interview conversation, for manual-interview
+                          (default VTC_MANUAL_AUTH_FILE or .auth/manual-<host>_<port>.json)
+  --experience both|interview|elevate   default scenario set (both)
+  --scenario <id>         run only these scenarios (repeatable); see 'npm run vtc -- scenarios'
+  --max-minutes <n>       conversation bound per scenario (0.1–20, default 8; manual-interview 12)
+  --verify-timeout <s>    result wait per scenario (1–600, default 120)
+  --run-timeout <min>     whole-scenario bound passed to the run (1–120, default derived)
+  --api-log/--agent-log   the running processes' log files (sanitized tails are saved)
+  --app-source <dir>      declared app checkout when processes cannot be inspected
+  --browser-channel <c>   e.g. chrome
+  --allow-production      only with explicit owner authorization for this run
+
+Evidence levels reported by preflight
+  reachable            an endpoint answered HTTP
+  configured           a process/provider/account is set up for this target (env, model list, access, coverage)
+  observed-registered  the agent's log shows registration with this LiveKit since its latest start
+  verified-by-live-audio  only a run proves dispatch and audio (see each run's live-audio checks)
+
+Cannot be verified automatically (document in your report):
+  physical microphones/speakers/acoustics; that the running code equals a commit when the checkout is dirty;
+  agents/APIs inside containers (revision unknown); provider generation quality; production readiness.
+
+Exit codes: 0 all scenarios passed (or preflight ready), 1 failed, 2 blocked, 3 inconclusive.
+`
+
+const DEFAULT_SETS: Record<string, string[]> = {
+  both: ['confident-interview', 'manual-interview', 'elevate-learner'],
+  interview: ['confident-interview', 'manual-interview'],
+  elevate: ['elevate-learner'],
 }
-async function reachable(url: string) {
-  try { return (await fetch(url, { signal: AbortSignal.timeout(5000), redirect: 'error' })).ok } catch { return false }
+
+function options(argv: string[]) {
+  return parseArgs({ args: argv, allowPositionals: true, strict: true, options: {
+    target: { type: 'string' }, 'api-url': { type: 'string' }, 'livekit-url': { type: 'string' }, workspace: { type: 'string' },
+    'auth-file': { type: 'string' }, 'manual-auth-file': { type: 'string' }, output: { type: 'string' }, experience: { type: 'string' },
+    scenario: { type: 'string', multiple: true }, 'max-minutes': { type: 'string' }, 'verify-timeout': { type: 'string' }, 'run-timeout': { type: 'string' },
+    'agent-log': { type: 'string' }, 'api-log': { type: 'string' }, 'app-source': { type: 'string' }, 'browser-channel': { type: 'string' },
+    'allow-production': { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
+  } })
 }
-async function preflight() {
-  // Credential-bearing URLs must never be accepted or persisted in evidence.
+
+export interface WorkflowSettings {
+  command: string; target: string; api: string; livekit: string; workspace?: string; auth: string; manualAuth: string
+  output: string; scenarios: string[]; maxMinutes?: number; verifyTimeout: number; runTimeout?: number
+  allowProduction: boolean; logs: { api?: string; agent?: string }; appSource?: string; channel?: string
+}
+
+/** Validates everything before any network access. Throws with an actionable message. */
+export function settings(argv: string[], env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): WorkflowSettings {
+  const { values, positionals } = options(argv)
+  const command = values.help ? 'help' : positionals[0] ?? 'preflight'
+  if (!['preflight', 'test', 'help'].includes(command)) throw new Error(`Unknown command "${command}". Use preflight, test or help.`)
+  const target = values.target ?? env.VTC_TARGET_URL ?? 'http://localhost:5173'
+  const api = values['api-url'] ?? env.VTC_API_URL ?? 'http://localhost:4000'
+  const livekit = values['livekit-url'] ?? env.VTC_LIVEKIT_URL ?? 'ws://localhost:7880'
+  const allowProduction = Boolean(values['allow-production'])
   for (const endpoint of [target, api, livekit]) {
     const u = new URL(endpoint)
+    // Credential-bearing URLs must never be accepted or persisted in evidence.
     if (u.username || u.password || u.search || u.hash) throw new Error('Use endpoint URLs without credentials, queries or fragments')
-    assertTargetAllowed(classifyTarget(endpoint), Boolean(values['allow-production']))
-    if (classifyTarget(endpoint) !== 'local' && !values['allow-production']) throw new Error('Workflow defaults to local services; remote use needs explicit authorization and --allow-production')
+    assertTargetAllowed(classifyTarget(endpoint), allowProduction)
+    if (classifyTarget(endpoint) !== 'local' && !allowProduction) throw new Error('Workflow defaults to local services; remote use needs explicit authorization and --allow-production')
   }
-  if (output !== resolve('runs') && !output.startsWith(resolve('runs') + '/')) throw new Error('Workflow evidence must stay under the ignored tool runs directory')
-  mkdirSync(dir, { recursive: true, mode: 0o700 })
-  check('app', await reachable(target), `${safeUrl(target)}; start/reuse this worktree web process on its own port`)
-  check('API readiness', await reachable(new URL('/ready', api).toString()), `${safeUrl(api)}/ready; use a dedicated local test database`)
-  check('LiveKit reachability', await reachable(livekit.replace(/^ws/, 'http')), `${safeUrl(livekit)}; reachability is not proof of agent registration or audio`)
-  const providers = providerConfig()
-  for (const [name, cfg] of Object.entries(providers)) {
-    if (cfg.provider !== 'openai-compatible') {
-      check(`candidate ${name}`, cfg.provider === 'scripted' || (cfg.provider === 'macos-say' && process.platform === 'darwin'),
-        `${cfg.provider}; independent listening must remain enabled`)
-    } else {
-      const result = await probe(cfg.baseUrl, cfg.apiKey)
-      check(`candidate ${name}`, result.ok, `${safeUrl(cfg.baseUrl)}: ${result.detail}; model=${cfg.model} (generation not tested)`)
-    }
+  const output = resolve(cwd, values.output ?? 'runs')
+  const runs = resolve(cwd, 'runs')
+  if (output !== runs && !output.startsWith(runs + '/')) throw new Error('Workflow evidence must stay under the ignored tool runs directory')
+  const experience = values.experience ?? 'both'
+  if (!DEFAULT_SETS[experience]) throw new Error('experience must be both, interview or elevate')
+  const scenarios = values.scenario?.length ? values.scenario : DEFAULT_SETS[experience]
+  for (const s of scenarios) if (!SCENARIOS[s]) throw new Error(`Unknown scenario "${s}". Available: ${Object.keys(SCENARIOS).join(', ')}`)
+  const host = new URL(target)
+  const hostKey = `${host.hostname}_${host.port || (host.protocol === 'https:' ? '443' : '80')}`
+  return {
+    command, target, api, livekit, workspace: values.workspace ?? env.VTC_WORKSPACE,
+    auth: resolve(cwd, values['auth-file'] ?? env.VTC_AUTH_FILE ?? `.auth/${hostKey}.json`),
+    manualAuth: resolve(cwd, values['manual-auth-file'] ?? env.VTC_MANUAL_AUTH_FILE ?? `.auth/manual-${hostKey}.json`),
+    output, scenarios,
+    maxMinutes: values['max-minutes'] !== undefined ? boundedNumber(values['max-minutes'], 'max-minutes', 0.1, 20) : undefined,
+    verifyTimeout: boundedNumber(values['verify-timeout'] ?? 120, 'verify-timeout', 1, 600),
+    runTimeout: values['run-timeout'] !== undefined ? boundedNumber(values['run-timeout'], 'run-timeout', 1, 120) : undefined,
+    allowProduction, logs: { api: values['api-log'] ?? env.VTC_API_LOG, agent: values['agent-log'] ?? env.VTC_AGENT_LOG },
+    appSource: values['app-source'] ?? env.VTC_APP_SOURCE, channel: values['browser-channel'],
   }
-  check('browser auth state', existsSync(auth), existsSync(auth) ? 'private session file exists; validating in browser next' : 'Run npm run vtc -- login --target <app> with dedicated local account; never commit .auth')
-  for (const kind of ['api', 'agent']) {
-    const path = values[`${kind}-log` as 'api-log' | 'agent-log'] ?? process.env[`VTC_${kind.toUpperCase()}_LOG`]
+}
+
+export function authFor(s: WorkflowSettings, scenario: string): string {
+  return getScenario(scenario).interviewMode === 'manual' ? s.manualAuth : s.auth
+}
+
+async function preflight(s: WorkflowSettings, record: (item: PreflightItem) => void): Promise<boolean> {
+  const local = classifyTarget(s.target) === 'local'
+  const app = await httpOk(s.target)
+  record({ name: 'app', ok: app.ok, level: 'reachable', detail: `${safeUrl(s.target)} → ${app.status ?? app.error}`, remedy: app.ok ? undefined : 'start/reuse this stack\'s web process on its own port' })
+  const ready = await httpOk(new URL('/ready', s.api).toString())
+  const health = ready.ok ? ready : await httpOk(new URL('/health', s.api).toString())
+  record({ name: 'API', ok: health.ok, level: 'reachable', detail: `${safeUrl(s.api)} /ready or /health → ${health.status ?? health.error}`, remedy: health.ok ? undefined : 'start this stack\'s API with a dedicated local database' })
+  const lk = await httpOk(s.livekit.replace(/^ws/, 'http'))
+  record({ name: 'LiveKit', ok: lk.ok, level: 'reachable', detail: `${safeUrl(s.livekit)} → ${lk.status ?? lk.error}; reachability is not agent registration or dispatch` })
+  for (const item of await providerItems(providerConfig())) record(item)
+
+  const stack = local ? inspectStack({ targetUrl: s.target, apiUrl: s.api, livekitUrl: s.livekit, declaredSource: s.appSource }) : []
+  if (local) {
+    for (const item of targetingItems(stack, { api: s.api, livekit: s.livekit })) record(item)
+    for (const item of stackSummary(stack)) record(item)
+  }
+  const agentLog = readLog(s.logs.agent)
+  if (agentLog) record(registrationItem(agentLog.text, agentLog.modifiedMs, stack.find(c => c.component === 'agent' && c.pid), s.livekit))
+  else record({ name: 'agent registration (log)', ok: false, advisory: true, level: 'configured', detail: 'no --agent-log given: registration not observed (process targeting above still applies)', remedy: 'pass --agent-log <file the running agent writes>' })
+  for (const kind of ['api', 'agent'] as const) {
+    const path = s.logs[kind]
     const ok = Boolean(path && existsSync(path) && statSync(path).isFile())
-    check(`${kind} log`, ok, ok ? 'readable local log; sanitized run-window tail will be saved' : `Set --${kind}-log to the actual local process log; do not use production logs`)
-    if (ok) starts[kind] = statSync(path!).size
+    record({ name: `${kind} log`, ok, advisory: kind === 'api', level: 'configured', detail: ok ? 'readable local log; a sanitized run-window tail will be saved' : `--${kind}-log not given or unreadable`, remedy: ok ? undefined : `set --${kind}-log to the actual local process log (never production logs)` })
   }
-  if (checks.some(c => !c.ok)) return false
+
+  const byAuth = new Map<string, string[]>()
+  for (const scenario of s.scenarios) byAuth.set(authFor(s, scenario), [...(byAuth.get(authFor(s, scenario)) ?? []), scenario])
+  for (const [auth, scenarios] of byAuth) {
+    const label = auth === s.manualAuth ? 'manual Interview account' : 'account'
+    if (!existsSync(auth)) { record({ name: `${label} browser state`, ok: false, level: 'access', detail: `missing ${auth}`, remedy: 'run the login command for this account (README: test accounts)' }); continue }
+    await browserChecks(s, auth, scenarios, label, record)
+  }
+  return true
+}
+
+/** Browser-level checks with the real app: API binding, workspace emission, auth, access, coverage, mode. */
+async function browserChecks(s: WorkflowSettings, auth: string, scenarios: string[], label: string, record: (item: PreflightItem) => void) {
   let browser
   try {
-    browser = await chromium.launch({ headless: true, channel: values['browser-channel'] })
+    browser = await chromium.launch({ headless: true, channel: s.channel })
     const context = await browser.newContext({ storageState: auth })
     const page = await context.newPage()
-    const unexpected: string[] = []
-    // Prevent a locally served frontend from sending credentials to a production API.
+    const unexpected = new Set<string>()
+    // Prevent a locally served frontend from sending credentials to another (e.g. production) API.
     await context.route('**/*', async route => {
       const u = new URL(route.request().url())
-      if ((u.pathname.startsWith('/api/') || u.pathname.startsWith('/sessions')) && u.origin !== new URL(api).origin) {
-        unexpected.push(u.origin); return route.abort()
-      }
+      if ((u.pathname.startsWith('/api/') || u.pathname.startsWith('/sessions')) && u.origin !== new URL(s.api).origin) { unexpected.add(u.origin); return route.abort() }
       return route.continue()
     })
-    let scopeSeen = false
-    let scopeToken = ''
-    page.on('request', req => { if (new URL(req.url()).origin === new URL(api).origin && req.headers()['x-spasht-workspace']) { scopeSeen = true; scopeToken = req.headers()['x-spasht-workspace']! } })
-    await navigateProduct(page, { targetUrl: target, workspace }, '/elevate')
-    const token = await page.evaluate(() => localStorage.getItem('spashtai_token'))
-    const me = token ? await context.request.get(new URL('/api/auth/me', api).toString(), {
-      headers: { Authorization: `Bearer ${token}` }, timeout: 10000,
-    }) : null
-    check('authenticated account', me?.status() === 200, 'identity validated against selected API; no token saved in report')
-    if (workspace) {
-      await page.waitForTimeout(2500)
-      check('selected workspace', scopeSeen && new URL(page.url()).pathname.startsWith(`/w/${workspace}/`), `${workspace}; workspace header must be emitted by the app, never fabricated`)
-    } else check('selected workspace', !new URL(page.url()).pathname.startsWith('/w/'), 'Personal (explicit default)')
-    if ((values.experience ?? 'both') !== 'elevate' && token && (!workspace || scopeToken)) {
-      const options = await context.request.get(new URL('/api/interviews/options', api).toString(), {
-        headers: { Authorization: `Bearer ${token}`, ...(workspace ? { 'x-spasht-workspace': scopeToken } : {}) }, timeout: 10000,
-      })
-      check('Interview access / bank options', options.status() === 200,
-        `HTTP ${options.status()}; use a dedicated enabled learner, published fictional bank and configured voice profile`)
+    let scope = ''
+    page.on('request', req => { if (new URL(req.url()).origin === new URL(s.api).origin && req.headers()['x-spasht-workspace']) scope = req.headers()['x-spasht-workspace']! })
+    await navigateProduct(page, { targetUrl: s.target, workspace: s.workspace }, '/elevate')
+    await page.waitForTimeout(1500)
+    if (/\/auth\//.test(new URL(page.url()).pathname)) record({ name: `${label}: signed in`, ok: false, level: 'access', detail: 'the app redirected to sign-in', remedy: 're-run login for this target/account' })
+    if (s.workspace) {
+      const inside = new URL(page.url()).pathname.startsWith(`/w/${s.workspace}/`)
+      record({ name: `${label}: workspace ${s.workspace}`, ok: inside && Boolean(scope), level: 'access',
+        detail: inside ? (scope ? 'page stayed in the workspace and the app sent its workspace scope' : 'page is in the workspace but the app sent no workspace scope (no Personal fallback is allowed)') : `page left the workspace (${new URL(page.url()).pathname})`,
+        remedy: inside && scope ? undefined : 'check membership and workspace access; re-login if the scope expired' })
+    } else record({ name: `${label}: workspace`, ok: !new URL(page.url()).pathname.startsWith('/w/'), level: 'access', detail: 'Personal (explicit default)' })
+    record({ name: `${label}: frontend API binding`, ok: unexpected.size === 0, level: 'safety',
+      detail: unexpected.size ? `frontend called ${[...unexpected].join(', ')} instead of ${new URL(s.api).origin}; requests were refused` : `all app API requests went to ${new URL(s.api).origin}`,
+      remedy: unexpected.size ? 'restart the web process with VITE_API_BASE_URL for this stack; do not run' : undefined })
+    if (unexpected.size === 0 && (!s.workspace || scope)) {
+      for (const item of await accessItems(page, context, s.api, scenarios, s.workspace ? { 'x-spasht-workspace': scope } : {})) record({ ...item, name: `${label}: ${item.name}` })
     }
-    check('frontend API binding', unexpected.length === 0, unexpected.length ? 'frontend calls another API; fix VITE_API_BASE_URL, do not run' : 'no conflicting API requests observed')
     await context.close()
   } catch (error) {
-    check('browser / workspace', false, `Could not validate browser auth/workspace: ${error instanceof Error ? error.message : 'browser failed'}. Check installed Chromium, login and membership/access`)
+    record({ name: `${label}: browser`, ok: false, level: 'access', detail: `could not validate in the browser: ${error instanceof Error ? error.message.split('\n')[0] : 'browser failed'}`, remedy: 'check Chromium install, login, membership and access' })
   } finally { await browser?.close() }
-  return checks.every(c => c.ok)
 }
-function saveLogs() {
-  for (const kind of Object.keys(starts)) {
-    const path = values[`${kind}-log` as 'api-log' | 'agent-log'] ?? process.env[`VTC_${kind.toUpperCase()}_LOG`]
+
+function saveLogs(s: WorkflowSettings, dir: string, starts: Record<string, number>, secrets: string[]) {
+  for (const kind of Object.keys(starts) as Array<'api' | 'agent'>) {
+    const path = s.logs[kind]!
     // Bounded tail only. Logs can contain secrets even before this tool's run.
-    const size = statSync(path!).size
-    const from = Math.max(size - 256000, Math.min(starts[kind]!, size))
+    const size = statSync(path).size
+    const from = Math.max(size - 256_000, Math.min(starts[kind]!, size))
     const bytes = Buffer.alloc(size - from)
-    const fd = openSync(path!, 'r')
+    const fd = openSync(path, 'r')
     try { readSync(fd, bytes, 0, bytes.length, from) } finally { closeSync(fd) }
     writeFileSync(resolve(dir, `${kind}-run.log`), redact(bytes.toString(), secrets), { mode: 0o600 })
   }
 }
-async function child(scenario: string) {
-  const args = ['--import', 'tsx', 'src/cli.ts', 'run', '--target', target, '--auth-file', auth,
-    '--api-url', api, '--scenario', scenario, '--output', dir, '--max-minutes', String(boundedNumber(values['max-minutes'] ?? 8, 'max-minutes', 0.1, 20)),
-    '--verify-timeout', String(boundedNumber(values['verify-timeout'] ?? 120, 'verify-timeout', 1, 600))]
-  if (workspace) args.push('--workspace', workspace)
-  if (values['allow-production']) args.push('--allow-production')
-  if (values['browser-channel']) args.push('--browser-channel', values['browser-channel'])
-  return await new Promise<number>(resolveCode => {
+
+function child(s: WorkflowSettings, scenario: string, dir: string): Promise<number> {
+  const maxMinutes = s.maxMinutes ?? (getScenario(scenario).interviewMode === 'manual' ? 12 : 8)
+  const args = ['--import', 'tsx', 'src/cli.ts', 'run', '--target', s.target, '--auth-file', authFor(s, scenario),
+    '--api-url', s.api, '--livekit-url', s.livekit, '--scenario', scenario, '--output', dir, '--max-minutes', String(maxMinutes),
+    '--verify-timeout', String(s.verifyTimeout), '--close-unfinished']
+  if (s.runTimeout) args.push('--run-timeout', String(s.runTimeout))
+  if (s.workspace) args.push('--workspace', s.workspace)
+  if (s.appSource) args.push('--app-source', s.appSource)
+  if (s.allowProduction) args.push('--allow-production')
+  if (s.channel) args.push('--browser-channel', s.channel)
+  return new Promise<number>(resolveCode => {
     const proc = spawn(process.execPath, args, { stdio: 'inherit' })
-    // Whole scenario bound includes setup and sequential result polling, not just conversation time.
-    const timer = setTimeout(() => proc.kill('SIGTERM'), 25 * 60_000)
-    const killer = setTimeout(() => proc.kill('SIGKILL'), 26 * 60_000)
+    // Outer guard in case the run's own watchdog cannot act (e.g. the process hangs outside the event loop).
+    const bound = ((s.runTimeout ?? maxMinutes + 2 * s.verifyTimeout / 60 + 6) + 2) * 60_000
+    const timer = setTimeout(() => proc.kill('SIGTERM'), bound)
+    const killer = setTimeout(() => proc.kill('SIGKILL'), bound + 60_000)
     proc.on('error', () => { clearTimeout(timer); clearTimeout(killer); resolveCode(2) })
     proc.on('exit', code => { clearTimeout(timer); clearTimeout(killer); resolveCode(code ?? 3) })
   })
 }
+
+export function workflowOutcome(ready: boolean, command: string, results: Array<{ exit: number }>): 'blocked' | 'preflight-ready' | 'passed' | 'not-passed' {
+  if (!ready) return 'blocked'
+  if (command === 'preflight') return 'preflight-ready'
+  return results.length && results.every(r => r.exit === 0) ? 'passed' : 'not-passed'
+}
+
 async function main() {
-  if (!['preflight', 'test'].includes(command)) throw new Error('Use preflight or test; see README for exact commands')
-  const experience = values.experience ?? 'both'
-  if (!['both', 'interview', 'elevate'].includes(experience)) throw new Error('experience must be both, interview or elevate')
-  let ready = false
+  loadLocalEnv()
+  const s = settings(process.argv.slice(2))
+  if (s.command === 'help') { process.stdout.write(WORKFLOW_HELP); return }
+  const secrets = knownSecrets()
+  const dir = resolve(s.output, `workflow-${new Date().toISOString().replace(/[:.]/g, '-')}`)
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  const items: PreflightItem[] = []
+  const record = (item: PreflightItem) => {
+    const clean = { ...item, detail: redact(item.detail, secrets) }
+    items.push(clean)
+    const tag = clean.ok ? 'OK     ' : clean.advisory ? 'NOTE   ' : 'BLOCKED'
+    process.stdout.write(`${tag} [${clean.level}] ${clean.name}: ${clean.detail}${!clean.ok && clean.remedy ? `\n          → ${clean.remedy}` : ''}\n`)
+  }
+  const starts: Record<string, number> = {}
+  for (const kind of ['api', 'agent'] as const) { const p = s.logs[kind]; if (p && existsSync(p)) starts[kind] = statSync(p).size }
   const results: Array<{ scenario: string; exit: number }> = []
+  let ready = false
   try {
-    ready = await preflight()
-    if (ready && command === 'test') {
-      const scenarios = values.scenario ? [values.scenario] : experience === 'both' ? ['confident-interview', 'elevate-learner'] : [experience === 'interview' ? 'confident-interview' : 'elevate-learner']
-      for (const scenario of scenarios) results.push({ scenario, exit: await child(scenario) })
-    }
+    await preflight(s, record)
+    ready = items.every(i => i.ok || i.advisory)
+    process.stdout.write(`\nPreflight ${ready ? 'READY' : 'BLOCKED'} — prerequisites only; a voice test has not run.\n`)
+    if (ready && s.command === 'test') for (const scenario of s.scenarios) results.push({ scenario, exit: await child(s, scenario, dir) })
   } finally {
-    if (existsSync(dir)) {
-      saveLogs()
-      writeFileSync(resolve(dir, 'workflow.json'), JSON.stringify({ command, target: safeUrl(target), workspace: workspace ?? 'Personal', checks, results,
-        outcome: !ready ? 'blocked' : command === 'preflight' ? 'preflight-only' : results.every(r => r.exit === 0) ? 'passed' : 'not-passed' }, null, 2), { mode: 0o600 })
-      console.log(`Evidence: ${dir}`)
-    }
+    saveLogs(s, dir, starts, secrets)
+    const outcome = workflowOutcome(ready, s.command, results)
+    writeFileSync(resolve(dir, 'workflow.json'), JSON.stringify({ command: s.command, target: safeUrl(s.target), api: safeUrl(s.api), livekit: safeUrl(s.livekit),
+      workspace: s.workspace ?? 'Personal', scenarios: s.scenarios, preflight: items, results, outcome }, null, 2), { mode: 0o600 })
+    process.stdout.write(`Workflow outcome: ${outcome}\nEvidence: ${dir}\n`)
   }
   process.exitCode = !ready ? 2 : results.find(r => r.exit !== 0)?.exit ?? 0
 }
-main().catch(error => { console.error(`Workflow blocked: ${redact(error instanceof Error ? error.message : 'check local configuration', secrets)}. No production authorization is implied.`); process.exitCode = 2 })
+
+if (process.argv[1] && /workflow\.(ts|js)$/.test(process.argv[1])) {
+  main().catch(error => { console.error(`Workflow blocked: ${redact(error instanceof Error ? error.message : 'check local configuration', knownSecrets())}. No production authorization is implied.`); process.exitCode = 2 })
+}

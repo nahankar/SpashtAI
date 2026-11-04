@@ -1,7 +1,8 @@
 import { navigateProduct } from '../browser/navigation.js'
 import type { ConversationEngine, StopReason } from '../engine/conversation.js'
 import { activateAudio } from './interview.js'
-import { BlockedError, pollUntil, wordRecall, type AdapterContext, type Check, type ExperienceAdapter } from './types.js'
+import { verifyBrowserPlayback, verifySavedRecording } from '../recording.js'
+import { AttributedError, BlockedError, pollUntil, wordRecall, type AdapterContext, type Check, type ExperienceAdapter } from './types.js'
 
 interface Turn { role?: string; speaker?: string; text?: string; content?: string }
 
@@ -57,7 +58,7 @@ export class ElevateAdapter implements ExperienceAdapter {
     const joined = await pollUntil(async () => { await activateAudio(ctx); return ctx.bridge.incomingStreamCount() > tracksBefore }, 90_000, 1000)
     if (!joined) {
       await ctx.screenshot('elevate-no-audio')
-      throw new Error('No audio track from the coach arrived within 90 s (room, agent or dispatch problem).')
+      throw new AttributedError('No audio track from the coach arrived within 90 s (agent worker, dispatch or LiveKit targeting).', 'setup')
     }
     evidence.event('browser', 'coach_audio_track_received')
     await ctx.screenshot('elevate-connected')
@@ -83,9 +84,12 @@ export class ElevateAdapter implements ExperienceAdapter {
 
   async verify(ctx: AdapterContext, engine: ConversationEngine): Promise<Check[]> {
     const checks: Check[] = []
-    const add = (c: Check) => { checks.push(c); ctx.evidence.event('verify', c.name, { status: c.status, required: c.required, basis: c.basis, detail: c.detail }) }
+    const add = (c: Check) => { checks.push(c); ctx.evidence.event('verify', c.name, { status: c.status, required: c.required, basis: c.basis, area: c.area, detail: c.detail }) }
+    // The results view opens on Playback after Leave: verify the browser player before navigating away.
+    add(await verifyBrowserPlayback(ctx.page))
+    await ctx.screenshot('elevate-playback')
     const id = this.sessionId
-    if (!id) { add({ name: 'elevate_session_identified', status: 'failed', required: true, basis: 'browser', detail: 'no session id observed' }); return checks }
+    if (!id) { add({ name: 'elevate_session_identified', status: 'failed', required: true, basis: 'browser', area: 'app-data', detail: 'no session id observed' }); return checks }
 
     type SessionView = { endedAt?: string | null; paceReconciliationStatus?: string | null; deliveryAlignmentStatus?: string | null }
     const readSession = async () => {
@@ -94,7 +98,7 @@ export class ElevateAdapter implements ExperienceAdapter {
     }
     const first = await readSession()
     if (first.session) ctx.evidence.writeJson('app-elevate-session.json', first.session)
-    add({ name: 'session_ended', status: first.session?.endedAt ? 'passed' : 'failed', required: true, basis: 'api', detail: first.session?.endedAt ? `endedAt ${first.session.endedAt}` : `HTTP ${first.status}; no endedAt` })
+    add({ name: 'session_ended', status: first.session?.endedAt ? 'passed' : 'failed', required: true, basis: 'api', area: 'app-data', detail: first.session?.endedAt ? `endedAt ${first.session.endedAt}` : `HTTP ${first.status}; no endedAt` })
 
     const turns = await pollUntil(async () => {
       const r = await ctx.api.get<{ turns?: Turn[] } | Turn[]>(`/sessions/${encodeURIComponent(id)}/turns`)
@@ -102,24 +106,29 @@ export class ElevateAdapter implements ExperienceAdapter {
       return list.length ? list : null
     }, Math.min(ctx.cfg.verifyTimeoutMs, 60_000), 5000) ?? []
     ctx.evidence.writeJson('app-elevate-turns.json', turns)
-    const userText = turns.filter(t => /user/i.test(t.role ?? t.speaker ?? '')).map(t => t.text ?? t.content ?? '').join(' ')
-    add({ name: 'transcript_saved', status: userText.trim() ? 'passed' : 'failed', required: true, basis: 'api', detail: `${turns.length} saved turn(s); learner text ${userText.trim() ? 'present' : 'missing'}` })
-    const spoken = engine.turns.filter(t => t.spoken).map(t => t.spoken!).join(' ')
+    const userTurns = turns.filter(t => /user/i.test(t.role ?? t.speaker ?? '')).map(t => t.text ?? t.content ?? '')
+    const userText = userTurns.join(' ')
+    add({ name: 'transcript_saved', status: userText.trim() ? 'passed' : 'failed', required: true, basis: 'api', area: 'app-data', detail: `${turns.length} saved turn(s), ${userTurns.length} from the learner; learner text ${userText.trim() ? 'present' : 'missing'}` })
+    // Per reply: did each thing the candidate said end up in the saved transcript? (The Northwind failure mode.)
+    const spokenTurns = engine.turns.filter(t => t.spoken)
+    for (const t of spokenTurns) t.savedRecall = Math.max(0, ...userTurns.map(u => wordRecall(t.spoken!, u)))
+    const missing = spokenTurns.filter(t => (t.savedRecall ?? 0) < 0.3)
+    add({ name: 'saved_transcript_covers_spoken_replies', status: spokenTurns.length && !missing.length ? 'passed' : 'failed', required: true, basis: 'api', area: 'app-data',
+      detail: `${spokenTurns.length - missing.length}/${spokenTurns.length} spoken replies found in ${userTurns.length} saved learner turn(s)` + (missing.length
+        ? `; potentially missing: ${missing.map(t => `turn ${t.turn} (${Math.round((t.savedRecall ?? 0) * 100)}% match, ${((t.micTrackVoicedMs ?? 0) / 1000).toFixed(1)} s voiced on the app mic track)`).join(', ')}` : '') })
+    const spoken = spokenTurns.map(t => t.spoken!).join(' ')
     const recall = wordRecall(spoken, userText)
-    add({ name: 'app_transcript_matches_candidate_speech', status: recall >= 0.6 ? 'passed' : 'failed', required: false, basis: 'api', detail: `${Math.round(recall * 100)}% of candidate content words in the app transcript (advisory)` })
+    add({ name: 'app_transcript_matches_candidate_speech', status: recall >= 0.6 ? 'passed' : 'failed', required: false, basis: 'api', area: 'app-data', detail: `${Math.round(recall * 100)}% of candidate content words in the app transcript (advisory)` })
 
-    const recording = await pollUntil(async () => {
-      const r = await ctx.api.get(`/sessions/${encodeURIComponent(id)}/recording/stream`, { Range: 'bytes=0-0' })
-      return r.status === 200 || r.status === 206 ? r.status : null
-    }, ctx.cfg.verifyTimeoutMs, 5000)
-    add({ name: 'recording_available', status: recording ? 'passed' : 'pending', required: true, basis: 'api', detail: recording ? `recording stream HTTP ${recording}` : `no recording within ${ctx.cfg.verifyTimeoutMs / 1000} s` })
+    const expectedVoiced = engine.turns.reduce((n, t) => n + (t.micTrackVoicedMs ?? 0), 0)
+    for (const c of await verifySavedRecording(ctx, id, spokenTurns.map(t => t.spoken!), expectedVoiced)) add(c)
 
     const metrics = await pollUntil(async () => {
       const r = await ctx.api.get<Record<string, unknown>>(`/sessions/${encodeURIComponent(id)}/metrics`)
       return r.status === 200 && r.body && Object.keys(r.body).length ? r.body : null
     }, ctx.cfg.verifyTimeoutMs, 5000)
     if (metrics) ctx.evidence.writeJson('app-elevate-metrics.json', metrics)
-    add({ name: 'analysis_available', status: metrics ? 'passed' : 'pending', required: true, basis: 'api',
+    add({ name: 'analysis_available', status: metrics ? 'passed' : 'pending', required: true, basis: 'api', area: 'app-data',
       detail: metrics ? 'session metrics returned (existence only; values are not judged)' : 'no metrics within the verification window' })
 
     const unsettled = (s: SessionView | null) => !s ? ['session unreadable'] : (['paceReconciliationStatus', 'deliveryAlignmentStatus'] as const)
@@ -127,9 +136,11 @@ export class ElevateAdapter implements ExperienceAdapter {
     const settled = await pollUntil(async () => { const s = (await readSession()).session; return unsettled(s).length ? null : s }, ctx.cfg.verifyTimeoutMs, 5000)
     const last = settled ?? (await readSession()).session
     if (last) ctx.evidence.writeJson('app-elevate-session.json', last)
-    add({ name: 'async_processing_settled', status: settled ? 'passed' : 'pending', required: true, basis: 'api',
-      detail: settled ? `pace ${settled.paceReconciliationStatus ?? 'n/a'}, delivery alignment ${settled.deliveryAlignmentStatus ?? 'n/a'}`
-        : `still ${unsettled(last).join(', ')} after ${ctx.cfg.verifyTimeoutMs / 1000} s` })
+    const failedProcessing = last ? (['paceReconciliationStatus', 'deliveryAlignmentStatus'] as const).filter(k => /fail|error/i.test(String(last[k] ?? ''))).map(k => `${k}=${last[k]}`) : []
+    add({ name: 'async_processing_settled', status: failedProcessing.length ? 'failed' : settled ? 'passed' : 'pending', required: true, basis: 'api', area: 'app-data',
+      detail: failedProcessing.length ? `processing failed: ${failedProcessing.join(', ')}`
+        : settled ? `completed — pace ${settled.paceReconciliationStatus ?? 'n/a'}, delivery alignment ${settled.deliveryAlignmentStatus ?? 'n/a'}`
+        : `PENDING (not failed, not completed): still ${unsettled(last).join(', ')} after ${ctx.cfg.verifyTimeoutMs / 1000} s` })
 
     await ctx.page.getByRole('tab', { name: /Session Analytics/ }).click().catch(() => undefined)
     await ctx.page.waitForTimeout(3000)
@@ -137,7 +148,7 @@ export class ElevateAdapter implements ExperienceAdapter {
     await navigateProduct(ctx.page, ctx.cfg, '/elevate')
     const listed = await ctx.page.getByText(this.sessionName).first().waitFor({ timeout: 30_000 }).then(() => true, () => false)
     await ctx.screenshot('elevate-history')
-    add({ name: 'history_entry_displayed', status: listed ? 'passed' : 'failed', required: true, basis: 'browser', detail: listed ? `Elevate history lists "${this.sessionName}"` : 'session name not found in Elevate history' })
+    add({ name: 'history_entry_displayed', status: listed ? 'passed' : 'failed', required: true, basis: 'browser', area: 'app-data', detail: listed ? `Elevate history lists "${this.sessionName}"` : 'session name not found in Elevate history' })
     return checks
   }
 }

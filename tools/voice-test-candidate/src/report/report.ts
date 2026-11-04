@@ -1,5 +1,6 @@
 import type { Check } from '../adapters/types.js'
 import type { StopReason, TurnRecord } from '../engine/conversation.js'
+import { provenanceLabel, type ComponentProvenance } from '../provenance.js'
 
 export type Outcome = 'passed' | 'failed' | 'blocked' | 'inconclusive'
 
@@ -16,7 +17,15 @@ export interface RunReport {
   experience: string
   scenario: string
   profile: string
+  /** Revision of this test tool only. Never the application revision. */
   tool: { version: string; commit: string; dirty: boolean }
+  /** What application code was tested, per component, with verification status. */
+  application: ComponentProvenance[]
+  /** Interview interaction mode actually exercised (from the saved run), when applicable. */
+  interviewMode?: 'automatic' | 'manual' | 'unknown'
+  failureSources: FailureSource[]
+  /** Observable state when the conversation stopped (failure evidence). */
+  atStop?: Record<string, unknown>
   providers: Record<string, string>
   identifiers: Record<string, string | null>
   stop: StopReason | null
@@ -32,26 +41,40 @@ export interface RunReport {
   limitations: string[]
 }
 
-export function classify(input: { blocked?: string; stop: StopReason | null; finish: { ended: boolean; detail: string } | null; checks: Check[] }): { outcome: Outcome; reasons: string[] } {
-  if (input.blocked) return { outcome: 'blocked', reasons: [input.blocked] }
+export type FailureSource = 'application' | 'tool' | 'setup' | 'unknown'
+
+export interface Classification { outcome: Outcome; reasons: string[]; sources: FailureSource[] }
+
+/**
+ * Outcome rules. Only a session the application (or, for the manual scenario, the scripted learner plan)
+ * completed, ended through the UI, with every required check passed, is `passed`. Each failure reason names
+ * whether it points at the application, the tool, or the setup, so application defects are never masked.
+ */
+export function classify(input: { blocked?: string; blockedSource?: FailureSource; stop: StopReason | null; stopSource?: FailureSource;
+  finish: { ended: boolean; detail: string } | null; checks: Check[] }): Classification {
+  if (input.blocked) return { outcome: 'blocked', reasons: [`[${input.blockedSource ?? 'setup'}] ${input.blocked}`], sources: [input.blockedSource ?? 'setup'] }
   const reasons: string[] = []
+  const sources = new Set<FailureSource>()
+  const add = (source: FailureSource, text: string) => { sources.add(source); reasons.push(`[${source}] ${text}`) }
   const failedRequired = input.checks.filter(c => c.required && c.status === 'failed')
   const pendingRequired = input.checks.filter(c => c.required && c.status === 'pending')
-  if (input.stop?.kind === 'error') reasons.push(`conversation error: ${input.stop.detail}`)
-  if (input.stop?.kind === 'app_silent') reasons.push(`SpashtAI went silent: ${input.stop.detail}`)
-  if (input.finish && !input.finish.ended) reasons.push(`session did not end normally: ${input.finish.detail}`)
-  for (const c of failedRequired) reasons.push(`required check failed: ${c.name} — ${c.detail}`)
-  if (reasons.length) return { outcome: 'failed', reasons }
+  if (input.stop?.kind === 'error') add(input.stopSource ?? 'tool', `conversation error: ${input.stop.detail}`)
+  if (input.stop?.kind === 'timeout') add(input.stopSource ?? 'unknown', `whole-run timeout: ${input.stop.detail}`)
+  if (input.stop?.kind === 'app_silent') add(input.stopSource ?? 'unknown', `SpashtAI went silent: ${input.stop.detail}`)
+  if (input.finish && !input.finish.ended) add('application', `session did not end normally: ${input.finish.detail}`)
+  for (const c of failedRequired) add(c.attribution ?? (c.basis === 'tool' ? 'tool' : 'application'), `required check failed: ${c.name} — ${c.detail}`)
+  if (reasons.length) return { outcome: 'failed', reasons, sources: [...sources] }
   if (input.stop && (input.stop.kind === 'max_turns' || input.stop.kind === 'max_duration' || input.stop.kind === 'cancelled')) {
-    reasons.push(`bounded run: stopped by the tool (${input.stop.kind}: ${input.stop.detail}) before the application completed the session`)
+    add('tool', `bounded run: stopped by the tool (${input.stop.kind}: ${input.stop.detail}) before the application completed the session`)
   }
-  for (const c of pendingRequired) reasons.push(`still pending after the verification window: ${c.name} — ${c.detail}`)
+  for (const c of pendingRequired) add(c.attribution ?? 'application', `still pending after the verification window: ${c.name} — ${c.detail}`)
   if (!input.stop || !input.finish || !input.checks.some(c => c.required && c.status === 'passed')) {
-    reasons.push('missing completion, session-end or required verification evidence')
+    add('unknown', 'missing completion, session-end or required verification evidence')
   }
-  if (input.checks.some(c => c.required && c.status === 'skipped')) reasons.push('required verification was skipped')
-  if (reasons.length) return { outcome: 'inconclusive', reasons }
-  return { outcome: 'passed', reasons: ['application completed the session naturally and every required check passed'] }
+  for (const c of input.checks.filter(c => c.required && c.status === 'skipped')) add(c.attribution ?? 'setup', `required verification was skipped: ${c.name} — ${c.detail}`)
+  if (reasons.length) return { outcome: 'inconclusive', reasons, sources: [...sources] }
+  const how = input.stop?.kind === 'plan_complete' ? 'the scripted learner plan completed and the learner ended the session through the UI' : 'application completed the session naturally'
+  return { outcome: 'passed', reasons: [`${how}; every required check passed`], sources: [] }
 }
 
 export function stats(values: Array<number | undefined>): { count: number; min: number; median: number; max: number } | null {
@@ -72,15 +95,33 @@ export function renderMarkdown(r: RunReport, t0: number): string {
     `| Workspace | ${r.workspace ?? 'Personal'} |`,
     `| Experience / scenario / profile | ${r.experience} / ${r.scenario} / ${r.profile} |`,
     `| Started / duration | ${r.startedAt} / ${fmt(r.durationMs)} |`,
-    `| Tool | ${r.tool.version} @ ${r.tool.commit}${r.tool.dirty ? ' (uncommitted changes)' : ''} |`,
+    ...(r.interviewMode ? [`| Interview mode exercised | ${r.interviewMode === 'manual' ? 'manual — Finish / Skip / Next through UI controls' : r.interviewMode === 'automatic' ? 'automatic conversation — the interviewer finishes answers and moves on' : 'unknown'} |`] : []),
+    `| Test tool revision (not the app) | ${r.tool.version} @ ${r.tool.commit}${r.tool.dirty ? ' (uncommitted changes)' : ''} |`,
     ...Object.entries(r.providers).map(([k, v]) => `| ${k} | ${v} |`),
     ...Object.entries(r.identifiers).map(([k, v]) => `| ${k} | ${v ?? '—'} |`),
     `| Conversation stop | ${r.stop ? `${r.stop.kind}: ${r.stop.detail}` : '—'} |`,
     `| Session end | ${r.finish ? r.finish.detail : '—'} |`, '')
 
+  if (r.failureSources.length) lines.push(`**Failure points at:** ${r.failureSources.join(', ')} (see bracketed reasons above).`, '')
+
+  lines.push('## Application under test', '', 'Revision status: **verified** = a local process serves the endpoint from a clean checkout started after HEAD last moved; **unverified** = process found but the running code may differ; **unknown** = not inspectable. The test tool revision above is never the application revision.', '',
+    '| Component | Endpoint | Status | Revision / source | Targets | Basis |', '|---|---|---|---|---|---|')
+  for (const a of r.application) {
+    const targets = a.targets ? Object.entries(a.targets).map(([k, v]) => `${k}=${v.value} (${v.source})`).join('<br>') : '—'
+    lines.push(`| ${a.component}${a.pid ? ` (pid ${a.pid})` : ''} | ${a.endpoint ?? '—'} | ${a.status} | ${provenanceLabel(a).replace(/^[a-z]+: /, '')} | ${targets} | ${a.basis} |`)
+  }
+  lines.push('')
+
+  if (r.atStop) {
+    lines.push('## State when the conversation stopped', '')
+    for (const [k, v] of Object.entries(r.atStop)) lines.push(`- **${k}:** ${typeof v === 'string' ? v : JSON.stringify(v)}`)
+    lines.push('')
+  }
+
   lines.push('## Checks', '', 'Basis: **browser** = displayed in the test browser; **audio** = measured from captured audio; **api** = read-only API call with the test session (diagnostic, not user-visible); **tool** = tool state.', '',
-    '| Check | Status | Required | Basis | Detail |', '|---|---|---|---|---|')
-  for (const c of r.checks) lines.push(`| ${c.name} | ${c.status} | ${c.required ? 'yes' : 'advisory'} | ${c.basis} | ${c.detail.replace(/\|/g, '/')} |`)
+    'Area: **live-audio** = audio exchanged during the session (captured in the test browser); **saved-recording** = the stored recording after the session; **app-data** = saved answers, transcripts, feedback, history; **mode** = interaction mode exercised. Physical speaker output is never covered.', '',
+    '| Check | Status | Required | Area | Basis | Points at | Detail |', '|---|---|---|---|---|---|---|')
+  for (const c of r.checks) lines.push(`| ${c.name} | ${c.status} | ${c.required ? 'yes' : 'advisory'} | ${c.area ?? '—'} | ${c.basis} | ${c.status === 'passed' ? '—' : c.attribution ?? (c.basis === 'tool' ? 'tool' : 'application')} | ${c.detail.replace(/\|/g, '/')} |`)
 
   lines.push('', '## Conversation', '', 'SpashtAI lines are the tool\'s **independent recognition of the audio**, not the app\'s transcript.', '')
   for (const t of r.turns) {
@@ -88,6 +129,7 @@ export function renderMarkdown(r: RunReport, t0: number): string {
     if (t.spoken) {
       lines.push(`**Candidate (spoken):** ${t.spoken}`, '')
       lines.push(`Response gap ${fmt(t.responseGapMs)} · SpashtAI responded after ${fmt(t.appResponseLatencyMs)} · mic open at start: ${t.micOpenAtStart ? 'yes' : 'no'}${t.stoppedEarly ? ' · stopped early (yielded)' : ''}`)
+      lines.push(`On the app microphone track: ${t.micTrackVoicedMs === undefined ? 'not measured' : `${fmt(t.micTrackVoicedMs)} voiced`} · in the app's saved transcript: ${t.savedRecall === undefined ? 'not compared' : `${Math.round(t.savedRecall * 100)}% of its words${t.savedRecall < 0.3 ? ' — POTENTIALLY MISSING' : ''}`}`)
       const meta = t.audioMeta as { insertedPausesMs?: number[]; measuredPausesMs?: number[]; file?: string } | undefined
       if (meta?.insertedPausesMs?.length) lines.push(`Inserted pauses ${meta.insertedPausesMs.join(', ')} ms; measured in audio ${meta.measuredPausesMs?.join(', ') || 'none'} ms`)
       if (meta?.file) lines.push(`Audio: \`${meta.file}\``)

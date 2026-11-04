@@ -12,10 +12,23 @@ export interface Check {
   /** Where the evidence came from: what the browser displayed, the audio, or a read-only API call. */
   basis: 'browser' | 'audio' | 'api' | 'tool'
   detail: string
+  /**
+   * Which coverage area this check belongs to, so live capture, saved recordings and app data stay distinct:
+   * live-audio = audio exchanged during the session; saved-recording = the stored recording after the session;
+   * app-data = saved answers/transcripts/feedback/history; mode = the interaction mode actually exercised.
+   */
+  area?: 'live-audio' | 'saved-recording' | 'app-data' | 'mode' | 'setup'
+  /** Who a failure points at. Defaults: tool basis → tool; otherwise application. */
+  attribution?: 'application' | 'tool' | 'setup'
 }
 
 /** A missing prerequisite (auth, service, access, data) — the run cannot meaningfully proceed. */
 export class BlockedError extends Error {}
+
+/** A failure whose cause is known (e.g. no agent audio arrived = setup/dispatch; an app error banner = application). */
+export class AttributedError extends Error {
+  constructor(message: string, readonly source: 'application' | 'tool' | 'setup') { super(message) }
+}
 
 export interface AdapterContext {
   page: Page
@@ -25,6 +38,8 @@ export interface AdapterContext {
   cfg: RunConfig
   api: AppApi
   screenshot(name: string): Promise<void>
+  /** The candidate's independent speech recognition (used to inspect saved recordings). */
+  transcribe?: (pcm: import('../audio/pcm.js').Pcm) => Promise<string>
 }
 
 export interface ExperienceAdapter {
@@ -39,6 +54,15 @@ export interface ExperienceAdapter {
   identifiers(): Record<string, string | null>
   /** Gives adapters whose completion is heard (not shown) access to the candidate's conversation state. */
   attach?(engine: ConversationEngine): void
+  /** Interview interaction mode actually exercised, read from the saved run (not from the scenario). */
+  mode?(): 'automatic' | 'manual' | 'unknown' | undefined
+  /**
+   * Manual flows: what the learner does with the UI after a spoken reply (e.g. Finish answer, then Next).
+   * Returning `stop` ends the conversation (e.g. the learner plan is complete).
+   */
+  afterCandidateTurn?(ctx: AdapterContext, turn: number): Promise<{ action: 'continue' } | { action: 'stop'; reason: StopReason }>
+  /** Manual flows: a fixed reply for this candidate turn (e.g. asking to skip), instead of a generated one. */
+  scriptedReply?(turn: number): string | null
 }
 
 /**
@@ -63,16 +87,26 @@ export class AppApi {
     return await this.page.evaluate(() => localStorage.getItem('spashtai_token')).catch(() => null)
   }
 
-  async get<T = unknown>(path: string, headers: Record<string, string> = {}): Promise<{ status: number; body: T | null }> {
+  /** Raw bytes (e.g. a saved recording) with the same scoping rules as `get`. */
+  async getBytes(path: string, headers: Record<string, string> = {}): Promise<{ status: number; contentType: string; body: Buffer | null }> {
+    const res = await this.request(path, headers, 120_000)
+    return { status: res.status(), contentType: res.headers()['content-type'] ?? '', body: res.ok() ? await res.body() : null }
+  }
+
+  private async request(path: string, headers: Record<string, string>, timeout = 20_000) {
     if (!this.origin) throw new Error('API origin not observed yet')
     if (this.workspace && !new URL(this.page.url()).pathname.startsWith(`/w/${this.workspace}/`)) {
       throw new BlockedError('Selected workspace was lost; refusing diagnostic API fallback to Personal')
     }
     if (this.workspace && !this.workspaceToken) throw new BlockedError('Workspace token was not observed; refusing Personal diagnostics')
     const token = await this.token()
-    const res = await this.context.request.get(`${this.origin}${path}`, {
-      headers: { ...(this.workspace ? { 'x-spasht-workspace': this.workspaceToken! } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers }, timeout: 20_000, failOnStatusCode: false,
+    return await this.context.request.get(`${this.origin}${path}`, {
+      headers: { ...(this.workspace ? { 'x-spasht-workspace': this.workspaceToken! } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers }, timeout, failOnStatusCode: false,
     })
+  }
+
+  async get<T = unknown>(path: string, headers: Record<string, string> = {}): Promise<{ status: number; body: T | null }> {
+    const res = await this.request(path, headers)
     let body: T | null = null
     const type = res.headers()['content-type'] ?? ''
     if (type.includes('json')) body = await res.json().catch(() => null) as T | null

@@ -164,6 +164,45 @@ export class AudioBridge {
     return [...this.streams.values()].some(s => s.vad?.speaking)
   }
 
+  /**
+   * Milliseconds of voiced audio (20 ms frames above -48 dBFS) captured on streams of `kind` between two epochs.
+   * For `mic` this is what the application's own microphone track carried — silence while the app disabled it.
+   */
+  voicedMs(kind: 'incoming' | 'mic', startEpoch: number, endEpoch: number, thresholdDb = -48): number {
+    const frame = Math.round(0.02 * ANALYSIS_RATE)
+    const threshold = Math.pow(10, thresholdDb / 10) * frame
+    let voiced = 0
+    for (const stream of this.streams.values()) {
+      if (stream.kind !== kind) continue
+      const samples = this.samples(stream)
+      const from = Math.max(0, Math.floor(((startEpoch - stream.anchorEpoch) / 1000) * ANALYSIS_RATE))
+      const to = Math.min(samples.length, Math.ceil(((endEpoch - stream.anchorEpoch) / 1000) * ANALYSIS_RATE))
+      for (let i = from; i + frame <= to; i += frame) {
+        let sum = 0
+        for (let j = i; j < i + frame; j++) { const v = samples[j] / 32768; sum += v * v }
+        if (sum > threshold) voiced += 20
+      }
+    }
+    return voiced
+  }
+
+  /** Epoch of the last voiced frame captured on streams of `kind` (or null). */
+  lastVoicedEpoch(kind: 'incoming' | 'mic', thresholdDb = -48): number | null {
+    const frame = Math.round(0.02 * ANALYSIS_RATE)
+    const threshold = Math.pow(10, thresholdDb / 10) * frame
+    let last: number | null = null
+    for (const stream of this.streams.values()) {
+      if (stream.kind !== kind) continue
+      const samples = this.samples(stream)
+      for (let i = samples.length - frame; i >= 0; i -= frame) {
+        let sum = 0
+        for (let j = i; j < i + frame; j++) { const v = samples[j] / 32768; sum += v * v }
+        if (sum > threshold) { const at = this.sampleEpoch(stream, i + frame); last = Math.max(last ?? 0, at); break }
+      }
+    }
+    return last
+  }
+
   incomingStreamCount(): number { return [...this.streams.values()].filter(s => s.kind === 'incoming').length }
   micStreamCount(): number { return [...this.streams.values()].filter(s => s.kind === 'mic').length }
 

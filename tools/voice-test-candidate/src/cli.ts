@@ -36,6 +36,10 @@ run options
   --interview-minutes <n>             practice time chosen in the Interview setup (default 5)
   --elevate-focus <id>                Elevate focus area (default clarity)
   --verify-timeout <seconds>          wait for recording/evaluation after the session (default 240)
+  --run-timeout <minutes>             hard bound on the whole run incl. setup and verification (default derived)
+  --api-url <url>                     expected app API origin; app requests elsewhere block the run
+  --livekit-url <url>                 expected LiveKit (provenance: which local agent worker serves it)
+  --app-source <dir>                  declared app checkout for remote/containerized stacks (recorded as declared)
   --close-unfinished                  end an unfinished Interview practice through the UI before starting
   --seed <n>                          reproducible delays and pauses (default 1)
   --no-trace                          skip the Playwright trace
@@ -46,7 +50,9 @@ run options
   --stt-url --stt-model --llm-provider openai-compatible|scripted --llm-url --llm-model
   --tts-provider openai-compatible|macos-say --tts-url --tts-voice
 
-login options
+login / register-local options
+  --account default|manual  manual = the Interview account WITHOUT automatic conversation (VTC_MANUAL_EMAIL /
+                            VTC_MANUAL_PASSWORD; session file .auth/manual-<host>_<port>.json)
   --manual                  Sign in yourself in a visible browser (e.g. Google)
   (otherwise VTC_EMAIL and VTC_PASSWORD are used with the app's email/password form)
 
@@ -71,7 +77,7 @@ async function main(argv: string[]): Promise<number> {
       scenario: { type: 'string' }, profile: { type: 'string' }, 'max-minutes': { type: 'string' }, 'max-turns': { type: 'string' },
       'interview-minutes': { type: 'string' }, 'elevate-focus': { type: 'string' }, 'verify-timeout': { type: 'string' },
       'close-unfinished': { type: 'boolean' }, seed: { type: 'string' }, 'no-trace': { type: 'boolean' }, 'trace-full': { type: 'boolean' }, video: { type: 'boolean' },
-      'allow-production': { type: 'boolean' }, manual: { type: 'boolean' }, 'api-url': { type: 'string' },
+      'allow-production': { type: 'boolean' }, manual: { type: 'boolean' }, 'api-url': { type: 'string' }, 'livekit-url': { type: 'string' }, account: { type: 'string' }, 'app-source': { type: 'string' }, 'run-timeout': { type: 'string' },
       'stt-url': { type: 'string' }, 'stt-model': { type: 'string' }, 'llm-provider': { type: 'string' }, 'llm-url': { type: 'string' },
       'llm-model': { type: 'string' }, 'tts-provider': { type: 'string' }, 'tts-url': { type: 'string' }, 'tts-voice': { type: 'string' },
     },
@@ -81,7 +87,11 @@ async function main(argv: string[]): Promise<number> {
   const target = values.target ?? process.env.VTC_TARGET_URL ?? DEFAULT_TARGET
   const targetKind = classifyTarget(target)
   assertTargetAllowed(targetKind, Boolean(values['allow-production']))
-  const authFile = resolve(values['auth-file'] ?? process.env.VTC_AUTH_FILE ?? defaultAuthFile(target))
+  const account = values.account ?? 'default'
+  if (!['default', 'manual'].includes(account)) throw new Error('--account must be default or manual')
+  // The manual Interview account (no automatic conversation access) has its own credentials and session file.
+  const prefix = account === 'manual' ? 'VTC_MANUAL_' : 'VTC_'
+  const authFile = resolve(values['auth-file'] ?? process.env[`${prefix}AUTH_FILE`] ?? (account === 'manual' ? defaultAuthFile(target).replace(/([^/]+)$/, 'manual-$1') : defaultAuthFile(target)))
   const output = resolve(values.output ?? 'runs')
 
   if (command === 'scenarios') {
@@ -120,8 +130,8 @@ async function main(argv: string[]): Promise<number> {
     const { loginManually, loginWithForm } = await import('./auth.js')
     if (values.manual) await loginManually({ targetUrl: target, authFile, channel: values['browser-channel'] })
     else {
-      const email = process.env.VTC_EMAIL, password = process.env.VTC_PASSWORD
-      if (!email || !password) { process.stderr.write('Set VTC_EMAIL and VTC_PASSWORD (environment or .env.local), or use --manual.\n'); return 64 }
+      const email = process.env[`${prefix}EMAIL`], password = process.env[`${prefix}PASSWORD`]
+      if (!email || !password) { process.stderr.write(`Set ${prefix}EMAIL and ${prefix}PASSWORD (environment or .env.local), or use --manual.\n`); return 64 }
       await loginWithForm({ targetUrl: target, email, password, authFile, headed: Boolean(values.headed), channel: values['browser-channel'] })
     }
     process.stdout.write(`Saved signed-in browser session to ${authFile} (keep it private; it is git-ignored).\n`)
@@ -130,8 +140,8 @@ async function main(argv: string[]): Promise<number> {
 
   if (command === 'register-local') {
     const { registerLocalAccount } = await import('./auth.js')
-    const email = process.env.VTC_EMAIL, password = process.env.VTC_PASSWORD
-    if (!email || !password) { process.stderr.write('Set VTC_EMAIL and VTC_PASSWORD first.\n'); return 64 }
+    const email = process.env[`${prefix}EMAIL`], password = process.env[`${prefix}PASSWORD`]
+    if (!email || !password) { process.stderr.write(`Set ${prefix}EMAIL and ${prefix}PASSWORD first.\n`); return 64 }
     process.stdout.write(`${await registerLocalAccount({ apiUrl: values['api-url'] ?? 'http://localhost:4000', email, password, targetKind })}\n`)
     return 0
   }
@@ -142,16 +152,21 @@ async function main(argv: string[]): Promise<number> {
     const experience = (values.experience ?? scenario.experience) as Experience
     if (!['interview', 'elevate'].includes(experience)) { process.stderr.write('--experience must be interview or elevate\n'); return 64 }
     if (experience !== scenario.experience) { process.stderr.write(`Scenario ${scenario.id} is for ${scenario.experience}.\n`); return 64 }
-    const interviewMinutes = boundedNumber(values['interview-minutes'] ?? 5, 'interview-minutes', 1, 30)
+    const interviewMinutes = boundedNumber(values['interview-minutes'] ?? scenario.practiceMinutes ?? 5, 'interview-minutes', 1, 30)
     const maxMinutes = boundedNumber(values['max-minutes'] ?? (experience === 'interview' ? interviewMinutes + 5 : 12), 'max-minutes', 0.1, 30)
     const cfg: RunConfig = {
-      targetUrl: target, targetKind, apiUrl: values['api-url'], workspace: values.workspace ?? process.env.VTC_WORKSPACE, experience, scenario: scenario.id, profile: values.profile ?? scenario.defaultProfile, authFile,
+      targetUrl: target, targetKind, apiUrl: values['api-url'] ?? process.env.VTC_API_URL, workspace: values.workspace ?? process.env.VTC_WORKSPACE, experience, scenario: scenario.id, profile: values.profile ?? scenario.defaultProfile, authFile,
       headed: Boolean(values.headed), muteSpeakers: !values.speakers, browserChannel: values['browser-channel'],
       maxDurationMs: maxMinutes * 60_000, maxTurns: boundedNumber(values['max-turns'] ?? (experience === 'interview' ? 14 : 10), 'max-turns', 1, 60), outputDir: output,
       trace: !values['no-trace'], traceFull: Boolean(values['trace-full']), video: Boolean(values.video), seed: Number(values.seed ?? 1), interviewMinutes,
       elevateFocus: values['elevate-focus'] ?? 'clarity', closeUnfinished: Boolean(values['close-unfinished']),
       verifyTimeoutMs: boundedNumber(values['verify-timeout'] ?? 240, 'verify-timeout', 1, 600) * 1000, providers,
+      livekitUrl: values['livekit-url'] ?? process.env.VTC_LIVEKIT_URL, appSource: values['app-source'] ?? process.env.VTC_APP_SOURCE,
+      runTimeoutMs: 0,
     }
+    // Whole-run bound: conversation + ending/verification windows + fixed setup allowance, unless set lower.
+    const derived = cfg.maxDurationMs + 2 * cfg.verifyTimeoutMs + 6 * 60_000
+    cfg.runTimeoutMs = values['run-timeout'] ? boundedNumber(values['run-timeout'], 'run-timeout', 1, 120) * 60_000 : derived
     const { runSession } = await import('./run.js')
     const report = await runSession(cfg)
     process.stdout.write(`\nResult: ${report.outcome.toUpperCase()}\n${report.outcomeReasons.map(r => `  - ${r}`).join('\n')}\nReport: ${resolve(output, report.runId, 'report.md')}\n`)

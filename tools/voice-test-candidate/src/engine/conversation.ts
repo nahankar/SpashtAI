@@ -17,6 +17,10 @@ export interface EnginePorts {
   /** Adapter-level completion signal observed in the UI (e.g. "Practice time is up"). */
   completion(): Promise<{ complete: boolean; reason?: string } | null>
   log(kind: string, data?: Record<string, unknown>, epochMs?: number): void
+  /** Fixed reply for this candidate turn (manual scenarios, e.g. asking to skip); null = generate normally. */
+  scriptedReply?(turn: number): string | null
+  /** UI step after the candidate finished speaking (manual scenarios: Finish answer / Skip / Next). */
+  afterSpeech?(turn: number): Promise<{ action: 'continue' } | { action: 'stop'; reason: StopReason }>
 }
 
 export interface EngineOptions {
@@ -36,13 +40,18 @@ export interface EngineOptions {
   completionPollMs: number
 }
 
-export type StopReason =
+export type StopReason = StopKind & { /** Who the stop points at, when known (e.g. an app error banner). */ source?: 'application' | 'tool' | 'setup' }
+export type StopKind =
   | { kind: 'natural'; detail: string }
   | { kind: 'max_turns'; detail: string }
   | { kind: 'max_duration'; detail: string }
   | { kind: 'app_silent'; detail: string }
   | { kind: 'error'; detail: string }
   | { kind: 'cancelled'; detail: string }
+  /** Manual scenarios: the scripted learner plan (e.g. Finish, Next, Skip) was carried out completely. */
+  | { kind: 'plan_complete'; detail: string }
+  /** The whole-run watchdog fired (setup, conversation or verification hung). */
+  | { kind: 'timeout'; detail: string }
 
 export interface TurnRecord {
   turn: number
@@ -66,6 +75,10 @@ export interface TurnRecord {
   deliberateSilenceMs?: number
   appSpokeDuringSilence?: boolean
   audioMeta?: Record<string, unknown>
+  /** Voiced audio actually carried by the app's microphone track while this reply played (failure evidence). */
+  micTrackVoicedMs?: number
+  /** Best match of this spoken reply in the application's saved transcript (word recall 0–1). */
+  savedRecall?: number
 }
 
 interface Pending { u: Utterance; text: Promise<string>; settled: boolean; value: string }
@@ -202,7 +215,8 @@ export class ConversationEngine {
     }
     try {
       const g0 = this.ports.now()
-      const decision = await this.ports.decide(heard, signal)
+      const scripted = this.ports.scriptedReply?.(this.candidateTurns + 1) ?? null
+      const decision: Decision = scripted ? { action: 'answer', text: scripted, sessionComplete: false, note: 'scripted reply for this scenario step' } : await this.ports.decide(heard, signal)
       record.generationMs = this.ports.now() - g0
       record.decision = decision.action
       record.sessionCompleteHint = decision.sessionComplete
@@ -288,6 +302,12 @@ export class ConversationEngine {
       this.lastActivity = Math.max(this.lastActivity, finished.epochMs)
       this.ports.log('candidate_speech_end', { turn: record.turn, id, stoppedEarly: finished.stopped }, finished.epochMs)
       this.ports.commit(heard, finished.stopped ? `${decision.text} [cut off]` : decision.text)
+      if (this.ports.afterSpeech && !finished.stopped && !this.stopReason) {
+        const next = await this.ports.afterSpeech(nextTurn)
+        // The UI step may take a while (saving); its own activity is not SpashtAI silence.
+        this.lastActivity = Math.max(this.lastActivity, this.ports.now())
+        if (next.action === 'stop') this.stop(next.reason)
+      }
     } catch (error) {
       this.playingId = null
       if (error instanceof Cancelled || signal.aborted) {

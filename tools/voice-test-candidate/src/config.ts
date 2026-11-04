@@ -14,6 +14,12 @@ export interface RunConfig {
   targetUrl: string
   targetKind: TargetKind
   apiUrl?: string
+  /** LiveKit the stack is expected to use (provenance: which agent worker serves it). */
+  livekitUrl?: string
+  /** Declared application checkout for remote/containerized targets (recorded as declared, never verified). */
+  appSource?: string
+  /** Hard bound on the whole run: setup, conversation, ending and verification. */
+  runTimeoutMs: number
   /** Explicit organization slug; absence means Personal. */
   workspace?: string
   experience: Experience
@@ -109,7 +115,7 @@ export function providerConfig(env: NodeJS.ProcessEnv = process.env, overrides: 
 
 /** Secrets that must never appear in evidence even if a page or provider echoes them. */
 export function knownSecrets(env: NodeJS.ProcessEnv = process.env): string[] {
-  return ['VTC_PASSWORD', 'VTC_STT_API_KEY', 'VTC_LLM_API_KEY', 'VTC_TTS_API_KEY']
+  return ['VTC_PASSWORD', 'VTC_MANUAL_PASSWORD', 'VTC_STT_API_KEY', 'VTC_LLM_API_KEY', 'VTC_TTS_API_KEY']
     .map(k => env[k] ?? '').filter(v => v && v !== 'local')
 }
 

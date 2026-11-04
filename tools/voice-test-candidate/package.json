@@ -13,7 +13,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "preflight": "tsx src/workflow.ts preflight",
-    "test:voice": "tsx src/workflow.ts test"
+    "test:voice": "tsx src/workflow.ts test",
+    "help:voice": "tsx src/workflow.ts help"
   },
   "engines": {
     "node": ">=20"
