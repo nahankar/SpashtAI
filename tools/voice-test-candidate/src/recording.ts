@@ -75,7 +75,9 @@ export async function verifyBrowserPlayback(page: Page): Promise<Check> {
   const named = page.getByRole('button', { name: /^(play|play recording|play audio)$/i }).first()
   const icon = page.locator('button:has(svg.lucide-play):not([disabled])').first()
   let how: string
-  if (await named.isVisible().catch(() => false)) { await named.click(); how = 'page play control' }
+  const initial = await read()
+  if (!initial.paused) how = 'the page was already playing (auto-play); no control clicked'
+  else if (await named.isVisible().catch(() => false)) { await named.click(); how = 'page play control' }
   else if (await icon.isVisible().catch(() => false)) { await icon.click(); how = 'page play control (icon-only button without an accessible name)' }
   else {
     how = 'programmatic play() on the page audio element (no play control found)'

@@ -100,7 +100,10 @@ Exit codes: `0` passed, `1` failed, `2` blocked (missing prerequisite), `3` inco
 ### Running an isolated local stack
 
 LiveKit dispatches rooms to *any* registered unnamed agent worker, so two checkouts sharing one LiveKit server
-get each other's sessions. To test this checkout without disturbing a stack already running elsewhere, give it
+get each other's sessions. The ports below are examples: another session may already be using them (preflight
+reports every agent worker on the LiveKit and blocks if there is more than one). Pick unused ports — e.g. copy
+`infra/livekit.isolated.yaml` with the three ports changed — and never stop another session's worker or
+container; move your own stack instead. To test this checkout without disturbing a stack already running elsewhere, give it
 its own LiveKit and ports (no shared services are stopped or restarted):
 
 ```bash

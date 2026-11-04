@@ -146,7 +146,8 @@ export async function runSession(cfg: RunConfig): Promise<RunReport> {
     bridge.page = page
     page.on('console', msg => { if (msg.type() === 'error') errors.push(evidence.sanitize(`console: ${msg.text()}`)) })
     page.on('pageerror', err => errors.push(evidence.sanitize(`pageerror: ${err.message}`)))
-    page.on('requestfailed', req => { if (!/livekit|rtc/.test(req.url())) errors.push(evidence.sanitize(`requestfailed: ${req.method()} ${safeUrl(req.url())} ${req.failure()?.errorText ?? ''}`)) })
+    // Media elements routinely abort range requests while seeking; those are not errors.
+    page.on('requestfailed', req => { if (!/livekit|rtc/.test(req.url()) && !(req.failure()?.errorText === 'net::ERR_ABORTED' && /\/recording\/stream/.test(req.url()))) errors.push(evidence.sanitize(`requestfailed: ${req.method()} ${safeUrl(req.url())} ${req.failure()?.errorText ?? ''}`)) })
     page.on('response', res => { if (res.status() >= 500) errors.push(evidence.sanitize(`HTTP ${res.status()} ${res.request().method()} ${safeUrl(res.url())}`)) })
     let shot = 0
     const ctx: AdapterContext = {

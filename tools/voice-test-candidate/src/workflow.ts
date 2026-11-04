@@ -129,7 +129,9 @@ async function preflight(s: WorkflowSettings, record: (item: PreflightItem) => v
     for (const item of stackSummary(stack)) record(item)
   }
   const agentLog = readLog(s.logs.agent)
-  if (agentLog) record(registrationItem(agentLog.text, agentLog.modifiedMs, stack.find(c => c.component === 'agent' && c.pid), s.livekit))
+  const agents = stack.filter(c => c.component === 'agent' && c.pid)
+  if (agentLog && agents.length > 1) record({ name: 'agent registration (log)', ok: false, level: 'configured', detail: `${agents.length} workers target ${s.livekit}; which one the log belongs to (and which one gets dispatched) is ambiguous`, remedy: 'give this stack its own LiveKit; never stop another session\'s worker' })
+  else if (agentLog) record(registrationItem(agentLog.text, agentLog.modifiedMs, agents[0], s.livekit))
   else record({ name: 'agent registration (log)', ok: false, advisory: true, level: 'configured', detail: 'no --agent-log given: registration not observed (process targeting above still applies)', remedy: 'pass --agent-log <file the running agent writes>' })
   for (const kind of ['api', 'agent'] as const) {
     const path = s.logs[kind]
