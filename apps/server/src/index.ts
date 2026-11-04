@@ -113,10 +113,8 @@ import { requireFeature, ensureFeatureFlags } from './lib/featureFlags'
 import { ensurePlatformSettings, getPlatformSettings } from './lib/platformSettings'
 import { apiLimiter, setAdminRateLimitBypassEnabled } from './middleware/rate-limit'
 import { ingestClientLogs, clientLogsLimiter } from './routes/clientLogs'
-import { logger } from './lib/logger'
-import pino from 'pino'
+import { logger, requestLogOptions } from './lib/logger'
 import pinoHttp from 'pino-http'
-import { randomUUID } from 'crypto'
 import { prisma } from './lib/prisma'
 import { discardedSessionGuard } from './lib/sessionDiscard'
 import { startSessionDeletionWorker } from './lib/sessionDeletionWorker'
@@ -134,41 +132,7 @@ app.set('trust proxy', 1)
 // Logs at response 'finish', so req.user (set by requireAuth) is available.
 // Honors an inbound x-request-id and echoes it back; correlates to a session
 // via the optional x-conversation-id header (the client's sessionId).
-app.use(
-  pinoHttp({
-    logger,
-    genReqId: (req, res) => {
-      const hdr = req.headers['x-request-id']
-      const id = (Array.isArray(hdr) ? hdr[0] : hdr) || randomUUID()
-      res.setHeader('x-request-id', id)
-      return id
-    },
-    customProps: (req) => {
-      const conv = req.headers['x-conversation-id']
-      return {
-        userId: (req as { user?: { userId?: string } }).user?.userId,
-        sessionId: (Array.isArray(conv) ? conv[0] : conv) || undefined,
-      }
-    },
-    // Health checks would otherwise dominate the log volume.
-    autoLogging: { ignore: (req) => req.url === '/health' },
-    customLogLevel: (_req, res, err) => {
-      if (err || res.statusCode >= 500) return 'error'
-      if (res.statusCode >= 400) return 'warn'
-      return 'info'
-    },
-    // redact() covers headers/query, but the access_token also rides in the raw
-    // URL of media routes — strip it there so playback tokens never hit the logs.
-    serializers: {
-      req: pino.stdSerializers.wrapRequestSerializer((req) => {
-        if (typeof req.url === 'string' && /(access_token|workspace_media)=/.test(req.url)) {
-          req.url = req.url.replace(/([?&](?:access_token|workspace_media)=)[^&]+/gi, '$1[redacted]')
-        }
-        return req
-      }),
-    },
-  }),
-)
+app.use(pinoHttp(requestLogOptions()))
 
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
