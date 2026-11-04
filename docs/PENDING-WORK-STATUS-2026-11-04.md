@@ -58,15 +58,21 @@ Verified at reconciliation time (do not treat older chat summaries as source of 
 
 ### G. Northwind third learner turn (`session_1793768850376_v90vec3ax`)
 
+Deep-dive: [Northwind Elevate investigation](e13910bc-8058-4ade-bdc0-b517985064e8) (run `20261104-050729-3fe782`; agent log at `…/workflow-2026-11-04T05-07-25-789Z/agent-run.log`, not inside the run folder).
+
 | Item | Branch / commits | Push / deploy | Validation | Still required | Recommendation |
 |---|---|---|---|---|---|
-| Application stall after candidate-003 | N/A (investigation) | N/A | Walkthrough run `workflow-2026-11-04T05-07-25-789Z` / `20261104-050729-3fe782` — see `docs/RELEASE-VALIDATION-5351b92.md` §3 | Publication → VAD → recognizer → persist boundaries still unverified; **not** fixed by `051039a` | **Blocked** — evidence-supported app/agent fix only |
+| Application stall after candidate-003 | **No app change yet** | N/A | **Verified:** turn 3 on app mic track (`mic-1.wav`, timeline); only **two** AWS Transcribe finals and **two** `Saved user message`; UI/API frozen at 2 learner turns; VAD `new turn` at 10:40:09.811 with **no** third `received user transcript` / LLM / coach TTS | Rerun on single-worker stack with agent STT logs; prove turn 3 save + coach reply **or** logged STT stall at boundary | **Blocked** — no evidence-backed smallest fix (Interview `RecognizerWatch` not proven for Elevate) |
+
+**Not the cause:** voice-test `051039a` (coach-side long utterance recognition only).
 
 ### H. Prepare (and Coach) in organization workspaces
 
+Assessment: [Prepare workspace assessment](9bd0ff81-ef0e-45c9-b2f5-cf9cd87dc364).
+
 | Item | Branch / commits | Push / deploy | Validation | Still required | Recommendation |
 |---|---|---|---|---|---|
-| Org Prepare | `WORKSPACE_FEATURE_READINESS.prepare = false` on `main` | N/A | Code inspection only (§6) | Full workspace product plan before enable | **Deferred** — assessment only |
+| Org Prepare | `prepare: false`; platform `hidden: true`; no org shell routes | N/A | **Data plane on `main`:** `Preparation.workspaceId`, RLS, link triggers (`workspace-product-plane-database.test.ts`). **Missing:** `workspace-prepare-database.test.ts`, org nav/routes, `WORKSPACE_PRODUCTS` web gate, analytics attribution, journey delete `ReplayDeletion.workspaceId` | Smallest plan: HTTP tests + route guard parity → shell → analytics → **then** readiness/entitlements | **Deferred** — ~**8–15 dev-days** (not 3–5 weeks); Prepare can ship **without** Coach |
 
 ---
 
@@ -99,7 +105,7 @@ Verified at reconciliation time (do not treat older chat summaries as source of 
 | Outcome | **INCONCLUSIVE** — live audio, 5 candidate turns, transcript/recording checks **passed**; `deliveryAlignmentStatus` still **pending** after 120s |
 | Evidence | `tools/voice-test-candidate/runs/workflow-2026-11-04T08-58-21-695Z/20261104-085824-8821b4/` |
 
-**Production main (`17f4bb3`) voice rerun:** **BLOCKED** today — no stable isolated stack at that SHA (isolated agent venv missing under UX worktree; `:4130` API did not stay up). `:4110`/`:7980` agent was not running after earlier stop. **Do not** treat walkthrough `855cfba` Elevate as certifying production `17f4bb3` voice behavior.
+**Production main (`17f4bb3`) voice rerun:** **BLOCKED** for a dedicated isolated stack (no committed agent `.venv` under checked-out worktrees; `:7980` agent for `:4110` was stopped during reconciliation). **Walkthrough still usable:** `:5273`/`:4100`/`:7880` with tenancy agent (pid-managed, deps on host Python) — certifies **walkthrough code**, not EC2 `17f4bb3`. **Do not** conflate with production voice sign-off.
 
 **Interview scenarios:** **BLOCKED** on fresh VTC accounts — `GET /api/interviews/options` → 403 until interview entitlements/grants are configured on the test database.
 
@@ -109,31 +115,19 @@ Verified at reconciliation time (do not treat older chat summaries as source of 
 
 ## 4. Prepare for workspace — separate assessment (no implementation)
 
-**Current state on `main`:** `prepare` and `coach` are explicitly **not** workspace-ready (`WORKSPACE_FEATURE_READINESS`). Organization shell nav (`apps/web/src/workspaces/shell/model.ts`) has no Prepare route; platform Personal still uses `/prepare/*`.
+See [Prepare workspace assessment](9bd0ff81-ef0e-45c9-b2f5-cf9cd87dc364). **Do not flip readiness alone** — UI, tests, analytics, platform visibility, and entitlements are not wired.
 
-**Reusable without org enablement:** Prisma `Preparation` / journey models already carry `workspaceId`; Personal Prepare UI and APIs exist under `/prepare`.
+**Already on `main`:** org-scoped `Preparation` data + RLS (Checkpoint 7 “data only” per `docs/TENANCY-PRODUCT-PLANE.md`); Personal `/prepare/*` product unchanged.
 
-**Likely work for org Prepare (smallest credible slice):**
+**Smallest certified path (dependency order):**
 
-1. **Readiness & gating** — set `prepare: true` only after scoped API routes, RLS, feature flags, and admin toggles are verified (not a flag flip alone).
-2. **HTTP + RLS** — workspace-scoped list/create/update for preparations, stages, reflections; audit rows; deny cross-tenant reads (mirror Elevate/Replay patterns).
-3. **Web** — org nav entry, `FeatureGate`, deep links from Replay/Elevate that today assume Personal `/prepare/...` paths.
-4. **Media & jobs** — event recordings, reprocess/export/delete under workspace storage paths and retention rules.
-5. **Analytics** — attribute Prepare usage in workspace admin reports separately from Personal.
-6. **Limits** — seat/daily evaluation/concurrent voice caps where Prepare triggers voice or AI jobs.
+1. `workspace-prepare-database.test.ts` (mirror `workspace-replay-database.test.ts`).
+2. `requireWorkspaceProduct('prepare')` + access hardening; fix journey delete `ReplayDeletion.workspaceId`.
+3. Org shell routes/nav; include `prepare` in web `WORKSPACE_PRODUCTS`.
+4. Workspace analytics: separate Prepare from Interviews (journey Elevate practice uses `INTERVIEW` purpose today).
+5. Only then: `WORKSPACE_FEATURE_READINESS.prepare = true`, platform unhide, entitlements.
 
-**Coach:** shares home/threads model with Personal; org Coach remains `ready: false` — likely **after** Prepare or a parallel track; do not bundle with Prepare v1.
-
-**Effort (order-of-magnitude, high uncertainty):**
-
-| Slice | Assumption | Estimate |
-|---|---|---|
-| Prepare org MVP (journeys + history + nav + permissions, no new AI surfaces) | Elevate/Replay workspace patterns reused; no new migration beyond existing schema | **3–5 engineer-weeks** |
-| + Recordings/exports/deletion parity | Same storage stack as Replay | **+1–2 weeks** |
-| + Analytics attribution | Uses existing admin analytics plumbing | **+1 week** |
-| Coach org | Separate messaging/home integration | **Not estimated here**; likely **≥ Prepare** |
-
-Prepare could ship **independently of Coach** if scope is limited to journey CRUD + org-scoped history and links; it **should not** ship independently of workspace RLS/API scoping work.
+**Effort:** ~**8–15 dev-days** (~1.5–3 engineer-weeks), high uncertainty on analytics semantics and deletion workers. **Prepare independent of Coach.**
 
 ---
 
