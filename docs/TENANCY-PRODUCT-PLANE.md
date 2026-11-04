@@ -300,15 +300,13 @@ Personal and Brightpath, delete 204. Local override then includes `feedback`. Pr
 
 **Prepare and Coach.** Still unfinished. Organization readiness stays `false`. No local override. No claim they work.
 
-**Microphone check.** Northwind Elevate `session_1793728690320_rst8dgeyq` completed on `pipeline-bedrock`
-(Transcribe + Nova Lite + Polly): greeting, two learner turns, coach replies, Pulse tracked, recording uploaded.
-Delivery alignment still pending. Organization Coach Home mark-seen is 403, as designed. Brightpath Interview
-asked the one `0-2` question live under Show conversation; `/next` then exhausted. Hidden-session
-conversation/turns now 404 instead of an empty 200. Still unobserved: Brightpath Elevate microphone,
-and Interview Q1 evaluation retry after `INVALID_OUTPUT_INCONSISTENT`.
+**Microphone check.** See `TENANCY-PILOT-RELEASE.md`. Northwind Elevate is saved and isolated. Brightpath
+Elevate was human-confirmed with no COMMUNICATION artifact. Brightpath Interview conversation is saved and
+404 from other workspaces. Q1 evaluation is a terminal unavailable result. Production Interview mode is
+manual unless Super Admin enables `interview_conversation`.
 
 ## Blockers
 
-- Brightpath Elevate microphone and Interview multi-question / End-practice / playback still need a human check before any production readiness flip.
+- Technical: none for the bounded pilot. Ready for bounded pilot release — `TENANCY-PILOT-RELEASE.md`.
+- Deployment, merge, and production readiness remain unauthorized until an explicit approval.
 - Prepare and Coach remain unfinished.
-- Deployment needs explicit authorization in the Cursor conversation.
