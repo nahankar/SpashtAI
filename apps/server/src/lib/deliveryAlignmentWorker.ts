@@ -276,6 +276,11 @@ export async function sweepDeliveryAlignment(sessionId?: string): Promise<void> 
   let claimed = false
   try {
     const now = new Date()
+    await prisma.deliveryAlignmentLease.upsert({
+      where: { id: 'automatic' },
+      create: { id: 'automatic' },
+      update: {},
+    })
     const claim = await prisma.deliveryAlignmentLease.updateMany({ where: {
       id: 'automatic', OR: [{ expiresAt: null }, { expiresAt: { lte: now } }],
     }, data: { owner, expiresAt: new Date(Date.now() + LEASE_MS) } })
