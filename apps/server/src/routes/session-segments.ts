@@ -5,8 +5,9 @@ import { isPrivilegedRole } from '../lib/userExportFlags'
 import { currentDataScope } from '../lib/dataScope'
 import { reserveWorkspaceVoiceSlot } from '../workspaces/quotas'
 import { WorkspaceError } from '../workspaces/contracts'
-import { releaseLivekitRooms } from '../lib/livekitRooms'
+import { deleteLivekitRoomsWithRetry } from '../lib/livekitRooms'
 import {
+  acceptedEventTime,
   activeSegmentDurationSec,
   mergeSegmentAudioStatus,
 } from '../analytics/sessionSegments'
@@ -36,6 +37,34 @@ async function ownedSession(req: Request, sessionId: string) {
 
 /** Matches `workspace_open_voice_segments`: a slot is live only if updated within 6 hours. */
 const VOICE_STALE_MS = 6 * 60 * 60 * 1000
+
+type OpenSegment = { id: string; sessionId: string; startedAt: Date; updatedAt: Date; audioStatus: string; roomName: string }
+
+async function openOwnWorkspaceSegments(
+  db: Prisma.TransactionClient | typeof prisma,
+  userId: string,
+  exceptSessionId: string,
+): Promise<OpenSegment[]> {
+  if (!currentDataScope()) return []
+  return db.sessionSegment.findMany({
+    where: {
+      endedAt: null,
+      session: {
+        id: { not: exceptSessionId },
+        userId,
+        endedAt: null,
+        discardedAt: null,
+      },
+    },
+    select: { id: true, sessionId: true, startedAt: true, updatedAt: true, audioStatus: true, roomName: true },
+  })
+}
+
+function partitionVoiceLeftovers(leftover: OpenSegment[], now: Date) {
+  const stale = leftover.filter(open => now.getTime() - open.updatedAt.getTime() >= VOICE_STALE_MS)
+  const active = leftover.filter(open => now.getTime() - open.updatedAt.getTime() < VOICE_STALE_MS)
+  return { stale, active }
+}
 
 async function closeOpenSegments(
   tx: Prisma.TransactionClient,
@@ -69,25 +98,11 @@ async function claimOwnWorkspaceVoiceSlot(
   exceptSessionId: string,
   endedAt: Date,
   takeover: boolean,
+  allowedRooms: Set<string>,
 ): Promise<string[]> {
-  if (!currentDataScope()) return []
-  const leftover = await tx.sessionSegment.findMany({
-    where: {
-      endedAt: null,
-      session: {
-        id: { not: exceptSessionId },
-        userId,
-        endedAt: null,
-        discardedAt: null,
-      },
-    },
-    select: { id: true, sessionId: true, startedAt: true, updatedAt: true, audioStatus: true, roomName: true },
-  })
-  const stale = leftover.filter(open => endedAt.getTime() - open.updatedAt.getTime() >= VOICE_STALE_MS)
-  const active = leftover.filter(open => endedAt.getTime() - open.updatedAt.getTime() < VOICE_STALE_MS)
-  const rooms = await closeOpenSegments(tx, stale, endedAt, 'abandon')
-  if (!active.length) return rooms
-  if (!takeover) {
+  const leftover = await openOwnWorkspaceSegments(tx, userId, exceptSessionId)
+  const { stale, active } = partitionVoiceLeftovers(leftover, endedAt)
+  if (active.length && !takeover) {
     throw new WorkspaceError(
       409,
       'VOICE_SESSION_ACTIVE',
@@ -95,7 +110,17 @@ async function claimOwnWorkspaceVoiceSlot(
       { openSessions: [...new Set(active.map(open => open.sessionId))] },
     )
   }
-  rooms.push(...await closeOpenSegments(tx, active, endedAt, 'keep'))
+  const closing = [...stale, ...(takeover ? active : [])]
+  const unexpected = closing.filter(open => open.roomName && !allowedRooms.has(open.roomName))
+  if (unexpected.length) {
+    throw new WorkspaceError(
+      409,
+      'SEGMENT_RETRY',
+      'Live practice is starting elsewhere. Try again.',
+    )
+  }
+  const rooms = await closeOpenSegments(tx, stale, endedAt, 'abandon')
+  if (takeover && active.length) rooms.push(...await closeOpenSegments(tx, active, endedAt, 'keep'))
   return rooms
 }
 
@@ -104,14 +129,15 @@ export async function createSessionSegment(req: Request, res: Response) {
     const { sessionId } = req.params
     const id = String(req.body?.segmentId || '').trim()
     const roomName = String(req.body?.roomName || '').trim()
-    const startedAt = req.body?.startedAt ? new Date(req.body.startedAt) : new Date()
+    const now = new Date()
+    const startedAt = acceptedEventTime(req.body?.startedAt, now)
     const takeover = req.body?.takeover === true
     if (
       !id ||
       id.length > 128 ||
       !roomName ||
       roomName.length > 256 ||
-      Number.isNaN(startedAt.getTime())
+      !startedAt
     ) {
       return res.status(400).json({ error: 'segmentId, roomName, and valid startedAt are required' })
     }
@@ -132,8 +158,36 @@ export async function createSessionSegment(req: Request, res: Response) {
       return res.status(200).json({ segment: existing, idempotent: true })
     }
 
+    const leftover = await openOwnWorkspaceSegments(prisma, ownership.session.userId, sessionId)
+    const sameSessionOpen = await prisma.sessionSegment.findMany({
+      where: { sessionId, endedAt: null },
+      select: { id: true, sessionId: true, startedAt: true, updatedAt: true, audioStatus: true, roomName: true },
+    })
+    const { stale, active } = partitionVoiceLeftovers(leftover, now)
+    if (active.length && !takeover) {
+      return res.status(409).json({
+        error: 'You already have a live session in this workspace. Resume it, or confirm starting a new one to end the other take.',
+        code: 'VOICE_SESSION_ACTIVE',
+        openSessions: [...new Set(active.map(open => open.sessionId))],
+      })
+    }
+    const roomsToRelease = [...stale, ...(takeover ? active : []), ...sameSessionOpen]
+      .map(open => open.roomName)
+      .filter(Boolean)
+    if (roomsToRelease.length) {
+      try {
+        await deleteLivekitRoomsWithRetry(roomsToRelease)
+      } catch {
+        return res.status(503).json({
+          error: 'The other live session is still connected. Try again in a moment.',
+          code: 'VOICE_ROOM_RELEASE_FAILED',
+          openSessions: [...new Set([...stale, ...active, ...sameSessionOpen].map(open => open.sessionId))],
+        })
+      }
+    }
+    const releasedRoomSet = new Set(roomsToRelease)
+
     let segment
-    let releasedRooms: string[] = []
     try {
       segment = await prisma.$transaction(
         async (tx) => {
@@ -141,11 +195,17 @@ export async function createSessionSegment(req: Request, res: Response) {
           const openSegments = await tx.sessionSegment.findMany({
             where: { sessionId, endedAt: null },
           })
-          const rooms = await closeOpenSegments(tx, openSegments, startedAt, 'keep')
-          rooms.push(
-            ...await claimOwnWorkspaceVoiceSlot(tx, ownership.session.userId, sessionId, startedAt, takeover),
+          if (openSegments.some(open => open.roomName && !releasedRoomSet.has(open.roomName))) {
+            throw new WorkspaceError(
+              409,
+              'SEGMENT_RETRY',
+              'Live practice is starting elsewhere. Try again.',
+            )
+          }
+          await closeOpenSegments(tx, openSegments, now, 'keep')
+          await claimOwnWorkspaceVoiceSlot(
+            tx, ownership.session.userId, sessionId, now, takeover, releasedRoomSet,
           )
-          releasedRooms = rooms
           await reserveWorkspaceVoiceSlot(tx)
           const latest = await tx.sessionSegment.findFirst({
             where: { sessionId },
@@ -192,8 +252,7 @@ export async function createSessionSegment(req: Request, res: Response) {
       throw error
     }
 
-    await releaseLivekitRooms(releasedRooms)
-    return res.status(201).json({ segment })
+    return res.status(201).json({ segment, roomRelease: roomsToRelease.length ? 'closed' : 'none' })
   } catch (error) {
     if (error instanceof SessionDiscardedError || error instanceof SessionMissingError) {
       return res.status(error.status).json({ error: error.message })
@@ -211,32 +270,32 @@ export async function closeSessionSegment(req: Request, res: Response) {
       return res.status(ownership.status ?? 500).json({ error: ownership.error })
     }
 
-    const segment = await prisma.sessionSegment.findUnique({ where: { id: segmentId } })
-    if (!segment || segment.sessionId !== sessionId) {
-      return res.status(404).json({ error: 'Segment not found' })
-    }
-
     const audioStatus = req.body?.audioStatus
     if (audioStatus != null && !AUDIO_STATUSES.has(audioStatus)) {
       return res.status(400).json({ error: 'Invalid audioStatus' })
     }
-    const endedAt = req.body?.endedAt ? new Date(req.body.endedAt) : new Date()
-    if (Number.isNaN(endedAt.getTime()) || endedAt < segment.startedAt) {
+    const now = new Date()
+    const requestedEnd = acceptedEventTime(req.body?.endedAt, now)
+    if (!requestedEnd) {
       return res.status(400).json({ error: 'Invalid endedAt' })
     }
-    // Active session time starts when the room segment starts. Recording can
-    // begin later while the mic track is published; that delay is not paused
-    // time and must never redefine the session-duration contract.
-    const activeDurationSec = activeSegmentDurationSec(segment.startedAt, endedAt)
-    const nextAudioStatus = mergeSegmentAudioStatus(segment.audioStatus, audioStatus)
 
     const updated = await prisma.$transaction(async (tx) => {
       await lockWritableSession(tx, sessionId)
+      const current = await tx.sessionSegment.findUnique({ where: { id: segmentId } })
+      if (!current || current.sessionId !== sessionId) {
+        throw new WorkspaceError(404, 'SEGMENT_NOT_FOUND', 'Segment not found')
+      }
+      if (requestedEnd < current.startedAt) {
+        throw new WorkspaceError(400, 'INVALID_ENDED_AT', 'Invalid endedAt')
+      }
+      const endedAt = current.endedAt ?? requestedEnd
+      const nextAudioStatus = mergeSegmentAudioStatus(current.audioStatus, audioStatus)
       const next = await tx.sessionSegment.update({
         where: { id: segmentId },
         data: {
-          endedAt: segment.endedAt ?? endedAt,
-          activeDurationSec: segment.activeDurationSec ?? activeDurationSec,
+          endedAt,
+          activeDurationSec: current.activeDurationSec ?? activeSegmentDurationSec(current.startedAt, endedAt),
           ...(nextAudioStatus ? { audioStatus: nextAudioStatus } : {}),
         },
       })
@@ -253,6 +312,9 @@ export async function closeSessionSegment(req: Request, res: Response) {
 
     return res.json({ segment: updated })
   } catch (error) {
+    if (error instanceof WorkspaceError) {
+      return res.status(error.status).json({ error: error.message, code: error.code })
+    }
     if (error instanceof SessionDiscardedError || error instanceof SessionMissingError) {
       return res.status(error.status).json({ error: error.message })
     }

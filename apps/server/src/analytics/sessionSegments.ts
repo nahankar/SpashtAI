@@ -23,6 +23,17 @@ export function activeSegmentDurationSec(
   return Math.max(0, Math.round((endedAt.getTime() - startedAt.getTime()) / 1000))
 }
 
+/** Client clocks may be a little fast; authorization and staleness always use server time. */
+export const EVENT_CLOCK_SKEW_MS = 2 * 60 * 1000
+
+export function acceptedEventTime(raw: unknown, now: Date): Date | null {
+  if (raw == null || raw === '') return now
+  const value = new Date(typeof raw === 'string' || typeof raw === 'number' ? raw : String(raw))
+  if (Number.isNaN(value.getTime())) return null
+  if (value.getTime() - now.getTime() > EVENT_CLOCK_SKEW_MS) return null
+  return value
+}
+
 export function recordingPayloadMatches(
   canonical: {
     contentHash: string | null
