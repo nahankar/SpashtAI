@@ -73,7 +73,9 @@ export async function verifyBrowserPlayback(page: Page): Promise<Check> {
   const read = () => page.evaluate(() => { const a = document.querySelector('audio')!; return { t: a.currentTime, paused: a.paused, error: a.error?.code ?? null, duration: a.duration, ready: a.readyState } })
   // Prefer the page's own control: a named play button, else the icon-only play button (lucide "play" icon).
   const named = page.getByRole('button', { name: /^(play|play recording|play audio)$/i }).first()
-  const icon = page.locator('button:has(svg.lucide-play):not([disabled])').first()
+  // The main transport is the icon-only play button with no text, label or title. Tab triggers ("Playback"),
+  // moment clips ("Hear this moment …") and "Play from here" chips also carry a play icon but play other things.
+  const icon = page.locator('button:not([role=tab]):not([aria-label]):not([title]):not([disabled]):has(svg.lucide-play)').filter({ hasNotText: /\S/ }).first()
   let how: string
   const initial = await read()
   if (!initial.paused) how = 'the page was already playing (auto-play); no control clicked'
