@@ -6,6 +6,7 @@ import { InterviewAdapter } from './adapters/interview.js'
 import { ElevateAdapter } from './adapters/elevate.js'
 import { durationMs as pcmDuration } from './audio/pcm.js'
 import { AudioBridge } from './browser/bridge.js'
+import { transcribeUtterance } from './audio/recognition.js'
 import { browserArgs } from './browser/launch.js'
 import { apiOriginGuard } from './browser/guard.js'
 import { CandidateBrain } from './candidate/brain.js'
@@ -152,7 +153,7 @@ export async function runSession(cfg: RunConfig): Promise<RunReport> {
     let shot = 0
     const ctx: AdapterContext = {
       page, context, evidence, bridge, cfg, api: new AppApi(page, context, cfg.workspace),
-      transcribe: pcm => stt.transcribe(pcm),
+      transcribe: async pcm => (await transcribeUtterance(stt, pcm)).text,
       screenshot: async name => {
         const file = `screenshots/${String(++shot).padStart(2, '0')}-${name}.png`
         await page!.screenshot({ path: evidence.path(file), fullPage: true }).then(() => evidence.event('browser', 'screenshot', { file }), () => undefined)
@@ -166,7 +167,11 @@ export async function runSession(cfg: RunConfig): Promise<RunReport> {
         const timer = setTimeout(resolve, ms)
         signal?.addEventListener('abort', () => { clearTimeout(timer); reject(signal.reason) }, { once: true })
       }),
-      transcribe: (u, signal) => stt.transcribe(u.pcm, signal),
+      transcribe: async (u, signal) => {
+        const result = await transcribeUtterance(stt, u.pcm, signal)
+        evidence.event('candidate', 'recognition_request', { id: u.id, audioMs: Math.round((u.pcm.samples.length / u.pcm.sampleRate) * 1000), parts: result.parts })
+        return result.text
+      },
       decide: (heard, signal) => brain.decide(heard, signal),
       commit: (heard, spoken) => brain.commit(heard, spoken),
       synthesize: async (text, turn, signal) => {
