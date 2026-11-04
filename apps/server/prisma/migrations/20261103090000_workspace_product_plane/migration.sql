@@ -112,7 +112,15 @@ DO $$ DECLARE spec text[]; tbl text; owner text; BEGIN
    ARRAY['UserFeedback','userId'], ARRAY['RecordingAcknowledgment','userId']] LOOP
   tbl := spec[1]; owner := spec[2];
   EXECUTE format('ALTER TABLE public.%I ADD COLUMN "workspaceId" text NOT NULL DEFAULT %L, ADD COLUMN "workspaceKind" public."WorkspaceKind" NOT NULL DEFAULT %L', tbl, '', 'PERSONAL');
+  -- Existing acknowledgments are append-only. Disable that user trigger only for
+  -- this Personal workspace backfill, then restore it before the new owner trigger.
+  IF tbl = 'RecordingAcknowledgment' THEN
+    EXECUTE 'ALTER TABLE public."RecordingAcknowledgment" DISABLE TRIGGER USER';
+  END IF;
   EXECUTE format('UPDATE public.%I t SET "workspaceId"=public.ensure_personal_workspace(t.%I), "workspaceKind"=%L', tbl, owner, 'PERSONAL');
+  IF tbl = 'RecordingAcknowledgment' THEN
+    EXECUTE 'ALTER TABLE public."RecordingAcknowledgment" ENABLE TRIGGER USER';
+  END IF;
   EXECUTE format('ALTER TABLE public.%I ADD CONSTRAINT %I FOREIGN KEY ("workspaceId","workspaceKind") REFERENCES public."Workspace"(id,kind) ON DELETE CASCADE ON UPDATE NO ACTION', tbl, tbl||'_workspaceId_workspaceKind_fkey');
   EXECUTE format('CREATE TRIGGER workspace_owner_identity BEFORE INSERT OR UPDATE ON public.%I FOR EACH ROW EXECUTE FUNCTION public.assign_owned_workspace(%L)', tbl, owner);
   EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', tbl);
