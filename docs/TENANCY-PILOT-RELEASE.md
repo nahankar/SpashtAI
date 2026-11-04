@@ -13,7 +13,7 @@ Production Interviews use **Finish / Skip / Next**. `interview_conversation` sta
 ## Candidate
 
 - **Branch:** `tenancy-pilot-rc`
-- **SHA:** recorded at commit time in this file’s Candidate SHA line after the release commit
+- **SHA:** `c3fe621c0860d4df9c0f4151a6452148751c441b`
 - **Excludes** Nova Sonic / agent greeting `95170b3`
 - Editor checkout `feature/tenant-admin-demo-invitations` @ `81c393b` was not reset
 
