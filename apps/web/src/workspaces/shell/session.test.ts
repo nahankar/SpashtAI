@@ -85,4 +85,39 @@ describe('workspace session', () => {
     expect(states.at(-1)).toMatchObject({ status: 'ended', signIn: true })
     session.stop()
   })
+
+  it('opens from a signed-in refresh on a product URL and renews an expired workspace token', async () => {
+    const { session, request } = harness([async () => entry('fresh'), async () => snapshot, async () => entry('renewed'), async () => snapshot])
+    session.start(); await flush()
+    expect(getActiveWorkspace()?.token).toBe('fresh')
+    reportWorkspaceFailure('WORKSPACE_TOKEN_REQUIRED'); await flush()
+    expect(getActiveWorkspace()?.token).toBe('renewed')
+    expect(request).toHaveBeenNthCalledWith(1, '/api/workspaces/entry/klsvdit', 'identity', 'POST')
+    session.stop()
+  })
+
+  it('ends the organization stay when membership is suspended and leaves Personal pages without a workspace token', async () => {
+    const { session, states } = harness([async () => entry('t1'), async () => snapshot, async () => { throw new ApiError('Your workspace membership is no longer active', 403, 'MEMBERSHIP_INACTIVE') }])
+    session.start(); await flush()
+    await vi.advanceTimersByTimeAsync(REFRESH_MS)
+    expect(getActiveWorkspace()).toBeNull()
+    expect(states.at(-1)).toMatchObject({ status: 'ended', signIn: false })
+    session.stop()
+    expect(getActiveWorkspace()).toBeNull()
+  })
+
+  it('a stopped tab cannot put workspace context back after Personal navigation or another tab opened', async () => {
+    let release!: (value: unknown) => void
+    const leaving = harness([() => new Promise(resolve => { release = resolve }), async () => snapshot])
+    leaving.session.start()
+    leaving.session.stop()
+    expect(getActiveWorkspace()).toBeNull()
+    const other = harness([async () => entry('tab-b'), async () => snapshot])
+    other.session.start(); await flush()
+    expect(getActiveWorkspace()?.token).toBe('tab-b')
+    release(entry('late')); await flush()
+    expect(getActiveWorkspace()?.token).toBe('tab-b')
+    other.session.stop()
+    expect(getActiveWorkspace()).toBeNull()
+  })
 })
