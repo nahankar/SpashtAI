@@ -262,8 +262,10 @@ fi
 if [[ "${PENDING_MIGRATIONS}" -eq 1 && "${FORCE_MAINTENANCE:-}" != "1" ]]; then
   # Live segments stay open until Leave or Pause; a recent open segment means
   # a learner may be mid-conversation.
-  ACTIVE_SEGMENTS="$(cd apps/server && node -e '
-    const { PrismaClient } = require("@prisma/client"); const p = new PrismaClient();
+  ACTIVE_SEGMENTS="$(cd apps/server && MIGRATION_DATABASE_URL="${MIGRATION_DATABASE_URL}" node -e '
+    const { PrismaClient } = require("@prisma/client");
+    // Runtime RLS hides organization rows; release safety must count every active segment.
+    const p = new PrismaClient({ datasourceUrl: process.env.MIGRATION_DATABASE_URL || undefined });
     p.$queryRawUnsafe(`SELECT count(*)::int AS c FROM "SessionSegment" WHERE "endedAt" IS NULL AND "startedAt" > now() - interval \x273 hours\x27`)
       .then(r => { console.log(r[0].c); return p.$disconnect() })
       .catch(e => { console.error(e.message); process.exit(1) })
