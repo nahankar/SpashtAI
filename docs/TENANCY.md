@@ -115,3 +115,21 @@ For the latter, temporary test copies changed only 55443 to 55445 and were remov
 Production builds, frontend type checks and tenant-only mobile browser checks passed. Browser checks used
 simulated API responses; database tests exercised actual restricted-role queries and retained history.
 No production deployment, live email delivery or spoken voice-conversation run is claimed by these checks.
+
+### Tenant member deletion
+
+Tenant Users provides a Delete dialog with two explicit choices: remove membership and retain
+history, or remove membership and delete tenant history. Admins may remove learners; Owners
+may remove administrators. Users cannot delete themselves or remove the last active Owner.
+`DELETE /api/workspaces/current/members/:memberId` requires `{ "history": "retain" | "delete" }`.
+The operation serializes on the workspace row, revokes pending invitations for that tenant/email,
+deletes membership and feature overrides, and appends a content-free audit in one transaction.
+Old workspace tokens remain invalid even after re-enrollment, which creates a new membership ID.
+
+History deletion targets only the removed member’s records in that organization. Sessions are
+tombstoned for the existing durable cleanup worker (including active room shutdown); Replay and
+feedback file references are queued in the durable file cleanup outbox before rows are deleted.
+Preparation, coach, feedback, Pulse, usage and saved analytics history are deleted in that scope.
+Other tenants, preserved Personal history, the shared email identity, billing/consent and audit
+records remain intact. The email remains organization-only after removal. A new invitation is
+required to regain tenant access.

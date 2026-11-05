@@ -107,6 +107,7 @@ workspaceRouter.post('/current/members', scopedWrite((tx, scope, req) => service
 workspaceRouter.patch('/current/branding', scopedWrite((tx, scope, req) => service.updateWorkspaceBranding(tx, scope, req.body)))
 workspaceRouter.put('/current/features/:feature', scopedWrite((tx, scope, req) => service.configureWorkspaceFeature(tx, scope, String(req.params.feature), req.body)))
 workspaceRouter.patch('/current/members/:memberId', scopedWrite((tx, scope, req) => service.changeWorkspaceMember(tx, scope, idSchema.parse(req.params.memberId), req.body)))
+workspaceRouter.delete('/current/members/:memberId', scopedWrite((tx, scope, req) => service.deleteWorkspaceMember(tx, scope, idSchema.parse(req.params.memberId), req.body)))
 workspaceRouter.put('/current/members/:memberId/features/:feature', scopedWrite((tx, scope, req) => service.configureMemberFeature(tx, scope, idSchema.parse(req.params.memberId), String(req.params.feature), req.body)))
 platformWorkspacesRouter.put('/:workspaceId/enrollment', route(req => withPlatformWorkspaceAdmin(req.user!.userId, tx => saveEnrollmentSettings(tx, idSchema.parse(req.params.workspaceId), req.user!.userId, req.body))))
 platformWorkspacesRouter.post('/:workspaceId/invitations/preview', route(req => withPlatformWorkspaceAdmin(req.user!.userId, async tx => {

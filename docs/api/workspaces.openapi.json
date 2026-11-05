@@ -490,6 +490,71 @@
             }
           }
         }
+      },
+      "delete": {
+        "summary": "Delete tenant membership, optionally erasing tenant history",
+        "description": "Requires explicit history retain/delete choice. Admins may delete learners; Owners may delete administrators. Self deletion and removal of the last active Owner are refused. Workspace lock serializes membership changes, invitation acceptance and deletion. Old workspace tokens and pending invitation links cannot restore access. Retain keeps organization history; delete erases only this user\u2019s data in this organization, with durable session/media cleanup. Other tenants, Personal history, identity, audit and consent records remain unchanged. The email stays tenant-only.",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "memberId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result. See docs/TENANCY.md for DTO and rollout boundaries."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "history"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "history": {
+                    "type": "string",
+                    "enum": [
+                      "retain",
+                      "delete"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/workspaces/current/members/{memberId}/features/{feature}": {

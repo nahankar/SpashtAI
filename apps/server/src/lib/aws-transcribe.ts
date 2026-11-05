@@ -43,7 +43,7 @@ export interface TranscriptionResult {
 
 /** Location of a transcription input; deterministic so deletion can remove it after the parent is gone. */
 export function transcriptionInputUri(s3Key: string): string {
-  return transcriptionInputUri(s3Key)
+  return `s3://${S3_BUCKET}/${s3Key}`
 }
 
 export async function uploadToS3(

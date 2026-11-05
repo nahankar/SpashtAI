@@ -9,6 +9,7 @@ import {
   featureSchema, limitsSchema, platformFeatureSchema, updateMemberSchema, WORKSPACE_FEATURES, WorkspaceError,
 } from './contracts'
 import { memberFeatureDecisions } from './productAccess'
+import { eraseMemberHistory } from './memberDeletion'
 import { establishWorkspace, requireWorkspaceManager, withPlatformWorkspaceAdmin, withWorkspaceActor, type WorkspaceTx } from './context'
 
 export const WORKSPACE_PRIVACY_NOTICE = 'This email is for organization access only after you join. Any previous Personal history is preserved and unavailable here. Use a different email for Personal access.'
@@ -212,6 +213,25 @@ export async function changeWorkspaceMember(tx: WorkspaceTx, scope: Awaited<Retu
   const row = await tx.workspaceMember.update({ where: { id: target.id }, data: body })
   await audit(tx, scope.workspace.id, scope.member.userId, 'membership_updated', target.id, body)
   return { id: row.id, role: row.role, state: row.state }
+}
+
+export async function deleteWorkspaceMember(tx: WorkspaceTx, scope: Awaited<ReturnType<typeof establishWorkspace>>, memberId: string, input: unknown) {
+  const { history } = z.object({ history: z.enum(['retain', 'delete']) }).strict().parse(input)
+  const target = await lockedMember(tx, scope, memberId)
+  if (target.role === 'OWNER' && target.state === 'ACTIVE' &&
+    await tx.workspaceMember.count({ where: { workspaceId: scope.workspace.id, role: 'OWNER', state: 'ACTIVE' } }) <= 1) {
+    throw new WorkspaceError(409, 'LAST_OWNER', 'Keep at least one active workspace Owner')
+  }
+  if (target.userId === scope.member.userId) throw new WorkspaceError(409, 'SELF_DELETION', 'Ask another Owner to remove your membership')
+  const user = await tx.user.findUniqueOrThrow({ where: { id: target.userId }, select: { email: true } })
+  await tx.$queryRaw`SELECT set_config('app.workspace_reader', 'member_erasure', true), set_config('app.workspace_erasure_member', ${target.id}, true)`
+  const erased = history === 'delete' ? await eraseMemberHistory(tx, scope, target.userId) : null
+  // Do not leave an older, still-pending email link able to restore deleted access.
+  await tx.userInvitation.updateMany({ where: { workspaceId: scope.workspace.id, email: user.email, status: 'PENDING' },
+    data: { status: 'REVOKED', pendingKey: null, revokedAt: new Date(), revokedById: scope.member.userId } })
+  await tx.workspaceMember.delete({ where: { id: target.id } })
+  await audit(tx, scope.workspace.id, scope.member.userId, 'membership_deleted', target.id, { history, userId: target.userId, ...erased })
+  return { deleted: true, history, cleanupPending: history === 'delete' }
 }
 
 export async function configureMemberFeature(tx: WorkspaceTx, scope: Awaited<ReturnType<typeof establishWorkspace>>, memberId: string, feature: string, input: unknown) {

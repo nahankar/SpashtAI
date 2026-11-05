@@ -80,6 +80,8 @@ function MemberRow({ member, actor, features, busy, change }: {
   member: Member; actor: Membership['role']; features: Feature[]; busy: boolean
   change: (path: string, method: string, body: unknown, done: string) => Promise<void>
 }) {
+  const { snapshot } = useWorkspaceShell()
+  const [history, setHistory] = useState<'retain' | 'delete'>('retain')
   const editable = canManage(actor, member.role)
   const path = `/api/workspaces/current/members/${member.id}`
   const fields = (member.enrollmentFields ?? []).filter(f => f.type !== 'message')
@@ -100,6 +102,17 @@ function MemberRow({ member, actor, features, busy, change }: {
             <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => change(path, 'PATCH', { state: 'SUSPENDED' }, `${member.email} was suspended.`)}>Suspend</AlertDialogAction></AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>)}
+      <AlertDialog>
+        <AlertDialogTrigger asChild><Button variant="destructive" size="sm" disabled={busy || !editable || member.id === snapshot.membership.id} onClick={() => setHistory('retain')}>Delete</Button></AlertDialogTrigger>
+        <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Delete {member.name || member.email} from {snapshot.workspace.name}?</AlertDialogTitle>
+          <AlertDialogDescription>Choose what happens to this user’s history in this tenant. Other tenants and preserved Personal history are unaffected. This email remains organization-only.</AlertDialogDescription></AlertDialogHeader>
+          <fieldset className="space-y-3"><legend className="mb-2 text-sm font-medium">Tenant history</legend>
+            <label className="flex gap-3 rounded-md border p-3"><input type="radio" name={`delete-history-${member.id}`} checked={history === 'retain'} onChange={() => setHistory('retain')} /><span className="text-sm"><strong>Remove membership only</strong><span className="block text-muted-foreground">End tenant access and keep their history for tenant reports.</span></span></label>
+            <label className="flex gap-3 rounded-md border p-3"><input type="radio" name={`delete-history-${member.id}`} checked={history === 'delete'} onChange={() => setHistory('delete')} /><span className="text-sm"><strong>Remove membership and delete tenant history</strong><span className="block text-muted-foreground">Permanently delete practice, results, feedback and uploaded files in this tenant. File cleanup may take a few minutes. This cannot be undone.</span></span></label>
+          </fieldset>
+          <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => change(path, 'DELETE', { history }, history === 'delete' ? `${member.email} was removed. Tenant history deletion is queued.` : `${member.email} was removed. Tenant history was retained.`)}>Delete {history === 'delete' ? 'membership and history' : 'membership'}</AlertDialogAction></AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <AccordionTrigger className="flex-none py-0" aria-label={`Details for ${member.email}`} />
     </div>
     <AccordionContent>
