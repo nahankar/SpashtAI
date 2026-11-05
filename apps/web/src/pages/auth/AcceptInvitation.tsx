@@ -7,6 +7,7 @@ import { Link } from 'react-router-dom'
 import { Loader2, MailCheck, TriangleAlert, UserRoundCog } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
+import { EmailCodeSignIn } from '@/components/auth/EmailCodeSignIn'
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
 import { ProfileDetailsRow, type ProfileGender } from '@/components/auth/ProfileDetailsRow'
 import { LogoWithBeta } from '@/components/brand/LogoWithBeta'
@@ -68,13 +69,13 @@ export function AcceptInvitation() {
     }).catch(() => setLoadError('Could not check this invitation. Please try again.'))
   }, [token])
 
-  async function handleCredential(credential: string) {
+  async function handleIdentity(identity: { credential: string } | { challengeId: string; code: string }) {
     setProblem(null)
     setAccepting(true)
     try {
       const { ok, data } = await post<{ token: string; user: { needsProfileCompletion?: boolean }; workspacePath?: string }>('/api/invitations/accept', {
         token,
-        credential,
+        ...identity,
         enrollmentResponses: responses,
         phone,
         dateOfBirth,
@@ -128,8 +129,8 @@ export function AcceptInvitation() {
             <>
               <p className="text-sm text-muted-foreground">
                 {lookup.status === 'accepted'
-                  ? 'This invitation has already been accepted. Sign in with the invited Google Account to continue.'
-                  : <>Complete every required detail, then sign in with the Google Account for <span className="font-medium text-foreground">{lookup.invitedEmail}</span>. The invitation expires on {formatDate(lookup.expiresAt)}.</>}
+                  ? 'This invitation has already been accepted. Sign in with the invited email address to continue.'
+                  : <>Complete every required detail, then sign in as <span className="font-medium text-foreground">{lookup.invitedEmail}</span>. The invitation expires on {formatDate(lookup.expiresAt)}.</>}
               </p>
 
               {problem?.kind === 'wrong_account' && (
@@ -165,10 +166,13 @@ export function AcceptInvitation() {
                 </form>
               )}
 
-              {accepting ? (
-                <div className="flex items-center justify-center gap-2 py-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Accepting invitation…</div>
-              ) : lookup.status === 'accepted' || (step === 'profile' && profileReady) ? (
-                <GoogleSignInButton label="signin_with" onCredential={handleCredential} onError={(message) => setProblem({ kind: 'error', message })} />
+              {accepting && <p role="status" className="text-sm text-muted-foreground">Accepting invitation…</p>}
+              {lookup.status === 'accepted' || (step === 'profile' && profileReady) ? (
+                <>
+                  <EmailCodeSignIn invitedEmail={lookup.invitedEmail} invitationToken={token} onVerify={(challengeId, code) => handleIdentity({ challengeId, code })} />
+                  <p className="text-center text-xs text-muted-foreground">Or continue with Google</p>
+                  <GoogleSignInButton label="signin_with" onCredential={credential => handleIdentity({ credential })} onError={(message) => setProblem({ kind: 'error', message })} />
+                </>
               ) : step === 'profile' ? (
                 <p className="text-sm">Complete the details above to accept this invitation.</p>
               ) : null}
@@ -176,8 +180,7 @@ export function AcceptInvitation() {
               <div className="flex gap-2 rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
                 <MailCheck className="mt-0.5 h-4 w-4 shrink-0" />
                 <p>
-                  SpashtAI currently requires a Google Account. Gmail, Google Workspace and other addresses registered as a Google Account all
-                  work. Sign-in by emailed code or magic link isn&apos;t available yet.
+                  Use a code emailed to the invited address, or sign in with a Google Account using that same address.
                 </p>
               </div>
               <p className="text-xs text-muted-foreground text-center leading-relaxed">

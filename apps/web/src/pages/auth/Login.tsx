@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardDescription } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { EmailCodeSignIn } from '@/components/auth/EmailCodeSignIn'
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
 import { LogoWithBeta } from '@/components/brand/LogoWithBeta'
 
@@ -15,7 +16,7 @@ export function Login() {
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [signupsPaused, setSignupsPaused] = useState(false)
-  const { loginForDevelopment, loginWithGoogle } = useAuth()
+  const { loginForDevelopment, loginWithGoogle, loginWithEmailCode } = useAuth()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const next = safeAppPath(searchParams.get('next'))
@@ -35,6 +36,13 @@ export function Login() {
       return
     }
     navigate(next || (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN' ? '/admin' : '/'))
+  }
+
+  async function handleEmailCode(challengeId: string, code: string) {
+    const user = await loginWithEmailCode(challengeId, code)
+    navigate(user.needsProfileCompletion
+      ? (next ? `/auth/complete-profile?next=${encodeURIComponent(next)}` : '/auth/complete-profile')
+      : next || (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN' ? '/admin' : '/'))
   }
 
   async function handleLocalSignIn(event: FormEvent) {
@@ -73,6 +81,8 @@ export function Login() {
             </div>
           )}
 
+          <EmailCodeSignIn onVerify={handleEmailCode} />
+          <p className="text-center text-xs text-muted-foreground">Or continue with Google</p>
           <GoogleSignInButton
             label="signin_with"
             onCredential={handleGoogleCredential}

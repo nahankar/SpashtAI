@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { EmailCodeSignIn } from '@/components/auth/EmailCodeSignIn'
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
 import { ProfileDetailsRow, type ProfileGender } from '@/components/auth/ProfileDetailsRow'
 import { LogoWithBeta } from '@/components/brand/LogoWithBeta'
@@ -20,7 +21,7 @@ export function Register() {
   const [dateOfBirth, setDateOfBirth] = useState('')
   const [gender, setGender] = useState<ProfileGender>('')
   const [pincode, setPincode] = useState('')
-  const { loginWithGoogle } = useAuth()
+  const { loginWithGoogle, loginWithEmailCode } = useAuth()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const next = safeAppPath(searchParams.get('next'))
@@ -47,6 +48,13 @@ export function Register() {
       return
     }
     navigate(next || '/')
+  }
+
+  async function handleEmailCode(challengeId: string, code: string) {
+    const user = await loginWithEmailCode(challengeId, code, { phone, dateOfBirth, gender, pincode })
+    navigate(user.needsProfileCompletion
+      ? (next ? `/auth/complete-profile?next=${encodeURIComponent(next)}` : '/auth/complete-profile')
+      : next || '/')
   }
 
   return (
@@ -102,11 +110,15 @@ export function Register() {
               </form>
 
               {detailsReady && (
+                <>
+                <EmailCodeSignIn onVerify={handleEmailCode} />
+                <p className="text-center text-xs text-muted-foreground">Or continue with Google</p>
                 <GoogleSignInButton
                   label="signup_with"
                   onCredential={handleGoogleCredential}
                   onError={setError}
                 />
+                </>
               )}
 
               <p className="text-xs text-muted-foreground text-center leading-relaxed">

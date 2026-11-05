@@ -26,6 +26,8 @@ export const REQUEST_REDACT_PATHS = [
   'req.headers["x-spasht-workspace-scope"]',
   'req.query.access_token',
   'req.query.workspace_media',
+  'req.body.code',
+  'req.body.challengeId',
   'res.headers["set-cookie"]',
 ] as const
 

@@ -3,7 +3,7 @@ import { validateEnrollmentResponses } from '../workspaces/enrollment'
 import { WorkspaceError } from '../workspaces/contracts'
 import type { Request } from 'express'
 import type { User } from '@prisma/client'
-import type { GoogleUserInfo } from './google-auth'
+import type { VerifiedSignInIdentity } from './googleSignIn'
 import { prisma } from './prisma'
 import { loadSignupPolicy, resolveGoogleAccount, withAccountRaceRetry } from './googleSignIn'
 import { attachSignupLocation, type SignupProfile } from './profile'
@@ -27,7 +27,7 @@ class Abort extends Error {
 const fail = (status: number, body: AcceptanceFailure['body']): AcceptanceFailure => ({ ok: false, status, body })
 
 /**
- * Accepts an invitation for an already verified Google identity in one transaction: the invitation row is locked
+ * Accepts an invitation for an already verified identity in one transaction: the invitation row is locked
  * (so revoke and resend wait for, or are seen by, this acceptance), re-validated, the account is resolved or
  * created, and the acceptance and its audit rows are written together. Any failure rolls everything back, so no
  * committed account is ever deleted afterwards. A concurrent signup of the same address that wins the unique
@@ -35,7 +35,7 @@ const fail = (status: number, body: AcceptanceFailure['body']): AcceptanceFailur
  */
 export async function acceptInvitation(
   invitation: { id: string; tokenHash: string },
-  googleUser: GoogleUserInfo,
+  googleUser: VerifiedSignInIdentity,
   req: Request,
   profile?: SignupProfile | null,
 ): Promise<AcceptanceResult> {
@@ -64,7 +64,7 @@ export async function acceptInvitation(
       if (!googleUser.emailVerified || googleUser.email !== inv.email) {
         return fail(403, {
           error: 'wrong_account',
-          message: `This invitation is for ${inv.email}. Switch Google account and sign in with that address.`,
+          message: `This invitation is for ${inv.email}. Sign in with that address using Google or an emailed code.`,
           invitedEmail: inv.email,
         })
       }

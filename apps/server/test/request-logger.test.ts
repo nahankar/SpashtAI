@@ -24,6 +24,15 @@ function parsedRequests(lines: string[]) {
 }
 
 describe('request log redaction', () => {
+  it('redacts emailed codes and challenge credentials from explicitly logged bodies', () => {
+    const { lines, log } = captureLogger()
+    log.info({ req: { body: { code: '654321', challengeId: 'private-challenge' } } })
+    const output = lines.join('')
+    expect(output).not.toContain('654321')
+    expect(output).not.toContain('private-challenge')
+    expect(output).toContain('[redacted]')
+  })
+
   it('redacts workspace credentials on successful and failed serialized request logs', async () => {
     const { lines, log } = captureLogger()
     const app = express()

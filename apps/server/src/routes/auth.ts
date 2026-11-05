@@ -9,9 +9,10 @@ import { requireAuth } from '../middleware/auth'
 import { authLimiter } from '../middleware/rate-limit'
 import { sendEmail, buildPasswordResetEmail } from '../lib/email'
 import { verifyGoogleIdToken } from '../lib/google-auth'
-import { signInWithGoogleUser } from '../lib/googleSignIn'
+import { signInWithGoogleUser, signInWithVerifiedIdentity } from '../lib/googleSignIn'
 import { validateProfileFields, resolveProfileLocation, authUserForClient, readSignupProfile, attachSignupLocation } from '../lib/profile'
 import { areSignupsPaused, getSignupsPausedMessage } from '../lib/platformSettings'
+import { consumeEmailSignInCode, EmailCodeError, normalizeSignInEmail, requestEmailSignInCode } from '../lib/emailSignIn'
 
 const router = Router()
 
@@ -23,6 +24,38 @@ async function rejectIfSignupsPaused(res: Response): Promise<boolean> {
   })
   return true
 }
+
+// Email codes never grant workspace membership; invitations use their own acceptance route.
+router.post('/email-code/request', authLimiter, async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store')
+  try {
+    const email = normalizeSignInEmail(req.body?.email)
+    res.json(await requestEmailSignInCode(email))
+  } catch (err) {
+    if (err instanceof EmailCodeError) { res.status(err.status).json({ error: err.code, message: err.message }); return }
+    logger.error({ event: 'auth.email_code_request_failed' }, 'Email code request failed')
+    res.status(500).json({ error: 'Could not send a sign-in code' })
+  }
+})
+
+router.post('/email-code/verify', authLimiter, async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store')
+  try {
+    const profileRead = readSignupProfile(req.body)
+    if (!profileRead.ok) { res.status(400).json({ error: 'PROFILE_REQUIRED', message: profileRead.error }); return }
+    const identity = await consumeEmailSignInCode(req.body?.challengeId, req.body?.code)
+    const existing = profileRead.data ? await prisma.user.findUnique({ where: { email: identity.email } }) : null
+    const profile = profileRead.data ? await attachSignupLocation(profileRead.data, existing) : null
+    const result = await signInWithVerifiedIdentity(identity, req, profile)
+    if (!result.ok) { res.status(result.status).json(result.body); return }
+    const { user } = result
+    res.json({ token: signToken({ userId: user.id, email: user.email, role: user.role }), user: await authUserForClient(user) })
+  } catch (err) {
+    if (err instanceof EmailCodeError) { res.status(err.status).json({ error: err.code, message: err.message }); return }
+    logger.error({ event: 'auth.email_code_verify_failed' }, 'Email code sign-in failed')
+    res.status(500).json({ error: 'Could not sign in. Request a new code and try again.' })
+  }
+})
 
 // POST /api/auth/register
 router.post('/register', authLimiter, async (req: Request, res: Response) => {

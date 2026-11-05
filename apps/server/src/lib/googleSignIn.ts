@@ -5,6 +5,9 @@ import type { GoogleUserInfo } from './google-auth'
 import { areSignupsPaused, getSignupsPausedMessage } from './platformSettings'
 import { isProfileComplete, type SignupProfile } from './profile'
 
+/** Constructed only after verifying Google or a single-use emailed code. */
+export type VerifiedSignInIdentity = Omit<GoogleUserInfo, 'googleId'> & { googleId: string | null }
+
 export type GoogleSignInResult =
   | { ok: true; user: User; created: boolean }
   | { ok: false; status: number; body: { error: string; message?: string } }
@@ -21,20 +24,20 @@ export function isUniqueViolation(err: unknown) {
 }
 
 /**
- * Resolves a verified Google identity to a SpashtAI account inside the caller's transaction: an existing account
+ * Resolves a verified identity to a SpashtAI account inside the caller's transaction: an existing account
  * only gains missing Google/profile fields and login bookkeeping (never a role or permission change), and a new
  * account respects the signups-paused control unless an invitation allows it. A concurrent create of the same
  * account surfaces as a unique violation, which rolls the caller's transaction back for a clean retry.
  */
 export async function resolveGoogleAccount(
   db: Prisma.TransactionClient,
-  googleUser: GoogleUserInfo,
+  googleUser: VerifiedSignInIdentity,
   req: Request,
   opts: {
     /** Loaded by the caller outside the transaction (see loadSignupPolicy); only `db` is used in here. */
     policy: SignupPolicy
     /**
-     * Only for accepting a valid invitation whose verified Google email matched: a new learner (USER) account may
+     * Only for accepting a valid invitation whose verified email matched: a new learner (USER) account may
      * be created while signups are paused. Every other signup path must leave this unset.
      */
     invitationBypassesSignupPause?: boolean
@@ -44,11 +47,11 @@ export async function resolveGoogleAccount(
 ): Promise<GoogleSignInResult> {
   let user = await db.user.findFirst({
     where: {
-      OR: [{ googleId: googleUser.googleId }, { email: googleUser.email }],
+      OR: [...(googleUser.googleId ? [{ googleId: googleUser.googleId }] : []), { email: googleUser.email }],
     },
   })
 
-  if (user && user.googleId && user.googleId !== googleUser.googleId) {
+  if (googleUser.googleId && user && user.googleId && user.googleId !== googleUser.googleId) {
     return { ok: false, status: 409, body: { error: 'Email already linked to another Google account' } }
   }
 
@@ -119,7 +122,7 @@ export async function resolveGoogleAccount(
     await db.userActivity.create({
       data: {
         userId: user.id,
-        action: 'register_google',
+        action: googleUser.googleId ? 'register_google' : 'register_email_code',
         ipAddress: req.ip || null,
         userAgent: req.headers['user-agent'] || null,
       },
@@ -129,7 +132,7 @@ export async function resolveGoogleAccount(
   await db.userActivity.create({
     data: {
       userId: user.id,
-      action: 'login_google',
+      action: googleUser.googleId ? 'login_google' : 'login_email_code',
       ipAddress: req.ip || null,
       userAgent: req.headers['user-agent'] || null,
     },
@@ -149,12 +152,17 @@ export async function withAccountRaceRetry<T>(fn: (tx: Prisma.TransactionClient)
   }
 }
 
-/** `POST /api/auth/google`: one transaction per attempt, so a racing signup of the same address never duplicates. */
-export async function signInWithGoogleUser(
-  googleUser: GoogleUserInfo,
+/** One transaction per attempt: Google and email signups racing for one address resolve to the same account. */
+export async function signInWithVerifiedIdentity(
+  googleUser: VerifiedSignInIdentity,
   req: Request,
   profile?: SignupProfile | null,
 ): Promise<GoogleSignInResult> {
   const policy = await loadSignupPolicy()
   return withAccountRaceRetry((tx) => resolveGoogleAccount(tx, googleUser, req, { policy, profile: profile ?? null }))
+}
+
+/** Keep the Google entry point explicit: email verification never fabricates or replaces a Google ID. */
+export function signInWithGoogleUser(identity: GoogleUserInfo, req: Request, profile?: SignupProfile | null) {
+  return signInWithVerifiedIdentity(identity, req, profile)
 }

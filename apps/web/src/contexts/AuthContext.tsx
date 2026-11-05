@@ -46,6 +46,7 @@ export interface AuthContextType {
   login: (email: string, password: string) => Promise<AuthUser>
   loginForDevelopment: (email: string, password: string) => Promise<AuthUser>
   loginWithGoogle: (credential: string, profile?: { phone: string; dateOfBirth: string; gender: string; pincode: string }) => Promise<AuthUser>
+  loginWithEmailCode: (challengeId: string, code: string, profile?: { phone: string; dateOfBirth: string; gender: string; pincode: string }) => Promise<AuthUser>
   register: (data: RegisterData) => Promise<AuthUser>
   logout: () => void
   isAdmin: boolean
@@ -133,6 +134,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return data.user
   }, [])
 
+  const loginWithEmailCode = useCallback(async (
+    challengeId: string, code: string,
+    profile?: { phone: string; dateOfBirth: string; gender: string; pincode: string },
+  ): Promise<AuthUser> => {
+    const data = await apiClient<{ token: string; user: AuthUser }>('/api/auth/email-code/verify', {
+      method: 'POST', body: JSON.stringify({ challengeId, code, ...profile }), skipAuth: true,
+    })
+    localStorage.setItem(TOKEN_KEY, data.token)
+    setUser(data.user)
+    return data.user
+  }, [])
+
   const register = useCallback(async (data: RegisterData): Promise<AuthUser> => {
     const res = await apiClient<{ token: string; user: AuthUser }>('/api/auth/register', {
       method: 'POST',
@@ -164,6 +177,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         loginForDevelopment,
         loginWithGoogle,
+        loginWithEmailCode,
         register,
         logout,
         isAdmin,

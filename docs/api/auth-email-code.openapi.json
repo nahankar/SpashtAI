@@ -1,0 +1,426 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "SpashtAI email-code authentication",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/auth/email-code/request": {
+      "post": {
+        "summary": "Email a sign-in code",
+        "description": "Sends for both existing and unknown addresses without revealing account existence. Does not create an account. Mailbox budget shared across API instances: one send per minute, five per hour, plus existing IP auth limiter. SMTP failure invalidates the code and returns 503. No development code is exposed or logged.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success; Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Challenge"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/auth/email-code/verify": {
+      "post": {
+        "summary": "Sign in or create an account with an email code",
+        "description": "Codes expire after ten minutes, allow five guesses, and are consumed atomically once. A resend replaces the previous challenge. Verification preserves existing roles, permissions and Google IDs; a new account needs all four profile fields and obeys the signup pause. A successful code check consumes the code even if later profile or signup checks reject the request; request a new code after correcting the problem. Invitation codes cannot be used here.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "challengeId",
+                  "code"
+                ],
+                "properties": {
+                  "challengeId": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "code": {
+                    "type": "string",
+                    "pattern": "^[0-9]{6}$"
+                  },
+                  "phone": {
+                    "type": "string"
+                  },
+                  "dateOfBirth": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "gender": {
+                    "enum": [
+                      "MALE",
+                      "FEMALE"
+                    ]
+                  },
+                  "pincode": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success; Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/invitations/email-code/request": {
+      "post": {
+        "summary": "Email a code to the invited address",
+        "description": "Derives recipient from the invitation; ignores any supplied email. Only pending or already accepted invitations qualify. Binds the challenge to this exact invitation link. Uses the same mailbox resend and hourly budget as Personal sign-in.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success; Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Challenge"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/invitations/accept": {
+      "post": {
+        "summary": "Accept an invitation using Google or an emailed code",
+        "description": "Existing Google contract remains supported. Email verification must match the invited address and exact invitation link. Acceptance rechecks revocation, expiry, inviter permissions, enrollment, seats, entitlements and membership in the existing locked transaction. Platform invitations retain the existing signup-pause exception; organization invitations do not bypass it.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "challengeId": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "code": {
+                    "type": "string",
+                    "pattern": "^[0-9]{6}$"
+                  },
+                  "phone": {
+                    "type": "string"
+                  },
+                  "dateOfBirth": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "gender": {
+                    "enum": [
+                      "MALE",
+                      "FEMALE"
+                    ]
+                  },
+                  "pincode": {
+                    "type": "string"
+                  },
+                  "token": {
+                    "type": "string"
+                  },
+                  "credential": {
+                    "type": "string",
+                    "description": "Google credential; supply this OR challengeId and code."
+                  },
+                  "enrollmentResponses": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success; Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "token",
+                    "user"
+                  ],
+                  "properties": {
+                    "token": {
+                      "type": "string"
+                    },
+                    "user": {
+                      "type": "object"
+                    },
+                    "workspacePath": {
+                      "type": "string"
+                    },
+                    "alreadyAccepted": {
+                      "type": "boolean"
+                    },
+                    "newAccount": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "x-rollout": {
+    "migration": "20261105120000_email_signin_codes",
+    "configuration": [
+      "Existing SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS and SMTP_FROM are reused; SMTP TLS remains required.",
+      "Set EMAIL_CODE_SECRET (recommended) or reuse the mandatory production JWT_SECRET. Keep it stable across API instances. Rotating it invalidates outstanding codes.",
+      "Apply migration before releasing the API. Generate the Prisma client. Grant the restricted runtime role SELECT, INSERT, UPDATE and DELETE on EmailSignInCode.",
+      "Release API before web. Google remains available throughout rollout.",
+      "Remove abandoned EmailSignInCode rows whose sentAt is older than one day during normal database maintenance. Preserve recent rows to retain mailbox budgets."
+    ],
+    "validation": "Isolated PostgreSQL at port 55445 via EMAIL_CODE_TEST_DATABASE_URL; SMTP transport mocked in the auth tests. Live mailbox delivery and production rollout require separate validation."
+  },
+  "components": {
+    "responses": {
+      "Error": {
+        "description": "Request failed; inspect error and message.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Challenge": {
+        "type": "object",
+        "required": [
+          "challengeId",
+          "expiresInSeconds",
+          "resendAfterSeconds"
+        ],
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "expiresInSeconds": {
+            "type": "integer",
+            "const": 600
+          },
+          "resendAfterSeconds": {
+            "type": "integer",
+            "const": 60
+          }
+        }
+      },
+      "Session": {
+        "type": "object",
+        "required": [
+          "token",
+          "user"
+        ],
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "user": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  },
+  "x-validation": {
+    "checks": [
+      "Production web and server builds passed.",
+      "Frontend TypeScript check passed.",
+      "31 relevant tests passed, including 13 isolated PostgreSQL email-code tests with a restricted runtime role.",
+      "Mobile browser checks passed for login, signup, invitation, wrong-code retry and cooldown; API responses were simulated."
+    ],
+    "limits": [
+      "Live SMTP delivery and production deployment are not verified.",
+      "Existing AuthContext isGenuineIdentityRejection export triggers react-refresh/only-export-components lint; unchanged by this feature.",
+      "Installed Postman CLI 1.74.0 does not provide postman status; no Postman workspace changes were made."
+    ]
+  }
+}

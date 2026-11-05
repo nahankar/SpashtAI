@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label'
 import { LogoWithBeta } from '@/components/brand/LogoWithBeta'
 
 /**
- * Dedicated admin sign-in (username + password). Regular users use Google-only
+ * Dedicated admin sign-in (username + password). Regular users use Google or emailed codes for
  * sign-in on /auth/login. Admin credentials are unchanged.
  */
 export function AdminLogin() {

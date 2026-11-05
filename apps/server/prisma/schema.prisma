@@ -1642,3 +1642,16 @@ model UserInvitation {
   @@index([email])
   @@index([createdAt])
 }
+
+// One row per mailbox: shared resend/guess budgets across all API instances and invitation links.
+model EmailSignInCode {
+  email          String   @id
+  challengeId    String   @unique
+  contextHash    String
+  codeHash       String?
+  expiresAt      DateTime
+  sentAt         DateTime
+  attempts       Int      @default(0)
+  windowStart    DateTime
+  sends          Int      @default(0)
+}

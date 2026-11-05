@@ -31,6 +31,7 @@ function auth(user: Partial<AuthUser> = {}): AuthContextType {
     login: unused,
     loginForDevelopment: unused,
     loginWithGoogle: unused,
+    loginWithEmailCode: unused,
     register: unused,
     logout: () => {},
     isAdmin: false,

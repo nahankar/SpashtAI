@@ -13,8 +13,10 @@ invitation email goes to the recipient (or, in development, that it is captured 
 - The platform Admin endpoints create **platform invitations**, with no workspace or membership assigned.
   They list/count/manage only null-scope invitations. Separate workspace endpoints reuse this service for
   organization membership; see "Tenancy integration" below.
-- Accepting requires Google sign-in. Gmail, Google Workspace and other addresses registered as a Google Account
-  all work; we never judge this from the email domain. Email-code / magic-link sign-in is not implemented.
+- Recipients can verify the invited address with an emailed code or Google sign-in. A Google Account is
+  optional when using email codes. See `api/auth-email-code.openapi.json` for the contract and rollout
+  requirements. Production email-code activation and real mailbox delivery remain unverified.
+  Magic-link sign-in is not implemented.
 
 ## Policy exception: invitations bypass paused signups
 
@@ -22,9 +24,9 @@ invitation email goes to the recipient (or, in development, that it is captured 
 While "Pause signups" is on, the invited address can still create an ordinary learner (`USER`) account, but only:
 
 - through invitation acceptance (`POST /api/invitations/accept`), never through `/api/auth/register` or
-  `/api/auth/google`, which stay blocked;
+  `/api/auth/google` or email-code signup, which stay blocked;
 - for a pending, unexpired, unrevoked invitation, checked under the row lock;
-- with a verified Google identity whose email exactly matches the invited address.
+- with a Google identity or single-use email code that verifies exactly the invited address.
 
 Onboarding and terms stay mandatory. Every bypass is audited without content (`signupsPausedBypass: true` on
 the `invitation_accepted` UserActivity and AdminAction rows). The Users page (Registration card) and the
@@ -37,9 +39,10 @@ Invitations page both state this exception.
    - An address that already has an account needs a second confirmation (`409 existing_user`).
 2. The branded email has an **Accept invitation** link: `FRONTEND_URL/invite#token=…`. The token is in the URL
    fragment, so it never reaches server or proxy logs.
-3. The recipient signs in with Google. The verified Google email must equal the invited address; otherwise the
-   page says **Switch Google account**, shows the full invited address to the link holder, and nothing changes.
-4. Account handling reuses normal Google sign-in (`lib/googleSignIn.ts`):
+3. The recipient verifies the invited address with a six-digit emailed code or Google sign-in. Email codes
+   are sent only to the invitation's address and bound to that exact invitation link. A mismatched Google
+   email still shows **Switch Google account** and leaves the invitation unchanged.
+4. Both methods reuse verified account resolution (`lib/googleSignIn.ts`):
    - Existing account: signed in; role, permissions, flags and history are unchanged; no duplicate is created.
    - New account: created as `USER`, then the normal profile/terms onboarding runs. This works even while
      signups are paused, but only for a pending, unexpired, unrevoked invitation accepted through this flow
@@ -47,7 +50,7 @@ Invitations page both state this exception.
      The bypass is audited without content as `UserActivity` `invitation_accepted` with metadata
      `{ newAccount: true, signupsPausedBypass: true }`.
 5. Accepting again with the same account is idempotent.
-6. **Atomic acceptance** (`lib/invitationAcceptance.ts`): after the Google credential is verified, one database
+6. **Atomic acceptance** (`lib/invitationAcceptance.ts`): after the Google credential or email code is verified, one database
    transaction locks the invitation row, re-checks token, address, status and expiry, resolves or creates the
    account, marks the invitation accepted and writes both audit rows. Any failure (including audit
    persistence) rolls all of it back, so no account is ever created and then deleted, and an acceptance never
@@ -180,7 +183,7 @@ organization invitation. It is not a membership capability: entering the path re
 **Still pending:** real Google browser acceptance, production SMTP configuration/login/delivery, and creating
 an organization's initial Owner by email before they have an account. Initial provisioning currently retains
 its verified-existing-Owner requirement. Organization practices and tenant analytics remain disabled until
-those data planes are certified. Email-code / magic-link sign-in is not implemented.
+those data planes are certified. Email-code sign-in is implemented alongside Google in the email-code change; see `api/auth-email-code.openapi.json` for its contract, migration, and rollout requirements. Production email-code activation and real mailbox delivery remain unverified. Magic-link sign-in is not implemented.
 
 ## Reviewed production email settings
 

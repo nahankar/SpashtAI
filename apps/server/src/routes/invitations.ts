@@ -1,7 +1,9 @@
 import { Router, type Request, type Response } from 'express'
+import { consumeEmailSignInCode, EmailCodeError, requestEmailSignInCode } from '../lib/emailSignIn'
+import type { VerifiedSignInIdentity } from '../lib/googleSignIn'
 import { signToken } from '../lib/jwt'
 import { logger } from '../lib/logger'
-import { verifyGoogleIdToken, type GoogleUserInfo } from '../lib/google-auth'
+import { verifyGoogleIdToken } from '../lib/google-auth'
 import { INVALID_LINK, acceptInvitation } from '../lib/invitationAcceptance'
 import { authUserForClient, readSignupProfile } from '../lib/profile'
 import { effectiveStatus, findInvitationByToken } from '../lib/invitations'
@@ -10,6 +12,23 @@ import { invitationAcceptLimiter } from '../middleware/rate-limit'
 // Public recipient endpoints. The token travels in the request body (the link keeps it in the URL fragment),
 // so it never appears in access logs.
 const router = Router()
+
+router.post('/email-code/request', invitationAcceptLimiter, async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store')
+  try {
+    const token = typeof req.body?.token === 'string' ? req.body.token : ''
+    const inv = await findInvitationByToken(token)
+    if (!inv) { res.status(404).json(INVALID_LINK); return }
+    if (!['pending', 'accepted'].includes(effectiveStatus(inv))) {
+      res.status(410).json({ error: 'invitation_closed', message: 'This invitation has expired or was withdrawn. Ask your administrator for a new one.' }); return
+    }
+    res.json(await requestEmailSignInCode(inv.email, token))
+  } catch (err) {
+    if (err instanceof EmailCodeError) { res.status(err.status).json({ error: err.code, message: err.message }); return }
+    logger.error({ event: 'invitation.email_code_request_failed' }, 'Invitation code request failed')
+    res.status(500).json({ error: 'Could not send a sign-in code' })
+  }
+})
 
 router.post('/lookup', invitationAcceptLimiter, async (req: Request, res: Response) => {
   try {
@@ -21,7 +40,7 @@ router.post('/lookup', invitationAcceptLimiter, async (req: Request, res: Respon
     res.json({
       status: effectiveStatus(inv),
       recipientName: inv.recipientName,
-      // The link holder is shown the full address so they know which Google Account to use.
+      // The link holder is shown the full address so they know which address to verify.
       invitedEmail: inv.email,
       expiresAt: inv.expiresAt,
       workspaceInvitation: Boolean(inv.workspaceId),
@@ -35,10 +54,11 @@ router.post('/lookup', invitationAcceptLimiter, async (req: Request, res: Respon
 })
 
 router.post('/accept', invitationAcceptLimiter, async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store')
   try {
-    const { token, credential } = (req.body ?? {}) as { token?: string; credential?: string }
-    if (!credential) {
-      res.status(400).json({ error: 'Google credential is required' })
+    const { token, credential, challengeId, code } = (req.body ?? {}) as { token?: string; credential?: string; challengeId?: string; code?: string }
+    if (!credential && !challengeId) {
+      res.status(400).json({ error: 'Google credential or email code is required' })
       return
     }
     const inv = await findInvitationByToken(String(token ?? ''))
@@ -53,10 +73,13 @@ router.post('/accept', invitationAcceptLimiter, async (req: Request, res: Respon
       return
     }
 
-    let googleUser: GoogleUserInfo
+    let googleUser: VerifiedSignInIdentity
     try {
-      googleUser = await verifyGoogleIdToken(credential)
-    } catch {
+      googleUser = challengeId
+        ? await consumeEmailSignInCode(challengeId, code, String(token ?? ''))
+        : await verifyGoogleIdToken(credential!)
+    } catch (err) {
+      if (err instanceof EmailCodeError) { res.status(err.status).json({ error: err.code, message: err.message }); return }
       res.status(401).json({ error: 'google_sign_in_failed', message: 'Google sign-in failed. Please try again.' })
       return
     }
