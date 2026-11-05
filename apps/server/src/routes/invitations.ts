@@ -31,6 +31,7 @@ router.post('/email-code/request', invitationAcceptLimiter, async (req: Request,
 })
 
 router.post('/lookup', invitationAcceptLimiter, async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store')
   try {
     const inv = await findInvitationByToken(String(req.body?.token ?? ''))
     if (!inv) {
@@ -44,6 +45,7 @@ router.post('/lookup', invitationAcceptLimiter, async (req: Request, res: Respon
       invitedEmail: inv.email,
       expiresAt: inv.expiresAt,
       workspaceInvitation: Boolean(inv.workspaceId),
+      workspace: inv.workspace,
       proposedRole: inv.proposedRole,
       enrollmentFields: inv.status === 'PENDING' && effectiveStatus(inv) === 'pending' ? inv.enrollmentFields : [],
     })

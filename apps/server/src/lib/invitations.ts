@@ -123,10 +123,11 @@ export function clearCapturedInvitationEmails() {
   devMailbox.length = 0
 }
 
-function acceptUrlFor(token: string) {
+function acceptUrlFor(token: string, workspaceSlug?: string) {
   const base = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '')
   // The token rides in the fragment so it never reaches server or proxy access logs.
-  return `${base}/invite#token=${token}`
+  const path = workspaceSlug ? `/w/${encodeURIComponent(workspaceSlug)}/invite` : '/invite'
+  return `${base}${path}#token=${token}`
 }
 
 function escapeHtml(value: string) {
@@ -164,8 +165,8 @@ ${message ? `<tr><td style="font-size:16px;line-height:24px">${escapeHtml(messag
   return { subject, text, html }
 }
 
-async function deliver(inv: UserInvitation, token: string, workspaceName?: string): Promise<{ deliveryStatus: InvitationDeliveryStatus; deliveryError: string | null }> {
-  const acceptUrl = acceptUrlFor(token)
+async function deliver(inv: UserInvitation, token: string, workspaceName?: string, workspaceSlug?: string): Promise<{ deliveryStatus: InvitationDeliveryStatus; deliveryError: string | null }> {
+  const acceptUrl = acceptUrlFor(token, workspaceSlug)
   const email = buildInvitationEmail({ recipientName: inv.recipientName, acceptUrl, expiresAt: inv.expiresAt, workspaceName, emailSubject: inv.emailSubject, emailMessage: inv.emailMessage })
   if (devMailboxAvailable()) {
     devMailbox.unshift({ workspaceId: inv.workspaceId, id: inv.id, to: inv.email, subject: email.subject, text: email.text, acceptUrl, capturedAt: new Date().toISOString(), developmentOnly: true })
@@ -186,6 +187,7 @@ export interface SendAttempt {
   invitation: UserInvitation
   token: string
   workspaceName?: string
+  workspaceSlug?: string
 }
 
 /**
@@ -197,7 +199,7 @@ export interface SendAttempt {
  */
 export async function deliverAttempt(adminId: string, attempt: SendAttempt, run: <T>(work: (tx: Prisma.TransactionClient) => Promise<T>) => Promise<T> = work => prisma.$transaction(work)) {
   const { invitation: inv, token } = attempt
-  const outcome = await deliver(inv, token, attempt.workspaceName)
+  const outcome = await deliver(inv, token, attempt.workspaceName, attempt.workspaceSlug)
   try {
     const stale = await run(async (tx) => {
       const { count } = await tx.userInvitation.updateMany({ where: { id: inv.id, tokenHash: hashInvitationToken(token) }, data: outcome })
@@ -368,7 +370,10 @@ export async function findInvitationByToken(token: string) {
       if (!workspacesEnabled()) return null
       await assertWorkspaceDatabaseSafety(tx)
     }
-    return inv
+    const workspace = inv?.workspaceId ? await tx.workspace.findUnique({
+      where: { id: inv.workspaceId }, select: { name: true, slug: true, logoDataUrl: true, accentColor: true },
+    }) : null
+    return inv ? { ...inv, workspace } : null
   })
 }
 

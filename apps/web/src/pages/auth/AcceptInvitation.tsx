@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Loader2, MailCheck, TriangleAlert, UserRoundCog } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
@@ -21,6 +21,7 @@ interface Lookup {
   recipientName: string | null
   invitedEmail: string
   workspaceInvitation?: boolean
+  workspace?: { name: string; slug: string; logoDataUrl: string | null; accentColor: string } | null
   proposedRole?: string
   enrollmentFields?: EnrollmentField[]
   expiresAt: string
@@ -46,6 +47,7 @@ async function post<T>(path: string, body: unknown): Promise<{ ok: boolean; stat
 }
 
 export function AcceptInvitation() {
+  const navigate = useNavigate()
   const [token] = useState(takeToken)
   const [lookup, setLookup] = useState<Lookup | null>(null)
   const [loadError, setLoadError] = useState(token ? '' : 'This invitation link is incomplete. Open the link from your invitation email again.')
@@ -64,10 +66,14 @@ export function AcceptInvitation() {
     post<Lookup>('/api/invitations/lookup', { token }).then(({ ok, data }) => {
       if (ok) {
         setLookup(data)
+        if (data.workspace) {
+          const canonical = `/w/${encodeURIComponent(data.workspace.slug)}/invite`
+          if (window.location.pathname !== canonical) navigate(canonical, { replace: true })
+        }
         if (!data.enrollmentFields?.length) setStep('profile')
       } else setLoadError(data.message || 'This invitation link is not valid.')
     }).catch(() => setLoadError('Could not check this invitation. Please try again.'))
-  }, [token])
+  }, [token, navigate])
 
   async function handleIdentity(identity: { credential: string } | { challengeId: string; code: string }) {
     setProblem(null)
@@ -105,18 +111,22 @@ export function AcceptInvitation() {
 
   return (
     <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center bg-background px-4 py-8">
-      <Card className="w-full max-w-md">
+      <Card className="w-full max-w-md" style={lookup?.workspace ? { borderTop: `4px solid ${lookup.workspace.accentColor}` } : undefined}>
         <CardHeader className="text-center space-y-3">
-          <div className="flex justify-center"><LogoWithBeta imgClassName="h-16 w-auto" /></div>
+          {lookup?.workspace ? <div className="space-y-2">
+            {lookup.workspace.logoDataUrl && <img src={lookup.workspace.logoDataUrl} alt="" className="mx-auto h-16 w-16 object-contain" />}
+            <h1 className="text-xl font-semibold">{lookup.workspace.name}</h1>
+            <p className="text-xs text-muted-foreground">on SpashtAI</p>
+          </div> : <div className="flex justify-center"><LogoWithBeta imgClassName="h-16 w-auto" /></div>}
           <CardDescription className="text-base text-foreground font-medium">
-            {lookup?.recipientName ? `${lookup.recipientName}, you're invited to SpashtAI` : "You're invited to SpashtAI"}
+            {lookup?.recipientName ? `${lookup.recipientName}, you're invited to ${lookup.workspace?.name || 'SpashtAI'}` : `You're invited to ${lookup?.workspace?.name || 'SpashtAI'}`}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {loadError && <p className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{loadError}</p>}
           {!lookup && !loadError && <div className="flex justify-center py-4"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>}
 
-          {lookup?.workspaceInvitation && <p className="text-sm">This invitation grants {lookup.proposedRole?.toLowerCase()} access to an organization workspace. Accepting makes this email organization-only. Any previous Personal history is preserved but unavailable. Use a different email for Personal access.</p>}
+          {lookup?.workspaceInvitation && <p className="text-sm">This invitation grants {lookup.proposedRole?.toLowerCase()} access to {lookup.workspace?.name || 'an organization workspace'}. Accepting makes this email organization-only. Any previous Personal history is preserved but unavailable. Use a different email for Personal access.</p>}
           {closed && (
             <p className="rounded-md bg-muted p-3 text-sm">
               {lookup.status === 'revoked'

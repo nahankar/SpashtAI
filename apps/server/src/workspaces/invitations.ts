@@ -68,7 +68,7 @@ export async function createWorkspaceInvitation(claims: WorkspaceTokenPayload, i
       proposedRole: body.role, memberFeatures: body.memberFeatures, pendingKey: key, tokenHash, expiresAt: expiryFrom(now), invitedById: scope.member.userId,
       existingUserAtInvite: Boolean(existing), sendCount: 1, lastSentAt: now } })
     await audit(tx, scope, 'invitation_create', invitation.id, { role: body.role, attempt: 1 })
-    return { invitation, token, workspaceName: scope.workspace.name }
+    return { invitation, token, workspaceName: scope.workspace.name, workspaceSlug: scope.workspace.slug }
   })
   return presentWorkspaceInvitation(await deliverAttempt(claims.userId, attempt, work => withLockedWorkspaceAccess(claims, tx => work(tx))))
 }
@@ -83,13 +83,13 @@ export async function changeWorkspaceInvitation(claims: WorkspaceTokenPayload, i
     mayManage(scope, current.proposedRole!)
     if (action === 'resend') reserveInvitationSend(claims.userId)
     if (current.status === 'ACCEPTED' || action === 'resend' && current.status === 'REVOKED') throw new WorkspaceError(409, 'INVITATION_CLOSED', 'This invitation cannot be changed')
-    if (action === 'revoke' && current.status === 'REVOKED') return { invitation: current, token, workspaceName: scope.workspace.name }
+    if (action === 'revoke' && current.status === 'REVOKED') return { invitation: current, token, workspaceName: scope.workspace.name, workspaceSlug: scope.workspace.slug }
     if (action === 'resend' && effectiveStatus(current) !== 'pending' && await reservedWorkspaceSeats(tx, scope.workspace.id) >= scope.workspace.maxMembers) throw new WorkspaceError(409, 'SEAT_LIMIT', 'This workspace has no available seats')
     const invitation = await tx.userInvitation.update({ where: { id }, data: action === 'revoke'
       ? { status: 'REVOKED', pendingKey: null, revokedAt: now, revokedById: scope.member.userId }
       : { status: 'PENDING', pendingKey: pendingInvitationKey(scope.workspace.id, current.email), tokenHash, expiresAt: expiryFrom(now), deliveryStatus: 'SENDING', deliveryError: null, sendCount: { increment: 1 }, lastSentAt: now } })
     await audit(tx, scope, `invitation_${action}`, id, { attempt: invitation.sendCount })
-    return { invitation, token, workspaceName: scope.workspace.name }
+    return { invitation, token, workspaceName: scope.workspace.name, workspaceSlug: scope.workspace.slug }
   })
   return presentWorkspaceInvitation(action === 'revoke' ? attempt.invitation : await deliverAttempt(claims.userId, attempt, work => withLockedWorkspaceAccess(claims, tx => work(tx))))
 }

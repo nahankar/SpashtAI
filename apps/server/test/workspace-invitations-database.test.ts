@@ -30,7 +30,10 @@ suite('workspace email invitation boundaries with a restricted runtime role', ()
   const post = (token: string, body: unknown) => request(app).post(base).set(bearer(token)).send(body)
   function mailToken(workspaceId: string, email: string) {
     const mail = captured(workspaceId).find(m => m.to === email)
-    expect(mail).toBeDefined(); return new URL(mail!.acceptUrl).hash.slice('#token='.length)
+    expect(mail).toBeDefined()
+    const url = new URL(mail!.acceptUrl)
+    expect(url.pathname).toBe(`/w/${workspaceId === alpha ? `${tag}-alpha` : `${tag}-beta`}/invite`)
+    return url.hash.slice('#token='.length)
   }
   const SIGNUP_PROFILE = { phone: '9876543210', dateOfBirth: '1995-06-15', gender: 'FEMALE', pincode: '560001' }
   const accept = (token: string, email: string, verified = true) => request(app).post('/api/invitations/accept').send({ token, credential: JSON.stringify({ email, verified }), ...SIGNUP_PROFILE })

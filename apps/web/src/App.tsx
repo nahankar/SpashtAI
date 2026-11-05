@@ -520,6 +520,7 @@ function AppRoutes() {
         <Route path="/auth/forgot-password" element={<ForgotPassword />} />
         <Route path="/auth/reset-password" element={<ResetPassword />} />
         <Route path="/invite" element={<AcceptInvitation />} />
+        <Route path="/w/:slug/invite" element={<AcceptInvitation />} />
 
         <Route element={<ProtectedRoute requireProfile={false} />}>
           <Route path="/auth/complete-profile" element={<CompleteProfile />} />
