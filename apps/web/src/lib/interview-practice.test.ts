@@ -35,6 +35,25 @@ describe('interview durable speech confirmation',()=> {
     expect(order).toEqual(['mute','rpc','verify'])
     expect(port.rpc).toHaveBeenCalledWith({action:'FINISH',requestId:'request-1'})
   })
+  it('recovers a lost RPC acknowledgment only from the exact durable server receipt', async () => {
+    const {port,receipt}=fixture('SKIP')
+    port.rpc.mockRejectedValue(new Error('Connection timeout'))
+    expect(await confirmedInterviewDrain(port,'SKIP','request-1','attempt-1','segment-1')).toEqual(receipt)
+    expect(port.verify).toHaveBeenCalledWith('request-1')
+    expect(port.rpc).toHaveBeenCalledTimes(1)
+  })
+  it('keeps a transport failure when no durable receipt exists', async () => {
+    const {port}=fixture()
+    port.rpc.mockRejectedValue(new Error('Connection timeout'))
+    port.verify.mockRejectedValue(new ApiError('Receipt not found',404))
+    await expect(confirmedInterviewDrain(port,'FINISH','request-1','attempt-1','segment-1')).rejects.toThrow('Connection timeout')
+  })
+  it.each(['id','attemptId','segmentId','action'] as const)('never accepts a mismatched %s after a lost acknowledgment', async field => {
+    const {port,receipt}=fixture()
+    port.rpc.mockRejectedValue(new Error('Connection timeout'))
+    port.verify.mockResolvedValue({...receipt,[field]:'other'} as CaptureReceipt)
+    await expect(confirmedInterviewDrain(port,'FINISH','request-1','attempt-1','segment-1')).rejects.toThrow('another action')
+  })
   it('cannot advance when provider transcript is pending',async()=> {
     const {port}=fixture();port.rpc.mockResolvedValue(JSON.stringify({error:'TRANSCRIPT_PENDING'}))
     await expect(confirmedInterviewDrain(port,'FINISH','request-1','attempt-1','segment-1')).rejects.toThrow('still being transcribed')

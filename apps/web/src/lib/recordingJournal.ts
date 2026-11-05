@@ -12,9 +12,9 @@
  * - A live recorder holds a Web Lock on its key, so no other tab (or recovery in the same tab) can upload a recording
  *   that is still being written; recoveries take the same lock, so competing tabs never upload the same recording.
  * - Local data is deleted after a confirmed upload, a deliberate discard, a terminal server answer (practice deleted,
- *   segment already holds its recording, nothing playable), an explicit sign-out (after a bounded upload attempt), or
+ *   segment already holds its recording, nothing playable), an explicit sign-out, or
  *   expiry after 7 days.
- * - At most the current timeslice (about 1 s) plus one local write is unpersisted at the instant of a crash.
+ * - The current timeslice and queued local writes can be lost at the instant of a crash; zero loss is not guaranteed.
  */
 
 /** Local by default; a production build needs an explicit rollout after the recording notice review. */

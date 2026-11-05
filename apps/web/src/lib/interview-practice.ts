@@ -113,9 +113,20 @@ export async function confirmedInterviewDrain(port: {
   if (action === 'PAUSE' || action === 'LEAVE') await port.seal()
   await port.mute()
   // acceptUnresolved is only ever the learner's explicit choice after TRANSCRIPT_PENDING.
-  const result = JSON.parse(await port.rpc({ action, requestId, ...(options.acceptUnresolved && action !== 'SKIP' ? { acceptUnresolved: true as const } : {}) })) as { error?: string; receiptId?: string }
-  if (result.error || !result.receiptId) throw new CaptureError(result.error)
-  const receipt = await port.verify(result.receiptId)
+  let reply: string | undefined
+  let receipt: CaptureReceipt | undefined
+  try {
+    reply = await port.rpc({ action, requestId, ...(options.acceptUnresolved && action !== 'SKIP' ? { acceptUnresolved: true as const } : {}) })
+  } catch (transportError) {
+    // The agent may have committed the receipt before its LiveKit reply was lost.
+    // Read that exact id through the owned endpoint; never repeat speech or assume success.
+    try { receipt = await port.verify(requestId) } catch { throw transportError }
+  }
+  if (!receipt) {
+    const result = JSON.parse(reply!) as { error?: string; receiptId?: string }
+    if (result.error || !result.receiptId) throw new CaptureError(result.error)
+    receipt = await port.verify(result.receiptId)
+  }
   // Pause and End seal the segment at whichever answer the interviewer holds, which can be one the page
   // has not refreshed to yet; Finish and Skip must name the answer on screen.
   const sameAnswer = action === 'PAUSE' || action === 'LEAVE' || receipt.attemptId === attemptId

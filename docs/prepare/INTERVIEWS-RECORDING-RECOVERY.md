@@ -55,3 +55,15 @@ notice and privacy wording to explain temporary browser audio, retention and sig
 browser persistence in production. Persistence defaults off in production builds; enable only with
 `VITE_RECORDING_RECOVERY_ENABLED=true` at build time after that review. Development defaults on. The prior prototype documented this same wording gap; its suggested wording
 was not approved or published. Validate shared-device cleanup and the final integrated revision before release.
+
+## Lost speech-save acknowledgment found during validation
+
+The first manual voice run hit a LiveKit `Connection timeout` after the agent logged a saved SKIP drain receipt.
+The browser previously stopped at the transport error without checking the durable receipt. The shared
+`confirmedInterviewDrain` now checks the owned receipt endpoint for the original request id when RPC throws.
+It accepts only the matching action, segment, request id and (for Finish/Skip) attempt. Missing receipts retain
+the original failure; mismatched receipts still fail. Explicit recognizer errors such as `TRANSCRIPT_PENDING`
+do not use this transport fallback. No recording/answer is marked saved without server confirmation.
+
+Regression tests were run against the old helper first and failed, then passed with the fallback. This is a
+separate small reliability change discovered during D-1 validation, not an adaptive-selection change.
