@@ -1,0 +1,41 @@
+{
+  "applicationRevision": "810a65b",
+  "runDateLocal": "2026-11-06",
+  "timezone": "Asia/Kolkata",
+  "policy": "learner-evaluation-8",
+  "model": "us.amazon.nova-2-lite-v1:0",
+  "fixtureSha256": "d9dd29de4e7b63fe70fcd58c5c48f51e27db42e53338f948767705aac7385686",
+  "environment": "Isolated local spasht_grading_validation on 127.0.0.1:55443; restricted walkthrough_app runtime; real Bedrock; ADMIN_TEST learner-policy preview; no simulation",
+  "quota": {
+    "perAdminLimit": 20,
+    "perAdminUsed": 20,
+    "globalLimit": 100,
+    "globalUsed": 20,
+    "changedOrReset": false
+  },
+  "sourceBank": "Existing local reviewed automation-pilot questions, revision 2; only their pinned rubric fields copied to test DB",
+  "guidanceSha256": {
+    "AUT-NEW-028": "225da0a75f4ea67cc4a285a77ce02a309a052402a3eaced72817ab6550867ba4",
+    "AUT-NEW-041": "f536093a17f817a80b0bafe6ff1305f846e7bdf3f0316a8d2458a1ec771ad07b",
+    "AUT-NEW-047": "9691c3d080085cae7420839c969dc27ce0962a13a4b22b07ce6f8f8fddc2b749",
+    "DE-NEW-001": "204362c097c744e21ec8605572d55e8990658d16fb92d975826ef7ebc61393ec",
+    "DE-NEW-012": "44779d96c7360fd945ddae48f6cd8ecafe2f504aca58b405d92644a36dc23801",
+    "DE-NEW-016": "11f73d422c6ac945cfb370edb3994e4cdec17dab1139d42a97be90d24f1250c8",
+    "DEV-NEW-016": "1202c3de3c3afd9d9e5b3d21fa421cc5fe152cd84fa97e3436577b3a8b4a62c4",
+    "MAN-NEW-019": "e19bf0f52d789b04b2a1822589bd9b3aa4cea1aadd3fc74e7f92bcd0a6129aad",
+    "OPS-NEW-001": "508fcce623b625d0b1c1ec5079d539b406e3c44561e25b4a82a19a74cc99ab4a",
+    "PY-NEW-010": "b9e84aa1cd9c7e6392db6d8ae43aa09a77072a5fb5450ef12f39c9a32e3829be",
+    "PY-NEW-021": "8a011752c22e1745eb671d719fac1f1894b9638300496859e5c99bc25d6920eb",
+    "PY-NEW-049": "43d4eb69503d6fe213239d7cd577c097dabc7cfb0c6a88ffb6a43ebfe522cad1",
+    "SM-NEW-013": "16372ccfbc131a79d84d6198d37d75e672e2deaae67a72ed80aff7e4d1eff71e",
+    "WEB-NEW-033": "5cc5866b23726bf45f63111656484d5eb15acda05a23e01770a2ea467d3ddee7",
+    "WEB-NEW-077": "a245f16990d5e3e2c0884672b3615a0b51a713dd458228d45883996a87cb56a7",
+    "WEB-NEW-099": "bd4bf1b2ebfb24d2cf6442858ba3b44deb8a9a21ba897cb2b9a0598da14a2323"
+  },
+  "limitations": [
+    "Historical heldout cases have been used before; this run is regression evidence, not fresh heldout validation.",
+    "AI-reviewed expected labels, not independent human expert calibration.",
+    "One invocation per model case; repeated-run variance and other tracks/languages are not established.",
+    "Typed saved answers use the real grading service; this is not a new microphone/transcription end-to-end test."
+  ]
+}
