@@ -144,7 +144,10 @@ export function invitationExpiryFooter(expiresAt: Date) {
 
 export function buildInvitationEmail(opts: { recipientName?: string | null; acceptUrl: string; expiresAt: Date; workspaceName?: string; emailSubject?: string | null; emailMessage?: string | null }) {
   const subject = opts.emailSubject || (opts.workspaceName ? `You're invited to ${opts.workspaceName} on SpashtAI` : "You're invited to SpashtAI")
-  const message = opts.emailMessage?.trim() ?? ''
+  // Without a custom message the body still names who is inviting and what accepting does.
+  const message = opts.emailMessage?.trim() || (opts.workspaceName
+    ? `${opts.workspaceName} has invited you to practise on SpashtAI.`
+    : "You're invited to practise on SpashtAI.")
   const footer = invitationExpiryFooter(opts.expiresAt)
   const text = [
     ...(message ? [message, ''] : []),
