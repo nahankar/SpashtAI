@@ -1,6 +1,6 @@
 import { prepareWorkspaceTestRole } from './workspace-test-role'
 import { RESTRICTED_TEST_URL, workspaceTestUrls } from './workspace-test-db'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { PrismaClient, type Prisma } from '@prisma/client'
 import express from 'express'
 import supertest from 'supertest'
@@ -312,6 +312,25 @@ suite('read-only Owner/Admin review of organization learner sessions', () => {
     const learnerTicket = signWorkspaceReviewMediaToken({ userId: users.learner, workspaceId: alpha, membershipId: members[`${alpha}:learner`],
       product: 'elevate', sessionId: ids.e2, recordingId: ids.crossRecording })
     expect((await api.get(`${streamPath('elevate', ids.e2, ids.crossRecording)}?review_media=${learnerTicket}`)).status).toBe(403)
+  })
+
+  it('refuses a playback ticket once it expires, even for a reviewer who still has access', async () => {
+    const issued = await ticket('owner', 'elevate', ids.e1, ids.e1Recording)
+    expect(issued.status).toBe(200)
+    const issuedAt = Date.now()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(issuedAt + 59 * 60_000)
+      expect((await api.get(issued.body.url).set('Range', 'bytes=0-9')).status).toBe(206)
+      vi.setSystemTime(issuedAt + 61 * 60_000)
+      const expired = await api.get(issued.body.url).set('Range', 'bytes=0-9')
+      expect(expired.status).toBe(401)
+      expect(expired.headers['content-range']).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
+    // A fresh ticket works again for the same, still-authorized reviewer.
+    expect((await api.get((await ticket('owner', 'elevate', ids.e1, ids.e1Recording)).body.url).set('Range', 'bytes=0-9')).status).toBe(206)
   })
 
   it('answers direct requests with known ids from another organization, Personal or the wrong path as not found', async () => {
