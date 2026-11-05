@@ -3,6 +3,41 @@
 > **North Star:** Product architecture, utterance model, and phased roadmap live in [NORTHSTAR.md](./NORTHSTAR.md).  
 > Elevate voice reliability and utterance persistence are **P0 / P1** there—backlog items below should reference those phases when touching live coaching or metrics storage.
 
+## 2026-11-05 — Current focus and parked workspace development
+
+**Owner priority:** focus next on adaptive Interview questions. Workspace Prepare and AI Coach are parked for later development; this entry does not authorize implementation, feature enablement, or deployment.
+
+### Current focus — Adaptive Interview questions (Phase 3.3c)
+
+- Current assessment and proposed bank-first implementation: [Adaptive next-question plan](prepare/INTERVIEWS-ADAPTIVE-NEXT-PLAN.md) (baseline `810a65b`, 5 November 2026).
+- Start from [the conversational/adaptive design](prepare/INTERVIEWS-PHASE-3.3.md) and [the 3.3b follow-up](prepare/INTERVIEWS-PHASE-3.3b-FOLLOWUP.md). Reconcile these documents with current code before writing a new implementation plan.
+- Assess what exists versus what remains for choosing the next question from the learner's answer: follow-up, easier/harder question, or topic change, using reviewed bank questions first.
+- The existing `interview_adaptive` capability includes learner evaluation; its presence does not prove adaptive next-question selection is implemented or enabled. Keep grading, automatic conversation progression, and adaptive selection distinct in the assessment.
+- Preserve selected track/experience constraints, transcript integrity, question provenance, workspace isolation, and time/attempt bounds. Technical feedback and model answers remain hidden until the practice ends; the learner's transcript stays available under Show conversation.
+- Before completion, validate affected manual/conversation paths and real multi-turn audio with the existing automated voice candidate, and report the exact application/tool revisions and evidence. A detailed implementation scope is the next deliverable, not a production readiness flip.
+
+### Parked — Prepare in organization workspaces
+
+**Status:** deferred by the owner on 2026-11-05; not a prerequisite for adaptive Interview work.
+
+- Reuse the existing workspace-owned Preparation data and database isolation. Complete organization API guards, `/w/:slug/prepare/*` navigation and deep links, and tenant/member feature permissions.
+- Keep journeys, stages, questions, linked Elevate/Replay practices, recordings, recovery and deletion inside the selected workspace. Stamp deletion jobs with workspace ownership.
+- Attribute activity to Prepare rather than Interviews. Extend Owner/Admin read-only review for organization practices explicitly; current review policies exclude Prepare-linked activity.
+- Prove isolation with the same learner in two organizations plus Personal, including direct-ID/media access, suspension, deletion, and automated voice validation of journey-launched practice.
+- Prepare can ship independently of Coach. Dedicated databases, billing, SSO, organization templates and exports are outside the initial scope.
+- Detailed milestones and provisional estimates: [Prepare workspace plan](PREPARE-WORKSPACE-PLAN.md). Reassess against the then-current code before scheduling; the estimate is not a delivery commitment.
+
+### Parked — AI Coach in organization workspaces
+
+**Status:** deferred by the owner on 2026-11-05; not a prerequisite for adaptive Interview work.
+
+- Reuse existing Coach chat and workspace isolation; complete workspace pages/navigation, refresh/recovery and links.
+- Build Coach context only from the selected workspace's conversations, Pulse, Elevate/Replay results and eligible Prepare journeys. Personal and other organization history must never enter the context or recommendations.
+- Recommendations must respect current workspace/member entitlements and keep practice launches in that workspace. If Prepare is not ready/enabled, omit Prepare recommendations and context.
+- Define Owner/Admin review of organization Coach conversations explicitly before exposing them; existing session-review support must not be assumed to cover Coach chat.
+- Test two organizations plus Personal, known-ID access, role/suspension changes, context isolation and workspace switching. Run automated real-audio scenarios for any affected voice launches.
+- Produce a focused scope and estimate when resumed. Do not bundle unrelated infrastructure or commercial features.
+
 ## 2026-03-25
 
 ### 1) Remove Replay Context Fields (Deferred)
