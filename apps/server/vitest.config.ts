@@ -5,5 +5,6 @@ export default defineConfig({
     environment: 'node',
     clearMocks: true,
     include: ['test/**/*.test.ts'],
+    setupFiles: ['test/setup/supertest-loopback.ts'],
   },
 })
