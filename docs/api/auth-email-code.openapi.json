@@ -224,7 +224,7 @@
     "/api/invitations/accept": {
       "post": {
         "summary": "Accept an invitation using Google or an emailed code",
-        "description": "Existing Google contract remains supported. Email verification must match the invited address and exact invitation link. Acceptance rechecks revocation, expiry, inviter permissions, enrollment, seats, entitlements and membership in the existing locked transaction. Platform invitations retain the existing signup-pause exception; organization invitations do not bypass it.",
+        "description": "A pending, unexpired emailed invitation token verifies exactly its stored email once. No Google credential or additional emailed code is needed for initial acceptance. Replays without independent authentication return 401, including concurrent submissions. Accepted links require Google or an invitation-bound email code. Acceptance rechecks revocation, expiry, inviter permissions, enrollment, seats, entitlements and membership under the existing row lock. Platform invitations retain the signup-pause exception; organization invitations do not bypass it.",
         "security": [],
         "requestBody": {
           "required": true,
@@ -265,7 +265,7 @@
                   },
                   "credential": {
                     "type": "string",
-                    "description": "Google credential; supply this OR challengeId and code."
+                    "description": "Optional Google credential. Accepted invitations require this or challengeId and code; pending invitations can be accepted using the token alone."
                   },
                   "enrollmentResponses": {
                     "type": "object"

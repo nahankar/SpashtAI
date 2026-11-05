@@ -27,7 +27,7 @@ class Abort extends Error {
 const fail = (status: number, body: AcceptanceFailure['body']): AcceptanceFailure => ({ ok: false, status, body })
 
 /**
- * Accepts an invitation for an already verified identity in one transaction: the invitation row is locked
+ * Accepts an invitation using its single-use emailed token or an independently verified identity in one transaction: the invitation row is locked
  * (so revoke and resend wait for, or are seen by, this acceptance), re-validated, the account is resolved or
  * created, and the acceptance and its audit rows are written together. Any failure rolls everything back, so no
  * committed account is ever deleted afterwards. A concurrent signup of the same address that wins the unique
@@ -35,7 +35,7 @@ const fail = (status: number, body: AcceptanceFailure['body']): AcceptanceFailur
  */
 export async function acceptInvitation(
   invitation: { id: string; tokenHash: string },
-  googleUser: VerifiedSignInIdentity,
+  googleUser: VerifiedSignInIdentity | null,
   req: Request,
   profile?: SignupProfile | null,
 ): Promise<AcceptanceResult> {
@@ -43,7 +43,7 @@ export async function acceptInvitation(
   // invitation may create an account while paused depends on the invitation being pending, checked under the lock.
   const policy = await loadSignupPolicy()
   // Lookup is network I/O — keep it outside the invitation row lock.
-  const existingLocation = profile
+  const existingLocation = profile && googleUser
     ? await prisma.user.findFirst({
       where: { email: googleUser.email },
       select: { pincode: true, city: true, state: true, country: true },
@@ -61,7 +61,20 @@ export async function acceptInvitation(
       const inv = await tx.userInvitation.findUnique({ where: { id: invitation.id } })
       // A resend replaced the token: this link is superseded.
       if (!inv || inv.tokenHash !== invitation.tokenHash) return fail(404, INVALID_LINK)
-      if (!googleUser.emailVerified || googleUser.email !== inv.email) {
+      const status = effectiveStatus(inv)
+      if (status === 'revoked') return fail(410, { error: 'invitation_revoked', message: 'This invitation was withdrawn. Ask your administrator for a new one.' })
+      if (status === 'expired') return fail(410, { error: 'invitation_expired', message: 'This invitation has expired. Ask your administrator to resend it.' })
+
+      // A pending emailed invitation is a single-use bearer credential for exactly its stored email.
+      // Check this under the row lock: a concurrent acceptance must never turn it into a reusable login.
+      if (!googleUser && status === 'accepted') return fail(401, {
+        error: 'sign_in_required', message: 'This invitation has already been accepted. Sign in with an emailed code or Google.',
+      })
+      const identity: VerifiedSignInIdentity = googleUser ?? {
+        email: inv.email, emailVerified: true, googleId: null,
+        firstName: inv.recipientName, lastName: null, avatar: null,
+      }
+      if (!identity.emailVerified || identity.email !== inv.email) {
         return fail(403, {
           error: 'wrong_account',
           message: `This invitation is for ${inv.email}. Sign in with that address using Google or an emailed code.`,
@@ -69,13 +82,9 @@ export async function acceptInvitation(
         })
       }
 
-      const status = effectiveStatus(inv)
-      if (status === 'revoked') return fail(410, { error: 'invitation_revoked', message: 'This invitation was withdrawn. Ask your administrator for a new one.' })
-      if (status === 'expired') return fail(410, { error: 'invitation_expired', message: 'This invitation has expired. Ask your administrator to resend it.' })
-
       if (status === 'accepted') {
         // Idempotent repeat: plain sign-in for the account that accepted it.
-        const account = await resolveGoogleAccount(tx, googleUser, req, { policy })
+        const account = await resolveGoogleAccount(tx, identity, req, { policy })
         if (!account.ok) return account
         if (account.user.id !== inv.acceptedUserId) throw new Abort(fail(409, { error: 'invitation_used', message: 'This invitation has already been used.' }))
         if (workspace) await acceptInvitedMembership(tx, inv, account.user.id, workspace.maxMembers, true)
@@ -85,7 +94,7 @@ export async function acceptInvitation(
       const responses = workspace ? validateEnrollmentResponses(inv.enrollmentFields, req.body?.enrollmentResponses) : {}
       // The approved paused-signup exception applies only to platform invitations. Organization invitations
       // respect the public pause for new identities; see docs/INVITATIONS.md.
-      const account = await resolveGoogleAccount(tx, googleUser, req, {
+      const account = await resolveGoogleAccount(tx, identity, req, {
         policy,
         invitationBypassesSignupPause: !workspace,
         profile: located,

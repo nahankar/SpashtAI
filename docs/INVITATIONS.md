@@ -13,10 +13,11 @@ invitation email goes to the recipient (or, in development, that it is captured 
 - The platform Admin endpoints create **platform invitations**, with no workspace or membership assigned.
   They list/count/manage only null-scope invitations. Separate workspace endpoints reuse this service for
   organization membership; see "Tenancy integration" below.
-- Recipients can verify the invited address with an emailed code or Google sign-in. A Google Account is
-  optional when using email codes. See `api/auth-email-code.openapi.json` for the contract and rollout
-  requirements. Production email-code activation and real mailbox delivery remain unverified.
-  Magic-link sign-in is not implemented.
+- A pending, unexpired emailed invitation is a single-use sign-in credential for its stored email.
+  After entering the required details, recipients accept directly without another code or Google sign-in.
+  Accepted links require an emailed code or Google for later sign-ins. See `api/auth-email-code.openapi.json` for the contract and rollout
+  requirements. Email-code authentication is deployed; inbox delivery is not established by automated tests.
+  Standalone magic-link login is not implemented; initial invitation acceptance uses its single-use emailed link.
 
 ## Organization-only email policy
 
@@ -35,7 +36,7 @@ While "Pause signups" is on, the invited address can still create an ordinary le
 - through invitation acceptance (`POST /api/invitations/accept`), never through `/api/auth/register` or
   `/api/auth/google` or email-code signup, which stay blocked;
 - for a pending, unexpired, unrevoked invitation, checked under the row lock;
-- with a Google identity or single-use email code that verifies exactly the invited address.
+- with the pending emailed invitation token, or a Google identity or single-use code verifying exactly the invited address.
 
 Onboarding and terms stay mandatory. Every bypass is audited without content (`signupsPausedBypass: true` on
 the `invitation_accepted` UserActivity and AdminAction rows). The Users page (Registration card) and the
@@ -48,7 +49,7 @@ Invitations page both state this exception.
    - An address that already has an account needs a second confirmation (`409 existing_user`).
 2. The branded email has an **Accept invitation** link: `FRONTEND_URL/invite#token=…`. The token is in the URL
    fragment, so it never reaches server or proxy logs.
-3. The recipient verifies the invited address with a six-digit emailed code or Google sign-in. Email codes
+3. The recipient completes the form and clicks **Accept invitation and continue**. The pending emailed token verifies the invited address once, under the acceptance row lock. Reusing an accepted link requires a six-digit emailed code or Google sign-in. Email codes
    are sent only to the invitation's address and bound to that exact invitation link. A mismatched Google
    email still shows **Switch Google account** and leaves the invitation unchanged.
 4. Both methods reuse verified account resolution (`lib/googleSignIn.ts`):
@@ -59,7 +60,7 @@ Invitations page both state this exception.
      The bypass is audited without content as `UserActivity` `invitation_accepted` with metadata
      `{ newAccount: true, signupsPausedBypass: true }`.
 5. Accepting again with the same account is idempotent.
-6. **Atomic acceptance** (`lib/invitationAcceptance.ts`): after the Google credential or email code is verified, one database
+6. **Atomic acceptance** (`lib/invitationAcceptance.ts`): using the pending emailed token or a verified Google credential or email code, one database
    transaction locks the invitation row, re-checks token, address, status and expiry, resolves or creates the
    account, marks the invitation accepted and writes both audit rows. Any failure (including audit
    persistence) rolls all of it back, so no account is ever created and then deleted, and an acceptance never
@@ -140,7 +141,9 @@ Admin (`requireAuth` + `requireCurrentAdmin`):
 - `POST /api/admin/invitations/:id/resend`, `POST /api/admin/invitations/:id/revoke`
 - `GET /api/admin/invitations/email-config`, `GET /api/admin/invitations/dev-mailbox`
 
-Public: `POST /api/invitations/lookup` `{ token }`, `POST /api/invitations/accept` `{ token, credential }`.
+Public: `POST /api/invitations/lookup` `{ token }`, `POST /api/invitations/accept` `{ token, phone, dateOfBirth, gender, pincode, enrollmentResponses? }`.
+Pending links require no further authentication. Accepted links additionally require `credential` or
+`challengeId` and `code`.
 
 ## Tenancy integration (implemented on the tenancy branch; not deployed)
 

@@ -59,10 +59,6 @@ router.post('/accept', invitationAcceptLimiter, async (req: Request, res: Respon
   res.setHeader('Cache-Control', 'no-store')
   try {
     const { token, credential, challengeId, code } = (req.body ?? {}) as { token?: string; credential?: string; challengeId?: string; code?: string }
-    if (!credential && !challengeId) {
-      res.status(400).json({ error: 'Google credential or email code is required' })
-      return
-    }
     const inv = await findInvitationByToken(String(token ?? ''))
     if (!inv) {
       res.status(404).json(INVALID_LINK)
@@ -75,9 +71,9 @@ router.post('/accept', invitationAcceptLimiter, async (req: Request, res: Respon
       return
     }
 
-    let googleUser: VerifiedSignInIdentity
+    let googleUser: VerifiedSignInIdentity | null = null
     try {
-      googleUser = challengeId
+      if (credential || challengeId) googleUser = challengeId
         ? await consumeEmailSignInCode(challengeId, code, String(token ?? ''))
         : await verifyGoogleIdToken(credential!)
     } catch (err) {

@@ -75,7 +75,7 @@ export function AcceptInvitation() {
     }).catch(() => setLoadError('Could not check this invitation. Please try again.'))
   }, [token, navigate])
 
-  async function handleIdentity(identity: { credential: string } | { challengeId: string; code: string }) {
+  async function handleIdentity(identity: { credential: string } | { challengeId: string; code: string } | Record<string, never>) {
     setProblem(null)
     setAccepting(true)
     try {
@@ -140,7 +140,7 @@ export function AcceptInvitation() {
               <p className="text-sm text-muted-foreground">
                 {lookup.status === 'accepted'
                   ? 'This invitation has already been accepted. Sign in with the invited email address to continue.'
-                  : <>Complete every required detail, then sign in as <span className="font-medium text-foreground">{lookup.invitedEmail}</span>. The invitation expires on {formatDate(lookup.expiresAt)}.</>}
+                  : <>Complete every required detail, then accept this invitation for <span className="font-medium text-foreground">{lookup.invitedEmail}</span>. The invitation expires on {formatDate(lookup.expiresAt)}.</>}
               </p>
 
               {problem?.kind === 'wrong_account' && (
@@ -179,9 +179,14 @@ export function AcceptInvitation() {
               {accepting && <p role="status" className="text-sm text-muted-foreground">Accepting invitation…</p>}
               {lookup.status === 'accepted' || (step === 'profile' && profileReady) ? (
                 <>
-                  <EmailCodeSignIn invitedEmail={lookup.invitedEmail} invitationToken={token} onVerify={(challengeId, code) => handleIdentity({ challengeId, code })} />
-                  <p className="text-center text-xs text-muted-foreground">Or continue with Google</p>
-                  <GoogleSignInButton label="signin_with" onCredential={credential => handleIdentity({ credential })} onError={(message) => setProblem({ kind: 'error', message })} />
+                  {lookup.status === 'pending' ? <>
+                    <Button className="w-full" disabled={accepting} onClick={() => handleIdentity({})}>Accept invitation and continue</Button>
+                    <p className="text-xs text-muted-foreground">Your invitation link verifies {lookup.invitedEmail}. No additional code or Google sign-in is needed to join. For future sign-ins, use an emailed code or Google with this address.</p>
+                  </> : <>
+                    <EmailCodeSignIn invitedEmail={lookup.invitedEmail} invitationToken={token} onVerify={(challengeId, code) => handleIdentity({ challengeId, code })} />
+                    <p className="text-center text-xs text-muted-foreground">Or continue with Google</p>
+                    <GoogleSignInButton label="signin_with" onCredential={credential => handleIdentity({ credential })} onError={(message) => setProblem({ kind: 'error', message })} />
+                  </>}
                 </>
               ) : step === 'profile' ? (
                 <p className="text-sm">Complete the details above to accept this invitation.</p>
@@ -190,7 +195,7 @@ export function AcceptInvitation() {
               <div className="flex gap-2 rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
                 <MailCheck className="mt-0.5 h-4 w-4 shrink-0" />
                 <p>
-                  Use a code emailed to the invited address, or sign in with a Google Account using that same address.
+                  This invitation is for {lookup.invitedEmail}. Accepting the invitation signs you in with this email address.
                 </p>
               </div>
               <p className="text-xs text-muted-foreground text-center leading-relaxed">

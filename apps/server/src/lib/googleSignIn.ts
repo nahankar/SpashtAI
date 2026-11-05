@@ -5,7 +5,7 @@ import type { GoogleUserInfo } from './google-auth'
 import { areSignupsPaused, getSignupsPausedMessage } from './platformSettings'
 import { isProfileComplete, type SignupProfile } from './profile'
 
-/** Constructed only after verifying Google or a single-use emailed code. */
+/** Constructed only after verifying Google, a single-use emailed code, or a pending invitation under its row lock. */
 export type VerifiedSignInIdentity = Omit<GoogleUserInfo, 'googleId'> & { googleId: string | null }
 
 export type GoogleSignInResult =

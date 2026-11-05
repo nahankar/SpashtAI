@@ -166,6 +166,52 @@ describe.skipIf(!config.url)('email sign-in and invitation codes (isolated Postg
     expect((await verify(code.challengeId, codeFor(existing))).status).toBe(200)
   })
 
+  it('uses the emailed link once without an extra code, ignores a supplied email, and requires authentication on reuse', async () => {
+    const email = addr(), { token, row } = await invite(email)
+    const lookup = await request(app).post('/api/invitations/lookup').send({ token })
+    expect(lookup.status).toBe(200)
+    expect(await prisma.user.findUnique({ where: { email } })).toBeNull()
+    const accepted = await request(app).post('/api/invitations/accept').send({ token, email: 'attacker@example.invalid', ...profile })
+    expect(accepted.status).toBe(200)
+    expect(accepted.body.user.email).toBe(email)
+    expect(accepted.body.token).toBeTruthy()
+    expect(config.mails).toHaveLength(0)
+    expect(await prisma.user.findUnique({ where: { email } })).toMatchObject({ googleId: null, emailVerified: true })
+    expect(await admin.userInvitation.findUnique({ where: { id: row.id } })).toMatchObject({ status: 'ACCEPTED' })
+    const replay = await request(app).post('/api/invitations/accept').send({ token, ...profile })
+    expect(replay.status).toBe(401); expect(replay.body.error).toBe('sign_in_required'); expect(replay.body.token).toBeUndefined()
+    const sent = await requestEmailSignInCode(email)
+    expect((await verify(sent.challengeId, codeFor(email))).body.user.id).toBe(accepted.body.user.id)
+  })
+
+  it('permits only one concurrent token-only acceptance and preserves an existing Google identity', async () => {
+    const email = addr(), user = await prisma.user.create({ data: { email, googleId: `google-${email}`, role: 'ADMIN' } })
+    const { token } = await invite(email)
+    const results = await Promise.all(Array.from({ length: 2 }, () => request(app).post('/api/invitations/accept').send({ token, ...profile })))
+    expect(results.map(r => r.status).sort()).toEqual([200, 401])
+    expect(results.find(r => r.status === 200)!.body.user.id).toBe(user.id)
+    expect(await prisma.user.findUnique({ where: { email } })).toMatchObject({ googleId: user.googleId, role: 'ADMIN' })
+  })
+
+  it('rejects missing, superseded, expired and revoked invitation tokens without issuing a session', async () => {
+    expect((await request(app).post('/api/invitations/accept').send(profile)).status).toBe(404)
+    for (const state of ['expired', 'revoked', 'superseded']) {
+      const email = addr(), { token, row } = await invite(email)
+      await admin.userInvitation.update({ where: { id: row.id }, data: state === 'expired' ? { expiresAt: new Date(Date.now() - 1000) } : state === 'revoked' ? { status: 'REVOKED', pendingKey: null } : { tokenHash: hashInvitationToken(randomUUID()) } })
+      const result = await request(app).post('/api/invitations/accept').send({ token, ...profile })
+      expect(result.status).toBe(state === 'superseded' ? 404 : 410)
+      expect(result.body.token).toBeUndefined()
+      expect(await prisma.user.findUnique({ where: { email } })).toBeNull()
+    }
+  })
+
+  it('keeps the link usable after missing profile validation fails', async () => {
+    const email = addr(), { token } = await invite(email)
+    expect((await request(app).post('/api/invitations/accept').send({ token })).status).toBe(400)
+    expect(await prisma.user.findUnique({ where: { email } })).toBeNull()
+    expect((await request(app).post('/api/invitations/accept').send({ token, ...profile })).status).toBe(200)
+  })
+
   it('sends invitations only to the invited mailbox and atomically accepts for a verified identity', async () => {
     const email = addr(), { token, row } = await invite(email)
     const sent = await request(app).post('/api/invitations/email-code/request').send({ token, email: 'attacker@example.invalid' })
@@ -195,8 +241,7 @@ describe.skipIf(!config.url)('email sign-in and invitation codes (isolated Postg
     expect(lookup.status).toBe(200)
     expect(lookup.body.workspace).toMatchObject({ name: workspace.name, slug: workspace.slug })
     expect(lookup.headers['cache-control']).toBe('no-store')
-    const sent = await requestEmailSignInCode(email, token)
-    const accepted = await request(app).post('/api/invitations/accept').send({ token, challengeId: sent.challengeId, code: codeFor(email), ...profile, enrollmentResponses: { team: 'Support' } })
+    const accepted = await request(app).post('/api/invitations/accept').send({ token, ...profile, enrollmentResponses: { team: 'Support' } })
     expect(accepted.status).toBe(200)
     expect(accepted.body.workspacePath).toBe(`/w/${workspace.slug}`)
     expect(accepted.body.user.role).toBe('USER')
