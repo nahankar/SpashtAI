@@ -46,6 +46,9 @@ export const LEARNER_POLICIES: Record<string, LearnerPolicy> = {
   // Benchmark only (never current): learner-evaluation-8 on Nova Pro.
   'learner-evaluation-8-nova-pro': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova-pro-learner-8', modelId: 'amazon.nova-pro-v1:0', region: 'us-east-1', label: 'Nova Pro · learner grading 8 (benchmark)',
     prompt: 'interview-answer-8', schema: 'interview-result-4', rubric: 'bank-guidance-3', policy: 'learner-evaluation-8-nova-pro', temperature: 0, maxTokens: 2000, timeoutMs: 20_000 } },
+  // Preview only: claim-level judgments with a server-derived verdict. Not current until semantic validation.
+  'learner-evaluation-9': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova2-lite-learner-9', modelId: 'us.amazon.nova-2-lite-v1:0', region: 'us-east-1', label: 'Nova 2 Lite · learner grading 9 (candidate)',
+    prompt: 'interview-answer-11', schema: 'interview-result-5', rubric: 'bank-guidance-4', policy: 'learner-evaluation-9', temperature: 0, maxTokens: 2000, timeoutMs: 20_000 } },
 }
 // learner-evaluation-8: v5's prompt, rubric and model with the versioned interview-result-4 evidence matching.
 // Technical grading remains experimental (reasoning, mixed-answer strengths and no-answer classification are open).
@@ -123,6 +126,7 @@ export function originalPassage(answer: string, quote: string): string | null {
 // interview-result-4 is result-3 with whitespace-tolerant evidence matching (originalPassage).
 export function parseResult(output: string, answer: string, schema = 'interview-result-2'): EvaluationResult {
   const raw: unknown = JSON.parse(output.replace(/^\s*```(?:json)?\s*/, '').replace(/\s*```\s*$/, ''))
+  if (schema === 'interview-result-5') return parseClaimResult(raw, answer)
   const tolerant = schema === 'interview-result-4'
   const learner = schema === 'interview-result-3' || tolerant
   const validationNotes: string[] = []
@@ -157,6 +161,68 @@ export function parseResult(output: string, answer: string, schema = 'interview-
     if (!consistent) throw new Error('INCONSISTENT')
   }
   return validationNotes.length ? { ...result, validationNotes } : result
+}
+
+// v5 keeps claim judgments separate from the overall verdict. The model still judges meaning;
+// deriving the verdict prevents logical contradictions, not semantic misjudgments.
+const claimResultSchema = z.object({
+  claims: z.array(z.object({
+    quote: text, judgment: z.enum(['CORRECT', 'INCORRECT', 'EMPTY']),
+    scope: z.enum(['CENTRAL', 'SECONDARY']), reasoning: z.enum(['VALID', 'PARTIAL', 'INVALID', 'NONE']),
+    explanation: text,
+  }).strict()).max(6),
+  coverage: z.enum(['COMPLETE', 'INCOMPLETE', 'NONE']),
+  depth: criterionSchema.omit({ criterion: true }),
+  gaps: z.array(text).max(6), guidance: text, uncertainty: z.array(text).max(4),
+}).strict()
+
+function parseClaimResult(raw: unknown, answer: string): EvaluationResult {
+  const ledger = claimResultSchema.parse(raw)
+  if (ledger.depth.finding === 'NOT_ASSESSED' && ledger.depth.evidence.length) throw new Error('INCONSISTENT')
+  const claims = ledger.claims.map(c => {
+    const passage = originalPassage(answer, c.quote)
+    if (!passage) throw new Error('UNSUPPORTED_EVIDENCE')
+    if ((c.judgment === 'EMPTY' && c.reasoning !== 'NONE')
+      || (c.judgment === 'CORRECT' && c.reasoning === 'INVALID')
+      || (c.judgment === 'INCORRECT' && ['VALID', 'PARTIAL'].includes(c.reasoning))) throw new Error('INCONSISTENT')
+    return { ...c, quote: passage }
+  })
+  if (new Set(claims.map(c => c.quote)).size !== claims.length) throw new Error('INVALID_CRITERIA')
+  const correct = claims.filter(c => c.judgment === 'CORRECT')
+  const falseClaims = claims.filter(c => c.judgment === 'INCORRECT')
+  const substantive = correct.length + falseClaims.length > 0
+  if ((!substantive && ledger.coverage !== 'NONE') || (correct.length && ledger.coverage === 'NONE')) throw new Error('INCONSISTENT')
+  const correctCentral = correct.some(c => c.scope === 'CENTRAL')
+  if (ledger.coverage === 'COMPLETE' && !correctCentral) throw new Error('INCONSISTENT')
+  const classification = !substantive ? 'NOT_ANSWERED'
+    : (falseClaims.some(c => c.scope === 'CENTRAL') && !correctCentral) || !correct.length ? 'INCORRECT'
+    : falseClaims.length || ledger.coverage !== 'COMPLETE' ? 'PARTIAL' : 'CORRECT'
+  if (classification === 'CORRECT' && ledger.gaps.length) throw new Error('INCONSISTENT')
+  if (!substantive && ledger.depth.finding !== 'NOT_ASSESSED') throw new Error('INCONSISTENT')
+  const reasons = claims.filter(c => c.reasoning !== 'NONE')
+  const valid = reasons.filter(c => ['VALID', 'PARTIAL'].includes(c.reasoning))
+  const invalid = reasons.filter(c => c.reasoning === 'INVALID')
+  const unassessed = 'No supporting subject evidence was established for this criterion.'
+  const quotations = (items: typeof claims) => [...new Set(items.map(c => c.quote))].slice(0, 3)
+  const accuracyEvidence = classification === 'INCORRECT' ? falseClaims : [...correct, ...falseClaims]
+  const accuracyFinding = classification === 'CORRECT' ? 'MET' : classification === 'PARTIAL' ? 'PARTIAL'
+    : classification === 'INCORRECT' ? 'NOT_MET' : 'NOT_ASSESSED'
+  const reasoningFinding = !reasons.length ? 'NOT_ASSESSED' : !valid.length ? 'NOT_MET'
+    : invalid.length || valid.some(c => c.reasoning === 'PARTIAL') ? 'PARTIAL' : 'MET'
+  const result = {
+    classification, criteria: [
+      { criterion: 'ACCURACY', finding: accuracyFinding, evidence: quotations(accuracyEvidence),
+        explanation: classification === 'PARTIAL' ? 'Some relevant understanding was demonstrated, with essential gaps or a false claim.'
+          : substantive ? (classification === 'INCORRECT' ? falseClaims[0] : correct[0]).explanation : unassessed },
+      { criterion: 'REASONING', finding: reasoningFinding, evidence: quotations(reasons),
+        explanation: reasoningFinding === 'PARTIAL' ? 'The explanation includes valid reasoning alongside false or incomplete reasoning.'
+          : reasons.length ? reasons[0].explanation : unassessed },
+      { criterion: 'DEPTH', ...ledger.depth },
+    ], strengths: correct.map(c => c.explanation), misconceptions: falseClaims.map(c => c.explanation),
+    gaps: substantive ? ledger.gaps : [], guidance: ledger.guidance, uncertainty: ledger.uncertainty, followUpQuestion: '',
+  }
+  // Reuse the existing evidence/shape/consistency boundary after normalizing to the public result contract.
+  return parseResult(JSON.stringify(result), answer, 'interview-result-4')
 }
 // Learner grades keep the first allowed items when the model returns longer lists (for example
 // more than three quotations for an answer with many false claims). Kept quotes are still checked

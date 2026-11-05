@@ -121,6 +121,7 @@ describe('learner policy registry and learner-evaluation-2 contract', () => {
     expect(hash(LEARNER_POLICIES['learner-evaluation-5-nova-pro'].config)).toBe('a6f8408344933fe15f8e14e3d00c453b8ce8e2f8245c1012518e875ff40bc7ee')
     expect(hash(LEARNER_POLICIES['learner-evaluation-8'].config)).toBe('c92ff530caf2b0de35dc827e2747cc4f1129f4a26fb7267bd4444a94e49516a7')
     expect(hash(LEARNER_POLICIES['learner-evaluation-8-nova-pro'].config)).toBe('68217229fbc30b7ffc417d0253254990ea7dc24381dc6cd249b036c5fb638368')
+    expect(hash(LEARNER_POLICIES['learner-evaluation-9'].config)).toBe('c80adcda923677a8c0a26dd9f56389e0016a1eaf790498c773ed74218fc82511')
     const sha = (text: string) => createHash('sha256').update(text).digest('hex')
     expect(Object.fromEntries(Object.entries(PROMPTS).map(([id, text]) => [id, sha(text)]))).toEqual({
       'interview-answer-4': '6529a9f6cf7ebbc99016081a3dea4da01ee82207681cbbf630f513136798602a',
@@ -130,6 +131,7 @@ describe('learner policy registry and learner-evaluation-2 contract', () => {
       'interview-answer-8': 'cc83e5d41eacc3481b5e34ea0142b7cb2f54fd036607c71e716b79548a677364',
       'interview-answer-9': 'a940098b73f972a16d844be74ff07a9c9ea7dd82c2a840154c75fe5298687635',
       'interview-answer-10': 'e5d2dea679ca298fbfc3d1e9940b76d52002004ae982281fc79a91ed5727bcb1',
+      'interview-answer-11': '7e712218f2dc0e367aaf0862be075790c4abd9b804fa68bddc69e16df765cdc3',
     })
     expect(LEARNER_PROMPT_6).toContain('"get dissect" for git bisect'); expect(LEARNER_PROMPT_6.startsWith(LEARNER_PROMPT_5.slice(0, 400))).toBe(true)
     for (const policy of Object.values(LEARNER_POLICIES)) expect(PROMPTS[policy.config.prompt]).toBeTruthy()
@@ -148,6 +150,20 @@ describe('learner policy registry and learner-evaluation-2 contract', () => {
     expect(message).toMatchObject({ candidateAnswer: testAnswer, answerSource: 'SPEECH_TRANSCRIPT', assistance: 'NONE' })
     expect(JSON.stringify(message)).not.toContain('Ask about parallel workers'); expect(message.question.externalQid).toBeUndefined()
     expect(sdk.send.mock.calls[0][1].abortSignal).toBeInstanceOf(AbortSignal)
+  })
+  it('sends the claim-policy prompt and rubric without causal-keyword hints, then normalizes its ledger', async () => {
+    sdk.send.mockResolvedValue({ stopReason: 'end_turn', output: { message: { content: [{ text: JSON.stringify({
+      claims: [{ quote: testAnswer, judgment: 'CORRECT', scope: 'CENTRAL', reasoning: 'NONE', explanation: 'Independent state and fresh fixtures prevent interference.' }],
+      coverage: 'COMPLETE', depth: { finding: 'NOT_ASSESSED', evidence: [], explanation: 'No further depth.' },
+      gaps: [], guidance: 'Apply independent fixtures to a shared database.', uncertainty: [],
+    }) }] } }, usage: { inputTokens: 100, outputTokens: 60 } })
+    const result = await evaluateAnswer(question, testAnswer, LEARNER_POLICIES['learner-evaluation-9'].config, 'NONE')
+    const command = sdk.send.mock.calls[0][0]
+    expect(command.input.system[0].text).toBe(PROMPTS['interview-answer-11'])
+    const message = JSON.parse(command.input.messages[0].content[0].text)
+    expect(message.rubric.requiredPoints).toBe('Fresh independent state')
+    expect(message).not.toHaveProperty('statedReasons')
+    expect(result.result).toMatchObject({ classification: 'CORRECT', followUpQuestion: '', strengths: ['Independent state and fresh fixtures prevent interference.'] })
   })
   it('names stated reasons to the model only under learner-evaluation-5', async () => {
     sdk.send.mockResolvedValue({ stopReason: 'end_turn', output: { message: { content: [{ text: learnerOutput() }] } }, usage: { inputTokens: 900, outputTokens: 300 } })
@@ -222,7 +238,7 @@ describe('learner policy registry and learner-evaluation-2 contract', () => {
     expect(explicitAbstention(`Sorry, ${'um, '.repeat(10)}I don't know.`)).toBe(true)
   })
   it('offers only learner policies with their own configuration as Admin previews', () => {
-    expect(PREVIEW_POLICIES).toEqual(['learner-evaluation-2', 'learner-evaluation-3', 'learner-evaluation-4', 'learner-evaluation-5', 'learner-evaluation-6', 'learner-evaluation-7', 'learner-evaluation-5-nova-pro', 'learner-evaluation-8', 'learner-evaluation-8-nova-pro'])
+    expect(PREVIEW_POLICIES).toEqual(['learner-evaluation-2', 'learner-evaluation-3', 'learner-evaluation-4', 'learner-evaluation-5', 'learner-evaluation-6', 'learner-evaluation-7', 'learner-evaluation-5-nova-pro', 'learner-evaluation-8', 'learner-evaluation-8-nova-pro', 'learner-evaluation-9'])
     expect(adminConfig('learner-evaluation-2')).toEqual(learner2); expect(previewPolicy(learner2)?.key).toBe('learner-evaluation-2')
     expect(previewPolicy(configFor('nova2_lite'))).toBeNull()
     expect(() => submitSchema.parse({ questionId: 'q', revision: 1, answer: testAnswer, model: 'learner-evaluation-1' })).toThrow()
