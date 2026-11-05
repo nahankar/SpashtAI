@@ -1,0 +1,565 @@
+{
+  "applicationRevision": "a2f9286",
+  "dateLocal": "2026-11-06",
+  "timezone": "Asia/Kolkata",
+  "decision": "HOLD_GRADE_DRIVEN_ADAPTATION",
+  "policyUnchanged": "learner-evaluation-8",
+  "modelsChanged": false,
+  "authorization": "Owner explicitly approved up to 36 additional local model calls after candidate implementation and exhausted normal allowance were reported.",
+  "environment": "Existing isolated spasht_grading_validation, restricted walkthrough_app role, real Bedrock Admin test path; no app/agent/voice services or production calls.",
+  "additionalInvocations": 36,
+  "invocationOutcomes": {
+    "SUCCESS": 34,
+    "INVALID_OUTPUT_INCONSISTENT": 2
+  },
+  "additionalTokens": {
+    "input": 51070,
+    "output": 12183
+  },
+  "quota": {
+    "normalAdminDailyLimit": 20,
+    "baselineUsed": 20,
+    "approvedExtraMaximum": 36,
+    "finalPersistedAdminUsed": 56,
+    "finalPersistedGlobalUsed": 56,
+    "globalLimit": 100,
+    "temporaryLocalProcessAdminCeiling": 56,
+    "usageReset": false,
+    "sourceAndProductionLimitUnchanged": true
+  },
+  "fixtureHashes": {
+    "readiness-2026-11-06": "d9dd29de4e7b63fe70fcd58c5c48f51e27db42e53338f948767705aac7385686",
+    "policy-9-fresh-1": "a5f87fd8a1ad028ce19ce712c86f75e219029815fc99f194d7d850c4db673eb6"
+  },
+  "regressionComparison": {
+    "policy8": {
+      "cases": 22,
+      "usable": 21,
+      "acceptableClassification": 20,
+      "exactExpected": 18,
+      "allRequiredChecksPass": false,
+      "allRoutingLabelsMatch": false,
+      "failedCases": 8
+    },
+    "policy9": {
+      "cases": 22,
+      "usable": 20,
+      "acceptableClassification": 19,
+      "exactExpected": 19,
+      "allRequiredChecksPass": false,
+      "allRoutingLabelsMatch": false,
+      "failedCases": 3
+    }
+  },
+  "freshComparison": {
+    "policy8": {
+      "cases": 8,
+      "usable": 8,
+      "acceptableClassification": 8,
+      "exactExpected": 8,
+      "allRequiredChecksPass": false,
+      "allRoutingLabelsMatch": true,
+      "failedCases": 4
+    },
+    "policy9": {
+      "cases": 8,
+      "usable": 8,
+      "acceptableClassification": 8,
+      "exactExpected": 8,
+      "allRequiredChecksPass": true,
+      "allRoutingLabelsMatch": true,
+      "failedCases": 0
+    }
+  },
+  "pairedRegression": [
+    {
+      "id": "RS-01",
+      "policy8": {
+        "id": "RS-01",
+        "model": "learner-evaluation-8",
+        "actual": "PARTIAL",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": false,
+        "failures": [
+          "FALSE_OR_EMPTY_REASON_MET"
+        ]
+      },
+      "policy9": {
+        "id": "RS-01",
+        "model": "learner-evaluation-9",
+        "actual": "INCORRECT",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      }
+    },
+    {
+      "id": "RS-02",
+      "policy8": {
+        "id": "RS-02",
+        "model": "learner-evaluation-8",
+        "actual": "NOT_ANSWERED",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      },
+      "policy9": {
+        "id": "RS-02",
+        "model": "learner-evaluation-9",
+        "actual": "NOT_ANSWERED",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      }
+    },
+    {
+      "id": "RS-03",
+      "policy8": {
+        "id": "RS-03",
+        "model": "learner-evaluation-8",
+        "actual": "CORRECT",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": [
+          "VALID_REASONING_NOT_CREDITED"
+        ]
+      },
+      "policy9": {
+        "id": "RS-03",
+        "model": "learner-evaluation-9",
+        "actual": null,
+        "usable": false,
+        "failures": [
+          "INVALID_OUTPUT_INCONSISTENT"
+        ]
+      }
+    },
+    {
+      "id": "RS-04",
+      "policy8": {
+        "id": "RS-04",
+        "model": "learner-evaluation-8",
+        "actual": "INCORRECT",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      },
+      "policy9": {
+        "id": "RS-04",
+        "model": "learner-evaluation-9",
+        "actual": "INCORRECT",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      }
+    },
+    {
+      "id": "RS-05",
+      "policy8": {
+        "id": "RS-05",
+        "model": "learner-evaluation-8",
+        "actual": "CORRECT",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": [
+          "VALID_REASONING_NOT_CREDITED"
+        ]
+      },
+      "policy9": {
+        "id": "RS-05",
+        "model": "learner-evaluation-9",
+        "actual": "CORRECT",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      }
+    },
+    {
+      "id": "RS-06",
+      "policy8": {
+        "id": "RS-06",
+        "model": "learner-evaluation-8",
+        "actual": null,
+        "usable": false,
+        "failures": [
+          "INVALID_OUTPUT_INCONSISTENT"
+        ]
+      },
+      "policy9": {
+        "id": "RS-06",
+        "model": "learner-evaluation-9",
+        "actual": "NOT_ANSWERED",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      }
+    },
+    {
+      "id": "P2-06",
+      "policy8": {
+        "id": "P2-06",
+        "model": "learner-evaluation-8",
+        "actual": "INCORRECT",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": false,
+        "failures": [
+          "MISSING_CORRECT_STRENGTH"
+        ]
+      },
+      "policy9": {
+        "id": "P2-06",
+        "model": "learner-evaluation-9",
+        "actual": "PARTIAL",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      }
+    },
+    {
+      "id": "P2-07",
+      "policy8": {
+        "id": "P2-07",
+        "model": "learner-evaluation-8",
+        "actual": "PARTIAL",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": [
+          "FORBIDDEN_FEEDBACK_WORDING",
+          "VALID_REASONING_NOT_CREDITED"
+        ]
+      },
+      "policy9": {
+        "id": "P2-07",
+        "model": "learner-evaluation-9",
+        "actual": "PARTIAL",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      }
+    },
+    {
+      "id": "P2-08",
+      "policy8": {
+        "id": "P2-08",
+        "model": "learner-evaluation-8",
+        "actual": "NOT_ANSWERED",
+        "usable": true,
+        "acceptableClassification": false,
+        "exactExpected": false,
+        "failures": [
+          "CLASSIFICATION_OUTSIDE_ACCEPTABLE",
+          "FORBIDDEN_CLASSIFICATION"
+        ]
+      },
+      "policy9": {
+        "id": "P2-08",
+        "model": "learner-evaluation-9",
+        "actual": "NOT_ANSWERED",
+        "usable": true,
+        "acceptableClassification": false,
+        "exactExpected": false,
+        "failures": [
+          "CLASSIFICATION_OUTSIDE_ACCEPTABLE",
+          "FORBIDDEN_CLASSIFICATION"
+        ]
+      }
+    },
+    {
+      "id": "P2-01",
+      "policy8": {
+        "id": "P2-01",
+        "model": "learner-evaluation-8",
+        "actual": "NOT_ANSWERED",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      },
+      "policy9": {
+        "id": "P2-01",
+        "model": "learner-evaluation-9",
+        "actual": "NOT_ANSWERED",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      }
+    },
+    {
+      "id": "P2-02",
+      "policy8": {
+        "id": "P2-02",
+        "model": "learner-evaluation-8",
+        "actual": "NOT_ANSWERED",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      },
+      "policy9": {
+        "id": "P2-02",
+        "model": "learner-evaluation-9",
+        "actual": "NOT_ANSWERED",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      }
+    },
+    {
+      "id": "H1-01",
+      "policy8": {
+        "id": "H1-01",
+        "model": "learner-evaluation-8",
+        "actual": "CORRECT",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      },
+      "policy9": {
+        "id": "H1-01",
+        "model": "learner-evaluation-9",
+        "actual": "CORRECT",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      }
+    },
+    {
+      "id": "H1-02",
+      "policy8": {
+        "id": "H1-02",
+        "model": "learner-evaluation-8",
+        "actual": "INCORRECT",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      },
+      "policy9": {
+        "id": "H1-02",
+        "model": "learner-evaluation-9",
+        "actual": "INCORRECT",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      }
+    },
+    {
+      "id": "H1-03",
+      "policy8": {
+        "id": "H1-03",
+        "model": "learner-evaluation-8",
+        "actual": "PARTIAL",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      },
+      "policy9": {
+        "id": "H1-03",
+        "model": "learner-evaluation-9",
+        "actual": "PARTIAL",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      }
+    },
+    {
+      "id": "H1-04",
+      "policy8": {
+        "id": "H1-04",
+        "model": "learner-evaluation-8",
+        "actual": "CORRECT",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      },
+      "policy9": {
+        "id": "H1-04",
+        "model": "learner-evaluation-9",
+        "actual": "CORRECT",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      }
+    },
+    {
+      "id": "H1-05",
+      "policy8": {
+        "id": "H1-05",
+        "model": "learner-evaluation-8",
+        "actual": "CORRECT",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      },
+      "policy9": {
+        "id": "H1-05",
+        "model": "learner-evaluation-9",
+        "actual": "CORRECT",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      }
+    },
+    {
+      "id": "H1-06",
+      "policy8": {
+        "id": "H1-06",
+        "model": "learner-evaluation-8",
+        "actual": "PARTIAL",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      },
+      "policy9": {
+        "id": "H1-06",
+        "model": "learner-evaluation-9",
+        "actual": "PARTIAL",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      }
+    },
+    {
+      "id": "H1-08",
+      "policy8": {
+        "id": "H1-08",
+        "model": "learner-evaluation-8",
+        "actual": "INCORRECT",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      },
+      "policy9": {
+        "id": "H1-08",
+        "model": "learner-evaluation-9",
+        "actual": "INCORRECT",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      }
+    },
+    {
+      "id": "H1-10",
+      "policy8": {
+        "id": "H1-10",
+        "model": "learner-evaluation-8",
+        "actual": "PARTIAL",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": [
+          "MISCONCEPTION_EXPECTATION"
+        ]
+      },
+      "policy9": {
+        "id": "H1-10",
+        "model": "learner-evaluation-9",
+        "actual": "PARTIAL",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      }
+    },
+    {
+      "id": "H1-11",
+      "policy8": {
+        "id": "H1-11",
+        "model": "learner-evaluation-8",
+        "actual": "CORRECT",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      },
+      "policy9": {
+        "id": "H1-11",
+        "model": "learner-evaluation-9",
+        "actual": null,
+        "usable": false,
+        "failures": [
+          "INVALID_OUTPUT_INCONSISTENT"
+        ]
+      }
+    },
+    {
+      "id": "G-ABSTAIN",
+      "policy8": {
+        "id": "G-ABSTAIN",
+        "model": "learner-evaluation-8",
+        "actual": "NOT_ANSWERED",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      },
+      "policy9": {
+        "id": "G-ABSTAIN",
+        "model": "learner-evaluation-9",
+        "actual": "NOT_ANSWERED",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      }
+    },
+    {
+      "id": "G-REQUEST",
+      "policy8": {
+        "id": "G-REQUEST",
+        "model": "learner-evaluation-8",
+        "actual": "NOT_ANSWERED",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      },
+      "policy9": {
+        "id": "G-REQUEST",
+        "model": "learner-evaluation-9",
+        "actual": "NOT_ANSWERED",
+        "usable": true,
+        "acceptableClassification": true,
+        "exactExpected": true,
+        "failures": []
+      }
+    }
+  ],
+  "limitations": [
+    "Original v8 regression run is the earlier saved baseline, not a simultaneous repeated invocation.",
+    "One model invocation per case/policy; repeatability not established.",
+    "AI-authored/reviewed expected labels, no independent domain expert approval.",
+    "Fresh answers use previously reviewed questions, not unseen domains.",
+    "Typed saved-answer grading test; no new microphone or transcript capture test.",
+    "Generic INVALID_OUTPUT_INCONSISTENT does not identify which candidate consistency guard fired; raw rejected provider text is not retained."
+  ]
+}

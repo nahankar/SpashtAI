@@ -1,6 +1,7 @@
 # Claim-based grading candidate (policy 9)
 
-Status: **preview only; real-model semantic comparison pending**. Current learner policy remains
+Status: **preview only; real-model comparison completed, HOLD**. See
+`INTERVIEWS-GRADING-POLICY-9-COMPARISON.md`. Current learner policy remains
 `learner-evaluation-8`. Nothing merged, deployed or enabled for learners/adaptive selection.
 
 The 6 November baseline found eight semantic/availability failures across 22 cases. Prior prompt-only
@@ -60,9 +61,10 @@ baseline outputs are reused only as labelled historical evidence, never as fresh
 
 The initial 20-call baseline exhausted this Admin's normal UTC-day quota. A normal candidate submission
 was attempted and returned 429 before a provider call. No budget was reset and no second identity was used.
-The normal allowance resets at **05:30 IST on 6 November 2026**. A full 36-call comparison still spans normal
-daily allowances unless an explicit additional local benchmark allowance is approved. Production caps must
-remain unchanged. Missing comparison evidence is BLOCKED, not PASSED.
+The owner subsequently approved **36 additional local calls**, and the full comparison completed within that
+allowance. Only the isolated benchmark processes used a temporary Admin ceiling of 56 (20 existing + 36 new);
+no usage was reset, no second identity was used, and normal source/production caps stayed unchanged. All three
+processes exited. The observed result is HOLD, not a blocked run or a passed acceptance gate.
 
 The same saved-assessment path and `review-interview-calibration.ts` commands from the baseline report apply,
 using `--model learner-evaluation-9` and `--fixture policy-9-fresh-1` as appropriate. Preserve original baseline

@@ -1,0 +1,89 @@
+{
+  "fixtureVersion": "grading-policy-9-fresh-1",
+  "calibrated": false,
+  "decision": "SAMPLE_PASSED_REVIEW_STILL_REQUIRED",
+  "limitation": "Bank-relative AI-reviewed regression labels, not independent expert calibration or repeated-run reliability. A broader acceptable band can contain different adaptive actions; resolve routing-label disagreements before enablement.",
+  "summary": {
+    "cases": 8,
+    "usable": 8,
+    "acceptableClassification": 8,
+    "exactExpected": 8,
+    "allRequiredChecksPass": true,
+    "allRoutingLabelsMatch": true,
+    "failedCases": 0
+  },
+  "reviews": [
+    {
+      "id": "F9-01",
+      "model": "learner-evaluation-9",
+      "actual": "CORRECT",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": true,
+      "failures": []
+    },
+    {
+      "id": "F9-02",
+      "model": "learner-evaluation-9",
+      "actual": "INCORRECT",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": true,
+      "failures": []
+    },
+    {
+      "id": "F9-03",
+      "model": "learner-evaluation-9",
+      "actual": "CORRECT",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": true,
+      "failures": []
+    },
+    {
+      "id": "F9-04",
+      "model": "learner-evaluation-9",
+      "actual": "CORRECT",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": true,
+      "failures": []
+    },
+    {
+      "id": "F9-05",
+      "model": "learner-evaluation-9",
+      "actual": "NOT_ANSWERED",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": true,
+      "failures": []
+    },
+    {
+      "id": "F9-06",
+      "model": "learner-evaluation-9",
+      "actual": "INCORRECT",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": true,
+      "failures": []
+    },
+    {
+      "id": "F9-07",
+      "model": "learner-evaluation-9",
+      "actual": "CORRECT",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": true,
+      "failures": []
+    },
+    {
+      "id": "F9-08",
+      "model": "learner-evaluation-9",
+      "actual": "PARTIAL",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": true,
+      "failures": []
+    }
+  ]
+}
