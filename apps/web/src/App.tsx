@@ -1,3 +1,4 @@
+import { RecordingRecovery } from '@/components/session/RecordingRecovery'
 import { UserDropdown } from '@/components/layout/UserDropdown'
 import { OrganizationWorkspace, PlatformWorkspaces, WorkspaceLink, WorkspaceList } from '@/workspaces/Workspaces'
 import { useState, useRef, useEffect } from 'react'
@@ -460,6 +461,7 @@ function AppRoutes() {
   return (
     <>
       {!location.pathname.startsWith('/w/') && <Navbar />}
+      {user && !loading && <RecordingRecovery accountId={user.id} />}
       {user && !location.pathname.startsWith('/w/') && <WorkspaceLink />}
       <div className="flex min-h-[calc(100vh-4rem)] flex-col">
         <div className="flex-1">

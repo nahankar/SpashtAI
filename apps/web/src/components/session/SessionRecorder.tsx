@@ -1,10 +1,12 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react'
+import { forwardRef, useCallback, useContext, useEffect, useImperativeHandle, useRef } from 'react'
 import { useRoomContext } from '@livekit/components-react'
 import { ConnectionState, RoomEvent, Track } from 'livekit-client'
 import { useAudioRecording } from '@/hooks/useAudioRecording'
 import { describeAudioCapture } from '@/lib/audioCapture'
 import { createMicRecordingSource, type MicRecordingSource } from '@/lib/micRecordingSource'
-import { getActiveWorkspace, workspaceHeadersFor } from '@/workspaces/activeWorkspace'
+import { getActiveWorkspace, organizationSlugFromPath, workspaceHeadersFor } from '@/workspaces/activeWorkspace'
+import { AuthContext } from '@/contexts/AuthContext'
+import { browserJournalLocks, indexedDbJournalStore, openLiveJournal, recordingRecoveryEnabled, type LiveJournal } from '@/lib/recordingJournal'
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:4000'
@@ -67,6 +69,28 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
   function SessionRecorder({ sessionId, segmentId, disabled = false }, ref) {
     const room = useRoomContext()
     const { isRecording, startRecording, stopRecording } = useAudioRecording()
+    // Refresh/crash recovery journal for this recording (see lib/recordingJournal.ts); null when unavailable.
+    const accountId = useContext(AuthContext)?.user?.id ?? null
+    const journalRef = useRef<LiveJournal | null>(null)
+    const journalCancelledRef = useRef(false)
+    const recordingTokenRef = useRef(localStorage.getItem('spashtai_token'))
+    const keepJournalForRecovery = () => { void journalRef.current?.release() }
+    const dropJournal = () => { const journal = journalRef.current; journalRef.current = null; void journal?.remove() }
+
+    useEffect(() => {
+      const onSignOut = (event: Event) => {
+        if (event instanceof StorageEvent && (event.key !== 'spashtai_token' || event.newValue !== null)) return
+        if (event instanceof CustomEvent && event.detail !== accountId) return
+        journalCancelledRef.current = true
+        dropJournal()
+      }
+      window.addEventListener('spasht-recording-signout', onSignOut)
+      window.addEventListener('storage', onSignOut)
+      return () => {
+        window.removeEventListener('spasht-recording-signout', onSignOut)
+        window.removeEventListener('storage', onSignOut)
+      }
+    }, [accountId])
 
     const startedAtRef = useRef<string | null>(null)
     const startMsRef = useRef<number>(0)
@@ -104,7 +128,8 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
       const durationSec =
         durationSecRef.current ||
         (startMsRef.current ? (Date.now() - startMsRef.current) / 1000 : 0)
-      const token = localStorage.getItem('spashtai_token')
+      const token = recordingTokenRef.current
+      if (!token || localStorage.getItem('spashtai_token') !== token) { keepJournalForRecovery(); return false }
 
       for (let attempt = 1; attempt <= UPLOAD_ATTEMPTS; attempt += 1) {
         try {
@@ -131,10 +156,12 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
           if (response.ok) {
             uploadedRef.current = true
             console.log('📤 Session recording uploaded')
+            dropJournal() // durable on the server: the local recovery copy is no longer needed
             return true
           }
           if (!shouldRetryUploadStatus(response.status)) {
             console.warn('Session recording upload not retryable', response.status)
+            keepJournalForRecovery()
             return false
           }
           console.warn(`Session recording upload HTTP ${response.status} (attempt ${attempt})`)
@@ -145,6 +172,8 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
           await new Promise((r) => setTimeout(r, 400 * attempt))
         }
       }
+      // Kept locally; recovery retries it (on reconnect, reload or when back online) to this same segment.
+      keepJournalForRecovery()
       return false
     }, [segmentId])
 
@@ -226,6 +255,8 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
         discardRef.current = true
         if (isRecordingRef.current) await stopRef.current()
         capturedBlobRef.current = null
+        journalCancelledRef.current = true
+        dropJournal()
       },
     }))
 
@@ -252,16 +283,27 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
           startMsRef.current = Date.now()
           startOutcomeRef.current = 'started'
           captureSettingsRef.current = describeAudioCapture(track)
+          // Journal every timeslice locally first, keyed by account, session, segment and this recording.
+          const scopeKnown = !organizationSlugFromPath() || originWorkspaceRef.current?.slug === organizationSlugFromPath()
+          const journal = recordingRecoveryEnabled() && accountId && sessionId && segmentId && scopeKnown ? await openLiveJournal(indexedDbJournalStore(), browserJournalLocks(), {
+            recordingId: crypto.randomUUID(), accountId, sessionId, segmentId,
+            workspace: originWorkspaceRef.current ? { id: originWorkspaceRef.current.workspaceId, slug: originWorkspaceRef.current.slug } : null,
+            startedAt: startedAtRef.current, captureSettings: captureSettingsRef.current,
+          }, Date.now, (error) => console.warn('Recording recovery journal unavailable; recording continues without it:', error))
+            .catch(() => null) : null
+          if (cancelled || journalCancelledRef.current) { void journal?.remove(); source?.close(); startedRef.current = false; startedAtRef.current = null; return }
+          journalRef.current = journal
+          const onChunk = journal ? (chunk: Blob) => journal.append(chunk) : undefined
           if (source) {
             source.follow(micTrack() ?? track)
             recordingSourceRef.current = source
             startRecording(source.stream, () => {
               source.close()
               if (recordingSourceRef.current === source) recordingSourceRef.current = null
-            })
+            }, onChunk)
           } else {
             console.warn('Web Audio unavailable; recording the microphone track directly')
-            startRecording(new MediaStream([track]))
+            startRecording(new MediaStream([track]), undefined, onChunk)
           }
           console.log('🎙️ Auto session recording started', captureSettingsRef.current)
           return
@@ -278,7 +320,7 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
       return () => {
         cancelled = true
       }
-    }, [room, room.state, sessionId, segmentId, disabled, startRecording, micTrack])
+    }, [room, room.state, sessionId, segmentId, disabled, startRecording, micTrack, accountId])
 
     useEffect(() => {
       if (!isRecording) return
@@ -311,15 +353,16 @@ export const SessionRecorder = forwardRef<SessionRecorderHandle, SessionRecorder
 
     useEffect(() => {
       return () => {
-        if (discardRef.current || uploadedRef.current || !isRecordingRef.current) return
+        if (discardRef.current || uploadedRef.current) return
+        if (!isRecordingRef.current) { keepJournalForRecovery(); return }
         void stopRef.current().then((blob) => {
           if (blob) {
             if (startMsRef.current) {
               durationSecRef.current = (Date.now() - startMsRef.current) / 1000
             }
             capturedBlobRef.current = blob
-            void uploadBlob(blob)
-          }
+            void uploadBlob(blob) // success drops the journal; failure keeps it for recovery
+          } else keepJournalForRecovery()
         })
       }
     }, [uploadBlob])

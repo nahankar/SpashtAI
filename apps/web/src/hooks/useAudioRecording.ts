@@ -54,7 +54,9 @@ export function createRecordingStopGate(): RecordingStopGate {
 
 interface AudioRecordingHook {
   isRecording: boolean;
-  startRecording: (stream: MediaStream, onStopped?: () => void) => void;
+  /** onChunk receives each timeslice as it is recorded (for the refresh-recovery journal); the in-memory
+   * recording and upload are unchanged when it is omitted. */
+  startRecording: (stream: MediaStream, onStopped?: () => void, onChunk?: (chunk: Blob) => void) => void;
   stopRecording: () => Promise<Blob | null>;
   audioUrl: string | null;
   error: string | null;
@@ -77,7 +79,7 @@ export function useAudioRecording(): AudioRecordingHook {
     onStopped?.();
   };
 
-  const startRecording = useCallback((stream: MediaStream, onStopped?: () => void) => {
+  const startRecording = useCallback((stream: MediaStream, onStopped?: () => void, onChunk?: (chunk: Blob) => void) => {
     onStoppedRef.current = onStopped ?? null;
     try {
       // Create MediaRecorder with the audio stream
@@ -91,6 +93,7 @@ export function useAudioRecording(): AudioRecordingHook {
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           chunksRef.current.push(event.data);
+          onChunk?.(event.data);
         }
       };
 

@@ -1,4 +1,5 @@
 import { createContext, useEffect, useState, useCallback, type ReactNode } from 'react'
+import { clearRecordingsOnSignOut } from '@/lib/recordingRecovery'
 import { ApiError, apiClient } from '@/lib/api-client'
 import { isWorkspaceFailure, WorkspaceContextError } from '@/workspaces/activeWorkspace'
 
@@ -169,7 +170,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     apiClient('/api/auth/logout', { method: 'POST', identityOnly: true }).catch(() => {})
     localStorage.removeItem(TOKEN_KEY)
     setUser(null)
-  }, [])
+    if (user?.id) {
+      window.dispatchEvent(new CustomEvent('spasht-recording-signout', { detail: user.id }))
+      void clearRecordingsOnSignOut(user.id)
+    }
+  }, [user?.id])
 
   const updateUser = useCallback((data: Partial<AuthUser>) => {
     setUser((prev) => (prev ? { ...prev, ...data } : null))
