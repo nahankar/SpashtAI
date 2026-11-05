@@ -46,7 +46,7 @@ export async function acceptInvitation(
   const existingLocation = profile
     ? await prisma.user.findFirst({
       where: { email: googleUser.email },
-      select: { city: true, state: true, country: true },
+      select: { pincode: true, city: true, state: true, country: true },
     })
     : null
   const located = profile ? await attachSignupLocation(profile, existingLocation) : null

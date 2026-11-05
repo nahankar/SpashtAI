@@ -208,7 +208,7 @@ describe.skipIf(!testDb.url)('learner invitations (PostgreSQL)', () => {
     expect(row).toMatchObject({ status: 'ACCEPTED', acceptedUserId: first.body.user.id, pendingKey: null })
   })
 
-  it('resolves a new invitee location before the acceptance lock and keeps an existing city when lookup is empty', async () => {
+  it('resolves a new invitee location before the acceptance lock and keeps only a compatible existing location', async () => {
     const email = addr('located')
     await invite(email)
     const first = await accept(tokenFor(email), google(email))
@@ -217,15 +217,36 @@ describe.skipIf(!testDb.url)('learner invitations (PostgreSQL)', () => {
       city: 'Bengaluru', state: 'Karnataka', country: 'India', pincode: '560001',
     })
 
+    // Incomplete existing profile, same postcode, partial lookup: the existing city/state describe this postcode.
     const existingEmail = addr('kept-city')
-    await prisma.user.create({ data: { email: existingEmail, role: 'USER', city: 'Mysuru', state: 'Karnataka', country: 'India' } })
+    await prisma.user.create({ data: { email: existingEmail, role: 'USER', pincode: SIGNUP_PROFILE.pincode, city: 'Bengaluru', state: 'Karnataka', country: 'India' } })
     await invite(existingEmail, { confirmExistingUser: true })
     locationMocks.resolve.mockImplementation(async () => ({ city: null, state: null, country: 'India' }))
     const kept = await accept(tokenFor(existingEmail), google(existingEmail))
     expect(kept.status).toBe(200)
     expect(kept.body.newAccount).toBe(false)
     expect(await prisma.user.findUniqueOrThrow({ where: { email: existingEmail } })).toMatchObject({
-      city: 'Mysuru', state: 'Karnataka', country: 'India', phone: SIGNUP_PROFILE.phone, pincode: SIGNUP_PROFILE.pincode,
+      city: 'Bengaluru', state: 'Karnataka', country: 'India', phone: SIGNUP_PROFILE.phone, pincode: SIGNUP_PROFILE.pincode,
+    })
+
+    // Changed postcode with an unresolved lookup: the old locality is not carried over.
+    const movedEmail = addr('moved')
+    await prisma.user.create({ data: { email: movedEmail, role: 'USER', pincode: '570001', city: 'Mysuru', state: 'Karnataka', country: 'India' } })
+    await invite(movedEmail, { confirmExistingUser: true })
+    expect((await accept(tokenFor(movedEmail), google(movedEmail))).status).toBe(200)
+    expect(await prisma.user.findUniqueOrThrow({ where: { email: movedEmail } })).toMatchObject({
+      pincode: SIGNUP_PROFILE.pincode, city: null, state: null, country: 'India',
+    })
+
+    // Country change with a failed lookup: never Mysuru / Karnataka / United States.
+    const abroadEmail = addr('abroad')
+    await prisma.user.create({ data: { email: abroadEmail, role: 'USER', pincode: '570001', city: 'Mysuru', state: 'Karnataka', country: 'India' } })
+    await invite(abroadEmail, { confirmExistingUser: true })
+    locationMocks.resolve.mockImplementation(async () => ({ city: null, state: null, country: 'United States' }))
+    const abroad = await request(app).post('/api/invitations/accept').send({ token: tokenFor(abroadEmail), credential: google(abroadEmail), ...SIGNUP_PROFILE, pincode: '94105' })
+    expect(abroad.status).toBe(200)
+    expect(await prisma.user.findUniqueOrThrow({ where: { email: abroadEmail } })).toMatchObject({
+      pincode: '94105', city: null, state: null, country: 'United States',
     })
   })
 
@@ -256,11 +277,18 @@ describe.skipIf(!testDb.url)('learner invitations (PostgreSQL)', () => {
       pincode: SIGNUP_PROFILE.pincode, city: 'Bengaluru', state: 'Karnataka', country: 'India',
     })
 
-    const kept = await prisma.user.create({ data: { email: addr('personal-kept'), role: 'USER', city: 'Mysuru', state: 'Karnataka', country: 'India' } })
+    const kept = await prisma.user.create({ data: { email: addr('personal-kept'), role: 'USER', pincode: SIGNUP_PROFILE.pincode, city: 'Bengaluru', state: 'Karnataka', country: 'India' } })
     locationMocks.resolve.mockImplementation(async () => ({ city: null, state: null, country: 'India' }))
     expect((await request(app).post('/api/auth/google').send({ credential: google(kept.email), ...SIGNUP_PROFILE })).status).toBe(200)
     expect(await prisma.user.findUniqueOrThrow({ where: { id: kept.id } })).toMatchObject({
-      phone: SIGNUP_PROFILE.phone, city: 'Mysuru', state: 'Karnataka', country: 'India',
+      phone: SIGNUP_PROFILE.phone, city: 'Bengaluru', state: 'Karnataka', country: 'India',
+    })
+
+    const moved = await prisma.user.create({ data: { email: addr('personal-moved'), role: 'USER', city: 'Mysuru', state: 'Karnataka', country: 'India' } })
+    locationMocks.resolve.mockImplementation(async () => ({ city: null, state: null, country: 'United States' }))
+    expect((await request(app).post('/api/auth/google').send({ credential: google(moved.email), ...SIGNUP_PROFILE, pincode: '94105' })).status).toBe(200)
+    expect(await prisma.user.findUniqueOrThrow({ where: { id: moved.id } })).toMatchObject({
+      pincode: '94105', city: null, state: null, country: 'United States',
     })
 
     const signIn = await request(app).post('/api/auth/google').send({ credential: google(kept.email) })

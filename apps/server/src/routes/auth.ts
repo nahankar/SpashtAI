@@ -233,7 +233,7 @@ router.post('/google', authLimiter, async (req: Request, res: Response) => {
     const existingLocation = profileRead.data
       ? await prisma.user.findFirst({
         where: { email: googleUser.email },
-        select: { city: true, state: true, country: true },
+        select: { pincode: true, city: true, state: true, country: true },
       })
       : null
     const profile = profileRead.data

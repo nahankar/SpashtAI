@@ -91,22 +91,37 @@ export async function resolveProfileLocation(pincode: string) {
   return resolvePincodeLocation(pincode)
 }
 
-export function mergeResolvedLocation(
-  incoming: { city: string | null; state: string | null; country: string | null },
-  lookedUp: { city: string | null; state: string | null; country: string | null },
-  existing?: { city?: string | null; state?: string | null; country?: string | null } | null,
-) {
-  return {
-    city: lookedUp.city ?? existing?.city ?? incoming.city,
-    state: lookedUp.state ?? existing?.state ?? incoming.state,
-    country: lookedUp.country ?? existing?.country ?? incoming.country,
-  }
+type Location = { city: string | null; state: string | null; country: string | null }
+export type ExistingLocation = { pincode?: string | null; city?: string | null; state?: string | null; country?: string | null }
+
+function normalizedPostcode(value: string | null | undefined): string {
+  return (value ?? '').replace(/[\s-]/g, '').toUpperCase()
+}
+
+function sameCountry(a: string | null | undefined, b: string | null | undefined): boolean {
+  return Boolean(a && b && a.trim().toLowerCase() === b.trim().toLowerCase())
+}
+
+/**
+ * City/state/country for a submitted postcode. A lookup result always wins. Existing location fills gaps only when it
+ * is known to describe the same place: the same postcode and (when the lookup or postcode format names one) the same
+ * country. A different or missing existing postcode, or a different country, never carries an old locality over;
+ * unresolved fields stay blank.
+ */
+export function mergeResolvedLocation(submittedPincode: string, lookedUp: Location, existing?: ExistingLocation | null): Location {
+  const compatible = Boolean(existing && normalizedPostcode(existing.pincode)
+    && normalizedPostcode(existing.pincode) === normalizedPostcode(submittedPincode)
+    && (!lookedUp.country || !existing.country || sameCountry(lookedUp.country, existing.country)))
+  const fallback = compatible ? existing! : null
+  const country = lookedUp.country ?? fallback?.country ?? null
+  const fill = (looked: string | null, old: string | null | undefined) => looked ?? (fallback ? old ?? null : null)
+  return { city: fill(lookedUp.city, fallback?.city), state: fill(lookedUp.state, fallback?.state), country }
 }
 
 /** External pincode lookup. Call this before any locked signup/acceptance transaction. */
-export async function attachSignupLocation(profile: SignupProfile, existing?: { city?: string | null; state?: string | null; country?: string | null } | null): Promise<SignupProfile> {
+export async function attachSignupLocation(profile: SignupProfile, existing?: ExistingLocation | null): Promise<SignupProfile> {
   const lookedUp = await resolveProfileLocation(profile.pincode)
-  return { ...profile, ...mergeResolvedLocation(profile, lookedUp, existing) }
+  return { ...profile, ...mergeResolvedLocation(profile.pincode, lookedUp, existing) }
 }
 
 export function toAuthUser(user: {
