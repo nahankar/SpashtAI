@@ -14,11 +14,14 @@ Status 4 November 2026. Nothing here is implemented or enabled. Do not flip
 | Linked practices | `PreparationPractice.sessionId` (Elevate `Session`) and `PreparationRecording.replaySessionId` (`ReplaySession`); journey-owned Elevate sessions get `purpose='INTERVIEW'` (activityPolicy.ts) |
 | Deletion | `ReplayDeletion.workspaceId` is nullable; journey delete must stamp it so the org-scoped cleanup worker can find files |
 | Analytics | Org reports bucket journey Elevate practice under Interviews (purpose INTERVIEW) — Prepare activity is not attributable |
+| Session review | Review migration excludes Prepare-linked sessions and has no policy on `Preparation` (by design, see M3b) |
 
 ## Scope reconciliation (why estimates differed)
 
 * **8–15 dev-days** = smallest release: org-scoped journeys, stages, questions, reflections, linked Elevate/Replay
   practice inside the org, deletion/recovery, navigation, permission/RLS tests, analytics attribution.
+* **+2–4 dev-days (M3b)** if organization Owners/Admins must be able to review Prepare journeys at launch; otherwise
+  Prepare-linked practices stay excluded from review (current behaviour) and M3b follows separately.
 * **3–5 weeks** additionally assumed: Coach-in-org (Coach consumes Prepare context), Owner/Admin review of journeys,
   exports, org-managed journey templates. These are separable and are **not** in the smallest release.
 * Remaining uncertainty: analytics semantics (new `PREPARE` purpose vs. a link-based attribution), and
@@ -47,6 +50,22 @@ Status 4 November 2026. Nothing here is implemented or enabled. Do not flip
   `.cursor/rules/export-sync.mdc` if fields change.
 * Acceptance: Prepare activity no longer counted as Interviews; historical numbers unchanged for Personal.
 
+**M3b — Prepare in workspace session review (2–4 days; separate migration)**
+* The session-review migration (`20261104120000_workspace_session_review`) deliberately **excludes** Prepare:
+  `workspace_review_excludes_prepare()` hides any `Session` with a `PreparationPractice` row and any `ReplaySession`
+  with a `PreparationRecording` row, and reviewers cannot see `Preparation` or its children at all. Nothing becomes
+  reviewable automatically after M1–M2.
+* Work: a new migration that (a) lifts the exclusion for journey-linked practices only for organization journeys whose
+  `Preparation.workspaceId` matches, (b) adds a reviewer SELECT policy on `Preparation` and an explicit decision per
+  child table (`PreparationStage`, `InterviewQuestion`, `StageReflection` — reflections may be private by design),
+  (c) review API/UI showing the journey context with an explicit field allowlist, (d) product attribution in the review
+  list (Prepare vs Elevate/Replay) consistent with M3.
+* Tests: restricted-role DB tests for two organizations + Personal (Personal journeys never visible), role demotion,
+  suspension, Prepare-linked practice visible only to the owning organization's Owner/Admin, reflections hidden or shown
+  per the product decision, read-only enforcement, content-free audit; browser playback of a journey-linked recording.
+* Acceptance: a reviewer sees an organization learner's journey practices with Prepare attribution; Personal and other
+  organizations' journeys stay invisible; no write path exists.
+
 **M4 — Recovery and readiness gate (1–2 days)**
 * Recovery after partial failures (practice created, journey deleted mid-flight), seat/suspension changes,
   then `WORKSPACE_FEATURE_READINESS.prepare = true` + platform unhide + per-org entitlement — a separate,
@@ -59,7 +78,8 @@ not call Coach context builders for org journeys until Coach is org-ready (`prep
 
 ## How session review fits
 
-Workspace session review (branch `feature/workspace-session-review`) covers Elevate/Replay/Interviews. Once M1–M2
-land, journey-linked practices are ordinary org `Session`/`ReplaySession` rows and become reviewable through the same
-reviewer reader mode; journey-level review (stages, reflections, questions) is a follow-up that needs its own
-SELECT policy on `Preparation` and explicit field selection (reflections may be personal — needs a product decision).
+Workspace session review (branch `feature/workspace-session-review`) covers Elevate/Replay/Interviews and **explicitly
+excludes Prepare** at the database (see M3b). Journey-linked practices do **not** become reviewable when M1–M2 land;
+they need M3b's migration, policies, UI and isolation tests. Readiness (`WORKSPACE_FEATURE_READINESS.prepare`) stays
+`false` until M1–M4 (and M3b, if review of Prepare is required for launch) are validated end to end. Prepare remains
+independent of Coach throughout.
