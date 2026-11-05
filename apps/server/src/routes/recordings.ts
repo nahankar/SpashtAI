@@ -1,3 +1,4 @@
+import { canReviewWorkspaceSessions } from '../lib/dataScope'
 import type { Request, Response } from 'express'
 import multer from 'multer'
 import { createHash, randomUUID } from 'crypto'
@@ -351,7 +352,7 @@ export async function createSessionRecordingTicket(req: Request, res: Response) 
   const scope = req.dataScope
   if (!scope || !req.user) return res.status(400).json({ error: 'Playback tickets are issued inside a workspace', code: 'WORKSPACE_TOKEN_REQUIRED' })
   const session = await prisma.session.findFirst({
-    where: { id: req.params.sessionId, userId: req.user.userId, workspaceId: scope.workspaceId, discardedAt: null },
+    where: { id: req.params.sessionId, ...(canReviewWorkspaceSessions() ? {} : { userId: req.user.userId }), workspaceId: scope.workspaceId, discardedAt: null },
     select: { id: true },
   })
   if (!session) return res.status(404).json({ error: 'Session not found' })

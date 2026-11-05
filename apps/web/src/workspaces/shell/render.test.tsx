@@ -7,7 +7,7 @@ import { DailyActivityView, OverviewView, ProgressPulseView } from '../admin/rep
 import { WorkspaceShellContext } from './context'
 import { ShellLayout, WorkspaceHome } from './WorkspaceShell'
 
-vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ logout: () => {} }) }))
+vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ logout: () => {}, user: { firstName: 'Info', email: 'info@example.invalid' } }) }))
 
 const workspace = { id: 'ws-1', slug: 'klsvdit', name: 'KLS VDIT', kind: 'ORGANIZATION' as const, state: 'ACTIVE' as const, logoDataUrl: null, accentColor: '#123456', timeZone: 'Asia/Kolkata', isolationStage: 'PRODUCT_PLANE', limits: { maxMembers: 10, dailyEvaluations: 5, concurrentVoice: 2 } }
 const feature = (name: string, change: Partial<Feature> = {}): Feature => ({ feature: name, entitled: true, enabled: true, memberDefault: true, allowed: true, ready: true, ...change })
@@ -38,7 +38,7 @@ describe('workspace pages', () => {
     const admin = chrome('/w/klsvdit/admin/settings')
     expect(admin).toContain('aria-label="Workspace"')
     expect(admin).not.toContain('href="/coach"')
-    expect(admin).toContain('Sign out')
+    expect(admin).toContain('Info account menu')
     expect(admin).toContain('Switch')
     expect(admin).toContain('href="/w/klsvdit/elevate"')
     expect(admin).toContain('href="/w/klsvdit/replay"')

@@ -64,6 +64,16 @@ function fail(res: Response, error: unknown) {
   res.status(401).json({ error: 'Open the workspace again to continue', code: 'WORKSPACE_TOKEN_REQUIRED' })
 }
 
+// Reviewing other learners is limited to Elevate reads and the session-bound playback ticket.
+const ELEVATE_REVIEW_GET = /^\/sessions(?:$|\/[^/]+(?:$|\/(?:metrics|transcript|conversation|turns|advanced-metrics|skill-scores|coaching-insights|communication-signals|delivery-moments|recording\/stream)$))/
+function bindSessionReview(scope: DataScope, req: Request): DataScope {
+  if (!scope.features.elevate || !['OWNER', 'ADMIN'].includes(scope.role)) return scope
+  if ((req.method === 'GET' && ELEVATE_REVIEW_GET.test(req.path)) || (req.method === 'POST' && /^\/sessions\/[^/]+\/recording\/ticket$/.test(req.path))) {
+    return { ...scope, reader: 'session_review' }
+  }
+  return scope
+}
+
 const CONTROL_PLANE = [/^\/api\/workspaces(\/|$)/, /^\/api\/auth(\/|$)/, /^\/api\/invitations(\/|$)/]
 
 /**
@@ -90,7 +100,7 @@ export async function bindWorkspaceRequest(req: Request, res: Response, next: Ne
     let identity
     try { identity = verifyToken(bearer(req)) } catch { throw new WorkspaceError(401, 'IDENTITY_REQUIRED', 'Sign in again to continue') }
     if (identity.userId !== claims.userId) throw new WorkspaceError(403, 'WORKSPACE_IDENTITY_MISMATCH', 'Open the workspace again to continue')
-    const scope = await resolveRequestScope(claims)
+    const scope = bindSessionReview(await resolveRequestScope(claims), req)
     req.dataScope = scope
     runWithDataScope(scope, next)
   } catch (error) {
@@ -113,7 +123,7 @@ async function bindMediaRequest(req: Request, res: Response, next: NextFunction,
     let identity
     try { identity = verifyToken(access) } catch { throw new WorkspaceError(401, 'IDENTITY_REQUIRED', 'Sign in again to continue') }
     if (identity.userId !== claims.userId) throw new WorkspaceError(403, 'WORKSPACE_IDENTITY_MISMATCH', 'Open the workspace again to continue')
-    const scope = await resolveDataScope(claims, 'request')
+    const scope = bindSessionReview(await resolveDataScope(claims, 'request'), req)
     req.dataScope = scope
     runWithDataScope(scope, next)
   } catch (error) {

@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express'
 import { prisma } from './prisma'
-import { currentDataScope, type DataScope } from './dataScope'
+import { canReviewWorkspaceSessions, currentDataScope, type DataScope } from './dataScope'
 
 export interface UserExportFlags {
   hideTranscriptText: boolean
@@ -139,7 +139,7 @@ export async function resolveRequestExportFlags(
 
   const scope = currentDataScope()
   if (scope) {
-    const denied = Boolean(ownerUserId && ownerUserId !== scope.actorId)
+    const denied = Boolean(ownerUserId && ownerUserId !== scope.actorId && !canReviewWorkspaceSessions(scope))
     return { flags: organizationExportFlags(scope), accessDenied: denied }
   }
 

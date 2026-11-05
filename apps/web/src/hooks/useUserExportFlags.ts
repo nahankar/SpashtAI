@@ -1,4 +1,5 @@
 import { useContext } from 'react'
+import { WorkspaceShellContext } from '@/workspaces/shell/context'
 import { AuthContext } from '@/contexts/AuthContext'
 
 export interface UserExportFlags {
@@ -25,6 +26,13 @@ const ADMIN_FLAGS: UserExportFlags = {
 
 export function useUserExportFlags(): UserExportFlags {
   const auth = useContext(AuthContext)
+  const workspace = useContext(WorkspaceShellContext)
+  if (workspace) {
+    const allowed = (feature: string) => workspace.snapshot.features.some(row => row.feature === feature && row.allowed)
+    return { hideTranscriptText: false, hideTranscriptJsonExport: false, hideAudioDownload: false,
+      enableTxtExport: allowed('text_export'), enableJsonExport: allowed('text_export'),
+      enableAudioExport: allowed('audio_export'), enableReprocess: allowed('reprocess') }
+  }
   // Admins always have full access. A logged-out state shouldn't reach these
   // views, but default to admin-style visibility for the non-gated content.
   if (!auth?.user) return ADMIN_FLAGS

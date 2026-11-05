@@ -1,3 +1,4 @@
+import { canReviewWorkspaceSessions, currentDataScope } from '../lib/dataScope'
 import type { Request, Response } from 'express'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/prisma'
@@ -26,7 +27,8 @@ import { currentListRole } from '../lib/listAccess'
 
 export async function listSessions(req: Request, res: Response) {
   try {
-    const privileged = isPrivilegedRole(await currentListRole(req))
+    const scope = currentDataScope()
+    const privileged = isPrivilegedRole(await currentListRole(req)) || (canReviewWorkspaceSessions() && req.query.scope !== 'mine')
     // Non-privileged users only see their own sessions. Admins/super-admins
     // see every user's sessions. Prepare owns linked practices for everyone;
     // they are shown in the journey, never in standalone Elevate history.
@@ -63,7 +65,7 @@ export async function listSessions(req: Request, res: Response) {
         ? { ...session, progressPulseStatus: 'tracked' }
         : session,
     )
-    const deletionWhere = privileged
+    const deletionWhere = privileged && !scope
       ? { discardedAt: { not: null } }
       : { userId: req.user!.userId, discardedAt: { not: null } }
     const deletions = await prisma.session.findMany({
@@ -110,7 +112,7 @@ export async function getSession(req: Request, res: Response) {
     }
 
     // Ownership check: only the owner (or a privileged role) may read a session.
-    if (!isPrivilegedRole(req.user?.role) && session.userId !== req.user?.userId) {
+    if (!isPrivilegedRole(req.user?.role) && !canReviewWorkspaceSessions() && session.userId !== req.user?.userId) {
       return res.status(403).json({ error: 'Access denied' })
     }
 

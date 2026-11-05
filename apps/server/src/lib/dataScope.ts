@@ -19,9 +19,10 @@ export interface DataScope {
   features: Record<string, boolean>
   /**
    * manager: aggregate-only reads for Owner/Admin reports (the database rechecks the role).
+   * session_review: read-only Elevate results for tenant Owners/Admins.
    * cleanup: destruction of tombstoned activity by the deletion job.
    */
-  reader?: 'manager' | 'cleanup'
+  reader?: 'manager' | 'cleanup' | 'session_review'
   origin: 'request' | 'agent' | 'job'
 }
 
@@ -42,4 +43,9 @@ export function runOutsideDataScope<T>(work: () => T): T {
 
 export function isOrganizationScope(): boolean {
   return storage.getStore() !== undefined
+}
+
+/** Bound only to read-only Elevate routes after current tenant membership is verified. */
+export function canReviewWorkspaceSessions(scope = currentDataScope()): boolean {
+  return scope?.reader === 'session_review' && ['OWNER', 'ADMIN'].includes(scope.role)
 }

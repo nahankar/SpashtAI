@@ -1,4 +1,4 @@
-import { appPath } from '@/workspaces/activeWorkspace'
+import { appPath, getActiveWorkspace } from '@/workspaces/activeWorkspace'
 import { useLiveSession } from '@/features/live-session/useLiveSession'
 import { elevateAdapter } from '@/features/live-session/adapters/elevate'
 import { prepareAdapter } from '@/features/live-session/adapters/prepare'
@@ -71,7 +71,12 @@ interface ProgressPulseItem {
 export function Elevate() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const { user, isAdmin, updateUser } = useAuth()
+  const { user, isAdmin: platformAdmin, updateUser } = useAuth()
+  const workspace = getActiveWorkspace()
+  const tenantManager = !!workspace && ['OWNER', 'ADMIN'].includes(workspace.role)
+  const isAdmin = workspace ? tenantManager : platformAdmin
+  const [viewOwnerId, setViewOwnerId] = useState<string | null>(null)
+  const reviewingOther = !!workspace && !!viewOwnerId && viewOwnerId !== user?.id
   const exportFlags = useUserExportFlags()
   const confirmDialog = useConfirm()
   const viewSessionId = searchParams.get('session')
@@ -829,6 +834,7 @@ export function Elevate() {
         const data = await response.json()
         if (cancelled) return
         const session = data.session || data
+        setViewOwnerId(session.userId ?? null)
         setViewSessionName(session.sessionName || null)
         setViewSessionPulse(session.progressPulseStatus || null)
         setViewFocusArea(session.focusArea || null)
@@ -856,7 +862,7 @@ export function Elevate() {
         if (isReadOnlySession(session, user?.id)) {
           // Admins viewing another user's session never join its live room.
           console.log('📊 Viewing completed session:', viewSessionId)
-          void markCoachHomeResultSeen('elevate', viewSessionId).catch((error) =>
+          if (!workspace || session.userId === user?.id) void markCoachHomeResultSeen('elevate', viewSessionId).catch((error) =>
             console.warn('mark Coach Home Elevate result seen', error),
           )
           setIsCompletedSessionView(true)
@@ -896,6 +902,7 @@ export function Elevate() {
     resetMetrics,
     searchParams,
     user?.id,
+    workspace,
   ])
 
   // Initialize conversation when session ID is available
@@ -1219,7 +1226,7 @@ export function Elevate() {
                 <Card key={s.id} className={`transition-all hover:shadow-md ${isSelected ? 'ring-2 ring-primary' : ''}`}>
                   <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center py-4">
                     <div className="flex items-start gap-3 sm:gap-4 min-w-0 flex-1">
-                      <button
+                      {(!workspace || ownSession) && <button
                         onClick={() =>
                           setSelectedElevate((prev) => {
                             const n = new Set(prev)
@@ -1235,7 +1242,7 @@ export function Elevate() {
                         ) : (
                           <Square className="h-5 w-5 text-muted-foreground" />
                         )}
-                      </button>
+                      </button>}
 
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -1297,14 +1304,14 @@ export function Elevate() {
                           <Bug className="h-4 w-4" />
                         </Button>
                       </Link>
-                      <Button
+                      {(!workspace || ownSession) && <Button
                         size="icon"
                         variant="ghost"
                         className="h-8 w-8 text-muted-foreground hover:text-destructive"
                         onClick={() => handleDeleteElevateSession(s.id)}
                       >
                         <Trash2 className="h-4 w-4" />
-                      </Button>
+                      </Button>}
                     </div>
                   </CardContent>
                 </Card>
@@ -1401,6 +1408,7 @@ export function Elevate() {
         </button>
       )}
 
+      {reviewingOther && <p className="mb-3 rounded-md border bg-muted p-3 text-sm">Reviewing a tenant learner’s session. Results are read-only.</p>}
       <Card>
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
@@ -1415,7 +1423,7 @@ export function Elevate() {
                       ? `Elevate — Practice: ${getFocusAreaLabel(focusArea)}`
                       : 'Elevate — Practice'}
             </CardTitle>
-            {viewSessionId && isCompletedSessionView && viewFocusArea !== 'snapshot' && !prepareLaunch && (
+            {viewSessionId && !reviewingOther && isCompletedSessionView && viewFocusArea !== 'snapshot' && !prepareLaunch && (
               pulseBusy ? (
                 <Button variant="outline" size="sm" disabled>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Updating...

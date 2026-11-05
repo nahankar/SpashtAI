@@ -1,3 +1,4 @@
+import { UserDropdown } from '@/components/layout/UserDropdown'
 import { useAuth } from '@/hooks/useAuth'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, Navigate, NavLink, Outlet, Route, Routes, useLocation } from 'react-router-dom'
@@ -114,7 +115,6 @@ const ADMIN_ICONS = {
 
 export function ShellLayout({ children }: { children: ReactNode }) {
   const { slug, snapshot } = useWorkspaceShell()
-  const { logout } = useAuth()
   const { workspace, membership } = snapshot
   const nav = workspaceNav(membership.role, snapshot.features)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -143,7 +143,7 @@ export function ShellLayout({ children }: { children: ReactNode }) {
           {nav.admin.length > 0 && <NavLink to={`${base}/admin`} className={link} onClick={() => setMenuOpen(false)}><span className="inline-flex items-center gap-1"><ShieldCheck className="h-3.5 w-3.5" />Admin</span></NavLink>}
           <div className="mt-2 flex items-center gap-1 border-t pt-2 xl:ml-2 xl:mt-0 xl:border-l xl:border-t-0 xl:pl-3 xl:pt-0">
             <Button asChild variant="ghost" size="sm"><Link to="/workspaces" onClick={() => setMenuOpen(false)}><ArrowLeftRight className="mr-1.5 h-4 w-4" />Switch</Link></Button>
-            <Button variant="ghost" size="sm" onClick={logout}>Sign out</Button>
+            <UserDropdown className="ml-auto xl:ml-0" />
           </div>
         </nav>
       </div>

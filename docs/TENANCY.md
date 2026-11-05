@@ -133,3 +133,20 @@ Preparation, coach, feedback, Pulse, usage and saved analytics history are delet
 Other tenants, preserved Personal history, the shared email identity, billing/consent and audit
 records remain intact. The email remains organization-only after removal. A new invitation is
 required to regain tenant access.
+
+### Elevate review for tenant managers
+
+The tenant Elevate list shows all non-discarded standalone communication sessions to current
+Owners and Admins, including learner names. Learners see their own sessions. `?scope=mine`
+keeps manager pickers scoped to their own activity. Review applies only in the current tenant
+and requires Elevate to be available to the current member. Personal and other-tenant activity,
+Prepare-owned practice and interview runs do not gain review access.
+
+A dedicated `session_review` request context is bound only to an explicit allowlist of read routes
+and the session-bound playback-ticket endpoint. Database SELECT policies recheck current tenant
+role and membership. Results, transcript, metrics and playback can be read; another learner’s
+session cannot be resumed, deleted, modified or tracked/untracked in Pulse. Inherited child
+visibility does not grant INSERT/UPDATE/DELETE. Existing aggregate-only report contexts retain
+their raw-content restriction. Role demotion, suspension and removal apply on the next request.
+The shared account menu in the tenant header shows the signed-in name and Light/Dark/System
+appearance controls, using the same stored theme preference as the main site.
