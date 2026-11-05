@@ -435,6 +435,7 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
         avatar: true,
         role: true,
         emailVerified: true,
+        tenantOnly: true,
         lastLoginAt: true,
         createdAt: true,
         rewardPoints: true,

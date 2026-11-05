@@ -96,7 +96,7 @@ function MemberRow({ member, actor, features, busy, change }: {
         : <AlertDialog>
           <AlertDialogTrigger asChild><Button variant="outline" size="sm" disabled={busy || !editable}>Suspend</Button></AlertDialogTrigger>
           <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Suspend {member.name || member.email}?</AlertDialogTitle>
-            <AlertDialogDescription>{`They lose access to this workspace immediately, including any practice in progress. Their Personal account and history are not affected.`}</AlertDialogDescription></AlertDialogHeader>
+            <AlertDialogDescription>{`They lose access to this workspace immediately, including any practice in progress. Their previous Personal history stays preserved, and this email remains organization-only.`}</AlertDialogDescription></AlertDialogHeader>
             <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => change(path, 'PATCH', { state: 'SUSPENDED' }, `${member.email} was suspended.`)}>Suspend</AlertDialogAction></AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>)}

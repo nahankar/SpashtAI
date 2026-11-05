@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
+import { accountDestination } from '@/lib/account-access'
 import { safeAppPath } from '@/lib/safe-next-path'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -47,14 +48,14 @@ export function Register() {
       navigate(next ? `/auth/complete-profile?next=${encodeURIComponent(next)}` : '/auth/complete-profile')
       return
     }
-    navigate(next || '/')
+    navigate(accountDestination(user || {}, next))
   }
 
   async function handleEmailCode(challengeId: string, code: string) {
     const user = await loginWithEmailCode(challengeId, code, { phone, dateOfBirth, gender, pincode })
     navigate(user.needsProfileCompletion
       ? (next ? `/auth/complete-profile?next=${encodeURIComponent(next)}` : '/auth/complete-profile')
-      : next || '/')
+      : accountDestination(user, next))
   }
 
   return (

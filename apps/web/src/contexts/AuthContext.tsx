@@ -10,6 +10,7 @@ export interface AuthUser {
   avatar: string | null
   role: 'USER' | 'ADMIN' | 'SUPER_ADMIN'
   emailVerified: boolean
+  tenantOnly?: boolean
   lastLoginAt: string | null
   createdAt: string
   rewardPoints?: number
@@ -96,6 +97,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } else {
       setLoading(false)
     }
+  }, [fetchCurrentUser])
+
+  // An invitation accepted in another tab must update navigation when this tab returns.
+  useEffect(() => {
+    const refresh = () => { if (localStorage.getItem(TOKEN_KEY)) void fetchCurrentUser() }
+    window.addEventListener('focus', refresh)
+    return () => window.removeEventListener('focus', refresh)
   }, [fetchCurrentUser])
 
   const login = useCallback(async (email: string, password: string): Promise<AuthUser> => {

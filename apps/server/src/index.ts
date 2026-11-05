@@ -1,4 +1,5 @@
 import 'dotenv/config'
+import { enforceTenantOnlyAccess } from './middleware/tenantOnly'
 import { assertSafeWorkspaceStartup } from './workspaces/databaseSafety'
 import { workspaceRouter, platformWorkspacesRouter } from './workspaces/routes'
 import { bindWorkspaceRequest, reenterDataScope, requireWorkspaceProduct } from './workspaces/requestScope'
@@ -147,6 +148,7 @@ app.use('/api/', apiLimiter)
 // Organization requests and agent callbacks bind a verified workspace scope before
 // any product middleware queries the database.
 app.use(bindWorkspaceRequest)
+app.use(enforceTenantOnlyAccess)
 app.use(discardedSessionGuard)
 
 // Liveness: process is up. Cheap, dependency-free (kept as-is for uptime pings).
@@ -344,7 +346,7 @@ app.get('/audio/local/:date/:sessionId/:filename', async (req, res) => {
   const { date, sessionId, filename } = req.params
   // Unauthenticated legacy path: serve only Personal activity. Organization
   // sessions are invisible here and their media is never served by path.
-  if (req.dataScope || !(await prisma.session.count({ where: { id: sessionId } }))) {
+  if (req.dataScope || !(await prisma.session.count({ where: { id: sessionId, workspaceKind: 'PERSONAL', user: { tenantOnly: false } } }))) {
     return res.status(404).json({ error: 'Audio file not found' })
   }
   const filePath = path.join(date, sessionId, filename)

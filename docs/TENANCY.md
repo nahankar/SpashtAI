@@ -5,14 +5,18 @@ Base: `8e438a3`. No production changes or real invitations are part of this work
 
 ## Agreed product contract
 
-- One verified login identity may have one private Personal workspace and multiple organization memberships.
+- Before accepting organization enrollment, an identity can use Personal. Accepted organization enrollment
+  permanently makes that email tenant-only, with access to its organization memberships. Personal requires
+  a different email. Existing Personal records and workspace rows are retained but unavailable to that identity.
 - Existing root product routes remain Personal. `/w/:slug` selects an organization, never grants access.
-- Root login goes to Personal; a workspace entry retains its relative path through Google login/onboarding.
+- Tenant-only login goes to workspace selection; an organization entry retains its relative path through
+  Google or email-code login/onboarding. Personal destinations are rejected for tenant-only identities.
 - Platform administrators provision organizations. Workspace Owner/Admin privileges never change `User.role`.
 - Organization features are constrained by platform availability, tenant entitlement, tenant configuration,
   member permissions and limits. Platform disable and membership suspension always win.
 - Personal activity is never moved or exposed when an organization membership is created or accepted.
-- A suspended/deleted organization membership does not remove the global identity or Personal history.
+- A suspended/deleted organization membership does not remove the identity or retained Personal history,
+  and does not restore Personal access. Pending invitations alone do not convert the identity.
 - Workspace sessions are tab-local; no shared browser "current tenant" variable.
 
 ## Delivery boundaries
@@ -83,3 +87,31 @@ organization sessions exist. Turning off the flag is not a substitute for a rest
 See [Session contract](TENANCY-SESSION-CONTRACT.md), [complete model inventory](TENANCY-DATA-INVENTORY.md)
 and [status](TENANCY-STATUS.md). Voice dispatch, storage upload/remote playback, workers, remaining product
 roots, analytics, recovery/cache scoping and invitation integration still require implementation.
+
+## Tenant-only account rollout (5 November 2026)
+
+`20261105130000_tenant_only_accounts` adds `User.tenantOnly`, backfills accepted organization members
+(including suspended accepted memberships and retained accepted invitations), and installs a membership
+acceptance trigger. Conversion rolls back with enrollment; it never moves, deletes, or grants tenant admins
+access to Personal history. Both public invitation acceptance and direct membership acceptance use this rule.
+
+Deploy the migration and regenerate Prisma before releasing the API/web. Existing accepted tenant members
+will lose Personal access when the new API is released; preserve the normal database backup before rollout.
+The restriction survives membership suspension/removal and is not reset by Google, emailed codes, password
+login or public signup. No application endpoint grants Personal access again.
+
+The API guard reads current account state, including for old identity tokens and media query tokens.
+Personal workspace entry and existing Personal workspace tokens are also rejected. Existing Personal
+WebSocket subscriptions recheck on every event. Tenant workspace product scope and row isolation remain
+required. Account/profile/sign-out, workspace control, public reference data and separately authorized
+platform administration remain available. Legacy local Personal audio paths exclude converted owners.
+UI entry, navigation, signup and login redirects use the same policy; Switch lists organization workspaces.
+No Personal workspace is created by the chooser for tenant-only identities. Retained Personal reward points
+are omitted from authentication responses.
+
+Validation: 37 targeted account/navigation/email tests and 41 existing workspace/invitation/Elevate
+API-authorization regression tests passed against the isolated PostgreSQL instance on port 55445.
+For the latter, temporary test copies changed only 55443 to 55445 and were removed afterwards.
+Production builds, frontend type checks and tenant-only mobile browser checks passed. Browser checks used
+simulated API responses; database tests exercised actual restricted-role queries and retained history.
+No production deployment, live email delivery or spoken voice-conversation run is claimed by these checks.

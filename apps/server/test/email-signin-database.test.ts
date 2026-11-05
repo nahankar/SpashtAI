@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import express from 'express'
 import request from 'supertest'
 import { randomUUID } from 'crypto'
+import { readFile } from 'node:fs/promises'
 import { PrismaClient } from '@prisma/client'
 import { prepareWorkspaceTestRole } from './workspace-test-role'
 
@@ -12,7 +13,8 @@ const config = vi.hoisted(() => {
 })
 vi.mock('../src/lib/prisma', async () => {
   const { PrismaClient } = await import('@prisma/client')
-  return { prisma: new PrismaClient({ datasourceUrl: config.url?.replace('postgres@', 'tenancy_test_app@') }) }
+  const { createScopedPrisma } = await import('../src/lib/scopedPrisma')
+  return { prisma: createScopedPrisma(new PrismaClient({ datasourceUrl: config.url?.replace('postgres@', 'tenancy_test_app@') })) }
 })
 vi.mock('../src/lib/email', () => ({
   sendEmail: vi.fn(async (mail) => { config.mails.push(mail); return { sent: config.sent } }),
@@ -31,12 +33,25 @@ vi.mock('../src/lib/google-auth', () => ({
   verifyGoogleIdToken: async (credential: string) => ({ email: credential, googleId: `google-${credential}`, emailVerified: true, firstName: null, lastName: null, avatar: null }),
 }))
 import { prisma } from '../src/lib/prisma'
+import { enforceTenantOnlyAccess } from '../src/middleware/tenantOnly'
+import { bindWorkspaceRequest } from '../src/workspaces/requestScope'
+import { listMyWorkspaces, acceptWorkspaceMembership, enterWorkspace } from '../src/workspaces/service'
+import { withWorkspaceAccess } from '../src/workspaces/context'
+import { signToken, signWorkspaceToken } from '../src/lib/jwt'
+import { SessionSubscriptions, canSubscribeToPersonalSession } from '../src/lib/sessionSubscriptions'
+import { WebSocket } from 'ws'
 import authRouter from '../src/routes/auth'
 import invitationRouter from '../src/routes/invitations'
 import { hashInvitationToken } from '../src/lib/invitations'
 import { consumeEmailSignInCode, normalizeSignInEmail, requestEmailSignInCode } from '../src/lib/emailSignIn'
 
-const app = express(); app.use(express.json()); app.use('/api/auth', authRouter); app.use('/api/invitations', invitationRouter)
+const app = express(); app.use(express.json()); app.use(bindWorkspaceRequest, enforceTenantOnlyAccess); app.use('/api/auth', authRouter); app.use('/api/invitations', invitationRouter)
+app.get('/sessions/:id', async (req, res) => {
+  const session = await prisma.session.findUnique({ where: { id: req.params.id }, select: { id: true } })
+  res.status(session ? 200 : 404).json({ session })
+})
+app.get('/api/replay', (_req, res) => res.json({ productReached: true }))
+app.post('/livekit/dispatch', (_req, res) => res.json({ productReached: true }))
 const admin = new PrismaClient({ datasourceUrl: config.url })
 const tag = `emailcode_${randomUUID().replaceAll('-', '')}`
 let sequence = 0
@@ -181,6 +196,9 @@ describe.skipIf(!config.url)('email sign-in and invitation codes (isolated Postg
     expect(accepted.status).toBe(200)
     expect(accepted.body.workspacePath).toBe(`/w/${workspace.slug}`)
     expect(accepted.body.user.role).toBe('USER')
+    expect(accepted.body.user.tenantOnly).toBe(true)
+    expect((await listMyWorkspaces(accepted.body.user.id)).every(workspace => workspace.kind === 'ORGANIZATION')).toBe(true)
+    expect(await admin.workspace.findUnique({ where: { personalOwnerId: accepted.body.user.id } })).toBeNull()
     expect(await admin.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: workspace.id, userId: accepted.body.user.id } } })).toMatchObject({ role: 'OWNER', state: 'ACTIVE', enrollmentResponses: { team: 'Support' } })
   })
 
@@ -201,6 +219,105 @@ describe.skipIf(!config.url)('email sign-in and invitation codes (isolated Postg
     expect(accepted.status).toBe(409); expect(accepted.body.error).toBe('SEAT_LIMIT')
     expect(await prisma.user.findUnique({ where: { email } })).toBeNull()
     expect(await admin.userInvitation.findUnique({ where: { id: row.id } })).toMatchObject({ status: 'PENDING' })
+  })
+
+  it('converts an existing Personal identity on acceptance, preserves history, and rejects old HTTP and socket access', async () => {
+    const email = addr()
+    const user = await admin.user.create({ data: { email, googleId: `google-${email}`, emailVerified: true } })
+    const history = await admin.session.create({ data: { userId: user.id, module: 'elevate', sessionName: 'Retained Personal practice', endedAt: new Date() } })
+    const transcript = await admin.sessionTranscript.create({ data: { sessionId: history.id, conversationData: { messages: [{ role: 'user', content: 'Private retained answer' }] } } })
+    const recording = await admin.sessionRecording.create({ data: { sessionId: history.id, egressId: `${tag}-retained-recording`, filePath: 's3://fixture/private-history.webm' } })
+    const personalWorkspaceId = history.workspaceId
+    const oldToken = signToken({ userId: user.id, email, role: 'USER' })
+    const registry = new SessionSubscriptions(), sentEvents: string[] = []
+    const socket = { readyState: WebSocket.OPEN, send: (event: string) => sentEvents.push(event) }
+    expect(await registry.subscribe(socket, history.id, oldToken)).toBe(true)
+    expect((await request(app).get(`/sessions/${history.id}`).set('Authorization', `Bearer ${oldToken}`)).status).toBe(200)
+    const { token, row } = await invite(email)
+    const workspace = await admin.workspace.create({ data: { kind: 'ORGANIZATION', slug: `${tag}-convert`, name: 'Conversion workspace' } })
+    await admin.workspaceMember.create({ data: { workspaceId: workspace.id, userId: row.invitedById, role: 'OWNER', state: 'ACTIVE', acceptedAt: new Date() } })
+    await admin.userInvitation.delete({ where: { id: row.id } })
+    await admin.userInvitation.create({ data: { email, tokenHash: row.tokenHash, invitedById: row.invitedById, expiresAt: row.expiresAt, workspaceId: workspace.id, proposedRole: 'LEARNER' } })
+    const accepted = await request(app).post('/api/invitations/accept').send({ token, credential: email, ...profile })
+    expect(accepted.status).toBe(200)
+    expect(accepted.body.user).toMatchObject({ id: user.id, tenantOnly: true })
+    expect(await admin.session.findUnique({ where: { id: history.id } })).toEqual(history)
+    expect(await admin.sessionTranscript.findUnique({ where: { sessionId: history.id } })).toEqual(transcript)
+    expect(await admin.sessionRecording.findUnique({ where: { id: recording.id } })).toEqual(recording)
+    expect(await admin.workspace.findUnique({ where: { personalOwnerId: user.id } })).toMatchObject({ id: personalWorkspaceId, kind: 'PERSONAL' })
+    expect((await listMyWorkspaces(user.id)).map(workspace => workspace.kind)).toEqual(['ORGANIZATION'])
+    const personal = await admin.workspace.findUniqueOrThrow({ where: { id: personalWorkspaceId } })
+    await expect(enterWorkspace(user.id, personal.slug)).rejects.toMatchObject({ code: 'TENANT_ONLY_ACCOUNT' })
+    const personalMember = await admin.workspaceMember.findUniqueOrThrow({ where: { workspaceId_userId: { workspaceId: personalWorkspaceId, userId: user.id } } })
+    await expect(withWorkspaceAccess({ tokenUse: 'workspace', workspaceId: personalWorkspaceId, userId: user.id, membershipId: personalMember.id }, async () => 'must not reach')).rejects.toMatchObject({ code: 'TENANT_ONLY_ACCOUNT' })
+    for (const path of [`/sessions/${history.id}`, '/api/replay', `/sessions/${history.id}/recording/stream?access_token=${oldToken}`]) {
+      const result = await request(app).get(path).set('Authorization', `Bearer ${oldToken}`)
+      expect(result.status).toBe(403); expect(result.body.code).toBe('TENANT_ONLY_ACCOUNT')
+    }
+    expect((await request(app).post('/livekit/dispatch').set('Authorization', `Bearer ${oldToken}`)).status).toBe(403)
+    const me = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${oldToken}`)
+    expect(me.status).toBe(200); expect(me.body.user.tenantOnly).toBe(true)
+    expect(await canSubscribeToPersonalSession(oldToken, history.id)).toBe(false)
+    await registry.publish([socket], history.id, { private: 'must not be sent' })
+    expect(sentEvents).toHaveLength(1); expect(sentEvents[0]).toContain('ACCESS_UNAVAILABLE'); expect(sentEvents[0]).not.toContain('must not be sent')
+    // Both sign-in methods retain the restriction and use the same account.
+    const emailed = await requestEmailSignInCode(email)
+    expect((await verify(emailed.challengeId, codeFor(email))).body.user).toMatchObject({ id: user.id, tenantOnly: true })
+    const google = await request(app).post('/api/auth/google').send({ credential: email })
+    expect(google.body.user).toMatchObject({ id: user.id, tenantOnly: true })
+    const member = await admin.workspaceMember.findUniqueOrThrow({ where: { workspaceId_userId: { workspaceId: workspace.id, userId: user.id } } })
+    const scoped = await request(app).get(`/sessions/${history.id}`).set('Authorization', `Bearer ${oldToken}`).set('x-spasht-workspace', signWorkspaceToken({ userId: user.id, workspaceId: workspace.id, membershipId: member.id }))
+    expect(scoped.status).toBe(404) // Organization context cannot reopen the retained Personal row.
+    const orgSession = await admin.session.create({ data: { userId: user.id, workspaceId: workspace.id, workspaceKind: 'ORGANIZATION', module: 'elevate' } })
+    const orgResult = await request(app).get(`/sessions/${orgSession.id}`).set('Authorization', `Bearer ${oldToken}`).set('x-spasht-workspace', signWorkspaceToken({ userId: user.id, workspaceId: workspace.id, membershipId: member.id }))
+    expect(orgResult.status).toBe(200); expect(orgResult.body.session.id).toBe(orgSession.id)
+    await admin.workspaceMember.update({ where: { id: member.id }, data: { state: 'SUSPENDED' } })
+    expect((await listMyWorkspaces(user.id))).toEqual([])
+    expect((await request(app).get('/api/replay').set('Authorization', `Bearer ${oldToken}`)).status).toBe(403)
+    await admin.workspaceMember.delete({ where: { id: member.id } })
+    expect((await admin.user.findUniqueOrThrow({ where: { id: user.id } })).tenantOnly).toBe(true)
+  })
+
+  it('converts direct pending membership acceptance and leaves ordinary Personal accounts unchanged', async () => {
+    const email = addr(), user = await admin.user.create({ data: { email, emailVerified: true } })
+    const workspace = await admin.workspace.create({ data: { kind: 'ORGANIZATION', slug: `${tag}-direct`, name: 'Direct enrollment' } })
+    await admin.workspaceMember.create({ data: { workspaceId: workspace.id, userId: user.id, role: 'OWNER', state: 'INVITED' } })
+    expect((await listMyWorkspaces(user.id)).some(row => row.kind === 'PERSONAL')).toBe(true)
+    expect((await admin.user.findUniqueOrThrow({ where: { id: user.id } })).tenantOnly).toBe(false)
+    await acceptWorkspaceMembership(user.id, workspace.slug)
+    expect((await admin.user.findUniqueOrThrow({ where: { id: user.id } })).tenantOnly).toBe(true)
+    expect((await listMyWorkspaces(user.id)).map(row => row.kind)).toEqual(['ORGANIZATION'])
+    const personal = await admin.user.create({ data: { email: addr(), emailVerified: true } })
+    expect((await listMyWorkspaces(personal.id)).map(row => row.kind)).toEqual(['PERSONAL'])
+    expect((await request(app).post('/api/auth/google').send({ credential: personal.email })).body.user.tenantOnly).toBe(false)
+  })
+
+  it('backfills accepted legacy memberships without converting pending invitations or rewriting history', async () => {
+    const accepted = await admin.user.create({ data: { email: addr(), emailVerified: true } })
+    const pending = await admin.user.create({ data: { email: addr(), emailVerified: true } })
+    const history = await admin.session.create({ data: { userId: accepted.id, module: 'elevate', endedAt: new Date() } })
+    const workspace = await admin.workspace.create({ data: { kind: 'ORGANIZATION', name: 'Legacy organization', slug: `${tag}-legacy` } })
+    await admin.workspaceMember.create({ data: { workspaceId: workspace.id, userId: accepted.id, role: 'LEARNER', state: 'SUSPENDED', acceptedAt: new Date() } })
+    await admin.workspaceMember.create({ data: { workspaceId: workspace.id, userId: pending.id, role: 'LEARNER', state: 'INVITED' } })
+    // Represent the old state before the new column/backfill existed.
+    await admin.user.update({ where: { id: accepted.id }, data: { tenantOnly: false } })
+    const migration = await readFile(new URL('../prisma/migrations/20261105130000_tenant_only_accounts/migration.sql', import.meta.url), 'utf8')
+    const backfill = migration.match(/UPDATE "User"[\s\S]+?;\n/)![0]
+    await admin.$executeRawUnsafe(backfill)
+    expect((await admin.user.findUniqueOrThrow({ where: { id: accepted.id } })).tenantOnly).toBe(true)
+    expect((await admin.user.findUniqueOrThrow({ where: { id: pending.id } })).tenantOnly).toBe(false)
+    expect(await admin.session.findUnique({ where: { id: history.id } })).toEqual(history)
+  })
+
+  it('rolls back the account restriction when enrollment rolls back', async () => {
+    const user = await admin.user.create({ data: { email: addr(), emailVerified: true } })
+    const workspace = await admin.workspace.create({ data: { kind: 'ORGANIZATION', name: 'Rolled back enrollment', slug: `${tag}-rollback` } })
+    await expect(admin.$transaction(async tx => {
+      await tx.workspaceMember.create({ data: { workspaceId: workspace.id, userId: user.id, role: 'LEARNER', state: 'ACTIVE', acceptedAt: new Date() } })
+      throw new Error('audit unavailable')
+    })).rejects.toThrow('audit unavailable')
+    expect((await admin.user.findUniqueOrThrow({ where: { id: user.id } })).tenantOnly).toBe(false)
+    expect((await listMyWorkspaces(user.id)).map(row => row.kind)).toEqual(['PERSONAL'])
   })
 
 })

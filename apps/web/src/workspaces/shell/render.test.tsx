@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import type { Feature, Membership, Snapshot } from '../client'
@@ -6,6 +6,8 @@ import { FeaturesCard } from '../admin/SettingsPage'
 import { DailyActivityView, OverviewView, ProgressPulseView } from '../admin/reports'
 import { WorkspaceShellContext } from './context'
 import { ShellLayout, WorkspaceHome } from './WorkspaceShell'
+
+vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ logout: () => {} }) }))
 
 const workspace = { id: 'ws-1', slug: 'klsvdit', name: 'KLS VDIT', kind: 'ORGANIZATION' as const, state: 'ACTIVE' as const, logoDataUrl: null, accentColor: '#123456', timeZone: 'Asia/Kolkata', isolationStage: 'PRODUCT_PLANE', limits: { maxMembers: 10, dailyEvaluations: 5, concurrentVoice: 2 } }
 const feature = (name: string, change: Partial<Feature> = {}): Feature => ({ feature: name, entitled: true, enabled: true, memberDefault: true, allowed: true, ready: true, ...change })
@@ -35,6 +37,9 @@ describe('workspace pages', () => {
       <ShellLayout><p>page</p></ShellLayout></WorkspaceShellContext.Provider></MemoryRouter>)
     const admin = chrome('/w/klsvdit/admin/settings')
     expect(admin).toContain('aria-label="Workspace"')
+    expect(admin).not.toContain('href="/coach"')
+    expect(admin).toContain('Sign out')
+    expect(admin).toContain('Switch')
     expect(admin).toContain('href="/w/klsvdit/elevate"')
     expect(admin).toContain('href="/w/klsvdit/replay"')
     expect(admin).toContain('href="/w/klsvdit/interviews"')

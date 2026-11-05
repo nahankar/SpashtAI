@@ -132,6 +132,7 @@ export function toAuthUser(user: {
   avatar: string | null
   role: string
   emailVerified?: boolean
+  tenantOnly?: boolean
   lastLoginAt?: Date | null
   createdAt?: Date
   rewardPoints?: number
@@ -160,6 +161,7 @@ export function toAuthUser(user: {
     avatar: user.avatar,
     role: user.role,
     emailVerified: user.emailVerified ?? false,
+    tenantOnly: user.tenantOnly ?? false,
     lastLoginAt: user.lastLoginAt ?? null,
     createdAt: user.createdAt,
     rewardPoints: user.rewardPoints,
@@ -182,7 +184,7 @@ export function toAuthUser(user: {
 /** Hide the points balance unless an admin has turned the points system on. */
 export async function authUserForClient(user: Parameters<typeof toAuthUser>[0]) {
   const presented = toAuthUser(user)
-  if (await areRewardPointsEnabled()) return presented
+  if (!user.tenantOnly && await areRewardPointsEnabled()) return presented
   const { rewardPoints: _rewardPoints, ...withoutPoints } = presented
   return withoutPoints
 }

@@ -33,6 +33,10 @@ export function withPlatformWorkspaceAdmin<T>(actorId: string, work: (tx: Worksp
 export async function establishWorkspace(tx: WorkspaceTx, actorId: string, slug: string) {
   const workspace = await tx.workspace.findUnique({ where: { slug } })
   if (!workspace) throw new WorkspaceError(404, 'WORKSPACE_NOT_FOUND', 'This workspace is not available to your account')
+  if (workspace.kind === 'PERSONAL') {
+    const user = await tx.user.findUnique({ where: { id: actorId }, select: { tenantOnly: true } })
+    if (user?.tenantOnly) throw new WorkspaceError(403, 'TENANT_ONLY_ACCOUNT', 'This email has organization access only. Use a different email for Personal access.')
+  }
   const member = await tx.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: workspace.id, userId: actorId } } })
   if (!member || member.state === 'SUSPENDED') throw new WorkspaceError(404, 'WORKSPACE_NOT_FOUND', 'This workspace is not available to your account')
   if (workspace.state !== 'ACTIVE') throw new WorkspaceError(403, 'WORKSPACE_SUSPENDED', 'This workspace has been suspended')

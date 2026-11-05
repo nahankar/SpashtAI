@@ -11,7 +11,7 @@ import {
 import { memberFeatureDecisions } from './productAccess'
 import { establishWorkspace, requireWorkspaceManager, withPlatformWorkspaceAdmin, withWorkspaceActor, type WorkspaceTx } from './context'
 
-export const WORKSPACE_PRIVACY_NOTICE = 'Organization activity stays in this workspace. Your Personal history remains separate and private.'
+export const WORKSPACE_PRIVACY_NOTICE = 'This email is for organization access only after you join. Any previous Personal history is preserved and unavailable here. Use a different email for Personal access.'
 
 export function presentWorkspace(workspace: Workspace) {
   return { id: workspace.id, slug: workspace.kind === 'PERSONAL' ? 'personal' : workspace.slug,
@@ -38,8 +38,9 @@ async function ensurePersonal(tx: WorkspaceTx, userId: string) {
 
 export function listMyWorkspaces(userId: string) {
   return withWorkspaceActor(userId, async tx => {
-    await ensurePersonal(tx, userId)
-    const rows = await tx.workspaceMember.findMany({ where: { userId, state: { not: 'SUSPENDED' } },
+    const user = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { tenantOnly: true } })
+    if (!user.tenantOnly) await ensurePersonal(tx, userId)
+    const rows = await tx.workspaceMember.findMany({ where: { userId, state: { not: 'SUSPENDED' }, ...(user.tenantOnly ? { workspace: { kind: 'ORGANIZATION' as const } } : {}) },
       include: { workspace: true }, orderBy: { createdAt: 'asc' } })
     return rows.sort((a, b) => Number(b.workspace.kind === 'PERSONAL') - Number(a.workspace.kind === 'PERSONAL')).map(member => ({ ...presentWorkspace(member.workspace), membership: { id: member.id, role: member.role, state: member.state },
       path: member.workspace.kind === 'PERSONAL' ? '/coach' : `/w/${member.workspace.slug}` }))

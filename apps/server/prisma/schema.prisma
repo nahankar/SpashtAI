@@ -120,6 +120,8 @@ model User {
 
   // Authorization
   role UserRole @default(USER)
+  // Permanent after accepted organization enrollment; Personal history is retained.
+  tenantOnly Boolean @default(false)
 
   // Activity
   lastLoginAt  DateTime?

@@ -10,7 +10,7 @@ export function OwnerAccessPanel({ name, slug, owners, disabled, onSend }: { nam
   const origin = typeof window === 'undefined' ? 'https://spasht.ai' : window.location.origin
   const url = `${origin}/w/${encodeURIComponent(slug)}`
   function instructions(owner: WorkspaceOwner) {
-    return `Your ${name} workspace\nLogin email: ${owner.email}\nWorkspace: ${url}\nSign in with the Google Account for this email. There is no separate workspace password. If shown, select Accept invitation. As Owner you can invite learners and workspace administrators and manage this workspace. Personal history stays separate. Workspace analytics are available to Owners and Admins; practice products appear as they become available for your organization.`
+    return `Your ${name} workspace\nLogin email: ${owner.email}\nWorkspace: ${url}\nSign in with an emailed code or Google using this email. There is no separate workspace password. If shown, select Accept invitation. As Owner you can invite learners and workspace administrators and manage this workspace. After acceptance, this email has organization access only; previous Personal history is preserved but unavailable. Workspace analytics are available to Owners and Admins; practice products appear as they become available for your organization.`
   }
   async function send() {
     if (!confirm) return

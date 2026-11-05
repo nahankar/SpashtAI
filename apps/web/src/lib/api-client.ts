@@ -1,3 +1,4 @@
+import { tenantAccountPath } from './account-access'
 /**
  * Product and identity HTTP helpers.
  *
@@ -157,6 +158,9 @@ export async function apiClient<T = unknown>(
       message?: string
       error?: string
       code?: string
+    }
+    if (body.code === 'TENANT_ONLY_ACCOUNT' && !tenantAccountPath(window.location.pathname)) {
+      window.location.href = '/workspaces'
     }
     throw new ApiError(body.message || body.error || `Request failed: ${response.status}`, response.status, body.code)
   }

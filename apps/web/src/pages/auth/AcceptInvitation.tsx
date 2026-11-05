@@ -116,7 +116,7 @@ export function AcceptInvitation() {
           {loadError && <p className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{loadError}</p>}
           {!lookup && !loadError && <div className="flex justify-center py-4"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>}
 
-          {lookup?.workspaceInvitation && <p className="text-sm">This invitation grants {lookup.proposedRole?.toLowerCase()} access to an organization workspace. Your Personal history stays separate.</p>}
+          {lookup?.workspaceInvitation && <p className="text-sm">This invitation grants {lookup.proposedRole?.toLowerCase()} access to an organization workspace. Accepting makes this email organization-only. Any previous Personal history is preserved but unavailable. Use a different email for Personal access.</p>}
           {closed && (
             <p className="rounded-md bg-muted p-3 text-sm">
               {lookup.status === 'revoked'

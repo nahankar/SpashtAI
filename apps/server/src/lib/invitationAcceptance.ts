@@ -79,7 +79,7 @@ export async function acceptInvitation(
         if (!account.ok) return account
         if (account.user.id !== inv.acceptedUserId) throw new Abort(fail(409, { error: 'invitation_used', message: 'This invitation has already been used.' }))
         if (workspace) await acceptInvitedMembership(tx, inv, account.user.id, workspace.maxMembers, true)
-        return { ok: true, user: account.user, newAccount: false, alreadyAccepted: true, signupsPausedBypass: false, workspacePath }
+        return { ok: true, user: workspace ? await tx.user.findUniqueOrThrow({ where: { id: account.user.id } }) : account.user, newAccount: false, alreadyAccepted: true, signupsPausedBypass: false, workspacePath }
       }
 
       const responses = workspace ? validateEnrollmentResponses(inv.enrollmentFields, req.body?.enrollmentResponses) : {}
@@ -100,7 +100,7 @@ export async function acceptInvitation(
       if (!workspace) await writeAcceptanceAudit(tx, {
         invitationId: inv.id, invitedById: inv.invitedById, userId: account.user.id, newAccount: account.created, signupsPausedBypass: bypassed, req,
       })
-      return { ok: true, user: account.user, newAccount: account.created, alreadyAccepted: false, signupsPausedBypass: bypassed, workspacePath }
+      return { ok: true, user: workspace ? await tx.user.findUniqueOrThrow({ where: { id: account.user.id } }) : account.user, newAccount: account.created, alreadyAccepted: false, signupsPausedBypass: bypassed, workspacePath }
     })
   } catch (err) {
     if (err instanceof Abort) return err.result

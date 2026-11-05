@@ -300,6 +300,19 @@ function Navbar() {
   const navLinkClass = 'block py-2 text-sm hover:text-foreground text-muted-foreground'
   const coachActive = location.pathname === '/coach'
 
+  if (user?.tenantOnly) return (
+    <header ref={headerRef} className="sticky top-0 z-40 border-b bg-card">
+      <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
+        <Link to="/workspaces"><LogoWithBeta /></Link>
+        <nav className="flex items-center gap-3 text-sm">
+          <Link to="/workspaces">Workspaces</Link>
+          {isAdmin && <Link to="/admin">Admin</Link>}
+          <UserDropdown />
+        </nav>
+      </div>
+    </header>
+  )
+
   return (
     <header
       ref={headerRef}
@@ -438,7 +451,7 @@ function HomeRoute() {
       />
     )
   }
-  return <Navigate to="/coach" replace />
+  return <Navigate to={user.tenantOnly ? "/workspaces" : "/coach"} replace />
 }
 
 function ElevateRoute() {

@@ -1,6 +1,7 @@
+import { useAuth } from '@/hooks/useAuth'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, Navigate, NavLink, Outlet, Route, Routes, useLocation } from 'react-router-dom'
-import { Activity, ArrowLeftRight, BarChart3, BrainCircuit, LayoutDashboard, Loader2, MailPlus, MessageSquareText, Settings2, ShieldCheck, User, Users } from 'lucide-react'
+import { Activity, ArrowLeftRight, BarChart3, BrainCircuit, LayoutDashboard, Loader2, MailPlus, MessageSquareText, Settings2, ShieldCheck, Users } from 'lucide-react'
 import { AdminSideNav } from '@/components/admin/AdminSideNav'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -29,6 +30,7 @@ import { ADMIN_NAV_GROUPS, allowedFeatures, isManager, unavailableReason, worksp
 import { createWorkspaceSession, type WorkspaceSessionState } from './session'
 
 export function WorkspaceShell({ slug }: { slug: string }) {
+  const { fetchCurrentUser, logout } = useAuth()
   const [state, setState] = useState<WorkspaceSessionState>({ status: 'loading' })
   const [accepting, setAccepting] = useState(false)
   const [session] = useState(() => createWorkspaceSession(slug, { request: workspaceRequest, identity: identityToken, onState: setState }))
@@ -42,7 +44,7 @@ export function WorkspaceShell({ slug }: { slug: string }) {
 
   async function accept() {
     setAccepting(true)
-    try { await session.accept() } finally { setAccepting(false) }
+    try { await session.accept(); await fetchCurrentUser() } finally { setAccepting(false) }
   }
   const enter = session.reload
 
@@ -53,11 +55,11 @@ export function WorkspaceShell({ slug }: { slug: string }) {
   if (state.status === 'loading') return <Centered><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-label="Opening workspace" /></Centered>
   if (state.status === 'ended') return <Centered><Card className="max-w-md"><CardHeader><CardTitle>Workspace unavailable</CardTitle><CardDescription>{state.message}</CardDescription></CardHeader>
     <CardContent className="flex gap-2">{state.signIn ? <Button asChild><a href={`/auth/login?next=${encodeURIComponent(`/w/${slug}`)}`}>Sign in</a></Button> : <Button asChild variant="outline"><Link to="/workspaces">Your workspaces</Link></Button>}
-      <Button asChild variant="ghost"><Link to="/coach">Personal</Link></Button></CardContent></Card></Centered>
+      <Button variant="ghost" onClick={logout}>Sign out</Button></CardContent></Card></Centered>
   if (state.status === 'invited') return <Centered><Card className="max-w-lg"><CardHeader>
     {state.entry.workspace.logoDataUrl && <img src={state.entry.workspace.logoDataUrl} alt={`${state.entry.workspace.name} logo`} className="mb-2 h-12 w-12 object-contain" />}
     <CardTitle>Join {state.entry.workspace.name}</CardTitle>
-    <CardDescription>{`You were invited as ${state.entry.membership.role.toLowerCase()}. Your Personal history stays private and separate from this workspace.`}</CardDescription></CardHeader>
+    <CardDescription>{`You were invited as ${state.entry.membership.role.toLowerCase()}. Accepting makes this email organization-only. Any previous Personal history is preserved but unavailable. Use a different email for Personal access.`}</CardDescription></CardHeader>
     <CardContent className="space-y-3"><p className="text-sm text-muted-foreground">{state.entry.notice}</p>
       <div className="flex gap-2"><Button disabled={accepting} onClick={accept}>{accepting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Accept invitation</Button><Button asChild variant="ghost"><Link to="/workspaces">Not now</Link></Button></div>
     </CardContent></Card></Centered>
@@ -112,6 +114,7 @@ const ADMIN_ICONS = {
 
 export function ShellLayout({ children }: { children: ReactNode }) {
   const { slug, snapshot } = useWorkspaceShell()
+  const { logout } = useAuth()
   const { workspace, membership } = snapshot
   const nav = workspaceNav(membership.role, snapshot.features)
   const location = useLocation()
@@ -130,7 +133,7 @@ export function ShellLayout({ children }: { children: ReactNode }) {
         <Badge variant="secondary">{membership.role.charAt(0) + membership.role.slice(1).toLowerCase()}</Badge>
         <div className="ml-auto flex items-center gap-1">
           <Button asChild variant="ghost" size="sm"><Link to="/workspaces"><ArrowLeftRight className="mr-1.5 h-4 w-4" />Switch</Link></Button>
-          <Button asChild variant="ghost" size="sm"><Link to="/coach"><User className="mr-1.5 h-4 w-4" />Personal</Link></Button>
+          <Button variant="ghost" size="sm" onClick={logout}>Sign out</Button>
         </div>
       </div>
       <nav aria-label="Workspace" className={cn('flex items-center gap-1 overflow-x-auto px-4 pb-2 sm:px-6', adminSection ? '' : 'mx-auto max-w-6xl')}>

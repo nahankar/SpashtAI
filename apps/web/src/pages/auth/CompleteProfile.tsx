@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
+import { accountDestination } from '@/lib/account-access'
 import { safeAppPath } from '@/lib/safe-next-path'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -24,7 +25,7 @@ export function CompleteProfile() {
 
   useEffect(() => {
     if (user && !user.needsProfileCompletion) {
-      navigate(next || '/', { replace: true })
+      navigate(accountDestination(user, next), { replace: true })
     }
   }, [next, user, navigate])
 
@@ -45,7 +46,7 @@ export function CompleteProfile() {
       })
       if (data.user) updateUser(data.user)
       else await fetchCurrentUser()
-      navigate(next || '/')
+      navigate(accountDestination(user || {}, next))
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to save profile')
     } finally {

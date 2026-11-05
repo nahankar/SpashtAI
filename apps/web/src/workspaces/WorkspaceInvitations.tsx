@@ -49,7 +49,7 @@ export function WorkspaceInvitations({ role, features, emailContent, workspaceNa
   }
   return <div className="space-y-5" aria-label="Workspace invitations">
     <div><h1 className="text-2xl font-bold tracking-tight">Invitations</h1>
-      <p className="mt-1 text-sm text-muted-foreground">Invite someone with their Google Account email. Their Personal history stays separate.</p></div>
+      <p className="mt-1 text-sm text-muted-foreground">Invite someone with their email address. After acceptance, this email has organization access only; previous Personal history is preserved but unavailable.</p></div>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}{notice && <p role="status" className="text-sm text-emerald-700">{notice}</p>}
     {rows && <div className="grid grid-cols-2 gap-3 sm:grid-cols-4" aria-label="Invitation overview">{STATUSES.map(s => <Card key={s}><CardHeader className="p-4"><CardDescription className="capitalize">{s}</CardDescription><CardTitle className="text-2xl tabular-nums">{rows.counts[s] ?? 0}</CardTitle></CardHeader></Card>)}</div>}
     <Card><CardHeader><CardTitle className="text-base">Invite one person</CardTitle></CardHeader><CardContent>

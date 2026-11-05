@@ -13,7 +13,7 @@ export async function canSubscribeToPersonalSession(token: string, sessionId: st
   try {
     const identity = verifyToken(token)
     if (typeof identity.userId !== 'string' || !identity.userId) return false
-    return Boolean(await db.session.findFirst({ where: { id: sessionId, userId: identity.userId, workspaceKind: 'PERSONAL', discardedAt: null }, select: { id: true } }))
+    return Boolean(await db.session.findFirst({ where: { id: sessionId, userId: identity.userId, workspaceKind: 'PERSONAL', discardedAt: null, user: { tenantOnly: false } }, select: { id: true } }))
   } catch { return false }
 }
 

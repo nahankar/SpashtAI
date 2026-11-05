@@ -404,7 +404,13 @@
             "type": "string"
           },
           "user": {
-            "type": "object"
+            "type": "object",
+            "properties": {
+              "tenantOnly": {
+                "type": "boolean",
+                "description": "Organization-only identity: reject Personal destinations and open /workspaces unless an organization next path is provided."
+              }
+            }
           }
         }
       }
@@ -412,15 +418,22 @@
   },
   "x-validation": {
     "checks": [
-      "Production web and server builds passed.",
-      "Frontend TypeScript check passed.",
-      "31 relevant tests passed, including 13 isolated PostgreSQL email-code tests with a restricted runtime role.",
-      "Mobile browser checks passed for login, signup, invitation, wrong-code retry and cooldown; API responses were simulated."
+      "Production builds and frontend TypeScript check passed.",
+      "37 targeted account/navigation/email tests passed, including 17 isolated PostgreSQL email-code and tenant-policy tests.",
+      "41 existing workspace/invitation/Elevate API authorization tests passed with test-only port redirection to the isolated database.",
+      "Tenant-only mobile browser checks passed with simulated API responses."
     ],
     "limits": [
       "Live SMTP delivery and production deployment are not verified.",
       "Existing AuthContext isGenuineIdentityRejection export triggers react-refresh/only-export-components lint; unchanged by this feature.",
-      "Installed Postman CLI 1.74.0 does not provide postman status; no Postman workspace changes were made."
+      "Installed Postman CLI 1.74.0 does not provide postman status; no Postman workspace changes were made.",
+      "Spoken voice-conversation validation was not run for the access-policy change."
     ]
+  },
+  "x-account-policy": {
+    "enrollment": "Accepted organization membership permanently converts the email to tenant-only access, including accounts with previous Personal history. Pending invitations and platform invitations alone do not convert.",
+    "history": "Previous Personal records remain stored and unavailable to this identity. They are not copied into the tenant. A different email is required for Personal access.",
+    "revocation": "Membership suspension/removal does not restore Personal. Old Personal HTTP/media tokens and Personal workspace tokens are rejected; Personal WebSocket grants are rechecked for each event.",
+    "migration": "Apply 20261105130000_tenant_only_accounts after 20261105120000_email_signin_codes before releasing the new API."
   }
 }

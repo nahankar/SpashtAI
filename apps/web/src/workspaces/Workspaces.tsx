@@ -1,3 +1,4 @@
+import { useAuth } from '@/hooks/useAuth'
 import { OwnerAccessPanel, type WorkspaceOwner } from './OwnerAccessPanel'
 import { EnrollmentSettingsEditor } from './EnrollmentForm'
 import { useWorkspacesEnabled } from './useWorkspacesEnabled'
@@ -26,11 +27,14 @@ export function WorkspaceLink() {
   return enabled ? <div className="mx-auto max-w-6xl px-4 py-2 text-right"><Button asChild variant="link" size="sm"><Link to="/workspaces">Workspaces</Link></Button></div> : null
 }
 export function WorkspaceList() {
+  const { user } = useAuth()
   const [rows, setRows] = useState<Array<Workspace & { membership: Membership; path: string }>>([])
   const [error, setError] = useState('')
-  useEffect(() => { let alive = true; request<typeof rows>('/api/workspaces', identityToken()).then(data => { if (alive) setRows(data) }).catch(e => { if (alive) setError(e.message) }); return () => { alive = false } }, [])
+  const [loaded, setLoaded] = useState(false)
+  useEffect(() => { let alive = true; request<typeof rows>('/api/workspaces', identityToken()).then(data => { if (alive) setRows(data) }).catch(e => { if (alive) setError(e.message) }).finally(() => { if (alive) setLoaded(true) }); return () => { alive = false } }, [])
   return <main className="mx-auto max-w-4xl space-y-5 p-6"><div><h1 className="text-3xl font-bold">Your workspaces</h1>
-    <p className="mt-1 text-muted-foreground">Choose where to work. Your Personal history stays in Personal.</p></div><ErrorNotice error={error} />
+    <p className="mt-1 text-muted-foreground">{user?.tenantOnly ? 'This email has organization access only. Use a different email for Personal access.' : 'Choose where to work. Accepting organization enrollment makes this email organization-only.'}</p></div><ErrorNotice error={error} />
+    {loaded && !error && rows.length === 0 && <p className="rounded-md border p-4 text-sm text-muted-foreground">No organization workspaces are available for this account. Contact your organization administrator.</p>}
     {rows.map(row => <Card key={row.id}><CardContent className="flex flex-wrap items-center gap-4 pt-6"><WorkspaceLogo workspace={row} />
       <div className="min-w-0 flex-1"><h2 className="break-words font-semibold">{row.name}</h2><p className="text-sm text-muted-foreground">{row.kind === 'PERSONAL' ? 'Personal' : `${row.membership.role.toLowerCase()} · ${row.membership.state.toLowerCase()}`}</p></div>
       {row.state === 'ACTIVE' ? <Button asChild variant={row.membership.state === 'INVITED' ? 'default' : 'outline'}><Link to={row.path}>{row.membership.state === 'INVITED' ? 'Review invitation' : 'Open'}</Link></Button> : <Badge variant="destructive">Suspended</Badge>}

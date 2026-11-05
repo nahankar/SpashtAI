@@ -1,6 +1,7 @@
 import { useState, useEffect, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
+import { accountDestination } from '@/lib/account-access'
 import { safeAppPath } from '@/lib/safe-next-path'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardDescription } from '@/components/ui/card'
@@ -35,14 +36,14 @@ export function Login() {
       navigate(next ? `/auth/complete-profile?next=${encodeURIComponent(next)}` : '/auth/complete-profile')
       return
     }
-    navigate(next || (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN' ? '/admin' : '/'))
+    navigate(accountDestination(user, next, user.role === 'ADMIN' || user.role === 'SUPER_ADMIN' ? '/admin' : '/'))
   }
 
   async function handleEmailCode(challengeId: string, code: string) {
     const user = await loginWithEmailCode(challengeId, code)
     navigate(user.needsProfileCompletion
       ? (next ? `/auth/complete-profile?next=${encodeURIComponent(next)}` : '/auth/complete-profile')
-      : next || (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN' ? '/admin' : '/'))
+      : accountDestination(user, next, user.role === 'ADMIN' || user.role === 'SUPER_ADMIN' ? '/admin' : '/'))
   }
 
   async function handleLocalSignIn(event: FormEvent) {
@@ -55,7 +56,7 @@ export function Login() {
         navigate(next ? `/auth/complete-profile?next=${encodeURIComponent(next)}` : '/auth/complete-profile')
         return
       }
-      navigate(next || (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN' ? '/admin' : '/'))
+      navigate(accountDestination(user, next, user.role === 'ADMIN' || user.role === 'SUPER_ADMIN' ? '/admin' : '/'))
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Invalid credentials')
     } finally {

@@ -32,7 +32,7 @@ export function SignupFieldsPreview({ workspaceName, fields = [] }: { workspaceN
         <Button type="button">Accept invitation</Button>
       </fieldset>
     </div>
-    {workspaceName && <p>After these steps, the recipient opens {workspaceName}. Workspace responses stay with that workspace; Personal history stays separate.</p>}
+    {workspaceName && <p>After these steps, the recipient opens {workspaceName}. Workspace responses stay with that workspace. After acceptance, this email has organization access only. Previous Personal history is preserved but unavailable.</p>}
   </div>
 }
 export function RecipientExperiencePreview({ workspaceName, fields, emailContent, onEmailPreview }: PreviewProps) {

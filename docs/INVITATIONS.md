@@ -18,6 +18,15 @@ invitation email goes to the recipient (or, in development, that it is captured 
   requirements. Production email-code activation and real mailbox delivery remain unverified.
   Magic-link sign-in is not implemented.
 
+## Organization-only email policy
+
+Accepting an organization invitation converts that email to tenant-only access, whether the account is
+new or already has Personal history. Previous Personal sessions, transcripts, recordings and workspace
+rows remain stored, without being moved into the tenant. They are unavailable through the converted
+identity. Personal access requires a different email. Pending invitations alone do not convert an account;
+platform invitations do not apply this organization policy. Suspension/removal never restores Personal.
+See `TENANCY.md` for migration and enforcement details.
+
 ## Policy exception: invitations bypass paused signups
 
 **Yes — a valid invitation bypasses paused public signups.** This is a deliberate, product-approved exception.

@@ -1,5 +1,6 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
+import { tenantAccountPath } from '@/lib/account-access'
 import { safeAppPath } from '@/lib/safe-next-path'
 
 interface ProtectedRouteProps {
@@ -29,6 +30,10 @@ export function ProtectedRoute({ requireAdmin = false, requireProfile = true }: 
         replace
       />
     )
+  }
+
+  if (user.tenantOnly && !tenantAccountPath(location.pathname)) {
+    return <Navigate to="/workspaces" replace />
   }
 
   if (requireProfile && user.needsProfileCompletion) {
