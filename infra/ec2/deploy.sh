@@ -217,6 +217,8 @@ fi
 
 echo "==> Nginx vhosts"
 sudo cp infra/ec2/nginx/cloudflare-real-ip.conf /etc/nginx/snippets/cloudflare-real-ip.conf
+# Query-free access log format used by every vhost (must exist before the vhosts are tested).
+sudo cp infra/ec2/nginx/log-no-query.conf /etc/nginx/conf.d/spasht-log-no-query.conf
 sudo cp infra/ec2/nginx/spasht.ai.conf infra/ec2/nginx/api.spasht.ai.conf /etc/nginx/sites-available/
 sudo ln -sf /etc/nginx/sites-available/spasht.ai.conf /etc/nginx/sites-enabled/spasht.ai.conf
 sudo ln -sf /etc/nginx/sites-available/api.spasht.ai.conf /etc/nginx/sites-enabled/api.spasht.ai.conf
