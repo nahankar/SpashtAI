@@ -1,4 +1,5 @@
 import { prepareWorkspaceTestRole } from './workspace-test-role'
+import { workspaceTestUrls } from './workspace-test-db'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { PrismaClient } from '@prisma/client'
 import express from 'express'
@@ -6,7 +7,8 @@ import request from 'supertest'
 import { randomUUID } from 'node:crypto'
 vi.mock('../src/lib/prisma', async () => {
   const { PrismaClient } = await import('@prisma/client')
-  return { prisma: new PrismaClient({ datasourceUrl: 'postgresql://tenancy_test_app@127.0.0.1:55443/postgres' }) }
+  const { RESTRICTED_TEST_URL } = await import('./workspace-test-db')
+  return { prisma: new PrismaClient({ datasourceUrl: RESTRICTED_TEST_URL }) }
 })
 const delivery = vi.hoisted(() => ({ sendEmail: vi.fn().mockResolvedValue({ sent: true }) }))
 vi.mock('../src/lib/email', () => ({ sendEmail: delivery.sendEmail }))
@@ -17,7 +19,7 @@ vi.mock('../src/lib/google-auth', () => ({ verifyGoogleIdToken: async (credentia
   return { googleId: `google-${data.email}`, email: data.email, emailVerified: data.verified !== false, firstName: 'Test', lastName: 'Learner', avatar: null }
 } }))
 const url = process.env.WORKSPACE_TEST_DATABASE_URL
-if (url && url !== 'postgresql://postgres@127.0.0.1:55443/postgres') throw new Error('Use the isolated tenancy database')
+workspaceTestUrls(url)
 const suite = url ? describe : describe.skip
 suite('workspace email invitation boundaries with a restricted runtime role', () => {
   const admin = new PrismaClient({ datasourceUrl: url || 'postgresql://unused:5432/unused' })
