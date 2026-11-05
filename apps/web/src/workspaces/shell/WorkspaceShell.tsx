@@ -1,7 +1,7 @@
 import { useAuth } from '@/hooks/useAuth'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, Navigate, NavLink, Outlet, Route, Routes, useLocation } from 'react-router-dom'
-import { Activity, ArrowLeftRight, BarChart3, BrainCircuit, LayoutDashboard, Loader2, MailPlus, MessageSquareText, Settings2, ShieldCheck, Users } from 'lucide-react'
+import { Activity, ArrowLeftRight, BarChart3, BrainCircuit, LayoutDashboard, Loader2, MailPlus, Menu, X, MessageSquareText, Settings2, ShieldCheck, Users } from 'lucide-react'
 import { AdminSideNav } from '@/components/admin/AdminSideNav'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -117,6 +117,7 @@ export function ShellLayout({ children }: { children: ReactNode }) {
   const { logout } = useAuth()
   const { workspace, membership } = snapshot
   const nav = workspaceNav(membership.role, snapshot.features)
+  const [menuOpen, setMenuOpen] = useState(false)
   const location = useLocation()
   const base = `/w/${encodeURIComponent(slug)}`
   const adminSection = location.pathname === `${base}/admin` || location.pathname.startsWith(`${base}/admin/`)
@@ -124,23 +125,28 @@ export function ShellLayout({ children }: { children: ReactNode }) {
     isActive ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground')
   return <div className="min-h-screen">
     <header className="border-b bg-card" style={{ borderTop: `4px solid ${workspace.accentColor}` }}>
-      <div className={cn('flex flex-wrap items-center gap-3 px-4 py-3 sm:px-6', adminSection ? '' : 'mx-auto max-w-6xl')}>
-        <Link to={base} className="flex min-w-0 items-center gap-3">
-          {workspace.logoDataUrl ? <img src={workspace.logoDataUrl} alt="" className="h-9 w-9 rounded object-contain" />
-            : <span className="flex h-9 w-9 items-center justify-center rounded text-sm font-bold text-white" style={{ background: workspace.accentColor }}>{workspace.name.slice(0, 1).toUpperCase()}</span>}
-          <span className="truncate text-lg font-semibold">{workspace.name}</span>
-        </Link>
-        <Badge variant="secondary">{membership.role.charAt(0) + membership.role.slice(1).toLowerCase()}</Badge>
-        <div className="ml-auto flex items-center gap-1">
-          <Button asChild variant="ghost" size="sm"><Link to="/workspaces"><ArrowLeftRight className="mr-1.5 h-4 w-4" />Switch</Link></Button>
-          <Button variant="ghost" size="sm" onClick={logout}>Sign out</Button>
+      <div className={cn('flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6 xl:flex-nowrap', adminSection ? '' : 'mx-auto max-w-6xl')}>
+        <div className="flex min-w-0 items-center gap-3">
+          <Link to={base} className="flex min-w-0 items-center gap-3" onClick={() => setMenuOpen(false)}>
+            {workspace.logoDataUrl ? <img src={workspace.logoDataUrl} alt="" className="h-9 w-9 shrink-0 rounded object-contain" />
+              : <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded text-sm font-bold text-white" style={{ background: workspace.accentColor }}>{workspace.name.slice(0, 1).toUpperCase()}</span>}
+            <span className="max-w-[10rem] truncate text-lg font-semibold sm:max-w-[14rem]">{workspace.name}</span>
+          </Link>
+          <Badge variant="secondary" className="shrink-0">{membership.role.charAt(0) + membership.role.slice(1).toLowerCase()}</Badge>
         </div>
+        <Button variant="outline" size="icon" className="shrink-0 xl:hidden" aria-label={menuOpen ? 'Close workspace menu' : 'Open workspace menu'}
+          aria-expanded={menuOpen} aria-controls="workspace-navigation" onClick={() => setMenuOpen(open => !open)}>
+          {menuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+        </Button>
+        <nav id="workspace-navigation" aria-label="Workspace" className={cn('w-full flex-col gap-1 xl:ml-auto xl:w-auto xl:flex-row xl:items-center', menuOpen ? 'flex' : 'hidden', 'xl:flex')}>
+          {nav.learner.map(item => <NavLink key={item.to} to={`${base}/${item.to}`} className={link} onClick={() => setMenuOpen(false)}>{item.label}</NavLink>)}
+          {nav.admin.length > 0 && <NavLink to={`${base}/admin`} className={link} onClick={() => setMenuOpen(false)}><span className="inline-flex items-center gap-1"><ShieldCheck className="h-3.5 w-3.5" />Admin</span></NavLink>}
+          <div className="mt-2 flex items-center gap-1 border-t pt-2 xl:ml-2 xl:mt-0 xl:border-l xl:border-t-0 xl:pl-3 xl:pt-0">
+            <Button asChild variant="ghost" size="sm"><Link to="/workspaces" onClick={() => setMenuOpen(false)}><ArrowLeftRight className="mr-1.5 h-4 w-4" />Switch</Link></Button>
+            <Button variant="ghost" size="sm" onClick={logout}>Sign out</Button>
+          </div>
+        </nav>
       </div>
-      <nav aria-label="Workspace" className={cn('flex items-center gap-1 overflow-x-auto px-4 pb-2 sm:px-6', adminSection ? '' : 'mx-auto max-w-6xl')}>
-        <NavLink end to={base} className={link}>Home</NavLink>
-        {nav.learner.map(item => <NavLink key={item.to} to={`${base}/${item.to}`} className={link}>{item.label}</NavLink>)}
-        {nav.admin.length > 0 && <NavLink to={`${base}/admin`} className={link}><span className="inline-flex items-center gap-1"><ShieldCheck className="h-3.5 w-3.5" />Admin</span></NavLink>}
-      </nav>
     </header>
     {adminSection ? <div className="flex min-h-[calc(100vh-65px)] flex-col md:flex-row">
       <AdminSideNav title="Admin Panel" groups={ADMIN_NAV_GROUPS.map(group => ({
