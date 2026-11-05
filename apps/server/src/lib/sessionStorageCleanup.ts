@@ -137,6 +137,17 @@ export async function stopSessionEgress(
       throw new Error(`Could not stop ${stillActive.length} active Egress job(s) for ${roomName}`)
     }
   }
+  // Egress jobs recorded for this session's own recordings are stopped by id even when their room name cannot be
+  // proven to belong to the session.
+  for (const egressId of [...new Set(recordings.filter(r => isLiveKitEgressId(r.egressId) && !isTerminalRecordingStatus(r.status)).map(r => r.egressId))]) {
+    const active = await client.listEgress({ egressId, active: true })
+    const stopped = await Promise.allSettled(active.map((egress) => client.stopEgress(egress.egressId)))
+    stopped.forEach((result) => { if (result.status === 'fulfilled') collectStoragePaths(result.value, paths) })
+    active.forEach((egress) => collectStoragePaths(egress, paths))
+    if ((await client.listEgress({ egressId, active: true })).length > 0) {
+      throw new Error(`Could not stop the recorded Egress job ${egressId}`)
+    }
+  }
   return { paths, skippedUnavailable: false }
 }
 

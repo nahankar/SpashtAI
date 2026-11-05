@@ -9,6 +9,48 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { signAgentScopeToken, signToken, signWorkspaceToken } from '../src/lib/jwt'
 
+/** In-memory LiveKit: rooms carry the metadata token issuance writes; deletions and Egress stops are recorded. */
+const lk = vi.hoisted(() => ({
+  rooms: new Map<string, { name: string; metadata: string }>(),
+  deleted: [] as string[],
+  egress: [] as Array<{ egressId: string; roomName: string; file: string; active: boolean }>,
+  stoppedEgress: [] as string[],
+}))
+vi.mock('livekit-server-sdk', async (importOriginal) => {
+  const real = await importOriginal<typeof import('livekit-server-sdk')>()
+  return {
+    ...real,
+    RoomServiceClient: class {
+      async listRooms(names?: string[]) { return (names ?? [...lk.rooms.keys()]).flatMap(name => lk.rooms.get(name) ?? []) }
+      async createRoom(options: { name: string; metadata?: string }) {
+        const room = lk.rooms.get(options.name) ?? { name: options.name, metadata: options.metadata ?? '' }
+        lk.rooms.set(options.name, room)
+        return room
+      }
+      async updateRoomMetadata(name: string, metadata: string) { lk.rooms.get(name)!.metadata = metadata; return lk.rooms.get(name) }
+      async deleteRoom(name: string) {
+        if (!lk.rooms.delete(name)) throw Object.assign(new Error('room not found'), { status: 404 })
+        lk.deleted.push(name)
+      }
+    },
+    AgentDispatchClient: class {
+      async listDispatch() { return [] }
+      async createDispatch(room: string) { return { room } }
+    },
+    EgressClient: class {
+      async listEgress(options: { roomName?: string; egressId?: string; active?: boolean }) {
+        return lk.egress.filter(e => (!options.roomName || e.roomName === options.roomName) && (!options.egressId || e.egressId === options.egressId)
+          && (!options.active || e.active)).map(e => ({ egressId: e.egressId, roomName: e.roomName, fileResults: [{ location: e.file }] }))
+      }
+      async stopEgress(egressId: string) {
+        lk.stoppedEgress.push(egressId)
+        const job = lk.egress.find(e => e.egressId === egressId)!; job.active = false
+        return { egressId, fileResults: [{ location: job.file }] }
+      }
+    },
+  }
+})
+
 const url = process.env.WORKSPACE_TEST_DATABASE_URL
 if (url && url !== 'postgresql://postgres@127.0.0.1:55443/postgres') throw new Error('Use only the isolated tenancy container')
 const suite = url ? describe : describe.skip
@@ -24,7 +66,8 @@ function wav(seconds = 1) {
 
 suite('organization Elevate voice path', () => {
   const admin = new PrismaClient({ datasourceUrl: url || 'postgresql://unused:5432/unused' })
-  const env = { database: process.env.DATABASE_URL, enabled: process.env.WORKSPACES_ENABLED, audio: process.env.LOCAL_AUDIO_PATH }
+  const env = { database: process.env.DATABASE_URL, enabled: process.env.WORKSPACES_ENABLED, audio: process.env.LOCAL_AUDIO_PATH,
+    lkUrl: process.env.LIVEKIT_URL, lkKey: process.env.LIVEKIT_API_KEY, lkSecret: process.env.LIVEKIT_API_SECRET }
   const tag = 'ev-' + randomUUID().replaceAll('-', '').slice(0, 10)
   let audioRoot = ''
   let db: PrismaClient
@@ -51,6 +94,9 @@ suite('organization Elevate voice path', () => {
     process.env.DATABASE_URL = 'postgresql://tenancy_test_app@127.0.0.1:55443/postgres'
     process.env.WORKSPACES_ENABLED = 'true'
     process.env.AUTO_DELIVERY_ALIGNMENT_ENABLED = 'false'
+    process.env.LIVEKIT_URL = 'wss://livekit.example.invalid'
+    process.env.LIVEKIT_API_KEY = 'test-key'
+    process.env.LIVEKIT_API_SECRET = 'test-secret-with-enough-length-for-hs256'
     db = (await import('../src/lib/prisma')).prisma
     scopes = await import('../src/lib/dataScope')
     subscriptions = await import('../src/lib/sessionSubscriptions')
@@ -61,13 +107,16 @@ suite('organization Elevate voice path', () => {
     const recordings = await import('../src/routes/recordings')
     const conversations = await import('../src/routes/conversations')
     const { getSessionTurns } = await import('../src/routes/turns')
-    const { guardInterviewSession } = await import('../src/middleware/interviewSessionAccess')
+    const { guardInterviewSession, requireSessionFeature } = await import('../src/middleware/interviewSessionAccess')
+    const { getLivekitToken, dispatchAgent } = await import('../src/routes/livekit')
     app = express(); app.use(express.json()); app.use(bindWorkspaceRequest)
     app.use(guardInterviewSession)
     app.get('/sessions/:sessionId/conversation', requireAuth, conversations.getConversation)
     app.get('/sessions/:sessionId/turns', requireAuth, getSessionTurns)
     app.post('/sessions/:sessionId/segments', requireAuth, createSessionSegment)
     app.patch('/sessions/:sessionId/segments/:segmentId', requireAuth, closeSessionSegment)
+    app.get('/livekit/token', requireAuth, requireSessionFeature(true), getLivekitToken)
+    app.post('/livekit/dispatch', requireAuth, requireSessionFeature(true), dispatchAgent)
     app.post('/sessions/:sessionId/recording/upload', requireAuth, recordings.recordingUpload.single('audio'), reenterDataScope, recordings.uploadSessionRecording)
     app.post('/sessions/:sessionId/recording/ticket', requireAuth, recordings.createSessionRecordingTicket)
     app.get('/sessions/:sessionId/recording/stream', requireAuthOrMediaToken, recordings.streamSessionRecording)
@@ -91,7 +140,8 @@ suite('organization Elevate voice path', () => {
     await admin.user.deleteMany({ where: { id: { in: ids } } })
     await db?.$disconnect(); await admin.$disconnect()
     if (audioRoot) await rm(audioRoot, { recursive: true, force: true })
-    for (const [key, value] of Object.entries({ DATABASE_URL: env.database, WORKSPACES_ENABLED: env.enabled, LOCAL_AUDIO_PATH: env.audio })) {
+    for (const [key, value] of Object.entries({ DATABASE_URL: env.database, WORKSPACES_ENABLED: env.enabled, LOCAL_AUDIO_PATH: env.audio,
+      LIVEKIT_URL: env.lkUrl, LIVEKIT_API_KEY: env.lkKey, LIVEKIT_API_SECRET: env.lkSecret })) {
       if (value === undefined) delete process.env[key]; else process.env[key] = value
     }
     delete process.env.AUTO_DELIVERY_ALIGNMENT_ENABLED
@@ -183,11 +233,11 @@ suite('organization Elevate voice path', () => {
     expect((await admin.sessionSegment.findUniqueOrThrow({ where: { id: `${tag}-own-a` } })).endedAt).toBeNull()
 
     const rooms = await import('../src/lib/livekitRooms')
-    const released = vi.spyOn(rooms, 'deleteLivekitRoomsWithRetry').mockResolvedValue(undefined)
+    const released = vi.spyOn(rooms, 'releaseSegmentRoomsWithRetry').mockResolvedValue({ owned: [], foreign: [], unverified: [] })
     const taken = await request(app).post(`/sessions/${second.id}/segments`).set(headers(alpha, learner))
       .send({ segmentId: `${tag}-own-c`, roomName: `${tag}-own-c`, takeover: true })
     expect(taken.status).toBe(201)
-    expect(released).toHaveBeenCalledWith(expect.arrayContaining([`${tag}-own-a`]))
+    expect(released).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ id: `${tag}-own-a`, sessionId: first.id })]))
     const closed = await admin.sessionSegment.findUniqueOrThrow({ where: { id: `${tag}-own-a` } })
     expect(closed.endedAt).not.toBeNull()
     expect(closed.activeDurationSec).toBeGreaterThanOrEqual(0)
@@ -343,7 +393,7 @@ suite('organization Elevate voice path', () => {
     const first = await orgSession(alpha, learner)
     expect((await request(app).post(`/sessions/${first.id}/segments`).set(headers(alpha, learner)).send({ segmentId: `${tag}-lk-a`, roomName: `${tag}-lk-a` })).status).toBe(201)
     const rooms = await import('../src/lib/livekitRooms')
-    const failed = vi.spyOn(rooms, 'deleteLivekitRoomsWithRetry').mockRejectedValue(new Error('livekit unavailable'))
+    const failed = vi.spyOn(rooms, 'releaseSegmentRoomsWithRetry').mockRejectedValue(new Error('livekit unavailable'))
     const second = await orgSession(alpha, learner)
     const taken = await request(app).post(`/sessions/${second.id}/segments`).set(headers(alpha, learner))
       .send({ segmentId: `${tag}-lk-b`, roomName: `${tag}-lk-b`, takeover: true })
@@ -353,5 +403,180 @@ suite('organization Elevate voice path', () => {
     expect(await admin.sessionSegment.count({ where: { id: `${tag}-lk-b` } })).toBe(0)
     failed.mockRestore()
     await admin.sessionSegment.update({ where: { id: `${tag}-lk-a` }, data: { endedAt: new Date() } })
+  })
+
+  describe('LiveKit room ownership', () => {
+    let gamma = ''
+    const extraUsers: string[] = []
+    const enroll = async (workspaceId: string, userId: string) => {
+      members[`${workspaceId}:${userId}`] = (await admin.workspaceMember.create({ data: { workspaceId, userId, role: 'LEARNER', state: 'ACTIVE', acceptedAt: new Date() } })).id
+    }
+    const newUser = async (suffix: string) => {
+      const id = (await admin.user.create({ data: { email: `${tag}-${suffix}@example.invalid`, emailVerified: true } })).id
+      extraUsers.push(id)
+      return id
+    }
+    const personalSession = async (userId: string) => db.session.create({ data: { userId, module: 'elevate' } })
+    const segment = (sessionId: string, workspaceId: string | null, userId: string, body: Record<string, unknown>) =>
+      request(app).post(`/sessions/${sessionId}/segments`).set(headers(workspaceId, userId)).send(body)
+    const token = (workspaceId: string | null, userId: string, query: { room: string; sessionId: string; segmentId: string }) =>
+      request(app).get('/livekit/token').query(query).set(headers(workspaceId, userId))
+    const endOpen = (sessionIds: string[]) => admin.sessionSegment.updateMany({ where: { sessionId: { in: sessionIds }, endedAt: null }, data: { endedAt: new Date() } })
+
+    beforeAll(async () => {
+      gamma = (await admin.workspace.create({ data: { kind: 'ORGANIZATION', name: 'gamma', slug: `${tag}-gamma`, isolationStage: 'FOUNDATION_ONLY', concurrentVoice: 5 } })).id
+      // Token issuance is gated by the Elevate entitlement; probes must reach the ownership checks behind it.
+      for (const workspaceId of [gamma, beta]) {
+        await admin.workspaceFeature.upsert({ where: { workspaceId_feature: { workspaceId, feature: 'elevate' } },
+          create: { workspaceId, feature: 'elevate', entitled: true, enabled: true }, update: { entitled: true, enabled: true } })
+      }
+    })
+    afterAll(async () => {
+      await admin.workspace.deleteMany({ where: { OR: [{ id: gamma }, { personalOwnerId: { in: extraUsers } }] } })
+      await admin.user.deleteMany({ where: { id: { in: extraUsers } } })
+    })
+
+    it('names rooms on the server so a known foreign room name cannot be registered, joined, dispatched to or closed', async () => {
+      const { segmentRoomName } = await import('../src/lib/livekitRooms')
+      const victim = await newUser('victim'), attacker = await newUser('attacker')
+      await enroll(gamma, victim); await enroll(gamma, attacker); await enroll(beta, attacker)
+      const victimSession = await orgSession(gamma, victim)
+      const started = await segment(victimSession.id, gamma, victim, { segmentId: `${tag}-victim-1`, roomName: 'client-chosen' })
+      expect(started.status).toBe(201)
+      const victimRoom = started.body.segment.roomName as string
+      expect(victimRoom).toBe(segmentRoomName(victimSession.id, `${tag}-victim-1`))
+      expect((await token(gamma, victim, { room: victimRoom, sessionId: victimSession.id, segmentId: `${tag}-victim-1` })).status).toBe(200)
+      expect(JSON.parse(lk.rooms.get(victimRoom)!.metadata)).toMatchObject({ sessionId: victimSession.id, segmentId: `${tag}-victim-1` })
+
+      const contexts: Array<[string, string | null]> = [['same organization', gamma], ['another organization', beta], ['Personal', null]]
+      const attackerSessions: string[] = []
+      for (const [label, workspaceId] of contexts) {
+        const own = workspaceId ? await orgSession(workspaceId, attacker) : await personalSession(attacker)
+        attackerSessions.push(own.id)
+        const forgedId = `${tag}-forge-${label.replaceAll(' ', '-')}`
+        const forged = await segment(own.id, workspaceId, attacker, { segmentId: forgedId, roomName: victimRoom })
+        expect(forged.status, label).toBe(201)
+        expect(forged.body.segment.roomName, label).not.toBe(victimRoom)
+        expect((await admin.sessionSegment.findUniqueOrThrow({ where: { id: forgedId } })).roomName).toBe(segmentRoomName(own.id, forgedId))
+        // Joining with the victim's room name through the attacker's own segment, or through the victim's ids.
+        expect((await token(workspaceId, attacker, { room: victimRoom, sessionId: own.id, segmentId: forgedId })).status, label).toBe(409)
+        expect([403, 404]).toContain((await token(workspaceId, attacker, { room: victimRoom, sessionId: victimSession.id, segmentId: `${tag}-victim-1` })).status)
+        expect((await request(app).post('/livekit/dispatch').set(headers(workspaceId, attacker))
+          .send({ room: victimRoom, sessionId: own.id, segmentId: forgedId })).status, label).toBe(409)
+        // Reusing the victim's segment id cannot adopt the victim's segment or room.
+        expect((await segment(own.id, workspaceId, attacker, { segmentId: `${tag}-victim-1` })).status, label).toBe(409)
+        // A retry/resume on the attacker's own session closes only the attacker's own room.
+        expect((await segment(own.id, workspaceId, attacker, { segmentId: `${forgedId}-resume`, roomName: victimRoom })).status, label).toBe(201)
+        expect(lk.deleted, label).not.toContain(victimRoom)
+        expect(lk.rooms.has(victimRoom), label).toBe(true)
+        await endOpen([own.id])
+      }
+      await endOpen([victimSession.id, ...attackerSessions])
+    })
+
+    it('never closes, stops recording of, or deletes storage for a foreign room named by a legacy segment row', async () => {
+      const { segmentRoomName } = await import('../src/lib/livekitRooms')
+      const { processSessionDeletion } = await import('../src/lib/sessionDeletionWorker')
+      const { withCleanupScope } = await import('../src/workspaces/requestScope')
+      const attacker = await newUser('attacker-legacy')
+      await enroll(gamma, attacker)
+      // SessionSegment.roomName is unique, so a stored legacy name cannot duplicate another segment's room here.
+      // A legacy (client-chosen) name can still name a live room this database does not own — e.g. another
+      // environment or stack sharing the LiveKit server — with its own recording in progress.
+      const foreignRoom = `room_${tag}_shared_livekit`
+      lk.rooms.set(foreignRoom, { name: foreignRoom, metadata: JSON.stringify({ sessionId: 'session_elsewhere', segmentId: 'segment_elsewhere' }) })
+      lk.egress.push({ egressId: `EG_${tag}_foreign`, roomName: foreignRoom, file: `s3://foreign-bucket/${tag}/foreign.mp4`, active: true })
+
+      const own = await orgSession(gamma, attacker)
+      await admin.sessionSegment.create({ data: { id: `${tag}-legacy-forged`, sessionId: own.id, segmentIndex: 0, roomName: foreignRoom, startedAt: new Date() } })
+      // Resume on the same session closes the legacy segment without touching the foreign room.
+      const resumed = await segment(own.id, gamma, attacker, { segmentId: `${tag}-legacy-resume` })
+      expect(resumed.status).toBe(201)
+      expect(lk.deleted).not.toContain(foreignRoom)
+      expect((await token(gamma, attacker, { room: foreignRoom, sessionId: own.id, segmentId: `${tag}-legacy-forged` })).status).toBe(409)
+      expect((await token(gamma, attacker, { room: resumed.body.segment.roomName, sessionId: own.id, segmentId: `${tag}-legacy-resume` })).status).toBe(200)
+      lk.egress.push({ egressId: `EG_${tag}_own`, roomName: resumed.body.segment.roomName, file: `s3://own-bucket/${tag}/own.mp4`, active: true })
+
+      // Taking over from a second own session closes the own room only.
+      const second = await orgSession(gamma, attacker)
+      expect((await segment(second.id, gamma, attacker, { segmentId: `${tag}-legacy-takeover` })).status).toBe(409)
+      const taken = await segment(second.id, gamma, attacker, { segmentId: `${tag}-legacy-takeover`, takeover: true })
+      expect(taken.status).toBe(201)
+      expect(lk.deleted).toContain(segmentRoomName(own.id, `${tag}-legacy-resume`))
+      expect(lk.rooms.has(foreignRoom)).toBe(true)
+
+      // Deleting the session stops only its own Egress (by room it owns or by recorded id) and never the foreign one.
+      lk.rooms.set(resumed.body.segment.roomName, { name: resumed.body.segment.roomName, metadata: JSON.stringify({ sessionId: own.id, segmentId: `${tag}-legacy-resume` }) })
+      const deletedPaths: string[] = []
+      const storage = await import('../src/lib/sessionStorageCleanup')
+      const deleteStorage = vi.spyOn(storage, 'deleteSessionStorage').mockImplementation(async (_id, paths) => { deletedPaths.push(...paths) })
+      await admin.session.update({ where: { id: own.id }, data: { endedAt: new Date(), discardedAt: new Date() } })
+      try {
+        expect(await withCleanupScope(gamma, () => processSessionDeletion(own.id))).toBe(true)
+      } finally { deleteStorage.mockRestore() }
+      expect(lk.stoppedEgress).not.toContain(`EG_${tag}_foreign`)
+      expect(lk.egress.find(e => e.egressId === `EG_${tag}_foreign`)!.active).toBe(true)
+      expect(deletedPaths).not.toContain(`s3://foreign-bucket/${tag}/foreign.mp4`)
+      expect(lk.stoppedEgress).toContain(`EG_${tag}_own`)
+      expect(deletedPaths).toContain(`s3://own-bucket/${tag}/own.mp4`)
+      expect(lk.rooms.has(foreignRoom)).toBe(true)
+      expect(lk.rooms.has(resumed.body.segment.roomName)).toBe(false)
+      await endOpen([second.id])
+    })
+
+    it('keeps token issuance, dispatch, idempotent retry, resume and takeover working with server-named rooms', async () => {
+      const learnerId = await newUser('legit')
+      await enroll(gamma, learnerId)
+      const first = await orgSession(gamma, learnerId)
+      const a = await segment(first.id, gamma, learnerId, { segmentId: `${tag}-legit-a` })
+      expect(a.status).toBe(201)
+      const retry = await segment(first.id, gamma, learnerId, { segmentId: `${tag}-legit-a`, roomName: 'anything' })
+      expect(retry.status).toBe(200)
+      expect(retry.body).toMatchObject({ idempotent: true, segment: { roomName: a.body.segment.roomName } })
+      const issued = await token(gamma, learnerId, { room: a.body.segment.roomName, sessionId: first.id, segmentId: `${tag}-legit-a` })
+      expect(issued.status).toBe(200)
+      expect(issued.body.token).toEqual(expect.any(String))
+      expect((await request(app).post('/livekit/dispatch').set(headers(gamma, learnerId))
+        .send({ room: a.body.segment.roomName, sessionId: first.id, segmentId: `${tag}-legit-a` })).body).toMatchObject({ success: true })
+
+      const b = await segment(first.id, gamma, learnerId, { segmentId: `${tag}-legit-b` })
+      expect(b.status).toBe(201)
+      expect(lk.deleted).toContain(a.body.segment.roomName)
+      expect((await token(gamma, learnerId, { room: a.body.segment.roomName, sessionId: first.id, segmentId: `${tag}-legit-a` })).status).toBe(409)
+      expect((await token(gamma, learnerId, { room: b.body.segment.roomName, sessionId: first.id, segmentId: `${tag}-legit-b` })).status).toBe(200)
+
+      const second = await orgSession(gamma, learnerId)
+      expect((await segment(second.id, gamma, learnerId, { segmentId: `${tag}-legit-c` })).body.code).toBe('VOICE_SESSION_ACTIVE')
+      const c = await segment(second.id, gamma, learnerId, { segmentId: `${tag}-legit-c`, takeover: true })
+      expect(c.status).toBe(201)
+      expect(lk.deleted).toContain(b.body.segment.roomName)
+      expect((await token(gamma, learnerId, { room: c.body.segment.roomName, sessionId: second.id, segmentId: `${tag}-legit-c` })).status).toBe(200)
+      await endOpen([first.id, second.id])
+    })
+
+    it.each(['LIVEKIT_URL', 'LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET'])('keeps occupancy when %s is missing and a room must be closed', async (missing) => {
+      const learnerId = await newUser(`config-${missing.toLowerCase()}`)
+      await enroll(gamma, learnerId)
+      const first = await orgSession(gamma, learnerId)
+      const a = await segment(first.id, gamma, learnerId, { segmentId: `${tag}-cfg-${missing}-a` })
+      expect(a.status).toBe(201)
+      const saved = process.env[missing]
+      delete process.env[missing]
+      try {
+        const second = await orgSession(gamma, learnerId)
+        const taken = await segment(second.id, gamma, learnerId, { segmentId: `${tag}-cfg-${missing}-b`, takeover: true })
+        expect(taken.status).toBe(503)
+        expect(taken.body.code).toBe('VOICE_ROOM_RELEASE_FAILED')
+        expect((await admin.sessionSegment.findUniqueOrThrow({ where: { id: `${tag}-cfg-${missing}-a` } })).endedAt).toBeNull()
+        expect(await admin.sessionSegment.count({ where: { id: `${tag}-cfg-${missing}-b` } })).toBe(0)
+        const resumed = await segment(first.id, gamma, learnerId, { segmentId: `${tag}-cfg-${missing}-c` })
+        expect(resumed.status).toBe(503)
+        process.env[missing] = saved
+        expect((await segment(second.id, gamma, learnerId, { segmentId: `${tag}-cfg-${missing}-b`, takeover: true })).status).toBe(201)
+        await endOpen([first.id, second.id])
+      } finally {
+        process.env[missing] = saved
+      }
+    })
   })
 })

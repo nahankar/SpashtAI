@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   deleteRoom: vi.fn(),
+  listRooms: vi.fn(),
   stopSessionEgress: vi.fn(),
   deleteSessionStorage: vi.fn(),
   prisma: {
@@ -31,8 +32,12 @@ vi.mock('../src/lib/logger', () => ({
 vi.mock('livekit-server-sdk', () => ({
   RoomServiceClient: class {
     deleteRoom = mocks.deleteRoom
+    listRooms = mocks.listRooms
   },
 }))
+
+import { segmentRoomName } from '../src/lib/livekitRooms'
+const own = (sessionId: string, id: string) => ({ id, sessionId, roomName: segmentRoomName(sessionId, id) })
 
 describe('durable discarded-session cleanup worker', () => {
   beforeEach(() => {
@@ -47,6 +52,7 @@ describe('durable discarded-session cleanup worker', () => {
       skippedUnavailable: false,
     })
     mocks.deleteRoom.mockResolvedValue(undefined)
+    mocks.listRooms.mockResolvedValue([])
     mocks.prisma.sessionRecording.findMany.mockResolvedValue([
       {
         egressId: 'client-segment-late',
@@ -80,7 +86,7 @@ describe('durable discarded-session cleanup worker', () => {
       discardedAt: new Date(),
       deletionAttempts: 1,
       deletionLeaseId: claimedLeaseId,
-      segments: [{ roomName: 'room-closed' }, { roomName: 'room-open' }],
+      segments: [own('session-1', 'segment-closed'), own('session-1', 'segment-open')],
       recordings: [{
         egressId: 'client-segment-1',
         filePath: '/audio/first.webm',
@@ -93,9 +99,11 @@ describe('durable discarded-session cleanup worker', () => {
     await expect(processSessionDeletion('session-1')).resolves.toBe(true)
 
     expect(mocks.stopSessionEgress).toHaveBeenCalledWith(
-      ['room-closed', 'room-open'],
+      [segmentRoomName('session-1', 'segment-closed'), segmentRoomName('session-1', 'segment-open')],
       expect.any(Array),
     )
+    expect(mocks.deleteRoom.mock.calls.map(call => call[0]).sort()).toEqual(
+      [segmentRoomName('session-1', 'segment-closed'), segmentRoomName('session-1', 'segment-open')].sort())
     expect(mocks.deleteSessionStorage).toHaveBeenCalledWith(
       'session-1',
       expect.any(Set),
@@ -179,7 +187,7 @@ describe('durable discarded-session cleanup worker', () => {
       discardedAt: new Date(),
       deletionAttempts: 1,
       deletionLeaseId: claimedLeaseId,
-      segments: [{ roomName: 'room-still-live' }],
+      segments: [own('session-room-failure', 'segment-live')],
       recordings: [],
       transcript: null,
     }))
@@ -199,5 +207,50 @@ describe('durable discarded-session cleanup worker', () => {
         }),
       }),
     )
+  })
+
+  it('stops Egress and closes rooms only for rooms the session can prove it owns', async () => {
+    mocks.prisma.session.findUnique.mockImplementation(async () => ({
+      id: 'session-legacy',
+      discardedAt: new Date(),
+      deletionAttempts: 1,
+      deletionLeaseId: claimedLeaseId,
+      segments: [
+        { id: 'segment-legacy-own', sessionId: 'session-legacy', roomName: 'room_legacy_own' },
+        { id: 'segment-legacy-foreign', sessionId: 'session-legacy', roomName: 'room_legacy_foreign' },
+        { id: 'segment-legacy-gone', sessionId: 'session-legacy', roomName: 'room_legacy_gone' },
+      ],
+      recordings: [],
+      transcript: null,
+    }))
+    mocks.listRooms.mockResolvedValue([
+      { name: 'room_legacy_own', metadata: JSON.stringify({ sessionId: 'session-legacy', segmentId: 'segment-legacy-own' }) },
+      { name: 'room_legacy_foreign', metadata: JSON.stringify({ sessionId: 'session-other', segmentId: 'segment-other' }) },
+    ])
+    mocks.deleteSessionStorage.mockResolvedValue(undefined)
+    const { processSessionDeletion } = await import('../src/lib/sessionDeletionWorker')
+
+    await expect(processSessionDeletion('session-legacy')).resolves.toBe(true)
+
+    expect(mocks.stopSessionEgress).toHaveBeenCalledWith(['room_legacy_own'], expect.any(Array))
+    expect(mocks.deleteRoom.mock.calls.map(call => call[0])).toEqual(['room_legacy_own'])
+  })
+
+  it('retains the tombstone when LiveKit configuration is missing and a room must be closed', async () => {
+    delete process.env.LIVEKIT_API_SECRET
+    mocks.prisma.session.findUnique.mockImplementation(async () => ({
+      id: 'session-no-config',
+      discardedAt: new Date(),
+      deletionAttempts: 1,
+      deletionLeaseId: claimedLeaseId,
+      segments: [own('session-no-config', 'segment-1')],
+      recordings: [],
+      transcript: null,
+    }))
+    const { processSessionDeletion } = await import('../src/lib/sessionDeletionWorker')
+
+    await expect(processSessionDeletion('session-no-config')).resolves.toBe(false)
+    expect(mocks.deleteSessionStorage).not.toHaveBeenCalled()
+    expect(mocks.prisma.session.deleteMany).not.toHaveBeenCalled()
   })
 })

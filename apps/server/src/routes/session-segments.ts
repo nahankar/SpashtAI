@@ -5,7 +5,7 @@ import { isPrivilegedRole } from '../lib/userExportFlags'
 import { currentDataScope } from '../lib/dataScope'
 import { reserveWorkspaceVoiceSlot } from '../workspaces/quotas'
 import { WorkspaceError } from '../workspaces/contracts'
-import { deleteLivekitRoomsWithRetry } from '../lib/livekitRooms'
+import { releaseSegmentRoomsWithRetry, segmentRoomName } from '../lib/livekitRooms'
 import {
   acceptedEventTime,
   activeSegmentDurationSec,
@@ -128,19 +128,14 @@ export async function createSessionSegment(req: Request, res: Response) {
   try {
     const { sessionId } = req.params
     const id = String(req.body?.segmentId || '').trim()
-    const roomName = String(req.body?.roomName || '').trim()
     const now = new Date()
     const startedAt = acceptedEventTime(req.body?.startedAt, now)
     const takeover = req.body?.takeover === true
-    if (
-      !id ||
-      id.length > 128 ||
-      !roomName ||
-      roomName.length > 256 ||
-      !startedAt
-    ) {
-      return res.status(400).json({ error: 'segmentId, roomName, and valid startedAt are required' })
+    if (!id || id.length > 128 || !startedAt) {
+      return res.status(400).json({ error: 'segmentId and valid startedAt are required' })
     }
+    // The server names the room; any client-supplied roomName is ignored.
+    const roomName = segmentRoomName(sessionId, id)
 
     const ownership = await ownedSession(req, sessionId)
     if ('error' in ownership) {
@@ -152,7 +147,7 @@ export async function createSessionSegment(req: Request, res: Response) {
 
     const existing = await prisma.sessionSegment.findUnique({ where: { id } })
     if (existing) {
-      if (existing.sessionId !== sessionId || existing.roomName !== roomName) {
+      if (existing.sessionId !== sessionId) {
         return res.status(409).json({ error: 'segmentId already belongs to different metadata' })
       }
       return res.status(200).json({ segment: existing, idempotent: true })
@@ -171,12 +166,11 @@ export async function createSessionSegment(req: Request, res: Response) {
         openSessions: [...new Set(active.map(open => open.sessionId))],
       })
     }
-    const roomsToRelease = [...stale, ...(takeover ? active : []), ...sameSessionOpen]
-      .map(open => open.roomName)
-      .filter(Boolean)
+    const segmentsToRelease = [...stale, ...(takeover ? active : []), ...sameSessionOpen]
+    const roomsToRelease = segmentsToRelease.map(open => open.roomName).filter(Boolean)
     if (roomsToRelease.length) {
       try {
-        await deleteLivekitRoomsWithRetry(roomsToRelease)
+        await releaseSegmentRoomsWithRetry(segmentsToRelease)
       } catch {
         return res.status(503).json({
           error: 'The other live session is still connected. Try again in a moment.',
@@ -244,7 +238,7 @@ export async function createSessionSegment(req: Request, res: Response) {
       }
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         const raced = await prisma.sessionSegment.findUnique({ where: { id } })
-        if (raced?.sessionId === sessionId && raced.roomName === roomName) {
+        if (raced?.sessionId === sessionId) {
           return res.status(200).json({ segment: raced, idempotent: true })
         }
         return res.status(409).json({ error: 'Session segment or room is already in use' })

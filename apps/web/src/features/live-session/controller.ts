@@ -28,19 +28,18 @@ export class LiveSessionController {
     if (this.state.sessionId !== previous) this.deps.effects.sessionChanged(this.state.sessionId)
     for (const listener of this.listeners) listener()
   }
-  private async createSegment(sessionId: string, room: string) {
+  private async createSegment(sessionId: string) {
     try {
-      return await this.deps.api.createSessionSegment(sessionId, room)
+      return await this.deps.api.createSessionSegment(sessionId)
     } catch (error) {
       const code = error instanceof Error ? (error as Error & { code?: string }).code : undefined
       if (code !== 'VOICE_SESSION_ACTIVE') throw error
       const message = error instanceof Error ? error.message : 'You already have a live session in this workspace.'
       const confirmed = await this.deps.effects.confirmTakeover?.(message)
       if (!confirmed) throw error
-      return this.deps.api.createSessionSegment(sessionId, room, true)
+      return this.deps.api.createSessionSegment(sessionId, true)
     }
   }
-  private roomName() { return `room_${this.deps.now().getTime()}_${this.deps.random().toString(36).substr(2, 5)}` }
   private query(sessionId: string, segmentId: string, room: string) {
     return { room, sessionId, segmentId }
   }
@@ -51,10 +50,11 @@ export class LiveSessionController {
     try {
       if (config.preparationPending) throw new Error(config.preparationError || 'Interview journey is still loading')
       id = `session_${this.deps.now().getTime()}_${this.deps.random().toString(36).substr(2, 9)}`
-      const room = this.state.roomName || this.roomName()
       await adapter.createActivity(id, this.deps.now().toISOString())
       linked = adapter.kind === 'prepare'
-      segment = await this.createSegment(id, room)
+      const opened = await this.createSegment(id)
+      segment = opened.segmentId
+      const room = opened.roomName
       const connection = await this.deps.api.fetchLiveToken(this.query(id, segment, room))
       this.patch({ token: connection.token, url: connection.url, sessionId: id, roomName: room, segmentId: segment,
         isSessionPaused: false, pauseReason: null })
@@ -76,8 +76,9 @@ export class LiveSessionController {
     const cancelled = () => signal?.aborted || generation !== this.resumeGeneration
     try {
       if (cancelled()) return
-      const room = this.roomName()
-      segment = await this.createSegment(sessionId, room)
+      const opened = await this.createSegment(sessionId)
+      segment = opened.segmentId
+      const room = opened.roomName
       if (cancelled()) return
       const connection = await this.deps.api.fetchLiveToken(this.query(sessionId, segment, room), signal)
       if (cancelled()) return

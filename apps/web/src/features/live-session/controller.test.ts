@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fixture } from './test-fixtures'
+import { fixture, segmentReply } from './test-fixtures'
 import { elevateAdapter } from './adapters/elevate'
 import { prepareAdapter } from './adapters/prepare'
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r }); return { promise, resolve } }
@@ -53,11 +53,11 @@ describe('live controller start and resume characterization', () => {
     const segment = deferred<Response>(); f.fetcher.mockReturnValueOnce(segment.promise)
     const resume = f.controller.resume('session')
     await f.controller.resume('session')
-    segment.resolve(new Response('{}')); await resume
+    segment.resolve(segmentReply('segment-2')); await resume
     expect(f.calls.filter(c => c.path.includes('/token?'))).toHaveLength(2)
   })
   it('closes a new segment when resume token fails', async () => {
-    const f = fixture(); f.fetcher.mockResolvedValueOnce(new Response('{}')).mockRejectedValueOnce(new Error('token failed'))
+    const f = fixture(); f.fetcher.mockResolvedValueOnce(segmentReply('segment-1')).mockRejectedValueOnce(new Error('token failed'))
     await expect(f.controller.resume('existing')).rejects.toThrow('token failed')
     expect(f.calls.at(-1)?.body.audioStatus).toBe('unavailable')
     expect(f.calls.some(c => c.method === 'DELETE')).toBe(false)
@@ -69,18 +69,26 @@ describe('live controller start and resume characterization', () => {
     abort.abort()
     await f.controller.resume('existing', new AbortController().signal, true)
     const replacement = f.controller.getSnapshot()
-    pending.resolve(new Response('{}')); await first
+    pending.resolve(segmentReply('segment-1')); await first
     expect(f.controller.getSnapshot()).toEqual(replacement)
     expect(f.calls.filter(c => c.body?.audioStatus === 'unavailable')).toHaveLength(1)
   })
   it('ignores a late token after cancellation and seals its segment', async () => {
     const f = fixture(); const token = deferred<Response>(); const abort = new AbortController()
-    f.fetcher.mockResolvedValueOnce(new Response('{}')).mockReturnValueOnce(token.promise)
+    f.fetcher.mockResolvedValueOnce(segmentReply('segment-1')).mockReturnValueOnce(token.promise)
     const resume = f.controller.resume('existing', abort.signal, true)
     await vi.waitFor(() => expect(f.fetcher).toHaveBeenCalledTimes(2))
     abort.abort(); token.resolve(new Response(JSON.stringify({ token: 'late', url: 'wss://late' }))); await resume
     expect(f.controller.getSnapshot().token).toBeNull()
     expect(f.calls.at(-1)?.body.audioStatus).toBe('unavailable')
+  })
+  it('joins the room the server assigned to the segment, never a client-chosen name', async () => {
+    const f = fixture(); await f.controller.start(f.config, elevateAdapter(f.api, f.config))
+    const segmentRequest = f.calls.find(c => c.path.endsWith('/segments'))!
+    expect(segmentRequest.body).not.toHaveProperty('roomName')
+    const token = new URL(`http://api${f.calls.find(c => c.path.includes('/token?'))!.path}`).searchParams
+    expect(token.get('room')).toBe(`lk_server_${segmentRequest.body.segmentId}`)
+    expect(f.controller.getSnapshot().roomName).toBe(token.get('room'))
   })
   it('keeps room-prefixed user turn IDs distinct across resume and drops paused messages', async () => {
     const f = fixture(); await f.controller.resume('existing')

@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto'
 import jwt from 'jsonwebtoken'
 
 const DEFAULT_SECRET = 'dev-secret-change-me'
@@ -6,6 +7,11 @@ const JWT_EXPIRY = process.env.JWT_EXPIRY || '7d'
 
 if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || process.env.JWT_SECRET === DEFAULT_SECRET)) {
   throw new Error('FATAL: JWT_SECRET must be set to a secure value in production')
+}
+
+/** Server-only keyed digest; `purpose` separates uses so one value never validates in another context. */
+export function serverDigest(purpose: string, value: string): string {
+  return createHmac('sha256', JWT_SECRET).update(`${purpose}\0${value}`).digest('base64url')
 }
 
 export interface TokenPayload {

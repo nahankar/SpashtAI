@@ -105,6 +105,18 @@ describe('session recording storage cleanup', () => {
     expect(result.skippedUnavailable).toBe(false)
   })
 
+  it('stops a recorded active Egress by id even when no owned room name is given', async () => {
+    let active = true
+    mocks.listEgress.mockImplementation(async (options: { egressId?: string; active?: boolean }) =>
+      options.egressId === 'EG_recorded' && (!options.active || active) ? [{ egressId: 'EG_recorded', fileResults: [{ location: 's3://bucket/own.mp4' }] }] : [])
+    mocks.stopEgress.mockImplementation(async () => { active = false; return { egressId: 'EG_recorded', fileResults: [{ location: 's3://bucket/own.mp4' }] } })
+    const { stopSessionEgress } = await import('../src/lib/sessionStorageCleanup')
+    const result = await stopSessionEgress([], [{ egressId: 'EG_recorded', filePath: '/out/own.mp4', status: 'recording' }])
+    expect(mocks.stopEgress).toHaveBeenCalledWith('EG_recorded')
+    expect([...result.paths]).toContain('s3://bucket/own.mp4')
+    expect(mocks.listEgress).not.toHaveBeenCalledWith(expect.objectContaining({ roomName: expect.anything() }))
+  })
+
   it('skips the known Redis-disabled error when no active writer is evidenced', async () => {
     mocks.listEgress.mockRejectedValue(new Error('egress not connected (redis required)'))
 

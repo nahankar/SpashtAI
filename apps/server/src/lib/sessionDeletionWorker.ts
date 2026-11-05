@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
 import { prisma } from './prisma'
 import { logger } from './logger'
-import { deleteLivekitRooms } from './livekitRooms'
+import { classifySegmentRooms, releaseSegmentRooms, type SegmentRoom } from './livekitRooms'
 import { deleteSessionStorage, stopSessionEgress } from './sessionStorageCleanup'
 import { sweepAllScopes } from '../workspaces/jobScopes'
 
@@ -30,8 +30,8 @@ function legacyTranscriptAudioPaths(conversationData: unknown): string[] {
   })
 }
 
-async function disconnectRooms(roomNames: string[]): Promise<void> {
-  await deleteLivekitRooms(roomNames)
+async function disconnectRooms(segments: SegmentRoom[]): Promise<void> {
+  await releaseSegmentRooms(segments)
 }
 
 export function enqueueSessionDeletion(sessionId: string, delayMs = 0): void {
@@ -91,7 +91,7 @@ export async function processSessionDeletion(sessionId: string): Promise<boolean
       where: { id: sessionId },
       include: {
         segments: {
-          select: { roomName: true },
+          select: { id: true, sessionId: true, roomName: true },
         },
         recordings: {
           select: { egressId: true, filePath: true, status: true },
@@ -102,7 +102,14 @@ export async function processSessionDeletion(sessionId: string): Promise<boolean
     if (!session?.discardedAt || session.deletionLeaseId !== leaseId) return false
     const attempt = session.deletionAttempts
 
-    const roomNames = session.segments.map((segment) => segment.roomName)
+    // Only rooms this session verifiably owns may have their Egress stopped or listed for storage deletion; a
+    // stored legacy name could point at another learner's room. Known Egress ids are still stopped by id.
+    const rooms = await classifySegmentRooms(session.segments)
+    if (rooms.foreign.length || rooms.unverified.length) {
+      logger.warn({ sessionId, foreignRooms: rooms.foreign.length, unverifiedRooms: rooms.unverified.length },
+        'Session deletion skipped segment rooms it could not prove it owns')
+    }
+    const roomNames = rooms.owned
     const latestRecordings = await prisma.sessionRecording.findMany({
       where: { sessionId },
       select: { egressId: true, filePath: true, status: true },
@@ -115,7 +122,7 @@ export async function processSessionDeletion(sessionId: string): Promise<boolean
         'Skipped unavailable Redis-disabled Egress with no active-writer evidence',
       )
     }
-    await disconnectRooms(roomNames)
+    await disconnectRooms(session.segments)
 
     // Renew and fence the lease before deleting storage. A stale worker may
     // perform idempotent deletes, but it must never hard-delete another
