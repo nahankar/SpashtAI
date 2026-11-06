@@ -49,6 +49,9 @@ export const LEARNER_POLICIES: Record<string, LearnerPolicy> = {
   // Preview only: claim-level judgments with a server-derived verdict. Not current until semantic validation.
   'learner-evaluation-9': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova2-lite-learner-9', modelId: 'us.amazon.nova-2-lite-v1:0', region: 'us-east-1', label: 'Nova 2 Lite · learner grading 9 (candidate)',
     prompt: 'interview-answer-11', schema: 'interview-result-5', rubric: 'bank-guidance-4', policy: 'learner-evaluation-9', temperature: 0, maxTokens: 2000, timeoutMs: 20_000 } },
+  // Preview only: addresses measured complete-answer/gap conflicts and attempted technical statements.
+  'learner-evaluation-10': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova2-lite-learner-10', modelId: 'us.amazon.nova-2-lite-v1:0', region: 'us-east-1', label: 'Nova 2 Lite · learner grading 10 (candidate)',
+    prompt: 'interview-answer-12', schema: 'interview-result-5', rubric: 'bank-guidance-4', policy: 'learner-evaluation-10', temperature: 0, maxTokens: 2000, timeoutMs: 20_000 } },
 }
 // learner-evaluation-8: v5's prompt, rubric and model with the versioned interview-result-4 evidence matching.
 // Technical grading remains experimental (reasoning, mixed-answer strengths and no-answer classification are open).
@@ -176,29 +179,38 @@ const claimResultSchema = z.object({
   gaps: z.array(text).max(6), guidance: text, uncertainty: z.array(text).max(4),
 }).strict()
 
+// Content-free diagnostics only: keep the same rejection/message, never include provider text.
+const CLAIM_REASONS = ['DEPTH_UNASSESSED_EVIDENCE', 'TRUTH_REASONING_CONFLICT', 'DUPLICATE_PASSAGE',
+  'EMPTY_WITH_COVERAGE', 'CORRECT_WITH_NO_COVERAGE', 'COMPLETE_WITHOUT_CORE', 'CORRECT_WITH_GAPS',
+  'EMPTY_WITH_ASSESSED_DEPTH'] as const
+class ClaimValidationError extends Error {
+  constructor(public reason: typeof CLAIM_REASONS[number], message = 'INCONSISTENT') { super(message) }
+}
+
 function parseClaimResult(raw: unknown, answer: string): EvaluationResult {
   const ledger = claimResultSchema.parse(raw)
-  if (ledger.depth.finding === 'NOT_ASSESSED' && ledger.depth.evidence.length) throw new Error('INCONSISTENT')
+  if (ledger.depth.finding === 'NOT_ASSESSED' && ledger.depth.evidence.length) throw new ClaimValidationError('DEPTH_UNASSESSED_EVIDENCE')
   const claims = ledger.claims.map(c => {
     const passage = originalPassage(answer, c.quote)
     if (!passage) throw new Error('UNSUPPORTED_EVIDENCE')
     if ((c.judgment === 'EMPTY' && c.reasoning !== 'NONE')
       || (c.judgment === 'CORRECT' && c.reasoning === 'INVALID')
-      || (c.judgment === 'INCORRECT' && ['VALID', 'PARTIAL'].includes(c.reasoning))) throw new Error('INCONSISTENT')
+      || (c.judgment === 'INCORRECT' && ['VALID', 'PARTIAL'].includes(c.reasoning))) throw new ClaimValidationError('TRUTH_REASONING_CONFLICT')
     return { ...c, quote: passage }
   })
-  if (new Set(claims.map(c => c.quote)).size !== claims.length) throw new Error('INVALID_CRITERIA')
+  if (new Set(claims.map(c => c.quote)).size !== claims.length) throw new ClaimValidationError('DUPLICATE_PASSAGE', 'INVALID_CRITERIA')
   const correct = claims.filter(c => c.judgment === 'CORRECT')
   const falseClaims = claims.filter(c => c.judgment === 'INCORRECT')
   const substantive = correct.length + falseClaims.length > 0
-  if ((!substantive && ledger.coverage !== 'NONE') || (correct.length && ledger.coverage === 'NONE')) throw new Error('INCONSISTENT')
+  if (!substantive && ledger.coverage !== 'NONE') throw new ClaimValidationError('EMPTY_WITH_COVERAGE')
+  if (correct.length && ledger.coverage === 'NONE') throw new ClaimValidationError('CORRECT_WITH_NO_COVERAGE')
   const correctCentral = correct.some(c => c.scope === 'CENTRAL')
-  if (ledger.coverage === 'COMPLETE' && !correctCentral) throw new Error('INCONSISTENT')
+  if (ledger.coverage === 'COMPLETE' && !correctCentral) throw new ClaimValidationError('COMPLETE_WITHOUT_CORE')
   const classification = !substantive ? 'NOT_ANSWERED'
     : (falseClaims.some(c => c.scope === 'CENTRAL') && !correctCentral) || !correct.length ? 'INCORRECT'
     : falseClaims.length || ledger.coverage !== 'COMPLETE' ? 'PARTIAL' : 'CORRECT'
-  if (classification === 'CORRECT' && ledger.gaps.length) throw new Error('INCONSISTENT')
-  if (!substantive && ledger.depth.finding !== 'NOT_ASSESSED') throw new Error('INCONSISTENT')
+  if (classification === 'CORRECT' && ledger.gaps.length) throw new ClaimValidationError('CORRECT_WITH_GAPS')
+  if (!substantive && ledger.depth.finding !== 'NOT_ASSESSED') throw new ClaimValidationError('EMPTY_WITH_ASSESSED_DEPTH')
   const reasons = claims.filter(c => c.reasoning !== 'NONE')
   const valid = reasons.filter(c => ['VALID', 'PARTIAL'].includes(c.reasoning))
   const invalid = reasons.filter(c => c.reasoning === 'INVALID')
@@ -240,6 +252,7 @@ function trimLists(raw: Record<string, unknown>, notes: string[]) {
 }
 /** Bounded, content-free failure reason: schema keys and Zod issue codes only, never output text. */
 export function invalidOutputReason(error: unknown) {
+  if (error instanceof ClaimValidationError) return `INVALID_OUTPUT_CLAIM_${error.reason}`
   if (error instanceof SyntaxError) return 'INVALID_OUTPUT_JSON'
   if (error instanceof z.ZodError) {
     const issue = error.issues[0]

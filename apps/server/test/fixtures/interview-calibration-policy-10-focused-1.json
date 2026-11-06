@@ -1,0 +1,359 @@
+{
+  "fixtureVersion": "grading-policy-10-focused-1",
+  "reviewer": "Existing AI-reviewed labels unchanged; no independent expert review.",
+  "preRegistered": "Frozen before policy-10 model calls: ten regressions, five previously frozen transfer cases, two free deterministic controls. Repeat RS-03, H1-11, P2-08 exactly once with new accounted invocations; do not count deduplication as replication. Budget: two v9 diagnostic retries plus fifteen v10 initial calls plus three v10 replicates = 20 normal Admin units. No raised allowance or quota reset.",
+  "groups": {
+    "regression": [
+      "RS-01",
+      "RS-03",
+      "RS-04",
+      "RS-05",
+      "RS-06",
+      "P2-06",
+      "P2-07",
+      "P2-08",
+      "P2-01",
+      "H1-11"
+    ],
+    "transfer": [
+      "F9-01",
+      "F9-03",
+      "F9-04",
+      "F9-05",
+      "F9-08"
+    ],
+    "freeControls": [
+      "G-ABSTAIN",
+      "G-REQUEST"
+    ],
+    "repeat": [
+      "RS-03",
+      "H1-11",
+      "P2-08"
+    ]
+  },
+  "questions": {
+    "WEB-NEW-033": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-028": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-047": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "PY-NEW-010": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DEV-NEW-016": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "WEB-NEW-099": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DE-NEW-001": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "PY-NEW-021": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "MAN-NEW-019": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DE-NEW-012": {
+      "revision": 2,
+      "guidanceIssues": [
+        "The misconception's 'Correction' is an unrelated example sentence."
+      ]
+    },
+    "WEB-NEW-077": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-041": {
+      "revision": 2,
+      "guidanceIssues": []
+    }
+  },
+  "cases": [
+    {
+      "id": "RS-01",
+      "qid": "WEB-NEW-033",
+      "category": "incorrect-causality",
+      "expected": "INCORRECT",
+      "acceptable": [
+        "INCORRECT",
+        "PARTIAL"
+      ],
+      "mustNotBe": [
+        "CORRECT"
+      ],
+      "answer": "Use ResizeObserver because it is faster than a window resize listener and fires before the browser paints anything.",
+      "reasoningMustNotBeMet": true,
+      "notes": "Keyword present, but the stated cause (speed) is not why ResizeObserver is used; the real reason (element vs viewport size) is absent.",
+      "sourceFixture": "reasoning-1"
+    },
+    {
+      "id": "RS-03",
+      "qid": "WEB-NEW-033",
+      "category": "implicit-valid-reasoning",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT",
+        "PARTIAL"
+      ],
+      "mustNotBe": [
+        "INCORRECT",
+        "NOT_ANSWERED"
+      ],
+      "answer": "A window resize event only fires when the viewport changes. A sidebar collapsing or a web font loading can resize a card while the window stays the same size. ResizeObserver reports that element's own size change.",
+      "expectReasoning": true,
+      "mustNotSay": [
+        "does not provide reasoning",
+        "no reasoning",
+        "does not explain why"
+      ],
+      "notes": "Valid reasoning with no causal keyword (statedReasons is empty).",
+      "sourceFixture": "reasoning-1"
+    },
+    {
+      "id": "RS-04",
+      "qid": "AUT-NEW-028",
+      "category": "incorrect-causality",
+      "expected": "INCORRECT",
+      "acceptable": [
+        "INCORRECT"
+      ],
+      "mustNotBe": [
+        "CORRECT"
+      ],
+      "answer": "Put your assertions inside then() because then() retries the whole query chain until the assertion passes.",
+      "reasoningMustNotBeMet": true,
+      "expectMisconception": true,
+      "notes": "The bank's listed misconception, stated as the reason.",
+      "sourceFixture": "reasoning-1"
+    },
+    {
+      "id": "RS-05",
+      "qid": "AUT-NEW-028",
+      "category": "implicit-valid-reasoning",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT",
+        "PARTIAL"
+      ],
+      "mustNotBe": [
+        "INCORRECT",
+        "NOT_ANSWERED"
+      ],
+      "answer": "should() re-runs the query and its assertion until it passes or times out. A then() callback runs one time, and an assertion in it can read the page before it has updated.",
+      "expectReasoning": true,
+      "mustNotSay": [
+        "does not provide reasoning",
+        "no reasoning",
+        "does not explain why"
+      ],
+      "notes": "Valid reasoning without causal keywords.",
+      "sourceFixture": "reasoning-1"
+    },
+    {
+      "id": "RS-06",
+      "qid": "AUT-NEW-047",
+      "category": "empty-because",
+      "expected": "NOT_ANSWERED",
+      "acceptable": [
+        "NOT_ANSWERED",
+        "PARTIAL"
+      ],
+      "mustNotBe": [
+        "CORRECT"
+      ],
+      "answer": "Use soft assertions because they are good practice.",
+      "reasoningMustNotBeMet": true,
+      "notes": "Empty justification.",
+      "sourceFixture": "reasoning-1"
+    },
+    {
+      "id": "P2-06",
+      "qid": "DEV-NEW-016",
+      "category": "mixed-correct-and-false",
+      "expected": "PARTIAL",
+      "acceptable": [
+        "PARTIAL",
+        "INCORRECT"
+      ],
+      "mustNotBe": [
+        "CORRECT",
+        "NOT_ANSWERED"
+      ],
+      "answer": "And asynchronous dependent call needs composition rather than nested future values.\nThe stated misconception is a false, and we should use synchronous calls whenever possible.",
+      "expectMisconception": true,
+      "expectStrength": [
+        "compos"
+      ],
+      "mustNotSay": [
+        "no explanation of why asynchronous dependent calls need composition"
+      ],
+      "notes": "First sentence is correct (dependent async calls need composition, not nested futures); 'use synchronous calls whenever possible' is false. The correct concept must be acknowledged.",
+      "sourceFixture": "pilot-2"
+    },
+    {
+      "id": "P2-07",
+      "qid": "WEB-NEW-099",
+      "category": "fragmented-implicit-reasoning",
+      "expected": "PARTIAL",
+      "acceptable": [
+        "PARTIAL",
+        "CORRECT"
+      ],
+      "mustNotBe": [
+        "INCORRECT",
+        "NOT_ANSWERED"
+      ],
+      "answer": "Keyboard order follows semantic controls.\nAnd\nDom position.\nPositive TB index.\nCreates\nUh, competing manual order?\nUh, the example.\nI don't have one.\nMaybe, I don't know.",
+      "expectReasoning": true,
+      "mustNotSay": [
+        "does not provide any reasoning",
+        "lacks reasoning",
+        "no reasoning",
+        "does not explain why"
+      ],
+      "notes": "'Positive TB index. Creates ... competing manual order' is the reason positive tabindex is discouraged.",
+      "sourceFixture": "pilot-2"
+    },
+    {
+      "id": "P2-08",
+      "qid": "DE-NEW-001",
+      "category": "vague-substantive-fragments",
+      "expected": "PARTIAL",
+      "acceptable": [
+        "PARTIAL",
+        "INCORRECT"
+      ],
+      "mustNotBe": [
+        "NOT_ANSWERED",
+        "CORRECT"
+      ],
+      "answer": "Packed tables are the real data.\nUm,\nWhich are specific to any artifact dimensions can be\nCreated, derived.\nAcross the data.\ncombination of the data aggregation of the data.\nAgainst any specific\nOther fields, so multiple dimensions can be created.\nTo query all of the data at once, instead of the basic rows and columns that 1 may typically do.",
+      "mustNotQuote": [
+        "grain",
+        "measure"
+      ],
+      "notes": "Vague but makes claims (fact tables hold the real data; dimensions derived across the data; aggregation). Grade those claims; do not credit grain or measures, which are not stated. 'Packed' is a mishearing of 'fact'.",
+      "sourceFixture": "pilot-2"
+    },
+    {
+      "id": "P2-01",
+      "qid": "PY-NEW-010",
+      "category": "control-guidance-echo",
+      "expected": "NOT_ANSWERED",
+      "acceptable": [
+        "NOT_ANSWERED"
+      ],
+      "answer": "None defaults with concrete.\nAnd standard limitation, a clear mechanism.\nAnd the current application are sufficient.",
+      "notes": "Control: repeats instruction wording; no technical claim. Must not be upgraded.",
+      "sourceFixture": "pilot-2"
+    },
+    {
+      "id": "H1-11",
+      "qid": "AUT-NEW-041",
+      "category": "complex-correct",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT"
+      ],
+      "answer": "If teams release on their own schedules and the shared parts are stable, I'd publish a versioned package with semantic versioning, changelogs and a deprecation policy, so each team upgrades when it is ready. If the teams are tightly coupled and change things together, a monorepo makes atomic changes easier, but it needs clear ownership and CI that only runs the affected suites.",
+      "evidence": [
+        "versioned package",
+        "deprecation policy",
+        "monorepo makes atomic changes easier"
+      ],
+      "sourceFixture": "heldout-1"
+    },
+    {
+      "id": "F9-01",
+      "qid": "PY-NEW-021",
+      "category": "fresh-concise-mechanism",
+      "expected": "CORRECT",
+      "answer": "Importing still executes the top-level statements outside the guard. The guard keeps the command-line startup from running on import, while running the file directly executes that block. Reusable functions can be imported independently.",
+      "expectReasoning": true,
+      "acceptable": [
+        "CORRECT"
+      ]
+    },
+    {
+      "id": "F9-03",
+      "qid": "AUT-NEW-028",
+      "category": "fresh-implicit-reasoning",
+      "expected": "CORRECT",
+      "answer": "Queries and their should assertions run again until success or timeout. Actions execute once. A then callback runs once; its assertion can observe the UI before the asynchronous update finishes. I use should for that assertion and then for a one-time transformation.",
+      "expectReasoning": true,
+      "acceptable": [
+        "CORRECT"
+      ]
+    },
+    {
+      "id": "F9-04",
+      "qid": "DE-NEW-012",
+      "category": "fresh-contrast-reasoning",
+      "expected": "CORRECT",
+      "answer": "In the operational store a customer address is updated in one authoritative place, avoiding copies and update anomalies. The reporting view can flatten those attributes to avoid repeated joins in analytical queries. A controlled transformation and reconciliation keep the reporting copies consistent.",
+      "expectReasoning": true,
+      "acceptable": [
+        "CORRECT"
+      ]
+    },
+    {
+      "id": "F9-05",
+      "qid": "MAN-NEW-019",
+      "category": "fresh-empty-instruction-echo",
+      "expected": "NOT_ANSWERED",
+      "answer": "A concrete case and a clear mechanism. The expected behavior and one practical example. That is my answer.",
+      "acceptable": [
+        "NOT_ANSWERED"
+      ]
+    },
+    {
+      "id": "F9-08",
+      "qid": "WEB-NEW-077",
+      "category": "fresh-mixed-secondary-error",
+      "expected": "PARTIAL",
+      "acceptable": [
+        "PARTIAL"
+      ],
+      "answer": "DNS-prefetch resolves the name; preconnect also establishes TCP and TLS. Preload fetches an imminent current-page asset with the matching as value. Modulepreload prepares the module graph; prefetch speculates at lower priority for a later page. Modulepreload additionally runs every module immediately even if nothing imports it.",
+      "expectMisconception": true
+    },
+    {
+      "id": "G-ABSTAIN",
+      "qid": "WEB-NEW-033",
+      "category": "deterministic-control",
+      "expected": "NOT_ANSWERED",
+      "acceptable": [
+        "NOT_ANSWERED"
+      ],
+      "answer": "Sorry, I do not know this one.",
+      "expectedKind": "DONT_KNOW"
+    },
+    {
+      "id": "G-REQUEST",
+      "qid": "WEB-NEW-033",
+      "category": "deterministic-control",
+      "expected": "NOT_ANSWERED",
+      "acceptable": [
+        "NOT_ANSWERED"
+      ],
+      "answer": "Could you repeat the question please?",
+      "expectedKind": "REQUEST_ONLY"
+    }
+  ]
+}
