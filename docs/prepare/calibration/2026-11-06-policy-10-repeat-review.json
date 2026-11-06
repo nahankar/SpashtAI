@@ -1,0 +1,44 @@
+{
+  "fixtureVersion": "grading-policy-10-repeat-1",
+  "calibrated": false,
+  "decision": "SAMPLE_PASSED_REVIEW_STILL_REQUIRED",
+  "limitation": "Bank-relative AI-reviewed regression labels, not independent expert calibration or repeated-run reliability. A broader acceptable band can contain different adaptive actions; resolve routing-label disagreements before enablement.",
+  "summary": {
+    "cases": 3,
+    "usable": 3,
+    "acceptableClassification": 3,
+    "exactExpected": 3,
+    "allRequiredChecksPass": true,
+    "allRoutingLabelsMatch": true,
+    "failedCases": 0
+  },
+  "reviews": [
+    {
+      "id": "RS-03",
+      "model": "learner-evaluation-10",
+      "actual": "CORRECT",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": true,
+      "failures": []
+    },
+    {
+      "id": "H1-11",
+      "model": "learner-evaluation-10",
+      "actual": "CORRECT",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": true,
+      "failures": []
+    },
+    {
+      "id": "P2-08",
+      "model": "learner-evaluation-10",
+      "actual": "PARTIAL",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": true,
+      "failures": []
+    }
+  ]
+}

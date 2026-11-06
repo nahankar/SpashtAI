@@ -1,0 +1,100 @@
+{
+  "applicationRevision": "b166468",
+  "dateLocal": "2026-11-06",
+  "timezone": "Asia/Kolkata",
+  "decision": "HOLD_GRADE_DRIVEN_ADAPTATION",
+  "currentPolicy": "learner-evaluation-8",
+  "diagnosticRetries": {
+    "RS-03": "INVALID_OUTPUT_CLAIM_CORRECT_WITH_GAPS",
+    "H1-11": "INVALID_OUTPUT_CLAIM_CORRECT_WITH_GAPS"
+  },
+  "quota": {
+    "normalPerAdmin": 20,
+    "normalGlobal": 100,
+    "usedPerAdminToday": 20,
+    "usedGlobalToday": 20,
+    "newDiagnosticCalls": 2,
+    "initialCandidateCalls": 15,
+    "repeatCandidateCalls": 3,
+    "overrideOrReset": false
+  },
+  "diagnosticUsageNote": "The two diagnostic rows include two invocations each: original on 5 Nov UTC and retry on 6 Nov UTC. Only the latest invocation of each is counted in today\u2019s 20 calls.",
+  "newTokens": {
+    "input": 32189,
+    "output": 7308
+  },
+  "initial": {
+    "cases": 17,
+    "usable": 17,
+    "acceptableClassification": 17,
+    "exactExpected": 16,
+    "allRequiredChecksPass": false,
+    "allRoutingLabelsMatch": false,
+    "failedCases": 1
+  },
+  "repeat": {
+    "cases": 3,
+    "usable": 3,
+    "acceptableClassification": 3,
+    "exactExpected": 3,
+    "allRequiredChecksPass": true,
+    "allRoutingLabelsMatch": true,
+    "failedCases": 0
+  },
+  "repeatVerification": [
+    {
+      "id": "RS-03",
+      "initialAssessmentId": "cmw52h5st00078phqffx8xbj1",
+      "repeatAssessmentId": "cmw52i15b00028pn5c20jk7a7",
+      "answerHashMatches": true,
+      "questionHashMatches": true,
+      "configHashMatches": true,
+      "inputKeyMatches": true,
+      "answerTextMatches": true,
+      "initial": "CORRECT",
+      "repeat": "CORRECT",
+      "stableClassification": true
+    },
+    {
+      "id": "H1-11",
+      "initialAssessmentId": "cmw52hmfy001b8phq4a2yjzhe",
+      "repeatAssessmentId": "cmw52i2y500078pn58o0fzgt6",
+      "answerHashMatches": true,
+      "questionHashMatches": true,
+      "configHashMatches": true,
+      "inputKeyMatches": true,
+      "answerTextMatches": true,
+      "initial": "CORRECT",
+      "repeat": "CORRECT",
+      "stableClassification": true
+    },
+    {
+      "id": "P2-08",
+      "initialAssessmentId": "cmw52hi2s00118phq3ckt602s",
+      "repeatAssessmentId": "cmw52i617000c8pn5kydzlu2i",
+      "answerHashMatches": true,
+      "questionHashMatches": true,
+      "configHashMatches": true,
+      "inputKeyMatches": true,
+      "answerTextMatches": true,
+      "initial": "INCORRECT",
+      "repeat": "PARTIAL",
+      "stableClassification": false
+    }
+  ],
+  "manualFindings": [
+    "P2-08 output in both trials explicitly treats the known ASR substitution packed tables as subject error; fixture notes identify fact tables as the intended term.",
+    "Initial P2-07 still fails VALID_REASONING_NOT_CREDITED.",
+    "P2-08 changes INCORRECT to PARTIAL despite exact answer, question, config and input-key hashes."
+  ],
+  "fixtureSha256": {
+    "policy-10-focused-1": "1206502a3e8d424ba3bf8d6bd5d638d98c81ca353e7538d6ddd8a68334eb56c1",
+    "policy-10-repeat-1": "9ee8580d4597e75e54fdead2600910ab3552053b4eb1d11f58c6a4d6ffa08687"
+  },
+  "limits": [
+    "Focused selection only: not all 20 original regressions or all eight transfer cases rerun.",
+    "One additional trial per blocker; no broad repeatability estimate.",
+    "AI-reviewed reference labels, not independent expert calibration.",
+    "Saved-answer grading tests; no new microphone/voice rollout test."
+  ]
+}

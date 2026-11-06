@@ -1,0 +1,202 @@
+{
+  "fixtureVersion": "grading-readiness-2026-11-06",
+  "reviewer": "Existing AI-reviewed bank-relative labels; no independent human expert review. Frozen selection before this run.",
+  "source": "ADMIN_TEST",
+  "configs": [
+    {
+      "id": "nova2-lite-learner-9",
+      "modelId": "us.amazon.nova-2-lite-v1:0",
+      "region": "us-east-1",
+      "label": "Nova 2 Lite \u00b7 learner grading 9 (candidate)",
+      "prompt": "interview-answer-11",
+      "schema": "interview-result-5",
+      "rubric": "bank-guidance-4",
+      "policy": "learner-evaluation-9",
+      "temperature": 0,
+      "maxTokens": 2000,
+      "timeoutMs": 20000
+    }
+  ],
+  "questions": {
+    "WEB-NEW-033": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-028": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-047": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "PY-NEW-010": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DE-NEW-016": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DEV-NEW-016": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "WEB-NEW-099": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DE-NEW-001": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "PY-NEW-021": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "OPS-NEW-001": {
+      "revision": 2,
+      "guidanceIssues": [
+        "Core states that deleting depends on parent-directory permissions, and Optional depth asks the same question."
+      ]
+    },
+    "MAN-NEW-019": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "SM-NEW-013": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DE-NEW-012": {
+      "revision": 2,
+      "guidanceIssues": [
+        "The misconception's 'Correction' is an unrelated example sentence."
+      ]
+    },
+    "PY-NEW-049": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "WEB-NEW-077": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-041": {
+      "revision": 2,
+      "guidanceIssues": []
+    }
+  },
+  "calibrated": false,
+  "limitation": "Small development set reviewed against bank guidance. Agreement on this sample is not a calibration claim.",
+  "summary": {
+    "cases": 2,
+    "completed": 0,
+    "agreement": 0,
+    "exactExpected": 0,
+    "forbiddenClassification": 0,
+    "invalidOutputJobs": 2,
+    "providerFailureJobs": 0,
+    "invocations": 4,
+    "invocationOutcomes": {
+      "INVALID_OUTPUT_INCONSISTENT": 2,
+      "INVALID_OUTPUT_CLAIM_CORRECT_WITH_GAPS": 2
+    },
+    "modelLatencyMs": {
+      "p50": 2610,
+      "p95": 4962,
+      "max": 4962
+    },
+    "endToEndMs": {
+      "p50": 3427,
+      "p95": 5083
+    },
+    "tokens": {
+      "input": 5316,
+      "output": 1351,
+      "invocationsWithUnknownUsage": 0
+    },
+    "quotesExact": true
+  },
+  "results": [
+    {
+      "id": "RS-03",
+      "name": "RS-03",
+      "category": "implicit-valid-reasoning",
+      "qid": "WEB-NEW-033",
+      "track": "Web / Frontend",
+      "difficulty": "Simple",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT",
+        "PARTIAL"
+      ],
+      "model": "learner-evaluation-9",
+      "actual": null,
+      "passed": false,
+      "review": null,
+      "assessmentId": "cmw3xhbrf000c8povg4cvo4ni",
+      "reused": true,
+      "status": "FAILED",
+      "errorCode": "INVALID_OUTPUT_CLAIM_CORRECT_WITH_GAPS",
+      "endToEndMs": 5083,
+      "usage": [
+        {
+          "latencyMs": 2564,
+          "inputTokens": 1305,
+          "outputTokens": 314,
+          "outcome": "INVALID_OUTPUT_INCONSISTENT"
+        },
+        {
+          "latencyMs": 4962,
+          "inputTokens": 1305,
+          "outputTokens": 319,
+          "outcome": "INVALID_OUTPUT_CLAIM_CORRECT_WITH_GAPS"
+        }
+      ],
+      "answer": "A window resize event only fires when the viewport changes. A sidebar collapsing or a web font loading can resize a card while the window stays the same size. ResizeObserver reports that element's own size change.",
+      "notes": "Valid reasoning with no causal keyword (statedReasons is empty).",
+      "result": null,
+      "topicSwitchPassed": null
+    },
+    {
+      "id": "H1-11",
+      "name": "H1-11",
+      "category": "complex-correct",
+      "qid": "AUT-NEW-041",
+      "track": "Automation Testing",
+      "difficulty": "Complex",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT"
+      ],
+      "model": "learner-evaluation-9",
+      "actual": null,
+      "passed": false,
+      "review": null,
+      "assessmentId": "cmw3xibrc002p8povogqmrjzy",
+      "reused": true,
+      "status": "FAILED",
+      "errorCode": "INVALID_OUTPUT_CLAIM_CORRECT_WITH_GAPS",
+      "endToEndMs": 3427,
+      "usage": [
+        {
+          "latencyMs": 2610,
+          "inputTokens": 1353,
+          "outputTokens": 360,
+          "outcome": "INVALID_OUTPUT_INCONSISTENT"
+        },
+        {
+          "latencyMs": 3341,
+          "inputTokens": 1353,
+          "outputTokens": 358,
+          "outcome": "INVALID_OUTPUT_CLAIM_CORRECT_WITH_GAPS"
+        }
+      ],
+      "answer": "If teams release on their own schedules and the shared parts are stable, I'd publish a versioned package with semantic versioning, changelogs and a deprecation policy, so each team upgrades when it is ready. If the teams are tightly coupled and change things together, a monorepo makes atomic changes easier, but it needs clear ownership and CI that only runs the affected suites.",
+      "notes": null,
+      "result": null,
+      "topicSwitchPassed": null
+    }
+  ]
+}

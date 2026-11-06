@@ -1,0 +1,41 @@
+[
+  {
+    "id": "RS-03",
+    "initialAssessmentId": "cmw52h5st00078phqffx8xbj1",
+    "repeatAssessmentId": "cmw52i15b00028pn5c20jk7a7",
+    "answerHashMatches": true,
+    "questionHashMatches": true,
+    "configHashMatches": true,
+    "inputKeyMatches": true,
+    "answerTextMatches": true,
+    "initial": "CORRECT",
+    "repeat": "CORRECT",
+    "stableClassification": true
+  },
+  {
+    "id": "H1-11",
+    "initialAssessmentId": "cmw52hmfy001b8phq4a2yjzhe",
+    "repeatAssessmentId": "cmw52i2y500078pn58o0fzgt6",
+    "answerHashMatches": true,
+    "questionHashMatches": true,
+    "configHashMatches": true,
+    "inputKeyMatches": true,
+    "answerTextMatches": true,
+    "initial": "CORRECT",
+    "repeat": "CORRECT",
+    "stableClassification": true
+  },
+  {
+    "id": "P2-08",
+    "initialAssessmentId": "cmw52hi2s00118phq3ckt602s",
+    "repeatAssessmentId": "cmw52i617000c8pn5kydzlu2i",
+    "answerHashMatches": true,
+    "questionHashMatches": true,
+    "configHashMatches": true,
+    "inputKeyMatches": true,
+    "answerTextMatches": true,
+    "initial": "INCORRECT",
+    "repeat": "PARTIAL",
+    "stableClassification": false
+  }
+]

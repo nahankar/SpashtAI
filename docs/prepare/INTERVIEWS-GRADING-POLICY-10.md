@@ -1,6 +1,8 @@
 # Policy 10 candidate — 6 November 2026
 
 Preview only. Policy 8 remains current; no promotion, merge, production change or adaptive enablement.
+The frozen local tests have now completed: **HOLD**, with exact-repeat instability and a reasoning regression.
+See `INTERVIEWS-GRADING-POLICY-10-RESULTS.md`; a passing repeat batch alone is not an overall pass.
 
 ## Diagnosis before changes
 

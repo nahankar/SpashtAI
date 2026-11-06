@@ -1,0 +1,172 @@
+{
+  "fixtureVersion": "grading-policy-10-focused-1",
+  "calibrated": false,
+  "decision": "HOLD_GRADE_DRIVEN_ADAPTATION",
+  "limitation": "Bank-relative AI-reviewed regression labels, not independent expert calibration or repeated-run reliability. A broader acceptable band can contain different adaptive actions; resolve routing-label disagreements before enablement.",
+  "summary": {
+    "cases": 17,
+    "usable": 17,
+    "acceptableClassification": 17,
+    "exactExpected": 16,
+    "allRequiredChecksPass": false,
+    "allRoutingLabelsMatch": false,
+    "failedCases": 1
+  },
+  "reviews": [
+    {
+      "id": "RS-01",
+      "model": "learner-evaluation-10",
+      "actual": "INCORRECT",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": true,
+      "failures": []
+    },
+    {
+      "id": "RS-03",
+      "model": "learner-evaluation-10",
+      "actual": "CORRECT",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": true,
+      "failures": []
+    },
+    {
+      "id": "RS-04",
+      "model": "learner-evaluation-10",
+      "actual": "INCORRECT",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": true,
+      "failures": []
+    },
+    {
+      "id": "RS-05",
+      "model": "learner-evaluation-10",
+      "actual": "CORRECT",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": true,
+      "failures": []
+    },
+    {
+      "id": "RS-06",
+      "model": "learner-evaluation-10",
+      "actual": "NOT_ANSWERED",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": true,
+      "failures": []
+    },
+    {
+      "id": "P2-06",
+      "model": "learner-evaluation-10",
+      "actual": "PARTIAL",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": true,
+      "failures": []
+    },
+    {
+      "id": "P2-07",
+      "model": "learner-evaluation-10",
+      "actual": "PARTIAL",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": true,
+      "failures": [
+        "VALID_REASONING_NOT_CREDITED"
+      ]
+    },
+    {
+      "id": "P2-08",
+      "model": "learner-evaluation-10",
+      "actual": "INCORRECT",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": false,
+      "failures": []
+    },
+    {
+      "id": "P2-01",
+      "model": "learner-evaluation-10",
+      "actual": "NOT_ANSWERED",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": true,
+      "failures": []
+    },
+    {
+      "id": "H1-11",
+      "model": "learner-evaluation-10",
+      "actual": "CORRECT",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": true,
+      "failures": []
+    },
+    {
+      "id": "F9-01",
+      "model": "learner-evaluation-10",
+      "actual": "CORRECT",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": true,
+      "failures": []
+    },
+    {
+      "id": "F9-03",
+      "model": "learner-evaluation-10",
+      "actual": "CORRECT",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": true,
+      "failures": []
+    },
+    {
+      "id": "F9-04",
+      "model": "learner-evaluation-10",
+      "actual": "CORRECT",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": true,
+      "failures": []
+    },
+    {
+      "id": "F9-05",
+      "model": "learner-evaluation-10",
+      "actual": "NOT_ANSWERED",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": true,
+      "failures": []
+    },
+    {
+      "id": "F9-08",
+      "model": "learner-evaluation-10",
+      "actual": "PARTIAL",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": true,
+      "failures": []
+    },
+    {
+      "id": "G-ABSTAIN",
+      "model": "learner-evaluation-10",
+      "actual": "NOT_ANSWERED",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": true,
+      "failures": []
+    },
+    {
+      "id": "G-REQUEST",
+      "model": "learner-evaluation-10",
+      "actual": "NOT_ANSWERED",
+      "usable": true,
+      "acceptableClassification": true,
+      "exactExpected": true,
+      "failures": []
+    }
+  ]
+}

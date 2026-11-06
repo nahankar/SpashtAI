@@ -1,0 +1,1664 @@
+{
+  "fixtureVersion": "grading-policy-10-focused-1",
+  "reviewer": "Existing AI-reviewed labels unchanged; no independent expert review.",
+  "source": "ADMIN_TEST",
+  "configs": [
+    {
+      "id": "nova2-lite-learner-10",
+      "modelId": "us.amazon.nova-2-lite-v1:0",
+      "region": "us-east-1",
+      "label": "Nova 2 Lite \u00b7 learner grading 10 (candidate)",
+      "prompt": "interview-answer-12",
+      "schema": "interview-result-5",
+      "rubric": "bank-guidance-4",
+      "policy": "learner-evaluation-10",
+      "temperature": 0,
+      "maxTokens": 2000,
+      "timeoutMs": 20000
+    }
+  ],
+  "questions": {
+    "WEB-NEW-033": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-028": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-047": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "PY-NEW-010": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DEV-NEW-016": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "WEB-NEW-099": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DE-NEW-001": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "PY-NEW-021": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "MAN-NEW-019": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DE-NEW-012": {
+      "revision": 2,
+      "guidanceIssues": [
+        "The misconception's 'Correction' is an unrelated example sentence."
+      ]
+    },
+    "WEB-NEW-077": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-041": {
+      "revision": 2,
+      "guidanceIssues": []
+    }
+  },
+  "calibrated": false,
+  "limitation": "Small development set reviewed against bank guidance. Agreement on this sample is not a calibration claim.",
+  "summary": {
+    "cases": 17,
+    "completed": 17,
+    "agreement": 17,
+    "exactExpected": 16,
+    "forbiddenClassification": 0,
+    "invalidOutputJobs": 0,
+    "providerFailureJobs": 0,
+    "invocations": 15,
+    "invocationOutcomes": {
+      "SUCCESS": 15
+    },
+    "modelLatencyMs": {
+      "p50": 2701,
+      "p95": 3786,
+      "max": 3786
+    },
+    "endToEndMs": {
+      "p50": 2613,
+      "p95": 3879
+    },
+    "tokens": {
+      "input": 24465,
+      "output": 5535,
+      "invocationsWithUnknownUsage": 0
+    },
+    "quotesExact": true
+  },
+  "results": [
+    {
+      "id": "RS-01",
+      "name": "RS-01",
+      "category": "incorrect-causality",
+      "qid": "WEB-NEW-033",
+      "track": "Web / Frontend",
+      "difficulty": "Simple",
+      "expected": "INCORRECT",
+      "acceptable": [
+        "INCORRECT",
+        "PARTIAL"
+      ],
+      "model": "learner-evaluation-10",
+      "actual": "INCORRECT",
+      "passed": true,
+      "review": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": null,
+        "forbiddenQuote": false,
+        "misconceptionReported": null,
+        "unexpectedMisconception": true,
+        "expectedGapReported": null,
+        "forbiddenGap": null,
+        "forbiddenWording": null,
+        "reasoningCredited": null,
+        "reasoningNotOverCredited": true,
+        "strengthAcknowledged": null,
+        "responseKindMatches": null,
+        "acknowledged": null
+      },
+      "assessmentId": "cmw52h3n100028phqmdnipyw6",
+      "reused": false,
+      "status": "COMPLETED",
+      "errorCode": null,
+      "endToEndMs": 2808,
+      "usage": [
+        {
+          "latencyMs": 2701,
+          "inputTokens": 1612,
+          "outputTokens": 348,
+          "outcome": "SUCCESS"
+        }
+      ],
+      "answer": "Use ResizeObserver because it is faster than a window resize listener and fires before the browser paints anything.",
+      "notes": "Keyword present, but the stated cause (speed) is not why ResizeObserver is used; the real reason (element vs viewport size) is absent.",
+      "result": {
+        "gaps": [
+          "ResizeObserver reacts to an element\u2019s content or border box changing, including changes caused by layout, fonts, content, or container resizing rather than only the viewport",
+          "It supports responsive components and chart or canvas recalculation where the observed element is the real dependency"
+        ],
+        "next": null,
+        "criteria": [
+          {
+            "finding": "NOT_MET",
+            "evidence": [
+              "Use ResizeObserver because it is faster than a window resize listener",
+              "and fires before the browser paints anything"
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "ResizeObserver is not necessarily faster; it observes element size changes, not viewport changes, which is the core distinction."
+          },
+          {
+            "finding": "NOT_MET",
+            "evidence": [
+              "Use ResizeObserver because it is faster than a window resize listener",
+              "and fires before the browser paints anything"
+            ],
+            "criterion": "REASONING",
+            "explanation": "ResizeObserver is not necessarily faster; it observes element size changes, not viewport changes, which is the core distinction."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "No correct technical explanation of when to use ResizeObserver versus window resize listeners was provided."
+          }
+        ],
+        "guidance": "Explain that ResizeObserver is used when an element's size changes due to layout shifts, content updates, or container resizing, not just viewport changes. Clarify that it observes the element's actual size, which is essential for responsive components and graphics.",
+        "strengths": [],
+        "assistance": "NONE",
+        "calibrated": false,
+        "uncertainty": [],
+        "afterExample": false,
+        "classification": "INCORRECT",
+        "misconceptions": [
+          "ResizeObserver is not necessarily faster; it observes element size changes, not viewport changes, which is the core distinction.",
+          "ResizeObserver callbacks run after the browser updates the layout but before the paint phase, not strictly \"before the browser paints anything\"; this phrasing misrepresents the timing."
+        ],
+        "followUpQuestion": ""
+      },
+      "topicSwitchPassed": null
+    },
+    {
+      "id": "RS-03",
+      "name": "RS-03",
+      "category": "implicit-valid-reasoning",
+      "qid": "WEB-NEW-033",
+      "track": "Web / Frontend",
+      "difficulty": "Simple",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT",
+        "PARTIAL"
+      ],
+      "model": "learner-evaluation-10",
+      "actual": "CORRECT",
+      "passed": true,
+      "review": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": null,
+        "forbiddenQuote": false,
+        "misconceptionReported": null,
+        "unexpectedMisconception": false,
+        "expectedGapReported": null,
+        "forbiddenGap": null,
+        "forbiddenWording": false,
+        "reasoningCredited": true,
+        "reasoningNotOverCredited": null,
+        "strengthAcknowledged": null,
+        "responseKindMatches": null,
+        "acknowledged": null
+      },
+      "assessmentId": "cmw52h5st00078phqffx8xbj1",
+      "reused": false,
+      "status": "COMPLETED",
+      "errorCode": null,
+      "endToEndMs": 2318,
+      "usage": [
+        {
+          "latencyMs": 2240,
+          "inputTokens": 1632,
+          "outputTokens": 330,
+          "outcome": "SUCCESS"
+        }
+      ],
+      "answer": "A window resize event only fires when the viewport changes. A sidebar collapsing or a web font loading can resize a card while the window stays the same size. ResizeObserver reports that element's own size change.",
+      "notes": "Valid reasoning with no causal keyword (statedReasons is empty).",
+      "result": {
+        "gaps": [],
+        "next": null,
+        "criteria": [
+          {
+            "finding": "MET",
+            "evidence": [
+              "A window resize event only fires when the viewport changes.",
+              "A sidebar collapsing or a web font loading can resize a card while the window stays the same size.",
+              "ResizeObserver reports that element's own size change."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "Correctly states that window resize events are viewport-specific."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "A window resize event only fires when the viewport changes.",
+              "A sidebar collapsing or a web font loading can resize a card while the window stays the same size.",
+              "ResizeObserver reports that element's own size change."
+            ],
+            "criterion": "REASONING",
+            "explanation": "Correctly states that window resize events are viewport-specific."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "A sidebar collapsing or a web font loading can resize a card while the window stays the same size."
+            ],
+            "criterion": "DEPTH",
+            "explanation": "The answer correctly explains why a card can resize due to container changes without a viewport resize, addressing the expected depth."
+          }
+        ],
+        "guidance": "Consider mentioning that mutating observed elements inside the ResizeObserver callback can create resize loops, and that observers should be disconnected during teardown.",
+        "strengths": [
+          "Correctly states that window resize events are viewport-specific.",
+          "Correctly identifies scenarios where an element's size changes without a viewport resize.",
+          "Correctly states that ResizeObserver observes element size changes."
+        ],
+        "assistance": "NONE",
+        "calibrated": false,
+        "uncertainty": [],
+        "afterExample": false,
+        "classification": "CORRECT",
+        "misconceptions": [],
+        "followUpQuestion": ""
+      },
+      "topicSwitchPassed": null
+    },
+    {
+      "id": "RS-04",
+      "name": "RS-04",
+      "category": "incorrect-causality",
+      "qid": "AUT-NEW-028",
+      "track": "Automation Testing",
+      "difficulty": "Simple",
+      "expected": "INCORRECT",
+      "acceptable": [
+        "INCORRECT"
+      ],
+      "model": "learner-evaluation-10",
+      "actual": "INCORRECT",
+      "passed": true,
+      "review": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": null,
+        "forbiddenQuote": false,
+        "misconceptionReported": true,
+        "unexpectedMisconception": false,
+        "expectedGapReported": null,
+        "forbiddenGap": null,
+        "forbiddenWording": null,
+        "reasoningCredited": null,
+        "reasoningNotOverCredited": true,
+        "strengthAcknowledged": null,
+        "responseKindMatches": null,
+        "acknowledged": null
+      },
+      "assessmentId": "cmw52h7lf000c8phqtwhi7r2f",
+      "reused": false,
+      "status": "COMPLETED",
+      "errorCode": null,
+      "endToEndMs": 2185,
+      "usage": [
+        {
+          "latencyMs": 2105,
+          "inputTokens": 1623,
+          "outputTokens": 250,
+          "outcome": "SUCCESS"
+        }
+      ],
+      "answer": "Put your assertions inside then() because then() retries the whole query chain until the assertion passes.",
+      "notes": "The bank's listed misconception, stated as the reason.",
+      "result": {
+        "gaps": [
+          "Which Cypress operations retry automatically",
+          "Why placing an assertion inside then() can be a mistake"
+        ],
+        "next": null,
+        "criteria": [
+          {
+            "finding": "NOT_MET",
+            "evidence": [
+              "Put your assertions inside then() because then() retries the whole query chain until the assertion passes."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "This claim incorrectly states that assertions inside then() are retried. In Cypress, then() callbacks are not retried, so assertions placed there may fail before the UI settles."
+          },
+          {
+            "finding": "NOT_MET",
+            "evidence": [
+              "Put your assertions inside then() because then() retries the whole query chain until the assertion passes."
+            ],
+            "criterion": "REASONING",
+            "explanation": "This claim incorrectly states that assertions inside then() are retried. In Cypress, then() callbacks are not retried, so assertions placed there may fail before the UI settles."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "The answer contains only an incorrect claim and does not provide any correct technical understanding of retryability boundaries."
+          }
+        ],
+        "guidance": "Review the difference between retryable queries and non-retriable then() callbacks in Cypress. Understand that assertions should be placed in should() for retryability, while then() is for one-time transformations or side effects.",
+        "strengths": [],
+        "assistance": "NONE",
+        "calibrated": false,
+        "uncertainty": [],
+        "afterExample": false,
+        "classification": "INCORRECT",
+        "misconceptions": [
+          "This claim incorrectly states that assertions inside then() are retried. In Cypress, then() callbacks are not retried, so assertions placed there may fail before the UI settles."
+        ],
+        "followUpQuestion": ""
+      },
+      "topicSwitchPassed": null
+    },
+    {
+      "id": "RS-05",
+      "name": "RS-05",
+      "category": "implicit-valid-reasoning",
+      "qid": "AUT-NEW-028",
+      "track": "Automation Testing",
+      "difficulty": "Simple",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT",
+        "PARTIAL"
+      ],
+      "model": "learner-evaluation-10",
+      "actual": "CORRECT",
+      "passed": true,
+      "review": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": null,
+        "forbiddenQuote": false,
+        "misconceptionReported": null,
+        "unexpectedMisconception": false,
+        "expectedGapReported": null,
+        "forbiddenGap": null,
+        "forbiddenWording": false,
+        "reasoningCredited": true,
+        "reasoningNotOverCredited": null,
+        "strengthAcknowledged": null,
+        "responseKindMatches": null,
+        "acknowledged": null
+      },
+      "assessmentId": "cmw52h9a0000h8phqura06d9a",
+      "reused": false,
+      "status": "COMPLETED",
+      "errorCode": null,
+      "endToEndMs": 3354,
+      "usage": [
+        {
+          "latencyMs": 3276,
+          "inputTokens": 1643,
+          "outputTokens": 308,
+          "outcome": "SUCCESS"
+        }
+      ],
+      "answer": "should() re-runs the query and its assertion until it passes or times out. A then() callback runs one time, and an assertion in it can read the page before it has updated.",
+      "notes": "Valid reasoning without causal keywords.",
+      "result": {
+        "gaps": [],
+        "next": null,
+        "criteria": [
+          {
+            "finding": "MET",
+            "evidence": [
+              "should() re-runs the query and its assertion until it passes or times out.",
+              "A then() callback runs one time, and an assertion in it can read the page before it has updated."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "Correctly identifies that should() retries the query and assertion until success or timeout."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "should() re-runs the query and its assertion until it passes or times out.",
+              "A then() callback runs one time, and an assertion in it can read the page before it has updated."
+            ],
+            "criterion": "REASONING",
+            "explanation": "Correctly identifies that should() retries the query and assertion until success or timeout."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "should() re-runs the query and its assertion until it passes or times out.",
+              "A then() callback runs one time, and an assertion in it can read the page before it has updated."
+            ],
+            "criterion": "DEPTH",
+            "explanation": "The answer correctly explains the retry behavior of should() and the single-execution nature of then(), covering the essential distinction."
+          }
+        ],
+        "guidance": "Consider adding a brief example to illustrate the difference, such as a query for an element that appears after a delay.",
+        "strengths": [
+          "Correctly identifies that should() retries the query and assertion until success or timeout.",
+          "Correctly states that then() callbacks run once and can read transient state before updates settle."
+        ],
+        "assistance": "NONE",
+        "calibrated": false,
+        "uncertainty": [],
+        "afterExample": false,
+        "classification": "CORRECT",
+        "misconceptions": [],
+        "followUpQuestion": ""
+      },
+      "topicSwitchPassed": null
+    },
+    {
+      "id": "RS-06",
+      "name": "RS-06",
+      "category": "empty-because",
+      "qid": "AUT-NEW-047",
+      "track": "Automation Testing",
+      "difficulty": "Simple",
+      "expected": "NOT_ANSWERED",
+      "acceptable": [
+        "NOT_ANSWERED",
+        "PARTIAL"
+      ],
+      "model": "learner-evaluation-10",
+      "actual": "NOT_ANSWERED",
+      "passed": true,
+      "review": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": null,
+        "forbiddenQuote": false,
+        "misconceptionReported": null,
+        "unexpectedMisconception": false,
+        "expectedGapReported": null,
+        "forbiddenGap": null,
+        "forbiddenWording": null,
+        "reasoningCredited": null,
+        "reasoningNotOverCredited": true,
+        "strengthAcknowledged": null,
+        "responseKindMatches": null,
+        "acknowledged": null
+      },
+      "assessmentId": "cmw52hbve000m8phq8ltj38nh",
+      "reused": false,
+      "status": "COMPLETED",
+      "errorCode": null,
+      "endToEndMs": 2112,
+      "usage": [
+        {
+          "latencyMs": 2038,
+          "inputTokens": 1593,
+          "outputTokens": 203,
+          "outcome": "SUCCESS"
+        }
+      ],
+      "answer": "Use soft assertions because they are good practice.",
+      "notes": "Empty justification.",
+      "result": {
+        "gaps": [],
+        "next": null,
+        "criteria": [
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "ACCURACY",
+            "explanation": "No supporting subject evidence was established for this criterion."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "REASONING",
+            "explanation": "No supporting subject evidence was established for this criterion."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "The answer contains no substantive technical claims, so depth cannot be assessed."
+          }
+        ],
+        "guidance": "Explain the purpose of soft assertions and why a test might pass incorrectly without proper aggregation at the end.",
+        "strengths": [],
+        "assistance": "NONE",
+        "calibrated": false,
+        "uncertainty": [],
+        "afterExample": false,
+        "classification": "NOT_ANSWERED",
+        "misconceptions": [],
+        "followUpQuestion": ""
+      },
+      "topicSwitchPassed": null
+    },
+    {
+      "id": "P2-06",
+      "name": "P2-06",
+      "category": "mixed-correct-and-false",
+      "qid": "DEV-NEW-016",
+      "track": "Java",
+      "difficulty": "Simple",
+      "expected": "PARTIAL",
+      "acceptable": [
+        "PARTIAL",
+        "INCORRECT"
+      ],
+      "model": "learner-evaluation-10",
+      "actual": "PARTIAL",
+      "passed": true,
+      "review": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": null,
+        "forbiddenQuote": false,
+        "misconceptionReported": true,
+        "unexpectedMisconception": false,
+        "expectedGapReported": null,
+        "forbiddenGap": null,
+        "forbiddenWording": false,
+        "reasoningCredited": null,
+        "reasoningNotOverCredited": null,
+        "strengthAcknowledged": true,
+        "responseKindMatches": null,
+        "acknowledged": null
+      },
+      "assessmentId": "cmw52hdia000r8phqb57mn6pc",
+      "reused": false,
+      "status": "COMPLETED",
+      "errorCode": null,
+      "endToEndMs": 3602,
+      "usage": [
+        {
+          "latencyMs": 3512,
+          "inputTokens": 1617,
+          "outputTokens": 362,
+          "outcome": "SUCCESS"
+        }
+      ],
+      "answer": "And asynchronous dependent call needs composition rather than nested future values.\nThe stated misconception is a false, and we should use synchronous calls whenever possible.",
+      "notes": "First sentence is correct (dependent async calls need composition, not nested futures); 'use synchronous calls whenever possible' is false. The correct concept must be acknowledged.",
+      "result": {
+        "gaps": [
+          "Explanation of thenApply, thenCompose, and thenCombine",
+          "Explanation of exception handling in CompletableFuture",
+          "Why asynchronous dependent calls need composition rather than nested future values",
+          "Why the stated misconception is false"
+        ],
+        "next": null,
+        "criteria": [
+          {
+            "finding": "PARTIAL",
+            "evidence": [
+              "And asynchronous dependent call needs composition rather than nested future values.",
+              "The stated misconception is a false",
+              "and we should use synchronous calls whenever possible."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "Some relevant understanding was demonstrated, with essential gaps or a false claim."
+          },
+          {
+            "finding": "PARTIAL",
+            "evidence": [
+              "And asynchronous dependent call needs composition rather than nested future values.",
+              "The stated misconception is a false",
+              "and we should use synchronous calls whenever possible."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The explanation includes valid reasoning alongside false or incomplete reasoning."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "The model did not provide supporting evidence for this finding. This criterion is left unassessed."
+          }
+        ],
+        "guidance": "Provide a clear explanation of each method (thenApply, thenCompose, thenCombine) and how exception handling works in CompletableFuture. Explain why asynchronous dependent calls need composition and why the misconception is false.",
+        "strengths": [
+          "Correctly states that asynchronous dependent calls require composition to avoid nested futures.",
+          "Correctly identifies the misconception as false."
+        ],
+        "assistance": "NONE",
+        "calibrated": false,
+        "uncertainty": [],
+        "afterExample": false,
+        "classification": "PARTIAL",
+        "misconceptions": [
+          "Incorrectly suggests using synchronous calls whenever possible, which contradicts the purpose of CompletableFuture composition for asynchronous operations."
+        ],
+        "validationNotes": [
+          "Answer depth: the model returned Needs improvement without evidence. The finding was changed to Not established; no evidence was invented."
+        ],
+        "followUpQuestion": ""
+      },
+      "topicSwitchPassed": null
+    },
+    {
+      "id": "P2-07",
+      "name": "P2-07",
+      "category": "fragmented-implicit-reasoning",
+      "qid": "WEB-NEW-099",
+      "track": "Web / Frontend",
+      "difficulty": "Simple",
+      "expected": "PARTIAL",
+      "acceptable": [
+        "PARTIAL",
+        "CORRECT"
+      ],
+      "model": "learner-evaluation-10",
+      "actual": "PARTIAL",
+      "passed": true,
+      "review": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": null,
+        "forbiddenQuote": false,
+        "misconceptionReported": null,
+        "unexpectedMisconception": false,
+        "expectedGapReported": null,
+        "forbiddenGap": null,
+        "forbiddenWording": false,
+        "reasoningCredited": false,
+        "reasoningNotOverCredited": null,
+        "strengthAcknowledged": null,
+        "responseKindMatches": null,
+        "acknowledged": null
+      },
+      "assessmentId": "cmw52hgae000w8phqn5xjf3qk",
+      "reused": false,
+      "status": "COMPLETED",
+      "errorCode": null,
+      "endToEndMs": 2319,
+      "usage": [
+        {
+          "latencyMs": 2226,
+          "inputTokens": 1646,
+          "outputTokens": 320,
+          "outcome": "SUCCESS"
+        }
+      ],
+      "answer": "Keyboard order follows semantic controls.\nAnd\nDom position.\nPositive TB index.\nCreates\nUh, competing manual order?\nUh, the example.\nI don't have one.\nMaybe, I don't know.",
+      "notes": "'Positive TB index. Creates ... competing manual order' is the reason positive tabindex is discouraged.",
+      "result": {
+        "gaps": [
+          "Why positive tabindex values are discouraged",
+          "How tabindex=\"0\" and tabindex=\"-1\" behave",
+          "Fix source order and use semantic controls instead of constructing a manual tab sequence"
+        ],
+        "next": null,
+        "criteria": [
+          {
+            "finding": "PARTIAL",
+            "evidence": [
+              "Keyboard order follows semantic controls.",
+              "Dom position.",
+              "Positive TB index.\nCreates\nUh, competing manual order?"
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "Some relevant understanding was demonstrated, with essential gaps or a false claim."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "REASONING",
+            "explanation": "No supporting subject evidence was established for this criterion."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "The model did not provide supporting evidence for this finding. This criterion is left unassessed."
+          }
+        ],
+        "guidance": "Explain why positive tabindex values are discouraged and describe the behavior of tabindex=\"0\" and tabindex=\"-1\".",
+        "strengths": [
+          "Correctly states that keyboard order follows semantic controls.",
+          "Correctly states that DOM position determines keyboard order.",
+          "Correctly identifies that positive tabindex creates a competing manual order, though phrased uncertainly."
+        ],
+        "assistance": "NONE",
+        "calibrated": false,
+        "uncertainty": [],
+        "afterExample": false,
+        "classification": "PARTIAL",
+        "misconceptions": [],
+        "validationNotes": [
+          "Answer depth: the model returned Needs improvement without evidence. The finding was changed to Not established; no evidence was invented."
+        ],
+        "followUpQuestion": ""
+      },
+      "topicSwitchPassed": null
+    },
+    {
+      "id": "P2-08",
+      "name": "P2-08",
+      "category": "vague-substantive-fragments",
+      "qid": "DE-NEW-001",
+      "track": "Data Engineering",
+      "difficulty": "Simple",
+      "expected": "PARTIAL",
+      "acceptable": [
+        "PARTIAL",
+        "INCORRECT"
+      ],
+      "model": "learner-evaluation-10",
+      "actual": "INCORRECT",
+      "passed": false,
+      "review": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": null,
+        "forbiddenQuote": false,
+        "misconceptionReported": null,
+        "unexpectedMisconception": true,
+        "expectedGapReported": null,
+        "forbiddenGap": null,
+        "forbiddenWording": null,
+        "reasoningCredited": null,
+        "reasoningNotOverCredited": null,
+        "strengthAcknowledged": null,
+        "responseKindMatches": null,
+        "acknowledged": null
+      },
+      "assessmentId": "cmw52hi2s00118phq3ckt602s",
+      "reused": false,
+      "status": "COMPLETED",
+      "errorCode": null,
+      "endToEndMs": 2613,
+      "usage": [
+        {
+          "latencyMs": 2541,
+          "inputTokens": 1754,
+          "outputTokens": 404,
+          "outcome": "SUCCESS"
+        }
+      ],
+      "answer": "Packed tables are the real data.\nUm,\nWhich are specific to any artifact dimensions can be\nCreated, derived.\nAcross the data.\ncombination of the data aggregation of the data.\nAgainst any specific\nOther fields, so multiple dimensions can be created.\nTo query all of the data at once, instead of the basic rows and columns that 1 may typically do.",
+      "notes": "Vague but makes claims (fact tables hold the real data; dimensions derived across the data; aggregation). Grade those claims; do not credit grain or measures, which are not stated. 'Packed' is a mishearing of 'fact'.",
+      "result": {
+        "gaps": [
+          "Definition of a fact table as storing business measurements or events at a declared grain",
+          "Definition of a dimension table as providing descriptive context for filtering and grouping",
+          "Example linking a fact table (e.g., order-line) to dimension tables (e.g., product, customer, date)",
+          "Explanation of how grain determines what one fact row represents and enables safe aggregation"
+        ],
+        "next": null,
+        "criteria": [
+          {
+            "finding": "NOT_MET",
+            "evidence": [
+              "Packed tables are the real data.",
+              "Um,\nWhich are specific to any artifact dimensions can be\nCreated, derived.",
+              "Across the data.\ncombination of the data aggregation of the data."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "The statement misidentifies 'packed tables' as the core concept instead of correctly distinguishing fact and dimension tables."
+          },
+          {
+            "finding": "NOT_MET",
+            "evidence": [
+              "Packed tables are the real data.",
+              "Um,\nWhich are specific to any artifact dimensions can be\nCreated, derived.",
+              "Across the data.\ncombination of the data aggregation of the data."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The statement misidentifies 'packed tables' as the core concept instead of correctly distinguishing fact and dimension tables."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "No substantive technical claims were made that could be assessed for depth."
+          }
+        ],
+        "guidance": "Clarify the core distinction: fact tables record measurable events at a specific grain, while dimension tables store descriptive attributes that provide context for analysis.",
+        "strengths": [],
+        "assistance": "NONE",
+        "calibrated": false,
+        "uncertainty": [],
+        "afterExample": false,
+        "classification": "INCORRECT",
+        "misconceptions": [
+          "The statement misidentifies 'packed tables' as the core concept instead of correctly distinguishing fact and dimension tables.",
+          "The phrasing is unclear and does not correctly describe the role or structure of dimension tables.",
+          "The statement vaguely references data aggregation but fails to explain how fact tables store measurements or how dimensions provide context."
+        ],
+        "followUpQuestion": ""
+      },
+      "topicSwitchPassed": null
+    },
+    {
+      "id": "P2-01",
+      "name": "P2-01",
+      "category": "control-guidance-echo",
+      "qid": "PY-NEW-010",
+      "track": "Python",
+      "difficulty": "Simple",
+      "expected": "NOT_ANSWERED",
+      "acceptable": [
+        "NOT_ANSWERED"
+      ],
+      "model": "learner-evaluation-10",
+      "actual": "NOT_ANSWERED",
+      "passed": true,
+      "review": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": null,
+        "forbiddenQuote": false,
+        "misconceptionReported": null,
+        "unexpectedMisconception": false,
+        "expectedGapReported": null,
+        "forbiddenGap": null,
+        "forbiddenWording": null,
+        "reasoningCredited": null,
+        "reasoningNotOverCredited": null,
+        "strengthAcknowledged": null,
+        "responseKindMatches": null,
+        "acknowledged": null
+      },
+      "assessmentId": "cmw52hk3c00168phqkahs9cy8",
+      "reused": false,
+      "status": "COMPLETED",
+      "errorCode": null,
+      "endToEndMs": 3038,
+      "usage": [
+        {
+          "latencyMs": 2969,
+          "inputTokens": 1569,
+          "outputTokens": 431,
+          "outcome": "SUCCESS"
+        }
+      ],
+      "answer": "None defaults with concrete.\nAnd standard limitation, a clear mechanism.\nAnd the current application are sufficient.",
+      "notes": "Control: repeats instruction wording; no technical claim. Must not be upgraded.",
+      "result": {
+        "gaps": [],
+        "next": null,
+        "criteria": [
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "ACCURACY",
+            "explanation": "No supporting subject evidence was established for this criterion."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "REASONING",
+            "explanation": "No supporting subject evidence was established for this criterion."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "The response contains no substantive technical claims or explanations, so depth cannot be assessed."
+          }
+        ],
+        "guidance": "Provide a clear explanation of why 'if value' is unsafe for supplying defaults, including the distinction between false-like values and missing data, and use an example to illustrate the issue.",
+        "strengths": [],
+        "assistance": "NONE",
+        "calibrated": false,
+        "uncertainty": [],
+        "afterExample": false,
+        "classification": "NOT_ANSWERED",
+        "misconceptions": [],
+        "followUpQuestion": ""
+      },
+      "topicSwitchPassed": null
+    },
+    {
+      "id": "H1-11",
+      "name": "H1-11",
+      "category": "complex-correct",
+      "qid": "AUT-NEW-041",
+      "track": "Automation Testing",
+      "difficulty": "Complex",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT"
+      ],
+      "model": "learner-evaluation-10",
+      "actual": "CORRECT",
+      "passed": true,
+      "review": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "misconceptionReported": null,
+        "unexpectedMisconception": false,
+        "expectedGapReported": null,
+        "forbiddenGap": null,
+        "forbiddenWording": null,
+        "reasoningCredited": null,
+        "reasoningNotOverCredited": null,
+        "strengthAcknowledged": null,
+        "responseKindMatches": null,
+        "acknowledged": null
+      },
+      "assessmentId": "cmw52hmfy001b8phq4a2yjzhe",
+      "reused": false,
+      "status": "COMPLETED",
+      "errorCode": null,
+      "endToEndMs": 2456,
+      "usage": [
+        {
+          "latencyMs": 2383,
+          "inputTokens": 1680,
+          "outputTokens": 359,
+          "outcome": "SUCCESS"
+        }
+      ],
+      "answer": "If teams release on their own schedules and the shared parts are stable, I'd publish a versioned package with semantic versioning, changelogs and a deprecation policy, so each team upgrades when it is ready. If the teams are tightly coupled and change things together, a monorepo makes atomic changes easier, but it needs clear ownership and CI that only runs the affected suites.",
+      "notes": null,
+      "result": {
+        "gaps": [],
+        "next": null,
+        "criteria": [
+          {
+            "finding": "MET",
+            "evidence": [
+              "If teams release on their own schedules and the shared parts are stable, I'd publish a versioned package with semantic versioning, changelogs and a deprecation policy, so each team upgrades when it is ready.",
+              "If the teams are tightly coupled and change things together, a monorepo makes atomic changes easier, but it needs clear ownership and CI that only runs the affected suites."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "Correctly identifies versioned packages for independent release cadences and stable shared primitives, with required semantic versioning, changelogs, and deprecation policy."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "If teams release on their own schedules and the shared parts are stable, I'd publish a versioned package with semantic versioning, changelogs and a deprecation policy, so each team upgrades when it is ready.",
+              "If the teams are tightly coupled and change things together, a monorepo makes atomic changes easier, but it needs clear ownership and CI that only runs the affected suites."
+            ],
+            "criterion": "REASONING",
+            "explanation": "Correctly identifies versioned packages for independent release cadences and stable shared primitives, with required semantic versioning, changelogs, and deprecation policy."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "so each team upgrades when it is ready",
+              "a monorepo makes atomic changes easier, but it needs clear ownership and CI that only runs the affected suites"
+            ],
+            "criterion": "DEPTH",
+            "explanation": "Answers cover the essential distinction between versioned packages and monorepos, and explain why independent teams may adopt a stable shared package on different schedules."
+          }
+        ],
+        "guidance": "Consider adding an explicit statement that a versioned package does not require all teams to upgrade simultaneously, to directly refute the common misconception.",
+        "strengths": [
+          "Correctly identifies versioned packages for independent release cadences and stable shared primitives, with required semantic versioning, changelogs, and deprecation policy.",
+          "Correctly identifies monorepo benefits for tightly coordinated teams and necessary ownership boundaries and scalable CI."
+        ],
+        "assistance": "NONE",
+        "calibrated": false,
+        "uncertainty": [],
+        "afterExample": false,
+        "classification": "CORRECT",
+        "misconceptions": [],
+        "followUpQuestion": ""
+      },
+      "topicSwitchPassed": null
+    },
+    {
+      "id": "F9-01",
+      "name": "F9-01",
+      "category": "fresh-concise-mechanism",
+      "qid": "PY-NEW-021",
+      "track": "Python",
+      "difficulty": "Simple",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT"
+      ],
+      "model": "learner-evaluation-10",
+      "actual": "CORRECT",
+      "passed": true,
+      "review": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": null,
+        "forbiddenQuote": false,
+        "misconceptionReported": null,
+        "unexpectedMisconception": false,
+        "expectedGapReported": null,
+        "forbiddenGap": null,
+        "forbiddenWording": null,
+        "reasoningCredited": true,
+        "reasoningNotOverCredited": null,
+        "strengthAcknowledged": null,
+        "responseKindMatches": null,
+        "acknowledged": null
+      },
+      "assessmentId": "cmw52hocb001g8phq15q2wf16",
+      "reused": false,
+      "status": "COMPLETED",
+      "errorCode": null,
+      "endToEndMs": 2460,
+      "usage": [
+        {
+          "latencyMs": 2379,
+          "inputTokens": 1570,
+          "outputTokens": 361,
+          "outcome": "SUCCESS"
+        }
+      ],
+      "answer": "Importing still executes the top-level statements outside the guard. The guard keeps the command-line startup from running on import, while running the file directly executes that block. Reusable functions can be imported independently.",
+      "notes": null,
+      "result": {
+        "gaps": [],
+        "next": null,
+        "criteria": [
+          {
+            "finding": "MET",
+            "evidence": [
+              "Importing still executes the top-level statements outside the guard.",
+              "The guard keeps the command-line startup from running on import, while running the file directly executes that block.",
+              "Reusable functions can be imported independently."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "Correctly states that code outside the guard executes on import."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "Importing still executes the top-level statements outside the guard.",
+              "The guard keeps the command-line startup from running on import, while running the file directly executes that block.",
+              "Reusable functions can be imported independently."
+            ],
+            "criterion": "REASONING",
+            "explanation": "Correctly states that code outside the guard executes on import."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "The guard keeps the command-line startup from running on import, while running the file directly executes that block.",
+              "Reusable functions can be imported independently."
+            ],
+            "criterion": "DEPTH",
+            "explanation": "The answer covers the essential mechanism and purpose of the guard with correct explanations."
+          }
+        ],
+        "guidance": "Consider adding a brief example to illustrate the practical benefit, such as a module with CLI handling behind the guard that can also be imported for its functions.",
+        "strengths": [
+          "Correctly states that code outside the guard executes on import.",
+          "Correctly explains the guard's purpose: it prevents the guarded block from running during import but allows it when the file is executed directly.",
+          "Correctly states that functions defined in the module can be imported and used without triggering the command-line startup logic."
+        ],
+        "assistance": "NONE",
+        "calibrated": false,
+        "uncertainty": [],
+        "afterExample": false,
+        "classification": "CORRECT",
+        "misconceptions": [],
+        "followUpQuestion": ""
+      },
+      "topicSwitchPassed": null
+    },
+    {
+      "id": "F9-03",
+      "name": "F9-03",
+      "category": "fresh-implicit-reasoning",
+      "qid": "AUT-NEW-028",
+      "track": "Automation Testing",
+      "difficulty": "Simple",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT"
+      ],
+      "model": "learner-evaluation-10",
+      "actual": "CORRECT",
+      "passed": true,
+      "review": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": null,
+        "forbiddenQuote": false,
+        "misconceptionReported": null,
+        "unexpectedMisconception": false,
+        "expectedGapReported": null,
+        "forbiddenGap": null,
+        "forbiddenWording": null,
+        "reasoningCredited": true,
+        "reasoningNotOverCredited": null,
+        "strengthAcknowledged": null,
+        "responseKindMatches": null,
+        "acknowledged": null
+      },
+      "assessmentId": "cmw52hq8s001l8phqvsk7p9px",
+      "reused": false,
+      "status": "COMPLETED",
+      "errorCode": null,
+      "endToEndMs": 3189,
+      "usage": [
+        {
+          "latencyMs": 3125,
+          "inputTokens": 1652,
+          "outputTokens": 441,
+          "outcome": "SUCCESS"
+        }
+      ],
+      "answer": "Queries and their should assertions run again until success or timeout. Actions execute once. A then callback runs once; its assertion can observe the UI before the asynchronous update finishes. I use should for that assertion and then for a one-time transformation.",
+      "notes": null,
+      "result": {
+        "gaps": [],
+        "next": null,
+        "criteria": [
+          {
+            "finding": "MET",
+            "evidence": [
+              "Queries and their should assertions run again until success or timeout.",
+              "Actions execute once.",
+              "A then callback runs once; its assertion can observe the UI before the asynchronous update finishes."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "Correctly identifies that queries and their attached assertions are retried until they pass or time out."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "Queries and their should assertions run again until success or timeout.",
+              "Actions execute once.",
+              "A then callback runs once; its assertion can observe the UI before the asynchronous update finishes."
+            ],
+            "criterion": "REASONING",
+            "explanation": "Correctly identifies that queries and their attached assertions are retried until they pass or time out."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "Queries and their should assertions run again until success or timeout.",
+              "A then callback runs once; its assertion can observe the UI before the asynchronous update finishes."
+            ],
+            "criterion": "DEPTH",
+            "explanation": "The answer correctly explains the retry behavior of queries and the non-retry behavior of then() callbacks, and provides appropriate usage guidance."
+          }
+        ],
+        "guidance": "The answer is clear and covers all essential points. For further depth, you could explain how a changing DOM might cause a stale subject error when using then().",
+        "strengths": [
+          "Correctly identifies that queries and their attached assertions are retried until they pass or time out.",
+          "Correctly states that action commands execute only once after actionability checks.",
+          "Correctly explains that a callback in then() is not retried and can fail if it reads transient state before the UI settles.",
+          "Correctly recommends using should() for retryable assertions and then() for one-time transformations."
+        ],
+        "assistance": "NONE",
+        "calibrated": false,
+        "uncertainty": [],
+        "afterExample": false,
+        "classification": "CORRECT",
+        "misconceptions": [],
+        "followUpQuestion": ""
+      },
+      "topicSwitchPassed": null
+    },
+    {
+      "id": "F9-04",
+      "name": "F9-04",
+      "category": "fresh-contrast-reasoning",
+      "qid": "DE-NEW-012",
+      "track": "Data Engineering",
+      "difficulty": "Medium",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT"
+      ],
+      "model": "learner-evaluation-10",
+      "actual": "CORRECT",
+      "passed": true,
+      "review": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": null,
+        "forbiddenQuote": false,
+        "misconceptionReported": null,
+        "unexpectedMisconception": false,
+        "expectedGapReported": null,
+        "forbiddenGap": null,
+        "forbiddenWording": null,
+        "reasoningCredited": true,
+        "reasoningNotOverCredited": null,
+        "strengthAcknowledged": null,
+        "responseKindMatches": null,
+        "acknowledged": null
+      },
+      "assessmentId": "cmw52hspa001q8phqhhps0dhn",
+      "reused": false,
+      "status": "COMPLETED",
+      "errorCode": null,
+      "endToEndMs": 2870,
+      "usage": [
+        {
+          "latencyMs": 2794,
+          "inputTokens": 1595,
+          "outputTokens": 406,
+          "outcome": "SUCCESS"
+        }
+      ],
+      "answer": "In the operational store a customer address is updated in one authoritative place, avoiding copies and update anomalies. The reporting view can flatten those attributes to avoid repeated joins in analytical queries. A controlled transformation and reconciliation keep the reporting copies consistent.",
+      "notes": null,
+      "result": {
+        "gaps": [],
+        "next": null,
+        "criteria": [
+          {
+            "finding": "MET",
+            "evidence": [
+              "In the operational store a customer address is updated in one authoritative place, avoiding copies and update anomalies.",
+              "The reporting view can flatten those attributes to avoid repeated joins in analytical queries.",
+              "A controlled transformation and reconciliation keep the reporting copies consistent."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "Correctly states that normalization in operational databases avoids update anomalies by keeping data in one authoritative place."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "In the operational store a customer address is updated in one authoritative place, avoiding copies and update anomalies.",
+              "The reporting view can flatten those attributes to avoid repeated joins in analytical queries.",
+              "A controlled transformation and reconciliation keep the reporting copies consistent."
+            ],
+            "criterion": "REASONING",
+            "explanation": "Correctly states that normalization in operational databases avoids update anomalies by keeping data in one authoritative place."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "In the operational store a customer address is updated in one authoritative place, avoiding copies and update anomalies.",
+              "The reporting view can flatten those attributes to avoid repeated joins in analytical queries.",
+              "A controlled transformation and reconciliation keep the reporting copies consistent."
+            ],
+            "criterion": "DEPTH",
+            "explanation": "The answer covers the essential trade-off between normalization for operational updates and denormalization for analytical simplicity, and mentions controlled transformation for consistency."
+          }
+        ],
+        "guidance": "Consider adding a concrete example, such as an order service updating a normalized customer address while a daily report uses a flattened customer view, to illustrate the trade-off more clearly.",
+        "strengths": [
+          "Correctly states that normalization in operational databases avoids update anomalies by keeping data in one authoritative place.",
+          "Correctly states that denormalization in reporting models simplifies analytical queries by flattening attributes to avoid repeated joins.",
+          "Correctly identifies that controlled transformation and reconciliation are needed to keep denormalized reporting data consistent with operational data."
+        ],
+        "assistance": "NONE",
+        "calibrated": false,
+        "uncertainty": [],
+        "afterExample": false,
+        "classification": "CORRECT",
+        "misconceptions": [],
+        "followUpQuestion": ""
+      },
+      "topicSwitchPassed": null
+    },
+    {
+      "id": "F9-05",
+      "name": "F9-05",
+      "category": "fresh-empty-instruction-echo",
+      "qid": "MAN-NEW-019",
+      "track": "Manual Testing",
+      "difficulty": "Simple",
+      "expected": "NOT_ANSWERED",
+      "acceptable": [
+        "NOT_ANSWERED"
+      ],
+      "model": "learner-evaluation-10",
+      "actual": "NOT_ANSWERED",
+      "passed": true,
+      "review": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": null,
+        "forbiddenQuote": false,
+        "misconceptionReported": null,
+        "unexpectedMisconception": false,
+        "expectedGapReported": null,
+        "forbiddenGap": null,
+        "forbiddenWording": null,
+        "reasoningCredited": null,
+        "reasoningNotOverCredited": null,
+        "strengthAcknowledged": null,
+        "responseKindMatches": null,
+        "acknowledged": null
+      },
+      "assessmentId": "cmw52huxc001v8phqspbscnsb",
+      "reused": false,
+      "status": "COMPLETED",
+      "errorCode": null,
+      "endToEndMs": 3879,
+      "usage": [
+        {
+          "latencyMs": 3786,
+          "inputTokens": 1604,
+          "outputTokens": 356,
+          "outcome": "SUCCESS"
+        }
+      ],
+      "answer": "A concrete case and a clear mechanism. The expected behavior and one practical example. That is my answer.",
+      "notes": null,
+      "result": {
+        "gaps": [],
+        "next": null,
+        "criteria": [
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "ACCURACY",
+            "explanation": "No supporting subject evidence was established for this criterion."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "REASONING",
+            "explanation": "No supporting subject evidence was established for this criterion."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "The answer contains no substantive technical claims, so depth cannot be assessed."
+          }
+        ],
+        "guidance": "To improve, describe the process of partitioning input domains into equivalence classes, testing boundary values, and including business-significant special values. Explain how each selected value maps to a specific risk or rule to keep the test dataset lean and explainable.",
+        "strengths": [],
+        "assistance": "NONE",
+        "calibrated": false,
+        "uncertainty": [],
+        "afterExample": false,
+        "classification": "NOT_ANSWERED",
+        "misconceptions": [],
+        "followUpQuestion": ""
+      },
+      "topicSwitchPassed": null
+    },
+    {
+      "id": "F9-08",
+      "name": "F9-08",
+      "category": "fresh-mixed-secondary-error",
+      "qid": "WEB-NEW-077",
+      "track": "Web / Frontend",
+      "difficulty": "Medium",
+      "expected": "PARTIAL",
+      "acceptable": [
+        "PARTIAL"
+      ],
+      "model": "learner-evaluation-10",
+      "actual": "PARTIAL",
+      "passed": true,
+      "review": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": null,
+        "forbiddenQuote": false,
+        "misconceptionReported": true,
+        "unexpectedMisconception": false,
+        "expectedGapReported": null,
+        "forbiddenGap": null,
+        "forbiddenWording": null,
+        "reasoningCredited": null,
+        "reasoningNotOverCredited": null,
+        "strengthAcknowledged": null,
+        "responseKindMatches": null,
+        "acknowledged": null
+      },
+      "assessmentId": "cmw52hxx700208phqioa5ts9g",
+      "reused": false,
+      "status": "COMPLETED",
+      "errorCode": null,
+      "endToEndMs": 3536,
+      "usage": [
+        {
+          "latencyMs": 3462,
+          "inputTokens": 1675,
+          "outputTokens": 656,
+          "outcome": "SUCCESS"
+        }
+      ],
+      "answer": "DNS-prefetch resolves the name; preconnect also establishes TCP and TLS. Preload fetches an imminent current-page asset with the matching as value. Modulepreload prepares the module graph; prefetch speculates at lower priority for a later page. Modulepreload additionally runs every module immediately even if nothing imports it.",
+      "notes": null,
+      "result": {
+        "gaps": [
+          "No mention of how to prove a preload is reused rather than fetched twice",
+          "No discussion of validating priorities in a network trace",
+          "No mention of failure boundaries or when to omit a hint"
+        ],
+        "next": null,
+        "criteria": [
+          {
+            "finding": "PARTIAL",
+            "evidence": [
+              "DNS-prefetch resolves the name",
+              "preconnect also establishes TCP and TLS",
+              "Preload fetches an imminent current-page asset with the matching as value"
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "Some relevant understanding was demonstrated, with essential gaps or a false claim."
+          },
+          {
+            "finding": "PARTIAL",
+            "evidence": [
+              "DNS-prefetch resolves the name",
+              "preconnect also establishes TCP and TLS",
+              "Preload fetches an imminent current-page asset with the matching as value"
+            ],
+            "criterion": "REASONING",
+            "explanation": "The explanation includes valid reasoning alongside false or incomplete reasoning."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "The model did not provide supporting evidence for this finding. This criterion is left unassessed."
+          }
+        ],
+        "guidance": "To strengthen the answer, include how to verify that a preload is reused (e.g., via network traces showing only one request) and discuss how to validate priorities in a network trace to avoid overusing hints.",
+        "strengths": [
+          "DNS-prefetch is used to resolve a domain name to an IP address early, which is a correct central function of this resource hint.",
+          "Preconnect not only resolves the DNS but also establishes the TCP connection and performs TLS handshake, which is an accurate description of its purpose.",
+          "Preload is used to fetch a resource that is needed for the current page, and the 'as' attribute specifies the type of resource, which is correctly described.",
+          "Modulepreload is used to fetch and prepare module graph resources for JavaScript modules, which aligns with its intended use.",
+          "Prefetch is used for speculatively loading resources for future navigations at a lower priority, correctly capturing its purpose."
+        ],
+        "assistance": "NONE",
+        "calibrated": false,
+        "uncertainty": [],
+        "afterExample": false,
+        "classification": "PARTIAL",
+        "misconceptions": [
+          "Modulepreload does not run modules immediately; it fetches and prepares them for when they are imported. The claim misrepresents the actual behavior of modulepreload."
+        ],
+        "validationNotes": [
+          "Answer depth: the model returned Needs improvement without evidence. The finding was changed to Not established; no evidence was invented."
+        ],
+        "followUpQuestion": ""
+      },
+      "topicSwitchPassed": null
+    },
+    {
+      "id": "G-ABSTAIN",
+      "name": "G-ABSTAIN",
+      "category": "deterministic-control",
+      "qid": "WEB-NEW-033",
+      "track": "Web / Frontend",
+      "difficulty": "Simple",
+      "expected": "NOT_ANSWERED",
+      "acceptable": [
+        "NOT_ANSWERED"
+      ],
+      "model": "learner-evaluation-10",
+      "actual": "NOT_ANSWERED",
+      "passed": true,
+      "review": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": null,
+        "forbiddenQuote": false,
+        "misconceptionReported": null,
+        "unexpectedMisconception": false,
+        "expectedGapReported": null,
+        "forbiddenGap": null,
+        "forbiddenWording": null,
+        "reasoningCredited": null,
+        "reasoningNotOverCredited": null,
+        "strengthAcknowledged": null,
+        "responseKindMatches": true,
+        "acknowledged": null
+      },
+      "assessmentId": "cmw52i0n200258phqj2l90st1",
+      "reused": false,
+      "status": "COMPLETED",
+      "errorCode": null,
+      "endToEndMs": 13,
+      "usage": [],
+      "answer": "Sorry, I do not know this one.",
+      "notes": null,
+      "result": {
+        "gaps": [],
+        "next": null,
+        "criteria": [
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "ACCURACY",
+            "explanation": "No subject understanding was demonstrated in this answer."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "REASONING",
+            "explanation": "No subject understanding was demonstrated in this answer."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "No subject understanding was demonstrated in this answer."
+          }
+        ],
+        "guidance": "You indicated that you do not know this answer. Review the concept before trying again.",
+        "strengths": [],
+        "assistance": "NONE",
+        "calibrated": false,
+        "uncertainty": [],
+        "afterExample": false,
+        "responseKind": "DONT_KNOW",
+        "classification": "NOT_ANSWERED",
+        "misconceptions": [],
+        "validationNotes": [
+          "Recognised as an explicit \"I don't know\". No model evaluation was used."
+        ],
+        "followUpQuestion": ""
+      },
+      "topicSwitchPassed": null
+    },
+    {
+      "id": "G-REQUEST",
+      "name": "G-REQUEST",
+      "category": "deterministic-control",
+      "qid": "WEB-NEW-033",
+      "track": "Web / Frontend",
+      "difficulty": "Simple",
+      "expected": "NOT_ANSWERED",
+      "acceptable": [
+        "NOT_ANSWERED"
+      ],
+      "model": "learner-evaluation-10",
+      "actual": "NOT_ANSWERED",
+      "passed": true,
+      "review": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": null,
+        "forbiddenQuote": false,
+        "misconceptionReported": null,
+        "unexpectedMisconception": false,
+        "expectedGapReported": null,
+        "forbiddenGap": null,
+        "forbiddenWording": null,
+        "reasoningCredited": null,
+        "reasoningNotOverCredited": null,
+        "strengthAcknowledged": null,
+        "responseKindMatches": true,
+        "acknowledged": null
+      },
+      "assessmentId": "cmw52i0nm00288phqo8sg79jr",
+      "reused": false,
+      "status": "COMPLETED",
+      "errorCode": null,
+      "endToEndMs": 10,
+      "usage": [],
+      "answer": "Could you repeat the question please?",
+      "notes": null,
+      "result": {
+        "gaps": [],
+        "next": null,
+        "criteria": [
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "ACCURACY",
+            "explanation": "The response asked to repeat, skip or pause the question; it contains no technical answer to assess."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "REASONING",
+            "explanation": "The response asked to repeat, skip or pause the question; it contains no technical answer to assess."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "The response asked to repeat, skip or pause the question; it contains no technical answer to assess."
+          }
+        ],
+        "guidance": "This response was a request rather than an answer, so it says nothing about your knowledge. Spoken requests are not supported yet: use Repeat question or Skip question.",
+        "strengths": [],
+        "assistance": "NONE",
+        "calibrated": false,
+        "uncertainty": [],
+        "afterExample": false,
+        "responseKind": "REQUEST_ONLY",
+        "classification": "NOT_ANSWERED",
+        "misconceptions": [],
+        "validationNotes": [
+          "Recognised as a request to repeat, skip or pause. No model evaluation was used."
+        ],
+        "followUpQuestion": ""
+      },
+      "topicSwitchPassed": null
+    }
+  ]
+}

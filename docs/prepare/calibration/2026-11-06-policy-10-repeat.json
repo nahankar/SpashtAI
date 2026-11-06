@@ -1,0 +1,396 @@
+{
+  "fixtureVersion": "grading-policy-10-repeat-1",
+  "reviewer": "Existing AI-reviewed labels unchanged; no independent expert review.",
+  "source": "ADMIN_TEST",
+  "configs": [
+    {
+      "id": "nova2-lite-learner-10",
+      "modelId": "us.amazon.nova-2-lite-v1:0",
+      "region": "us-east-1",
+      "label": "Nova 2 Lite \u00b7 learner grading 10 (candidate)",
+      "prompt": "interview-answer-12",
+      "schema": "interview-result-5",
+      "rubric": "bank-guidance-4",
+      "policy": "learner-evaluation-10",
+      "temperature": 0,
+      "maxTokens": 2000,
+      "timeoutMs": 20000
+    }
+  ],
+  "questions": {
+    "WEB-NEW-033": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-028": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-047": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "PY-NEW-010": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DEV-NEW-016": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "WEB-NEW-099": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DE-NEW-001": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "PY-NEW-021": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "MAN-NEW-019": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DE-NEW-012": {
+      "revision": 2,
+      "guidanceIssues": [
+        "The misconception's 'Correction' is an unrelated example sentence."
+      ]
+    },
+    "WEB-NEW-077": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-041": {
+      "revision": 2,
+      "guidanceIssues": []
+    }
+  },
+  "calibrated": false,
+  "limitation": "Small development set reviewed against bank guidance. Agreement on this sample is not a calibration claim.",
+  "summary": {
+    "cases": 3,
+    "completed": 3,
+    "agreement": 3,
+    "exactExpected": 3,
+    "forbiddenClassification": 0,
+    "invalidOutputJobs": 0,
+    "providerFailureJobs": 0,
+    "invocations": 3,
+    "invocationOutcomes": {
+      "SUCCESS": 3
+    },
+    "modelLatencyMs": {
+      "p50": 2772,
+      "p95": 3906,
+      "max": 3906
+    },
+    "endToEndMs": {
+      "p50": 2858,
+      "p95": 3987
+    },
+    "tokens": {
+      "input": 5066,
+      "output": 1096,
+      "invocationsWithUnknownUsage": 0
+    },
+    "quotesExact": true
+  },
+  "results": [
+    {
+      "id": "RS-03",
+      "name": "RS-03",
+      "category": "implicit-valid-reasoning",
+      "qid": "WEB-NEW-033",
+      "track": "Web / Frontend",
+      "difficulty": "Simple",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT",
+        "PARTIAL"
+      ],
+      "model": "learner-evaluation-10",
+      "actual": "CORRECT",
+      "passed": true,
+      "review": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": null,
+        "forbiddenQuote": false,
+        "misconceptionReported": null,
+        "unexpectedMisconception": false,
+        "expectedGapReported": null,
+        "forbiddenGap": null,
+        "forbiddenWording": false,
+        "reasoningCredited": true,
+        "reasoningNotOverCredited": null,
+        "strengthAcknowledged": null,
+        "responseKindMatches": null,
+        "acknowledged": null
+      },
+      "assessmentId": "cmw52i15b00028pn5c20jk7a7",
+      "reused": false,
+      "status": "COMPLETED",
+      "errorCode": null,
+      "endToEndMs": 2342,
+      "usage": [
+        {
+          "latencyMs": 2252,
+          "inputTokens": 1632,
+          "outputTokens": 320,
+          "outcome": "SUCCESS"
+        }
+      ],
+      "answer": "A window resize event only fires when the viewport changes. A sidebar collapsing or a web font loading can resize a card while the window stays the same size. ResizeObserver reports that element's own size change.",
+      "notes": "Valid reasoning with no causal keyword (statedReasons is empty).",
+      "result": {
+        "gaps": [],
+        "next": null,
+        "criteria": [
+          {
+            "finding": "MET",
+            "evidence": [
+              "A window resize event only fires when the viewport changes.",
+              "A sidebar collapsing or a web font loading can resize a card while the window stays the same size.",
+              "ResizeObserver reports that element's own size change."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "Correctly states that window resize events are viewport-specific."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "A window resize event only fires when the viewport changes.",
+              "A sidebar collapsing or a web font loading can resize a card while the window stays the same size.",
+              "ResizeObserver reports that element's own size change."
+            ],
+            "criterion": "REASONING",
+            "explanation": "Correctly states that window resize events are viewport-specific."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "A sidebar collapsing or a web font loading can resize a card while the window stays the same size.",
+              "ResizeObserver reports that element's own size change."
+            ],
+            "criterion": "DEPTH",
+            "explanation": "Answer correctly explains the core distinction and provides concrete examples."
+          }
+        ],
+        "guidance": "Consider mentioning that ResizeObserver callbacks should avoid immediate DOM mutations to prevent resize loops.",
+        "strengths": [
+          "Correctly states that window resize events are viewport-specific.",
+          "Correctly identifies scenarios where an element's size changes without viewport resize.",
+          "Correctly states that ResizeObserver observes element-specific size changes."
+        ],
+        "assistance": "NONE",
+        "calibrated": false,
+        "uncertainty": [],
+        "afterExample": false,
+        "classification": "CORRECT",
+        "misconceptions": [],
+        "followUpQuestion": ""
+      },
+      "topicSwitchPassed": null
+    },
+    {
+      "id": "H1-11",
+      "name": "H1-11",
+      "category": "complex-correct",
+      "qid": "AUT-NEW-041",
+      "track": "Automation Testing",
+      "difficulty": "Complex",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT"
+      ],
+      "model": "learner-evaluation-10",
+      "actual": "CORRECT",
+      "passed": true,
+      "review": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": true,
+        "forbiddenQuote": false,
+        "misconceptionReported": null,
+        "unexpectedMisconception": false,
+        "expectedGapReported": null,
+        "forbiddenGap": null,
+        "forbiddenWording": null,
+        "reasoningCredited": null,
+        "reasoningNotOverCredited": null,
+        "strengthAcknowledged": null,
+        "responseKindMatches": null,
+        "acknowledged": null
+      },
+      "assessmentId": "cmw52i2y500078pn58o0fzgt6",
+      "reused": false,
+      "status": "COMPLETED",
+      "errorCode": null,
+      "endToEndMs": 3987,
+      "usage": [
+        {
+          "latencyMs": 3906,
+          "inputTokens": 1680,
+          "outputTokens": 341,
+          "outcome": "SUCCESS"
+        }
+      ],
+      "answer": "If teams release on their own schedules and the shared parts are stable, I'd publish a versioned package with semantic versioning, changelogs and a deprecation policy, so each team upgrades when it is ready. If the teams are tightly coupled and change things together, a monorepo makes atomic changes easier, but it needs clear ownership and CI that only runs the affected suites.",
+      "notes": null,
+      "result": {
+        "gaps": [],
+        "next": null,
+        "criteria": [
+          {
+            "finding": "MET",
+            "evidence": [
+              "If teams release on their own schedules and the shared parts are stable, I'd publish a versioned package with semantic versioning, changelogs and a deprecation policy, so each team upgrades when it is ready.",
+              "If the teams are tightly coupled and change things together, a monorepo makes atomic changes easier, but it needs clear ownership and CI that only runs the affected suites."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "Correctly identifies versioned packages for independent release cadences and stable shared primitives, with required practices like semantic versioning, changelogs, and deprecation policy."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "If teams release on their own schedules and the shared parts are stable, I'd publish a versioned package with semantic versioning, changelogs and a deprecation policy, so each team upgrades when it is ready.",
+              "If the teams are tightly coupled and change things together, a monorepo makes atomic changes easier, but it needs clear ownership and CI that only runs the affected suites."
+            ],
+            "criterion": "REASONING",
+            "explanation": "Correctly identifies versioned packages for independent release cadences and stable shared primitives, with required practices like semantic versioning, changelogs, and deprecation policy."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "so each team upgrades when it is ready",
+              "needs clear ownership and CI that only runs the affected suites"
+            ],
+            "criterion": "DEPTH",
+            "explanation": "The answer explains why independent teams may adopt a stable shared package on different schedules and why the misconception about simultaneous upgrades is false."
+          }
+        ],
+        "guidance": "Consider adding an example of how compatibility tests and deprecation policies prevent consumer breakage to further demonstrate depth.",
+        "strengths": [
+          "Correctly identifies versioned packages for independent release cadences and stable shared primitives, with required practices like semantic versioning, changelogs, and deprecation policy.",
+          "Correctly identifies monorepo benefits for tightly coordinated teams and necessary governance like ownership boundaries and scalable CI."
+        ],
+        "assistance": "NONE",
+        "calibrated": false,
+        "uncertainty": [],
+        "afterExample": false,
+        "classification": "CORRECT",
+        "misconceptions": [],
+        "followUpQuestion": ""
+      },
+      "topicSwitchPassed": null
+    },
+    {
+      "id": "P2-08",
+      "name": "P2-08",
+      "category": "vague-substantive-fragments",
+      "qid": "DE-NEW-001",
+      "track": "Data Engineering",
+      "difficulty": "Simple",
+      "expected": "PARTIAL",
+      "acceptable": [
+        "PARTIAL",
+        "INCORRECT"
+      ],
+      "model": "learner-evaluation-10",
+      "actual": "PARTIAL",
+      "passed": true,
+      "review": {
+        "acceptable": true,
+        "forbidden": false,
+        "quotesExact": true,
+        "evidenceAnchorQuoted": null,
+        "forbiddenQuote": false,
+        "misconceptionReported": null,
+        "unexpectedMisconception": true,
+        "expectedGapReported": null,
+        "forbiddenGap": null,
+        "forbiddenWording": null,
+        "reasoningCredited": null,
+        "reasoningNotOverCredited": null,
+        "strengthAcknowledged": null,
+        "responseKindMatches": null,
+        "acknowledged": null
+      },
+      "assessmentId": "cmw52i617000c8pn5kydzlu2i",
+      "reused": false,
+      "status": "COMPLETED",
+      "errorCode": null,
+      "endToEndMs": 2858,
+      "usage": [
+        {
+          "latencyMs": 2772,
+          "inputTokens": 1754,
+          "outputTokens": 435,
+          "outcome": "SUCCESS"
+        }
+      ],
+      "answer": "Packed tables are the real data.\nUm,\nWhich are specific to any artifact dimensions can be\nCreated, derived.\nAcross the data.\ncombination of the data aggregation of the data.\nAgainst any specific\nOther fields, so multiple dimensions can be created.\nTo query all of the data at once, instead of the basic rows and columns that 1 may typically do.",
+      "notes": "Vague but makes claims (fact tables hold the real data; dimensions derived across the data; aggregation). Grade those claims; do not credit grain or measures, which are not stated. 'Packed' is a mishearing of 'fact'.",
+      "result": {
+        "gaps": [
+          "Definition of a fact table and its role in recording business measurements or events",
+          "Explanation of how dimension tables provide descriptive context for filtering and grouping",
+          "Example illustrating the relationship between a fact table and dimension tables (e.g., order-line fact with product, customer, and date dimensions)",
+          "Importance of grain in determining what a fact row represents and ensuring safe aggregation of measures"
+        ],
+        "next": null,
+        "criteria": [
+          {
+            "finding": "PARTIAL",
+            "evidence": [
+              "dimensions can be\nCreated, derived.",
+              "Packed tables are the real data.",
+              "To query all of the data at once, instead of the basic rows and columns that 1 may typically do."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "Some relevant understanding was demonstrated, with essential gaps or a false claim."
+          },
+          {
+            "finding": "NOT_MET",
+            "evidence": [
+              "Packed tables are the real data.",
+              "To query all of the data at once, instead of the basic rows and columns that 1 may typically do."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The statement misidentifies 'packed tables' as the concept of fact tables without providing correct distinguishing features."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "The model did not provide supporting evidence for this finding. This criterion is left unassessed."
+          }
+        ],
+        "guidance": "Clarify the core definitions of fact and dimension tables, emphasizing that fact tables store measurable data at a specific grain and dimension tables store descriptive attributes used for context and analysis.",
+        "strengths": [
+          "Correctly identifies that dimensions can be created or derived, aligning with their role in providing descriptive context."
+        ],
+        "assistance": "NONE",
+        "calibrated": false,
+        "uncertainty": [],
+        "afterExample": false,
+        "classification": "PARTIAL",
+        "misconceptions": [
+          "The statement misidentifies 'packed tables' as the concept of fact tables without providing correct distinguishing features.",
+          "The statement inaccurately describes querying 'all of the data at once' as a distinguishing feature, which does not correctly explain the purpose or structure of fact or dimension tables."
+        ],
+        "validationNotes": [
+          "Answer depth: the model returned Needs improvement without evidence. The finding was changed to Not established; no evidence was invented."
+        ],
+        "followUpQuestion": ""
+      },
+      "topicSwitchPassed": null
+    }
+  ]
+}
