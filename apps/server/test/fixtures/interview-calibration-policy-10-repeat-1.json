@@ -1,0 +1,126 @@
+{
+  "fixtureVersion": "grading-policy-10-repeat-1",
+  "reviewer": "Existing AI-reviewed labels unchanged; no independent expert review.",
+  "preRegistered": "Exact second trials of the three blocker answers after preserving first trials; same labels, actor, answer/question/config hashes; new accounted invocation required.",
+  "groups": {
+    "repeat": [
+      "RS-03",
+      "H1-11",
+      "P2-08"
+    ]
+  },
+  "questions": {
+    "WEB-NEW-033": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-028": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-047": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "PY-NEW-010": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DEV-NEW-016": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "WEB-NEW-099": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DE-NEW-001": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "PY-NEW-021": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "MAN-NEW-019": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DE-NEW-012": {
+      "revision": 2,
+      "guidanceIssues": [
+        "The misconception's 'Correction' is an unrelated example sentence."
+      ]
+    },
+    "WEB-NEW-077": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-041": {
+      "revision": 2,
+      "guidanceIssues": []
+    }
+  },
+  "cases": [
+    {
+      "id": "RS-03",
+      "qid": "WEB-NEW-033",
+      "category": "implicit-valid-reasoning",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT",
+        "PARTIAL"
+      ],
+      "mustNotBe": [
+        "INCORRECT",
+        "NOT_ANSWERED"
+      ],
+      "answer": "A window resize event only fires when the viewport changes. A sidebar collapsing or a web font loading can resize a card while the window stays the same size. ResizeObserver reports that element's own size change.",
+      "expectReasoning": true,
+      "mustNotSay": [
+        "does not provide reasoning",
+        "no reasoning",
+        "does not explain why"
+      ],
+      "notes": "Valid reasoning with no causal keyword (statedReasons is empty).",
+      "sourceFixture": "reasoning-1"
+    },
+    {
+      "id": "H1-11",
+      "qid": "AUT-NEW-041",
+      "category": "complex-correct",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT"
+      ],
+      "answer": "If teams release on their own schedules and the shared parts are stable, I'd publish a versioned package with semantic versioning, changelogs and a deprecation policy, so each team upgrades when it is ready. If the teams are tightly coupled and change things together, a monorepo makes atomic changes easier, but it needs clear ownership and CI that only runs the affected suites.",
+      "evidence": [
+        "versioned package",
+        "deprecation policy",
+        "monorepo makes atomic changes easier"
+      ],
+      "sourceFixture": "heldout-1"
+    },
+    {
+      "id": "P2-08",
+      "qid": "DE-NEW-001",
+      "category": "vague-substantive-fragments",
+      "expected": "PARTIAL",
+      "acceptable": [
+        "PARTIAL",
+        "INCORRECT"
+      ],
+      "mustNotBe": [
+        "NOT_ANSWERED",
+        "CORRECT"
+      ],
+      "answer": "Packed tables are the real data.\nUm,\nWhich are specific to any artifact dimensions can be\nCreated, derived.\nAcross the data.\ncombination of the data aggregation of the data.\nAgainst any specific\nOther fields, so multiple dimensions can be created.\nTo query all of the data at once, instead of the basic rows and columns that 1 may typically do.",
+      "mustNotQuote": [
+        "grain",
+        "measure"
+      ],
+      "notes": "Vague but makes claims (fact tables hold the real data; dimensions derived across the data; aggregation). Grade those claims; do not credit grain or measures, which are not stated. 'Packed' is a mishearing of 'fact'.",
+      "sourceFixture": "pilot-2"
+    }
+  ]
+}
