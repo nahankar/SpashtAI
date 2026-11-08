@@ -13,13 +13,21 @@ http.createServer(async (req, res) => {
       res.writeHead(429, { 'x-amzn-errortype': 'ThrottlingException' })
       res.end(JSON.stringify({ __type: 'ThrottlingException', message: 'Fixture rate limit' })); return
     }
+    const toolOutput = request.toolConfig?.toolChoice?.tool?.name === 'grade_interview_answer'
     const result = answer === '[REVIEW_REQUIRED]' ? { reviewRequired: true, claims: [], coverage: 'NONE',
       depth: { finding: 'NOT_ASSESSED', evidence: [], explanation: 'Transport-only ambiguous-answer fixture.' },
       gaps: [], guidance: 'Review the saved answer.', uncertainty: ['Fixture meaning cannot be resolved.'] }
+      : toolOutput ? { reviewRequired: false, claims: [{ quote: answer, interpretedClaim: answer,
+        interpretation: 'LITERAL', judgment: 'CORRECT', scope: 'CENTRAL', reasoning: 'NONE', explanation: 'Transport fixture claim.' }],
+        coverage: 'COMPLETE', depth: { finding: 'NOT_ASSESSED', evidence: [], explanation: 'Transport fixture depth.' },
+        gaps: [], guidance: 'Fixture guidance.', uncertainty: [] }
       : { classification: 'CORRECT', criteria: ['ACCURACY', 'REASONING', 'DEPTH'].map(criterion => ({
       criterion, finding: criterion === 'ACCURACY' ? 'MET' : 'NOT_ASSESSED', evidence: criterion === 'ACCURACY' ? [answer] : [], explanation: 'Transport fixture finding.',
     })), strengths: ['Transport fixture'], gaps: [], misconceptions: [], guidance: 'Fixture guidance.', uncertainty: [], followUpQuestion: 'What would you test next?' }
-    res.end(JSON.stringify({ output: { message: { role: 'assistant', content: [{ text: answer === '[INVALID_OUTPUT]' ? 'not json' : JSON.stringify(result) }] } },
-      stopReason: 'end_turn', usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 }, metrics: { latencyMs: 1 } }))
+    const tool = { toolUse: { toolUseId: 'fixture', name: answer === '[WRONG_TOOL]' ? 'other' : 'grade_interview_answer', input: result } }
+    const content = toolOutput ? (answer === '[MULTIPLE_TOOLS]' ? [tool, tool] : [tool])
+      : [{ text: answer === '[INVALID_OUTPUT]' ? 'not json' : JSON.stringify(result) }]
+    res.end(JSON.stringify({ output: { message: { role: 'assistant', content } },
+      stopReason: toolOutput ? 'tool_use' : 'end_turn', usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 }, metrics: { latencyMs: 1 } }))
   } catch { res.writeHead(400); res.end(JSON.stringify({ message: 'Invalid Converse fixture request' })) }
 }).listen(process.env.PORT)

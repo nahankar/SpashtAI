@@ -9,7 +9,7 @@ vi.mock('@aws-sdk/client-bedrock-runtime', () => ({
   BedrockRuntimeClient: class { send = sdk.send; destroy = sdk.destroy },
   ConverseCommand: class { constructor(public input: unknown) {} },
 }))
-import { evaluateAnswer, EvaluationFailure, LEARNER_PROMPT_5, LEARNER_PROMPT_6, PROMPTS, SYSTEM_PROMPT } from '../src/interviews/evaluator/model'
+import { CLAIM_TOOL_NAME, CLAIM_TOOL_SCHEMA, evaluateAnswer, EvaluationFailure, LEARNER_PROMPT_5, LEARNER_PROMPT_6, PROMPTS, SYSTEM_PROMPT } from '../src/interviews/evaluator/model'
 const question = { id: 'q', namespace: 'pilot', externalQid: 'Q-1', revision: 1, questionText: 'How do tests remain independent?',
   track: 'Automation Testing', category: 'Testing', topic: 'Isolation', difficulty: 'Simple', experienceBand: '0-2', goodAnswerPoints: 'Fresh independent state', exampleAnswer: '', expectedDepth: 'Short answer', followUpGuidance: '' }
 describe('interview evaluator contracts and model boundary', () => {
@@ -124,6 +124,8 @@ describe('learner policy registry and learner-evaluation-2 contract', () => {
     expect(hash(LEARNER_POLICIES['learner-evaluation-9'].config)).toBe('c80adcda923677a8c0a26dd9f56389e0016a1eaf790498c773ed74218fc82511')
     expect(hash(LEARNER_POLICIES['learner-evaluation-10'].config)).toBe('438f6ade489852a7b5fb9eb0876fd9590dc7f11061b8bc5c04982858843187d9')
     expect(hash(LEARNER_POLICIES['learner-evaluation-11'].config)).toBe('9682e769b6a66929cfc08d21eaf947f8e0f70ec9b7a6ac399b7009d8e63acef3')
+    expect(hash(LEARNER_POLICIES['learner-evaluation-12'].config)).toBe('c7e0c6c598ce93aad3c157e32b7d416d76221e8a91e5e619c176aaf05ab5e981')
+    expect(hash(CLAIM_TOOL_SCHEMA)).toBe('aa6c68551a91d14d0239d55386dec4632fb8de5b8bf1d9f7cb90502194a0b894')
     const sha = (text: string) => createHash('sha256').update(text).digest('hex')
     expect(Object.fromEntries(Object.entries(PROMPTS).map(([id, text]) => [id, sha(text)]))).toEqual({
       'interview-answer-4': '6529a9f6cf7ebbc99016081a3dea4da01ee82207681cbbf630f513136798602a',
@@ -136,6 +138,7 @@ describe('learner policy registry and learner-evaluation-2 contract', () => {
       'interview-answer-11': '7e712218f2dc0e367aaf0862be075790c4abd9b804fa68bddc69e16df765cdc3',
       'interview-answer-12': '2637100b2cd89ab482854bdee9db6c75d7612d32480548577569bb75141e3f7f',
       'interview-answer-13': '0533c3ef96910ba99cf2288d7f3479c9a640e9ad8d3963665071f66abae04b22',
+      'interview-answer-14': '0a94fdba6ce1d119151c859ea3d93f41c3adce7cce491e7f92dbbaa2e175c96f',
     })
     expect(LEARNER_PROMPT_6).toContain('"get dissect" for git bisect'); expect(LEARNER_PROMPT_6.startsWith(LEARNER_PROMPT_5.slice(0, 400))).toBe(true)
     for (const policy of Object.values(LEARNER_POLICIES)) expect(PROMPTS[policy.config.prompt]).toBeTruthy()
@@ -242,7 +245,7 @@ describe('learner policy registry and learner-evaluation-2 contract', () => {
     expect(explicitAbstention(`Sorry, ${'um, '.repeat(10)}I don't know.`)).toBe(true)
   })
   it('offers only learner policies with their own configuration as Admin previews', () => {
-    expect(PREVIEW_POLICIES).toEqual(['learner-evaluation-2', 'learner-evaluation-3', 'learner-evaluation-4', 'learner-evaluation-5', 'learner-evaluation-6', 'learner-evaluation-7', 'learner-evaluation-5-nova-pro', 'learner-evaluation-8', 'learner-evaluation-8-nova-pro', 'learner-evaluation-9', 'learner-evaluation-10', 'learner-evaluation-11'])
+    expect(PREVIEW_POLICIES).toEqual(['learner-evaluation-2', 'learner-evaluation-3', 'learner-evaluation-4', 'learner-evaluation-5', 'learner-evaluation-6', 'learner-evaluation-7', 'learner-evaluation-5-nova-pro', 'learner-evaluation-8', 'learner-evaluation-8-nova-pro', 'learner-evaluation-9', 'learner-evaluation-10', 'learner-evaluation-11', 'learner-evaluation-12'])
     expect(adminConfig('learner-evaluation-2')).toEqual(learner2); expect(previewPolicy(learner2)?.key).toBe('learner-evaluation-2')
     expect(previewPolicy(configFor('nova2_lite'))).toBeNull()
     expect(() => submitSchema.parse({ questionId: 'q', revision: 1, answer: testAnswer, model: 'learner-evaluation-1' })).toThrow()
@@ -355,5 +358,58 @@ describe('interview-result-4 evidence matching', () => {
     const start = performance.now()
     expect(originalPassage('a '.repeat(4000) + 'b', 'a '.repeat(3000) + 'c')).toBeNull()
     expect(performance.now() - start).toBeLessThan(500)
+  })
+})
+
+// Provider-supported output transport is separately versioned; semantic/evidence guards still apply.
+describe('learner-evaluation-12 forced assessment tool', () => {
+  const config = LEARNER_POLICIES['learner-evaluation-12'].config
+  const ledger = () => ({ reviewRequired: false, claims: [{ quote: testAnswer, interpretedClaim: testAnswer,
+    interpretation: 'LITERAL', judgment: 'CORRECT', scope: 'CENTRAL', reasoning: 'NONE', explanation: 'Fresh state isolates tests.' }],
+    coverage: 'COMPLETE', depth: { finding: 'NOT_ASSESSED', evidence: [], explanation: 'No added depth.' },
+    gaps: [], guidance: 'Consider parallel workers.', uncertainty: [] })
+  const tool = (input: unknown = ledger(), name = CLAIM_TOOL_NAME) => ({ toolUse: { toolUseId: 'assessment', name, input } })
+  const respond = (content: unknown[], stopReason = 'tool_use') => sdk.send.mockResolvedValue({ stopReason,
+    output: { message: { content } }, usage: { inputTokens: 100, outputTokens: 60 } })
+  beforeEach(() => vi.clearAllMocks())
+  it('forces exactly the versioned data tool and validates the returned claims', async () => {
+    respond([tool()])
+    const result = await evaluateAnswer(question, testAnswer, config, 'NONE')
+    expect(result.result.classification).toBe('CORRECT')
+    const command = sdk.send.mock.calls[0][0]
+    expect(command.input.toolConfig).toEqual({ tools: [{ toolSpec: { name: CLAIM_TOOL_NAME,
+      description: expect.any(String), inputSchema: { json: CLAIM_TOOL_SCHEMA } } }], toolChoice: { tool: { name: CLAIM_TOOL_NAME } } })
+    expect(command.input.system[0].text).toBe(PROMPTS['interview-answer-14'])
+    expect(sdk.send).toHaveBeenCalledOnce() // no execution, tool result or recursive call
+    expect(sdk.destroy).toHaveBeenCalledOnce()
+  })
+  it('retains nonretryable uncertainty and usage without manufacturing a grade', async () => {
+    respond([tool({ ...ledger(), reviewRequired: true, uncertainty: ['The intended claim is unclear.'] })])
+    await expect(evaluateAnswer(question, testAnswer, config, 'NONE')).rejects.toMatchObject({
+      code: 'EVALUATION_REVIEW_REQUIRED', retryable: false, usage: { inputTokens: 100, outputTokens: 60 } })
+  })
+  it.each(['missing', 'wrong name', 'multiple', 'array input', 'null input'])('rejects %s envelopes without repair', async kind => {
+    const content = kind === 'missing' ? [{ text: JSON.stringify(ledger()) }] : kind === 'wrong name' ? [tool(ledger(), 'other')]
+      : kind === 'multiple' ? [tool(), tool()] : [tool(kind === 'array input' ? [] : null)]
+    respond(content)
+    await expect(evaluateAnswer(question, testAnswer, config, 'NONE')).rejects.toMatchObject({ code: 'INVALID_OUTPUT_TOOL_ENVELOPE', retryable: false })
+    expect(sdk.send).toHaveBeenCalledOnce()
+  })
+  it('still rejects invalid schema, invented evidence and contradictory claims', async () => {
+    for (const [input, code] of [
+      [{ ...ledger(), claims: 'not an array' }, 'INVALID_OUTPUT_SCHEMA_claims_invalid_type'],
+      [{ ...ledger(), claims: [{ ...ledger().claims[0], quote: 'An invented private quotation.' }] }, 'INVALID_OUTPUT_UNSUPPORTED_EVIDENCE'],
+      [{ ...ledger(), gaps: ['A missing essential.'] }, 'INVALID_OUTPUT_CLAIM_CORRECT_WITH_GAPS'],
+    ] as const) {
+      respond([tool(input)])
+      await expect(evaluateAnswer(question, testAnswer, config, 'NONE')).rejects.toMatchObject({ code, retryable: false })
+    }
+  })
+  it('refuses a text stop and does not change older request formats', async () => {
+    respond([tool()], 'end_turn')
+    await expect(evaluateAnswer(question, testAnswer, config, 'NONE')).rejects.toMatchObject({ code: 'INCOMPLETE_OUTPUT' })
+    respond([{ text: JSON.stringify(correctEvaluation()) }], 'end_turn')
+    await evaluateAnswer(question, testAnswer, configFor('nova2_lite'), 'NONE')
+    expect(sdk.send.mock.calls[1][0].input).not.toHaveProperty('toolConfig')
   })
 })

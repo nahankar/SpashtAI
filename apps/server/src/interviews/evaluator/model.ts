@@ -1,4 +1,4 @@
-import { BedrockRuntimeClient, ConverseCommand } from '@aws-sdk/client-bedrock-runtime'
+import { BedrockRuntimeClient, ConverseCommand, type ToolInputSchema } from '@aws-sdk/client-bedrock-runtime'
 import { NodeHttpHandler } from '@smithy/node-http-handler'
 import { awsCredentialsConfig } from '../../lib/awsCredentials'
 import { invalidOutputReason, parseResult, statedReasons, structuredRubric, supportedConfig, type EvaluationResult, type EvaluatorConfig, type QuestionSnapshot } from './contracts'
@@ -124,10 +124,30 @@ DEPTH: Assess additional depth only from exact quoted evidence. Missing depth al
 Return JSON only, at most six claims, three depth quotes, six short gaps, four uncertainties:
 {"reviewRequired":false,"claims":[{"quote":"original contiguous quote","interpretedClaim":"intended subject proposition only","interpretation":"LITERAL | NORMALIZED | UNCERTAIN","judgment":"CORRECT | INCORRECT | EMPTY","scope":"CENTRAL | SECONDARY","reasoning":"VALID | PARTIAL | INVALID | NONE","explanation":"Brief subject-specific judgment of the interpreted claim."}],"coverage":"COMPLETE | INCOMPLETE | NONE","depth":{"finding":"MET | PARTIAL | NOT_MET | NOT_ASSESSED","evidence":[],"explanation":"Brief depth judgment."},"gaps":[],"guidance":"Brief learning suggestion.","uncertainty":[]}
 For reviewRequired true, keep any identifiable original quotes and uncertainty explanation; do not invent claims to satisfy the form. Empty arrays are []. Check coverage/gap and evidence consistency before returning. Do not copy placeholders or return hidden deliberation.`
+// Same interpretation/knowledge rules as v11, with provider-supported tool choice for the output container.
+// No tool is executed: the single returned input object is validated as assessment data.
+export const LEARNER_PROMPT_14 = LEARNER_PROMPT_13.split('Return JSON only,')[0].replace('No tools, numerical score', 'No executable actions, numerical score')
+  + 'Submit the assessment once using grade_interview_answer and its supplied input schema. Do not emit a free-form JSON response, extra tools or hidden deliberation. For reviewRequired true supply the uncertainty explanation; empty lists are arrays. Check coverage/gap and exact-evidence consistency before submitting.'
+
+const schemaString = { type: 'string' }
+const schemaEnum = (...values: string[]) => ({ type: 'string', enum: values })
+const schemaArray = (items: object, maxItems: number) => ({ type: 'array', items, maxItems })
+const schemaObject = (properties: Record<string, object>) => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false })
+export const CLAIM_TOOL_NAME = 'grade_interview_answer'
+export const CLAIM_TOOL_SCHEMA = schemaObject({
+  reviewRequired: { type: 'boolean' },
+  claims: schemaArray(schemaObject({ quote: schemaString, interpretedClaim: schemaString,
+    interpretation: schemaEnum('LITERAL', 'NORMALIZED', 'UNCERTAIN'), judgment: schemaEnum('CORRECT', 'INCORRECT', 'EMPTY'),
+    scope: schemaEnum('CENTRAL', 'SECONDARY'), reasoning: schemaEnum('VALID', 'PARTIAL', 'INVALID', 'NONE'), explanation: schemaString }), 6),
+  coverage: schemaEnum('COMPLETE', 'INCOMPLETE', 'NONE'),
+  depth: schemaObject({ finding: schemaEnum('MET', 'PARTIAL', 'NOT_MET', 'NOT_ASSESSED'), evidence: schemaArray(schemaString, 3), explanation: schemaString }),
+  gaps: schemaArray(schemaString, 6), guidance: schemaString, uncertainty: schemaArray(schemaString, 4),
+})
 // Prompt text is part of its version: editing an entry requires a new ID (sha256 frozen in tests).
 export const PROMPTS: Record<string, string> = { 'interview-answer-4': SYSTEM_PROMPT, 'interview-answer-5': LEARNER_PROMPT_5, 'interview-answer-6': LEARNER_PROMPT_6,
   'interview-answer-7': LEARNER_PROMPT_7, 'interview-answer-8': LEARNER_PROMPT_8, 'interview-answer-9': LEARNER_PROMPT_9, 'interview-answer-10': LEARNER_PROMPT_10,
-  'interview-answer-11': LEARNER_PROMPT_11, 'interview-answer-12': LEARNER_PROMPT_12, 'interview-answer-13': LEARNER_PROMPT_13 }
+  'interview-answer-11': LEARNER_PROMPT_11, 'interview-answer-12': LEARNER_PROMPT_12, 'interview-answer-13': LEARNER_PROMPT_13,
+  'interview-answer-14': LEARNER_PROMPT_14 }
 function userMessage(question: QuestionSnapshot, answer: string, assistance: string, rubric: string) {
   if (!['bank-guidance-2', 'bank-guidance-3', 'bank-guidance-4', 'bank-guidance-5'].includes(rubric)) return { question, candidateAnswer: answer, assistance }
   const { questionText, track, topic, difficulty, experienceBand } = question
@@ -151,15 +171,28 @@ export async function evaluateAnswer(question: QuestionSnapshot, answer: string,
   const client = new BedrockRuntimeClient({ region: config.region, ...awsCredentialsConfig(), maxAttempts: 1,
     ...(testEndpoint ? { endpoint: testEndpoint, requestHandler: new NodeHttpHandler(), credentials: { accessKeyId: 'simulation', secretAccessKey: 'simulation' } } : {}) })
   const start = Date.now(); let inputTokens: number | null = null; let outputTokens: number | null = null
+  const toolOutput = config.responseFormat === 'tool'
   try {
     const response = await client.send(new ConverseCommand({
       modelId: config.modelId, system: [{ text: prompt }],
       messages: [{ role: 'user', content: [{ text: JSON.stringify(userMessage(question, answer, assistance, config.rubric)) }] }],
       inferenceConfig: { temperature: config.temperature, maxTokens: config.maxTokens },
+      ...(toolOutput ? { toolConfig: { tools: [{ toolSpec: { name: CLAIM_TOOL_NAME,
+        description: 'Submit quoted technical claims and interpretation uncertainty for one answer. This is data only; it executes no action.',
+        inputSchema: { json: CLAIM_TOOL_SCHEMA as ToolInputSchema.JsonMember['json'] } } }], toolChoice: { tool: { name: CLAIM_TOOL_NAME } } } } : {}),
     }), { abortSignal: AbortSignal.timeout(config.timeoutMs) })
     inputTokens = response.usage?.inputTokens ?? null; outputTokens = response.usage?.outputTokens ?? null
-    if (response.stopReason !== 'end_turn') throw new EvaluationFailure(STOP_REASONS[response.stopReason ?? ''] ?? 'INCOMPLETE_OUTPUT', false, { inputTokens, outputTokens, latencyMs: Date.now() - start })
-    const output = (response.output?.message?.content ?? []).map(block => block.text ?? '').join('')
+    if (response.stopReason !== (toolOutput ? 'tool_use' : 'end_turn')) throw new EvaluationFailure(STOP_REASONS[response.stopReason ?? ''] ?? 'INCOMPLETE_OUTPUT', false, { inputTokens, outputTokens, latencyMs: Date.now() - start })
+    const blocks = response.output?.message?.content ?? []
+    let output: string
+    if (toolOutput) {
+      const tools = blocks.flatMap(block => block.toolUse ? [block.toolUse] : [])
+      const tool = tools[0]
+      if (tools.length !== 1 || tool?.name !== CLAIM_TOOL_NAME || !tool.input || typeof tool.input !== 'object' || Array.isArray(tool.input)) {
+        throw new EvaluationFailure('INVALID_OUTPUT_TOOL_ENVELOPE', false, { inputTokens, outputTokens, latencyMs: Date.now() - start })
+      }
+      output = JSON.stringify(tool.input)
+    } else output = blocks.map(block => block.text ?? '').join('')
     let result: EvaluationResult
     // Persist only a bounded, content-free reason; never model text or Zod input.
     try { result = parseResult(output, answer, config.schema) } catch (error) {
