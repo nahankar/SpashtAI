@@ -123,6 +123,7 @@ describe('learner policy registry and learner-evaluation-2 contract', () => {
     expect(hash(LEARNER_POLICIES['learner-evaluation-8-nova-pro'].config)).toBe('68217229fbc30b7ffc417d0253254990ea7dc24381dc6cd249b036c5fb638368')
     expect(hash(LEARNER_POLICIES['learner-evaluation-9'].config)).toBe('c80adcda923677a8c0a26dd9f56389e0016a1eaf790498c773ed74218fc82511')
     expect(hash(LEARNER_POLICIES['learner-evaluation-10'].config)).toBe('438f6ade489852a7b5fb9eb0876fd9590dc7f11061b8bc5c04982858843187d9')
+    expect(hash(LEARNER_POLICIES['learner-evaluation-11'].config)).toBe('9682e769b6a66929cfc08d21eaf947f8e0f70ec9b7a6ac399b7009d8e63acef3')
     const sha = (text: string) => createHash('sha256').update(text).digest('hex')
     expect(Object.fromEntries(Object.entries(PROMPTS).map(([id, text]) => [id, sha(text)]))).toEqual({
       'interview-answer-4': '6529a9f6cf7ebbc99016081a3dea4da01ee82207681cbbf630f513136798602a',
@@ -134,6 +135,7 @@ describe('learner policy registry and learner-evaluation-2 contract', () => {
       'interview-answer-10': 'e5d2dea679ca298fbfc3d1e9940b76d52002004ae982281fc79a91ed5727bcb1',
       'interview-answer-11': '7e712218f2dc0e367aaf0862be075790c4abd9b804fa68bddc69e16df765cdc3',
       'interview-answer-12': '2637100b2cd89ab482854bdee9db6c75d7612d32480548577569bb75141e3f7f',
+      'interview-answer-13': '0533c3ef96910ba99cf2288d7f3479c9a640e9ad8d3963665071f66abae04b22',
     })
     expect(LEARNER_PROMPT_6).toContain('"get dissect" for git bisect'); expect(LEARNER_PROMPT_6.startsWith(LEARNER_PROMPT_5.slice(0, 400))).toBe(true)
     for (const policy of Object.values(LEARNER_POLICIES)) expect(PROMPTS[policy.config.prompt]).toBeTruthy()
@@ -240,7 +242,7 @@ describe('learner policy registry and learner-evaluation-2 contract', () => {
     expect(explicitAbstention(`Sorry, ${'um, '.repeat(10)}I don't know.`)).toBe(true)
   })
   it('offers only learner policies with their own configuration as Admin previews', () => {
-    expect(PREVIEW_POLICIES).toEqual(['learner-evaluation-2', 'learner-evaluation-3', 'learner-evaluation-4', 'learner-evaluation-5', 'learner-evaluation-6', 'learner-evaluation-7', 'learner-evaluation-5-nova-pro', 'learner-evaluation-8', 'learner-evaluation-8-nova-pro', 'learner-evaluation-9', 'learner-evaluation-10'])
+    expect(PREVIEW_POLICIES).toEqual(['learner-evaluation-2', 'learner-evaluation-3', 'learner-evaluation-4', 'learner-evaluation-5', 'learner-evaluation-6', 'learner-evaluation-7', 'learner-evaluation-5-nova-pro', 'learner-evaluation-8', 'learner-evaluation-8-nova-pro', 'learner-evaluation-9', 'learner-evaluation-10', 'learner-evaluation-11'])
     expect(adminConfig('learner-evaluation-2')).toEqual(learner2); expect(previewPolicy(learner2)?.key).toBe('learner-evaluation-2')
     expect(previewPolicy(configFor('nova2_lite'))).toBeNull()
     expect(() => submitSchema.parse({ questionId: 'q', revision: 1, answer: testAnswer, model: 'learner-evaluation-1' })).toThrow()

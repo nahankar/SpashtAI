@@ -13,7 +13,10 @@ http.createServer(async (req, res) => {
       res.writeHead(429, { 'x-amzn-errortype': 'ThrottlingException' })
       res.end(JSON.stringify({ __type: 'ThrottlingException', message: 'Fixture rate limit' })); return
     }
-    const result = { classification: 'CORRECT', criteria: ['ACCURACY', 'REASONING', 'DEPTH'].map(criterion => ({
+    const result = answer === '[REVIEW_REQUIRED]' ? { reviewRequired: true, claims: [], coverage: 'NONE',
+      depth: { finding: 'NOT_ASSESSED', evidence: [], explanation: 'Transport-only ambiguous-answer fixture.' },
+      gaps: [], guidance: 'Review the saved answer.', uncertainty: ['Fixture meaning cannot be resolved.'] }
+      : { classification: 'CORRECT', criteria: ['ACCURACY', 'REASONING', 'DEPTH'].map(criterion => ({
       criterion, finding: criterion === 'ACCURACY' ? 'MET' : 'NOT_ASSESSED', evidence: criterion === 'ACCURACY' ? [answer] : [], explanation: 'Transport fixture finding.',
     })), strengths: ['Transport fixture'], gaps: [], misconceptions: [], guidance: 'Fixture guidance.', uncertainty: [], followUpQuestion: 'What would you test next?' }
     res.end(JSON.stringify({ output: { message: { role: 'assistant', content: [{ text: answer === '[INVALID_OUTPUT]' ? 'not json' : JSON.stringify(result) }] } },

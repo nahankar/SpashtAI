@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url'
 
 export type CalibrationCase = {
   id?: string; name?: string; answer: string; expected: string; acceptable?: string[]; mustNotBe?: string[]
+  expectedDisposition?: 'GRADED' | 'REVIEW_REQUIRED'
   evidence?: string[]; mustNotQuote?: string[]; mustNotGap?: string[]; expectMisconception?: boolean
   expectGap?: string; mustNotSay?: string[]; expectReasoning?: boolean; reasoningMustNotBeMet?: boolean
   expectStrength?: string[]; expectedKind?: string; expectAcknowledged?: string[]
@@ -18,6 +19,12 @@ const lower = (items: string[] = []) => items.join(' ').toLowerCase()
 
 export function reviewCalibrationCase(test: CalibrationCase, row: CalibrationRow) {
   const grade = row.result
+  if (test.expectedDisposition === 'REVIEW_REQUIRED') {
+    const matched = row.status === 'FAILED' && row.errorCode === 'EVALUATION_REVIEW_REQUIRED' && !grade
+    return { id: test.id ?? test.name, model: row.model, actual: grade?.classification ?? null,
+      usable: Boolean(grade?.classification), reviewRequiredMatched: matched,
+      failures: matched ? [] : ['EXPECTED_UNGRADED_REVIEW'] }
+  }
   if (row.status !== 'COMPLETED' || !grade?.classification) {
     return { id: test.id ?? test.name, model: row.model, actual: null, usable: false, failures: [row.errorCode ?? 'NO_COMPLETED_GRADE'] }
   }
@@ -58,12 +65,14 @@ export function reviewCalibration(fixture: { fixtureVersion: string; cases: Cali
     if (rows.length > 1) throw new Error('Duplicate result case/model')
     return reviewCalibrationCase(test, rows[0] ?? { id: test.id, model, status: 'MISSING' })
   }))
-  const allRequiredChecksPass = reviews.every(r => r.usable && r.failures.length === 0)
-  const allRoutingLabelsMatch = reviews.every(r => r.usable && 'exactExpected' in r && r.exactExpected)
+  const allRequiredChecksPass = reviews.every(r => (r.usable || ('reviewRequiredMatched' in r && r.reviewRequiredMatched)) && r.failures.length === 0)
+  const allRoutingLabelsMatch = reviews.every(r => ('reviewRequiredMatched' in r && r.reviewRequiredMatched) || (r.usable && 'exactExpected' in r && r.exactExpected))
   return { fixtureVersion: fixture.fixtureVersion, calibrated: false,
     decision: allRequiredChecksPass && allRoutingLabelsMatch ? 'SAMPLE_PASSED_REVIEW_STILL_REQUIRED' : 'HOLD_GRADE_DRIVEN_ADAPTATION',
     limitation: 'Bank-relative AI-reviewed regression labels, not independent expert calibration or repeated-run reliability. A broader acceptable band can contain different adaptive actions; resolve routing-label disagreements before enablement.',
     summary: { cases: reviews.length, usable: reviews.filter(r => r.usable).length,
+      expectedUngradedReviews: fixture.cases.filter(c => c.expectedDisposition === 'REVIEW_REQUIRED').length * models.length,
+      matchedUngradedReviews: reviews.filter(r => 'reviewRequiredMatched' in r && r.reviewRequiredMatched).length,
       acceptableClassification: reviews.filter(r => 'acceptableClassification' in r && r.acceptableClassification).length,
       exactExpected: reviews.filter(r => 'exactExpected' in r && r.exactExpected).length,
       allRequiredChecksPass, allRoutingLabelsMatch, failedCases: reviews.filter(r => r.failures.length > 0).length }, reviews }

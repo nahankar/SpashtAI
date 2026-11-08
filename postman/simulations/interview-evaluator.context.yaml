@@ -1,0 +1,23 @@
+purpose:
+  stands_in_for: Local fixture-only Bedrock Converse HTTP responses.
+  unblocks: Transport and error-boundary checks without model charges; not semantic calibration.
+assumptions:
+  - id: review-outcome-is-not-provider-failure
+    status: supported
+    claim: In the four local stand-in scenarios, evaluator code distinguished a validated grade, review-required output, invalid JSON and provider throttling.
+    reason: The actual SDK HTTP path ran; parser uncertainty was nonretryable, while throttling was retryable. Scope is caller behavior against this owned fixture.
+    verification: On 2026-11-08 ran check-interview-evaluator-simulation.ts against port 4931. Four assertions passed; simulation request events confirmed POST Converse traffic and HTTP 200/429 responses. Repeated once using the committed launcher with the same outcomes.
+    source: apps/server/scripts/check-interview-evaluator-simulation.ts; postman/mocks/bedrock/default.js; private policy-11-http-public-results.json and policy-11-simulation.ndjson under /private/tmp/spasht-grading-validation/.
+    updated_at: "2026-11-08"
+  - id: stand-in-does-not-prove-model-judgment
+    status: unknown
+    claim: The real model consistently distinguishes ambiguous speech from clear incorrect subject claims under policy 11.
+    reason: The local response is authored fixture JSON, not a model judgment. Real-model tests are required to establish semantic quality.
+    verification: Inspected owned mock; REVIEW_REQUIRED is selected by a synthetic marker and never evaluates meaning. No real provider call was made by the HTTP check.
+    source: postman/mocks/bedrock/default.js; docs/prepare/INTERVIEWS-AI-ADJUDICATION-2026-11-08.md.
+    updated_at: "2026-11-08"
+fingerprints:
+  - id: policy-11-http-fixtures
+    date: "2026-11-08"
+    commit: "841a6a1 plus uncommitted policy-11 source/mock changes at test time"
+    cli: "Postman 1.74.0"

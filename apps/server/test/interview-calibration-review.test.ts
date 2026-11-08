@@ -38,4 +38,12 @@ describe('grading readiness acceptance review', () => {
   it('never calls a small passing sample calibrated', () => {
     expect(review()).toMatchObject({ calibrated: false, decision: 'SAMPLE_PASSED_REVIEW_STILL_REQUIRED' })
   })
+  it('accepts only a specifically predeclared ungraded review, never a provider failure or invented grade', () => {
+    const expected = { ...test, expectedDisposition: 'REVIEW_REQUIRED' as const }
+    const ungraded = { ...row, status: 'FAILED', errorCode: 'EVALUATION_REVIEW_REQUIRED', result: null }
+    expect(review([expected], [ungraded])).toMatchObject({ summary: { usable: 0, matchedUngradedReviews: 1, allRequiredChecksPass: true } })
+    expect(review([test], [ungraded]).summary.allRequiredChecksPass).toBe(false)
+    expect(review([expected], [{ ...ungraded, errorCode: 'TIMEOUT' }]).summary.allRequiredChecksPass).toBe(false)
+    expect(review([expected], [row]).summary.allRequiredChecksPass).toBe(false)
+  })
 })

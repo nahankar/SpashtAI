@@ -52,6 +52,8 @@ export const LEARNER_POLICIES: Record<string, LearnerPolicy> = {
   // Preview only: addresses measured complete-answer/gap conflicts and attempted technical statements.
   'learner-evaluation-10': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova2-lite-learner-10', modelId: 'us.amazon.nova-2-lite-v1:0', region: 'us-east-1', label: 'Nova 2 Lite · learner grading 10 (candidate)',
     prompt: 'interview-answer-12', schema: 'interview-result-5', rubric: 'bank-guidance-4', policy: 'learner-evaluation-10', temperature: 0, maxTokens: 2000, timeoutMs: 20_000 } },
+  'learner-evaluation-11': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova2-lite-learner-11', modelId: 'us.amazon.nova-2-lite-v1:0', region: 'us-east-1', label: 'Nova 2 Lite · learner grading 11 (candidate)',
+    prompt: 'interview-answer-13', schema: 'interview-result-6', rubric: 'bank-guidance-5', policy: 'learner-evaluation-11', temperature: 0, maxTokens: 2000, timeoutMs: 20_000 } },
 }
 // learner-evaluation-8: v5's prompt, rubric and model with the versioned interview-result-4 evidence matching.
 // Technical grading remains experimental (reasoning, mixed-answer strengths and no-answer classification are open).
@@ -130,6 +132,7 @@ export function originalPassage(answer: string, quote: string): string | null {
 export function parseResult(output: string, answer: string, schema = 'interview-result-2'): EvaluationResult {
   const raw: unknown = JSON.parse(output.replace(/^\s*```(?:json)?\s*/, '').replace(/\s*```\s*$/, ''))
   if (schema === 'interview-result-5') return parseClaimResult(raw, answer)
+  if (schema === 'interview-result-6') return parseInterpretedClaimResult(raw, answer)
   const tolerant = schema === 'interview-result-4'
   const learner = schema === 'interview-result-3' || tolerant
   const validationNotes: string[] = []
@@ -178,6 +181,30 @@ const claimResultSchema = z.object({
   depth: criterionSchema.omit({ criterion: true }),
   gaps: z.array(text).max(6), guidance: text, uncertainty: z.array(text).max(4),
 }).strict()
+
+const interpretedClaimResultSchema = claimResultSchema.extend({
+  reviewRequired: z.boolean(),
+  claims: z.array(claimResultSchema.shape.claims.element.extend({
+    interpretedClaim: z.string().trim().min(1).max(400),
+    interpretation: z.enum(['LITERAL', 'NORMALIZED', 'UNCERTAIN']),
+  }).strict()).max(6),
+}).strict()
+class EvaluationReviewRequired extends Error { constructor() { super('EVALUATION_REVIEW_REQUIRED') } }
+
+function parseInterpretedClaimResult(raw: unknown, answer: string): EvaluationResult {
+  const ledger = interpretedClaimResultSchema.parse(raw)
+  for (const claim of ledger.claims) if (!originalPassage(answer, claim.quote)) throw new Error('UNSUPPORTED_EVIDENCE')
+  if (ledger.reviewRequired || ledger.claims.some(c => c.interpretation === 'UNCERTAIN')) {
+    if (!ledger.uncertainty.length) throw new Error('INCONSISTENT')
+    // There is no classification to publish or use for routing. The saved answer remains intact.
+    throw new EvaluationReviewRequired()
+  }
+  const { reviewRequired: _, claims, ...rest } = ledger
+  const result = parseClaimResult({ ...rest, claims: claims.map(({ interpretedClaim: _meaning, interpretation: _kind, ...claim }) => claim) }, answer)
+  const notes = claims.filter(c => c.interpretation === 'NORMALIZED').slice(0, 2)
+    .map(c => `Transcription interpretation: “${originalPassage(answer, c.quote)}” was understood as “${c.interpretedClaim}”. The original transcript was not changed.`)
+  return notes.length ? { ...result, validationNotes: [...(result.validationNotes ?? []), ...notes] } : result
+}
 
 // Content-free diagnostics only: keep the same rejection/message, never include provider text.
 const CLAIM_REASONS = ['DEPTH_UNASSESSED_EVIDENCE', 'TRUTH_REASONING_CONFLICT', 'DUPLICATE_PASSAGE',
@@ -252,6 +279,7 @@ function trimLists(raw: Record<string, unknown>, notes: string[]) {
 }
 /** Bounded, content-free failure reason: schema keys and Zod issue codes only, never output text. */
 export function invalidOutputReason(error: unknown) {
+  if (error instanceof EvaluationReviewRequired) return 'EVALUATION_REVIEW_REQUIRED'
   if (error instanceof ClaimValidationError) return `INVALID_OUTPUT_CLAIM_${error.reason}`
   if (error instanceof SyntaxError) return 'INVALID_OUTPUT_JSON'
   if (error instanceof z.ZodError) {

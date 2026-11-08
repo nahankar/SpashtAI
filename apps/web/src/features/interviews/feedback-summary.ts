@@ -3,9 +3,10 @@ import { PENDING_FINDING, type LearnerFinding } from './useInterviewFindings'
 
 /** Summary text for an answer's feedback, or null when there is none to show (not enabled, skipped). */
 /** Why feedback is unavailable for an answer, by cause (never a grade). Saved answers and recordings are unaffected. */
-export type UnavailableReason = 'after_practice' | 'user_budget' | 'shared_budget' | 'budget' | 'service' | 'not_enabled' | 'transcript'
+export type UnavailableReason = 'after_practice' | 'user_budget' | 'shared_budget' | 'budget' | 'service' | 'not_enabled' | 'transcript' | 'review'
 export function unavailableReason(finding: LearnerFinding): UnavailableReason | null {
   if (finding.status === 'AFTER_PRACTICE') return 'after_practice'
+  if (finding.errorCode === 'EVALUATION_REVIEW_REQUIRED') return 'review'
   if (finding.status === 'TRANSCRIPT_INCOMPLETE' || finding.errorCode === 'TRANSCRIPT_INCOMPLETE') return 'transcript'
   if (finding.errorCode === 'EVALUATION_USER_BUDGET_REACHED') return 'user_budget'
   if (finding.errorCode === 'EVALUATION_SHARED_BUDGET_REACHED') return 'shared_budget'
@@ -16,6 +17,7 @@ export function unavailableReason(finding: LearnerFinding): UnavailableReason | 
   return null
 }
 export const UNAVAILABLE_SUMMARY: Record<UnavailableReason, string> = {
+  review: 'Not assessed · The transcript needs review',
   after_practice: 'Technical feedback · Available after practice ends',
   user_budget: 'Technical feedback · Your daily evaluation limit was reached',
   shared_budget: 'Technical feedback · Shared daily evaluation limit was reached',
@@ -25,6 +27,7 @@ export const UNAVAILABLE_SUMMARY: Record<UnavailableReason, string> = {
   transcript: 'Not assessed · Part of this answer was not transcribed',
 }
 export const UNAVAILABLE_DETAIL: Record<UnavailableReason, string> = {
+  review: 'The meaning of this transcript was too uncertain for a reliable technical grade. No knowledge judgement was made. Review the saved transcript and any available recording.',
   after_practice: 'Technical feedback appears here after you end the practice. Pausing does not end it.',
   user_budget: 'Your daily limit for technical evaluations (each evaluation and retry counts) was reached before this answer, so it was not evaluated.',
   shared_budget: 'The daily evaluation limit shared by all learners was reached before this answer, so it was not evaluated. This is not your personal allowance.',

@@ -70,6 +70,10 @@ describe('interview playback feedback', () => {
     expect(shared).toContain('Shared daily evaluation limit'); expect(shared).toContain('This is not your personal allowance')
     expect(feedbackSummary(failed('EVALUATION_BUDGET_REACHED'))).toBe('Technical feedback · A daily evaluation limit was reached')
     expect(feedbackSummary(failed('LEASE_EXPIRED'))).toBe('Technical feedback · Evaluation service unavailable')
+    const reviewRequired = renderToStaticMarkup(<InterviewFeedbackDisclosure finding={failed('EVALUATION_REVIEW_REQUIRED')} />)
+    expect(reviewRequired).toContain('The transcript needs review')
+    expect(reviewRequired).toContain('No knowledge judgement was made')
+    expect(reviewRequired).not.toContain('Evaluation service unavailable')
     expect(feedbackSummary(failed('PILOT_ACCESS_UNAVAILABLE', 'CANCELLED'))).toBe('Technical feedback · Not enabled for this practice')
     const gap = renderToStaticMarkup(<InterviewFeedbackDisclosure finding={{ ...failed('TRANSCRIPT_INCOMPLETE', 'TRANSCRIPT_INCOMPLETE'),
       transcriptIntegrity: { gapSpeechSeconds: 28.3, unresolved: false, unconfirmedAccepted: false, recordingAvailable: true } }} />)

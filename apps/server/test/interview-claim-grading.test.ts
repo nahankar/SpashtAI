@@ -75,4 +75,18 @@ describe('preview claim-based grading', () => {
       expect(invalidOutputReason(error)).not.toContain(answer)
     }
   })
+  it('normalizes meaning without changing quotation evidence, and transparently notes the interpretation', () => {
+    const raw = { ...ledger([{ ...correct, quote: 'A con text isolates cookies.', interpretedClaim: 'A browser context isolates cookies.', interpretation: 'NORMALIZED' }], 'COMPLETE'), reviewRequired: false }
+    const result = parseResult(JSON.stringify(raw), 'A con text isolates cookies.', 'interview-result-6')
+    expect(result.classification).toBe('CORRECT')
+    expect(result.criteria[0].evidence).toEqual(['A con text isolates cookies.'])
+    expect(result.validationNotes?.join(' ')).toContain('The original transcript was not changed')
+  })
+  it('withholds a grade for uncertain meaning, including when a false no-review flag conflicts', () => {
+    const raw = { ...ledger([{ ...correct, interpretation: 'UNCERTAIN', interpretedClaim: 'Unresolved proposition.' }], 'INCOMPLETE'), reviewRequired: false, uncertainty: ['The relationship between these fragments is unclear.'] }
+    try { parseResult(JSON.stringify(raw), answer, 'interview-result-6'); throw new Error('Expected review') } catch (error) {
+      expect(invalidOutputReason(error)).toBe('EVALUATION_REVIEW_REQUIRED')
+    }
+    expect(() => parseResult(JSON.stringify({ ...raw, uncertainty: [] }), answer, 'interview-result-6')).toThrow('INCONSISTENT')
+  })
 })

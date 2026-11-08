@@ -1,0 +1,129 @@
+{
+  "fixtureVersion": "grading-policy-11-repeat-1",
+  "reviewer": "Codex technical judgment with primary-source checks; owner explicitly accepts AI-led adjudication. Not independent human review.",
+  "preRegistered": "Frozen before policy-11 model calls. Historical fixtures and reports remain unchanged. P2-08 now intentionally requires review rather than a grade, for the documented ambiguity, not to count a prior failure as a passing grade. 17 model cases plus two free controls, then exact repeat RS-03/H1-11/P2-08 = 20 normal units.",
+  "questions": {
+    "WEB-NEW-033": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-028": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-047": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "PY-NEW-010": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DEV-NEW-016": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "WEB-NEW-099": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DE-NEW-001": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "PY-NEW-021": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "MAN-NEW-019": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DE-NEW-012": {
+      "revision": 2,
+      "guidanceIssues": [
+        "The misconception's 'Correction' is an unrelated example sentence."
+      ]
+    },
+    "WEB-NEW-077": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-041": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-097": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-005": {
+      "revision": 2,
+      "guidanceIssues": [
+        "expectedDepth asks the candidate to 'identify why the stated misconception is false'; a correct answer need not mention the misconception."
+      ]
+    }
+  },
+  "cases": [
+    {
+      "id": "RS-03",
+      "qid": "WEB-NEW-033",
+      "category": "implicit-valid-reasoning",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT",
+        "PARTIAL"
+      ],
+      "mustNotBe": [
+        "INCORRECT",
+        "NOT_ANSWERED"
+      ],
+      "answer": "A window resize event only fires when the viewport changes. A sidebar collapsing or a web font loading can resize a card while the window stays the same size. ResizeObserver reports that element's own size change.",
+      "expectReasoning": true,
+      "mustNotSay": [
+        "does not provide reasoning",
+        "no reasoning",
+        "does not explain why"
+      ],
+      "notes": "Valid reasoning with no causal keyword (statedReasons is empty).",
+      "sourceFixture": "reasoning-1"
+    },
+    {
+      "id": "H1-11",
+      "qid": "AUT-NEW-041",
+      "category": "complex-correct",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT"
+      ],
+      "answer": "If teams release on their own schedules and the shared parts are stable, I'd publish a versioned package with semantic versioning, changelogs and a deprecation policy, so each team upgrades when it is ready. If the teams are tightly coupled and change things together, a monorepo makes atomic changes easier, but it needs clear ownership and CI that only runs the affected suites.",
+      "evidence": [
+        "versioned package",
+        "deprecation policy",
+        "monorepo makes atomic changes easier"
+      ],
+      "sourceFixture": "heldout-1"
+    },
+    {
+      "id": "P2-08",
+      "qid": "DE-NEW-001",
+      "category": "vague-substantive-fragments",
+      "expected": "UNASSESSED",
+      "acceptable": [],
+      "mustNotBe": [
+        "CORRECT",
+        "PARTIAL",
+        "INCORRECT",
+        "NOT_ANSWERED"
+      ],
+      "answer": "Packed tables are the real data.\nUm,\nWhich are specific to any artifact dimensions can be\nCreated, derived.\nAcross the data.\ncombination of the data aggregation of the data.\nAgainst any specific\nOther fields, so multiple dimensions can be created.\nTo query all of the data at once, instead of the basic rows and columns that 1 may typically do.",
+      "mustNotQuote": [
+        "grain",
+        "measure"
+      ],
+      "notes": "AI-led adjudication, owner accepted 8 Nov 2026: the technical attempt is substantive but relationships cannot be reliably recovered from these fragments. Do not penalize packed/fact ASR substitution or invent knowledge. Preserve earlier labels in historical fixtures; require an ungraded review outcome in this new fixture.",
+      "sourceFixture": "pilot-2",
+      "expectedDisposition": "REVIEW_REQUIRED"
+    }
+  ]
+}
