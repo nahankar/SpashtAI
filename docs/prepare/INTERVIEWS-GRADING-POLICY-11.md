@@ -51,3 +51,28 @@ NODE_ENV=test INTERVIEW_EVALUATOR_TEST_ENDPOINT=http://127.0.0.1:4931/bedrock \
 
 The server's simulation endpoint remains test-only and restricted to loopback. Keep captured traffic/auth/audio
 out of Git. Use normal accounted calibration commands for real-provider results and report them separately.
+
+## Observed model results — HOLD
+
+Tested application code: `0b7e50b`, 8 November 2026 UTC. Real Nova 2 Lite calls used the existing
+accounted ADMIN_TEST path and the normal 20-unit daily allowance; no limit reset or earlier allowance reused.
+
+- Initial 19 cases: 17 model calls and two deterministic free controls. Nine usable grades, all nine matching
+  their expected class; ten invalid outputs; zero validated review-required outcomes.
+- Initial failure reasons: five `claims_invalid_type`, two `uncertainty_invalid_type`, one
+  `depth_evidence_too_big`, two `CORRECT_WITH_GAPS`. Schema errors were not repaired into grades.
+- Three fresh repeat calls: RS-03 graded CORRECT; H1-11 failed `CORRECT_WITH_GAPS`; P2-08 failed
+  `claims_invalid_type`. These are not three stable grades. The expected ambiguous-answer review failed again.
+- Provider failures/timeouts: zero. All twenty invocations have recorded token usage. Provider availability
+  does not make malformed/contradictory assessments usable.
+
+The reference dispositions were frozen before the calls. No expectation has been revised to rescue these
+results. Policy 11 is rejected for promotion. The next separate preview addresses output transport and retains
+all evidence and consistency validation; transport success alone cannot establish semantic reliability.
+
+Private evidence (ignored, outside Git): `/private/tmp/spasht-grading-validation/policy-11-initial.json`,
+`policy-11-initial-review.json`, `policy-11-repeat.json`, `policy-11-repeat-review.json`, and
+`policy-11-repeat-audit.json`. Historical failed provider bodies are not persisted or published.
+
+Additional checks at this code: full server 655 passed / 290 optional database tests skipped; full web
+383 passed; builds/typecheck passed. These are separate from the failed real-model acceptance.
