@@ -1,0 +1,199 @@
+{
+  "fixtureVersion": "thinking-comparison-repeat-1",
+  "reviewer": "Codex AI-led technical adjudication accepted by owner; not independent human review.",
+  "preRegistered": "Frozen before any matched-control or low-thinking provider call. Same existing expected labels and checks; 8 paid cases plus two free controls in each arm. Prompt/schema/model/temperature/token ceiling/timeout identical; only explicit extended-thinking setting differs. Two fresh critical repeats per arm: 20 provider calls total, including canaries. No result-driven re-labelling.",
+  "questions": {
+    "AUT-002": {
+      "revision": 2,
+      "guidanceIssues": [
+        "goodAnswerPoints credits 'Selenium Manager-backed condition waits'. Selenium Manager resolves driver/browser binaries; it provides no waits.",
+        "The misconception's 'Correction' sentence does not correct the stated misconception (mixing implicit and explicit waits)."
+      ]
+    },
+    "AUT-NEW-047": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-016": {
+      "revision": 2,
+      "guidanceIssues": [
+        "The misconception's 'Correction' restates the object model instead of saying pages in one context share cookies."
+      ]
+    },
+    "AUT-NEW-057": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-005": {
+      "revision": 2,
+      "guidanceIssues": [
+        "expectedDepth asks the candidate to 'identify why the stated misconception is false'; a correct answer need not mention the misconception."
+      ]
+    },
+    "AUT-NEW-060": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AAI-NEW-006": {
+      "revision": 2,
+      "guidanceIssues": [
+        "'Acceptable alternatives: cache-aware admission or paging strategies' is serving guidance, not an alternative answer to the question.",
+        "exampleAnswer calls 'it stores attention state for generation' a limitation; that is the definition, not a limitation."
+      ]
+    },
+    "BA-NEW-029": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "PY-NEW-021": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "OPS-NEW-001": {
+      "revision": 2,
+      "guidanceIssues": [
+        "Core states that deleting depends on parent-directory permissions, and Optional depth asks the same question."
+      ]
+    },
+    "MAN-NEW-019": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "SM-NEW-013": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DE-NEW-012": {
+      "revision": 2,
+      "guidanceIssues": [
+        "The misconception's 'Correction' is an unrelated example sentence."
+      ]
+    },
+    "DEV-NEW-080": {
+      "revision": 2,
+      "guidanceIssues": [
+        "The misconception's 'Correction' does not address the stated misconception.",
+        "A REST API design question is filed under the Java track."
+      ]
+    },
+    "PY-NEW-049": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AAI-NEW-033": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "WEB-NEW-077": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-041": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "WEB-NEW-033": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-056": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "WEB-NEW-055": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "WEB-003": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "WEB-008": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-028": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "PY-NEW-010": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DE-NEW-016": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DEV-NEW-016": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "WEB-NEW-099": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DE-NEW-001": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-097": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-019": {
+      "revision": 2,
+      "guidanceIssues": []
+    }
+  },
+  "cases": [
+    {
+      "id": "P2-08",
+      "qid": "DE-NEW-001",
+      "category": "vague-substantive-fragments",
+      "expected": "UNASSESSED",
+      "acceptable": [],
+      "mustNotBe": [
+        "CORRECT",
+        "PARTIAL",
+        "INCORRECT",
+        "NOT_ANSWERED"
+      ],
+      "answer": "Packed tables are the real data.\nUm,\nWhich are specific to any artifact dimensions can be\nCreated, derived.\nAcross the data.\ncombination of the data aggregation of the data.\nAgainst any specific\nOther fields, so multiple dimensions can be created.\nTo query all of the data at once, instead of the basic rows and columns that 1 may typically do.",
+      "mustNotQuote": [
+        "grain",
+        "measure"
+      ],
+      "notes": "AI-led adjudication, owner accepted 8 Nov 2026: the technical attempt is substantive but relationships cannot be reliably recovered from these fragments. Do not penalize packed/fact ASR substitution or invent knowledge. Preserve earlier labels in historical fixtures; require an ungraded review outcome in this new fixture.",
+      "sourceFixture": "pilot-2",
+      "expectedDisposition": "REVIEW_REQUIRED",
+      "sourceCases": [
+        "pilot-2:P2-08",
+        "readiness-2026-11-06:P2-08"
+      ]
+    },
+    {
+      "id": "A1-01",
+      "qid": "AUT-NEW-097",
+      "category": "misheard-term-correct",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT",
+        "PARTIAL"
+      ],
+      "answer": "Mark a known good commit and the current bad commit, then let get dissect check out the midpoint, run the test, mark it good or bad, and repeat until it finds the first bad commit. You can automate it with get dissect run and a script whose exit code says good or bad, but the test has to be reproducible.",
+      "evidence": [
+        "known good commit",
+        "first bad commit"
+      ],
+      "mustNotGap": [
+        "dissect",
+        "misstated",
+        "familiar"
+      ],
+      "notes": "Core content is complete. PARTIAL is tolerable only for a genuine content gap; any gap or misconception about 'get dissect' is the defect under test.",
+      "sourceCases": [
+        "asr-1:A1-01"
+      ]
+    }
+  ]
+}

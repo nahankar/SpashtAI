@@ -35,3 +35,9 @@ fingerprints:
 # malformed reasoning, genuine review and rejected contradictory core evidence.
 # This validates caller behavior only; no real-provider v14 accuracy claim.
 # Evidence: private policy-14-http-results.json and policy-14-simulation.ndjson.
+
+# Prepared thinking comparison: 21 actual SDK HTTP fixture assertions passed on
+# 2026-11-09, including matched-budget OFF vs explicit LOW request payloads and
+# exclusion of fixture reasoningContent from public/persisted result structures.
+# No real extended-thinking quality/latency claim; evidence is private
+# thinking-low-http-results.json and thinking-low-simulation.ndjson.

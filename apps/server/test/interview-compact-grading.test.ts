@@ -71,4 +71,28 @@ describe('compact assessment separates knowledge from prose',()=>{
   expect(sdk.send).toHaveBeenCalledOnce()
  })
 
+ it('pins a bounded low-thinking comparison with unchanged grading input and no persisted reasoning text',async()=>{
+  const config=LEARNER_POLICIES['learner-evaluation-14-thinking-low'].config
+  expect(hash(config)).toBe('b5f0749eea9fd6a5398cd3274f8edb6f78aa46c6b95dd8e9c8fd7fed9c7806af')
+  const content=[{reasoningContent:{reasoningText:{text:'FIXTURE_PRIVATE_REASONING'}}},{toolUse:{name:'grade_interview_answer',input:{decision:'COMPLETE',correct:[1,2],incorrect:[],validReasoning:[2]}}}]
+  sdk.send.mockResolvedValue({stopReason:'tool_use',output:{message:{content}},usage:{inputTokens:123,outputTokens:456}})
+  const r=await evaluateAnswer(q,answer,config,'NONE')
+  const control=LEARNER_POLICIES['learner-evaluation-14-budget-control'].config
+  expect(hash(control)).toBe('59d0d74942166c3aaed28cc8a0f484ab0fb1331d775289af960d7842a7a56bea')
+  expect(control.timeoutMs).toBe(config.timeoutMs)
+  await evaluateAnswer(q,answer,control,'NONE')
+  await evaluateAnswer(q,answer,LEARNER_POLICIES['learner-evaluation-14'].config,'NONE')
+  const [low,matched,baseline]=sdk.send.mock.calls.map(c=>c[0].input)
+  expect(low.additionalModelRequestFields).toEqual({reasoningConfig:{type:'enabled',maxReasoningEffort:'low'}})
+  expect(low.inferenceConfig).toEqual({temperature:0,maxTokens:15000})
+  expect(config.timeoutMs).toBe(40000)
+  expect(low.inferenceConfig).toEqual(matched.inferenceConfig)
+  expect(low.system).toEqual(matched.system);expect(low.messages).toEqual(matched.messages);expect(low.toolConfig).toEqual(matched.toolConfig)
+  expect(matched).not.toHaveProperty('additionalModelRequestFields')
+  expect(low.system).toEqual(baseline.system);expect(low.messages).toEqual(baseline.messages);expect(low.toolConfig).toEqual(baseline.toolConfig)
+  expect(baseline).not.toHaveProperty('additionalModelRequestFields')
+  expect(r).toMatchObject({inputTokens:123,outputTokens:456,result:{classification:'CORRECT'}})
+  expect(JSON.stringify(r)).not.toContain('FIXTURE_PRIVATE_REASONING')
+ })
+
 })

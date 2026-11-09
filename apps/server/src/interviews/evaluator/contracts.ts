@@ -9,7 +9,7 @@ export const CONFIGS = {
 export const VERSIONS = { prompt: 'interview-answer-4', schema: 'interview-result-2', rubric: 'bank-guidance-1', policy: 'adaptive-1' } as const
 export const LIMITS = { dailyPerAdmin: 20, dailyGlobal: 100, concurrent: 2, attempts: 3, timeoutMs: 20_000, leaseMs: 60_000, maxTokens: 2000 }
 export type EvaluatorConfig = { id: string; modelId: string; region: string; label: string; prompt: string; schema: string; rubric: string; policy: string
-  temperature: number; maxTokens: number; timeoutMs: number; responseFormat?: 'tool' }
+  temperature: number; maxTokens: number; timeoutMs: number; responseFormat?: 'tool'; reasoningEffort?: 'low' }
 // Learner grading policies are frozen literals: a run pins one at launch and keeps evaluating
 // with exactly that entry. Never edit an entry in place; add a version and move CURRENT.
 // learner-evaluation-1 reproduces configFor('nova2_lite') as first pinned (hash checked in tests).
@@ -60,6 +60,10 @@ export const LEARNER_POLICIES: Record<string, LearnerPolicy> = {
     prompt: 'interview-answer-15', schema: 'interview-result-7', rubric: 'bank-guidance-6', policy: 'learner-evaluation-13', temperature: 0, maxTokens: 2000, timeoutMs: 20_000, responseFormat: 'tool' } },
   'learner-evaluation-14': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova2-lite-learner-14', modelId: 'us.amazon.nova-2-lite-v1:0', region: 'us-east-1', label: 'Nova 2 Lite · separated grading 14 (candidate)',
     prompt: 'interview-answer-16', schema: 'interview-result-8', rubric: 'bank-guidance-6', policy: 'learner-evaluation-14', temperature: 0, maxTokens: 2000, timeoutMs: 20_000, responseFormat: 'tool' } },
+  'learner-evaluation-14-budget-control': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova2-lite-learner-14-budget-control', modelId: 'us.amazon.nova-2-lite-v1:0', region: 'us-east-1', label: 'Nova 2 Lite · grading 14 matched-budget control',
+    prompt: 'interview-answer-16', schema: 'interview-result-8', rubric: 'bank-guidance-6', policy: 'learner-evaluation-14-budget-control', temperature: 0, maxTokens: 15000, timeoutMs: 40_000, responseFormat: 'tool' } },
+  'learner-evaluation-14-thinking-low': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova2-lite-learner-14-thinking-low', modelId: 'us.amazon.nova-2-lite-v1:0', region: 'us-east-1', label: 'Nova 2 Lite · grading 14 low thinking (comparison)',
+    prompt: 'interview-answer-16', schema: 'interview-result-8', rubric: 'bank-guidance-6', policy: 'learner-evaluation-14-thinking-low', temperature: 0, maxTokens: 15000, timeoutMs: 40_000, responseFormat: 'tool', reasoningEffort: 'low' } },
 }
 // learner-evaluation-8: v5's prompt, rubric and model with the versioned interview-result-4 evidence matching.
 // Technical grading remains experimental (reasoning, mixed-answer strengths and no-answer classification are open).

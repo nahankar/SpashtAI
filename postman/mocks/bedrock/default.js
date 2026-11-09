@@ -7,6 +7,8 @@ http.createServer(async (req, res) => {
   try {
     const request = JSON.parse(raw)
     const answer = JSON.parse(request.messages[0].content[0].text).candidateAnswer
+    if (answer === '[MATCHED_CONTROL]' && (request.additionalModelRequestFields || request.inferenceConfig.maxTokens !== 15000)) throw Error('Expected matched control request')
+    if (answer === '[LOW_REASONING]' && (request.additionalModelRequestFields?.reasoningConfig?.type !== 'enabled' || request.additionalModelRequestFields?.reasoningConfig?.maxReasoningEffort !== 'low' || request.inferenceConfig.maxTokens !== 15000)) throw Error('Expected bounded reasoning request')
     if (answer === '[TIMEOUT]') await new Promise(resolve => setTimeout(resolve, 25000))
     res.setHeader('content-type', 'application/json')
     if (answer === '[THROTTLE]') {
@@ -34,6 +36,8 @@ http.createServer(async (req, res) => {
     const tool = { toolUse: { toolUseId: 'fixture', name: answer === '[WRONG_TOOL]' ? 'other' : 'grade_interview_answer', input: result } }
     const content = toolOutput ? (answer === '[MULTIPLE_TOOLS]' ? [tool, tool] : [tool])
       : [{ text: answer === '[INVALID_OUTPUT]' ? 'not json' : JSON.stringify(result) }]
+    if (answer === '[MATCHED_CONTROL]' && (request.additionalModelRequestFields || request.inferenceConfig.maxTokens !== 15000)) throw Error('Expected matched control request')
+    if (answer === '[LOW_REASONING]') content.unshift({ reasoningContent: { reasoningText: { text: 'FIXTURE_PRIVATE_REASONING' } } })
     res.end(JSON.stringify({ output: { message: { role: 'assistant', content } },
       stopReason: toolOutput ? 'tool_use' : 'end_turn', usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 }, metrics: { latencyMs: 1 } }))
   } catch { res.writeHead(400); res.end(JSON.stringify({ message: 'Invalid Converse fixture request' })) }
