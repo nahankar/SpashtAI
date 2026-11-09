@@ -1,0 +1,827 @@
+{
+  "fixtureVersion": "question-scope-focused-1",
+  "provenance": {
+    "type": "Saved synthetic validated-result projection; no fresh provider calls",
+    "applicationRevision": "524d4c936fce1cf2d384916332b6da85e615a957",
+    "policy": "learner-evaluation-16",
+    "configHash": "0f6f309aec2d53806612cac4180f1b4349b6dca98c4681fe1e6e5f93ebe0148a",
+    "model": "us.amazon.nova-2-lite-v1:0",
+    "date": "2026-11-09",
+    "scope": "All 20 initial rows: 18 paid model results plus two reused deterministic controls. Repeats excluded.",
+    "omitted": "Actor/assessment identifiers, usage records, raw provider bodies, hidden reasoning, auth and recordings.",
+    "warning": "Old evidence cannot establish correctness of a changed model, prompt, bank or application.",
+    "fixtureSha256": "3a456d7e074a66c73d35adceac17c8c2242f1ab20aaf39c098989d29d24345db"
+  },
+  "results": [
+    {
+      "id": "R1-08",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "INCORRECT",
+        "criteria": [
+          {
+            "finding": "NOT_MET",
+            "evidence": [
+              "A context is basically the same thing as a page, and each page always gets its own cookies, so two pages are completely isolated from each other."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "The cited answer contains a false claim about the requested core concept."
+          },
+          {
+            "finding": "NOT_MET",
+            "evidence": [
+              "A context is basically the same thing as a page, and each page always gets its own cookies, so two pages are completely isolated from each other."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The cited passage contains an explicitly false explanation; this is separate from the knowledge verdict."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [],
+        "gaps": [
+          "No explanation of Browser as the launched engine process",
+          "No explanation of BrowserContext as an isolated incognito-like profile"
+        ],
+        "misconceptions": [
+          "Belief that a BrowserContext is the same as a Page and that pages in the same context have isolated cookies"
+        ],
+        "guidance": "In Playwright, a Browser is the launched engine process, a BrowserContext is an isolated profile (like incognito) that contains one or more Pages, and a Page is a tab within a context. Pages within the same context share cookies and storage, while contexts provide isolation. Closing a context closes all its pages and releases resources."
+      }
+    },
+    {
+      "id": "H1-09",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "PARTIAL",
+        "criteria": [
+          {
+            "finding": "PARTIAL",
+            "evidence": [
+              "Maybe you could translate the queries into Hindi first?"
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "Relevant understanding is present, with missing essentials or mixed claims."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "Maybe you could translate the queries into Hindi first?"
+            ],
+            "criterion": "REASONING",
+            "explanation": "The cited passage explains a true relevant mechanism, contrast or consequence."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [
+          "Proposes translation-assisted retrieval, which aligns with an accepted alternative approach."
+        ],
+        "gaps": [
+          "Does not address building labelled cross-language query-document pairs or measuring retrieval performance.",
+          "Omits evaluation of the model's language support and input conventions.",
+          "Fails to note that multilingual quality varies by language and domain (a key limitation)."
+        ],
+        "misconceptions": [],
+        "guidance": "To fully answer, explain how you would build labelled cross-language pairs, measure retrieval quality, and check language support. Also note that multilingual models may perform unevenly across languages, making translation-assisted retrieval a useful fallback when recall is inadequate."
+      }
+    },
+    {
+      "id": "P2-07",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "CORRECT",
+        "criteria": [
+          {
+            "finding": "MET",
+            "evidence": [
+              "Keyboard order follows semantic controls.",
+              "Dom position.",
+              "Uh, competing manual order?"
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "The cited answer covers the requested essentials."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "Keyboard order follows semantic controls.",
+              "Dom position.",
+              "Uh, competing manual order?"
+            ],
+            "criterion": "REASONING",
+            "explanation": "The cited passage explains a true relevant mechanism, contrast or consequence."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [
+          "Identifies DOM position as the determinant of natural focus order",
+          "Recognizes that positive tabindex creates a competing manual sequence"
+        ],
+        "gaps": [],
+        "misconceptions": [],
+        "guidance": "Condense the core ideas into full sentences: 'Keyboard focus follows elements in DOM order by default. Using positive tabindex overrides this with an artificial sequence that can disconnect focus from visual layout, making navigation confusing.'"
+      }
+    },
+    {
+      "id": "P2-08",
+      "model": "learner-evaluation-16",
+      "status": "FAILED",
+      "errorCode": "EVALUATION_REVIEW_REQUIRED",
+      "reused": false,
+      "result": null
+    },
+    {
+      "id": "A1-01",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "CORRECT",
+        "criteria": [
+          {
+            "finding": "MET",
+            "evidence": [
+              "Mark a known good commit and the current bad commit, then let get dissect check out the midpoint, run the test, mark it good or bad, and repeat until it finds the first bad commit.",
+              "You can automate it with get dissect run and a script whose exit code says good or bad, but the test has to be reproducible."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "The cited answer covers the requested essentials."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "Mark a known good commit and the current bad commit, then let get dissect check out the midpoint, run the test, mark it good or bad, and repeat until it finds the first bad commit.",
+              "You can automate it with get dissect run and a script whose exit code says good or bad, but the test has to be reproducible."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The cited passage explains a true relevant mechanism, contrast or consequence."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [
+          "Correctly identifies the core bisect workflow: marking known good/bad commits, midpoint testing, and automation via script exit codes",
+          "Properly emphasizes the requirement for a reproducible test"
+        ],
+        "gaps": [],
+        "misconceptions": [],
+        "guidance": "The answer is correct for the requested essentials. For deeper understanding, explain why deterministic classification is required: flaky tests would cause bisect to incorrectly narrow the search space."
+      }
+    },
+    {
+      "id": "A1-05",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "INCORRECT",
+        "criteria": [
+          {
+            "finding": "NOT_MET",
+            "evidence": [
+              "stale element reference exception happens when the element takes too long to load so it is basically a time out, you just retry the same web element in a loop until it works"
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "The cited answer contains a false claim about the requested core concept."
+          },
+          {
+            "finding": "NOT_MET",
+            "evidence": [
+              "stale element reference exception happens when the element takes too long to load so it is basically a time out, you just retry the same web element in a loop until it works"
+            ],
+            "criterion": "REASONING",
+            "explanation": "The cited passage contains an explicitly false explanation; this is separate from the knowledge verdict."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [],
+        "gaps": [
+          "No explanation of proper recovery pattern (relocating with bounded waits after page/frame conditions)"
+        ],
+        "misconceptions": [
+          "StaleElementReferenceException is not caused by element load timeouts; it occurs when the referenced DOM node is removed/replaced or the browsing context changes",
+          "Retrying the same stale reference in a loop is ineffective - the old reference cannot be reattached; recovery requires locating a fresh element using its locator after page conditions stabilize"
+        ],
+        "guidance": "Review the requested distinction and explain your reasoning."
+      }
+    },
+    {
+      "id": "P2-06",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "PARTIAL",
+        "criteria": [
+          {
+            "finding": "PARTIAL",
+            "evidence": [
+              "And asynchronous dependent call needs composition rather than nested future values.",
+              "The stated misconception is a false, and we should use synchronous calls whenever possible."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "Relevant understanding is present, with missing essentials or mixed claims."
+          },
+          {
+            "finding": "PARTIAL",
+            "evidence": [
+              "And asynchronous dependent call needs composition rather than nested future values.",
+              "The stated misconception is a false, and we should use synchronous calls whenever possible."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The answer contains both valid and false explanations."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [
+          "Correctly identifies that asynchronous dependent calls require composition rather than nested future values (thenCompose purpose)"
+        ],
+        "gaps": [
+          "No explanation provided for thenApply (result transformation)",
+          "No explanation provided for thenCombine (independent result combination)",
+          "No explanation provided for exception handling mechanisms (e.g., exceptionally, handle, whenComplete)"
+        ],
+        "misconceptions": [
+          "Suggesting synchronous calls should be used whenever possible misrepresents CompletableFuture's asynchronous composition benefits"
+        ],
+        "guidance": "Review the requested distinction and explain your reasoning."
+      }
+    },
+    {
+      "id": "P2-02",
+      "model": "learner-evaluation-16",
+      "status": "FAILED",
+      "errorCode": "EVALUATION_REVIEW_REQUIRED",
+      "reused": false,
+      "result": null
+    },
+    {
+      "id": "N15-01",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "CORRECT",
+        "criteria": [
+          {
+            "finding": "MET",
+            "evidence": [
+              "A fact row records a measurement at a specified grain, such as one sale line with quantity and amount.",
+              "Dimensions supply descriptive context, like product category or customer region, for filtering and grouping those measurements."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "The cited answer covers the requested essentials."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "A fact row records a measurement at a specified grain, such as one sale line with quantity and amount.",
+              "Dimensions supply descriptive context, like product category or customer region, for filtering and grouping those measurements."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The cited passage explains a true relevant mechanism, contrast or consequence."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [
+          "A fact row records a measurement at a specified grain, such as one sale line with quantity and amount.",
+          "Dimensions supply descriptive context, like product category or customer region, for filtering and grouping those measurements."
+        ],
+        "gaps": [],
+        "misconceptions": [],
+        "guidance": "Apply this understanding to a different example."
+      }
+    },
+    {
+      "id": "N15-02",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "INCORRECT",
+        "criteria": [
+          {
+            "finding": "NOT_MET",
+            "evidence": [
+              "Fact tables and dimension tables have identical purposes.",
+              "Both only store descriptive labels and never measurements.",
+              "There is no distinction between them."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "The cited answer contains a false claim about the requested core concept."
+          },
+          {
+            "finding": "NOT_MET",
+            "evidence": [
+              "Fact tables and dimension tables have identical purposes.",
+              "Both only store descriptive labels and never measurements.",
+              "There is no distinction between them."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The cited passage contains an explicitly false explanation; this is separate from the knowledge verdict."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [],
+        "gaps": [
+          "Fact tables record business events at a defined grain",
+          "Dimensions provide context for filtering/grouping fact data"
+        ],
+        "misconceptions": [
+          "Fact tables and dimension tables do not have identical purposes",
+          "Fact tables store measurements/business events while dimension tables provide descriptive context",
+          "Fact tables can contain numeric measures (e.g., sales amount) while dimensions describe entities (e.g., product attributes)"
+        ],
+        "guidance": "Fact tables store quantitative measurements of business events (e.g., sales amounts) at a specific grain, while dimension tables store descriptive attributes that provide context for analyzing those measurements (e.g., product categories, customer details)."
+      }
+    },
+    {
+      "id": "N15-03",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "CORRECT",
+        "criteria": [
+          {
+            "finding": "MET",
+            "evidence": [
+              "The table with the...",
+              "event thing.",
+              "The other has that one, the measure..."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "The cited answer covers the requested essentials."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "REASONING",
+            "explanation": "No valid reasoning assessment was established."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [
+          "Correctly identifies the core distinction between fact tables (events/measurements) and dimension tables (descriptive context/labels)."
+        ],
+        "gaps": [],
+        "misconceptions": [],
+        "guidance": "To strengthen your response, explicitly state that fact tables record measurable business events at a defined grain (e.g., sales per transaction) while dimension tables provide descriptive attributes (e.g., product details, customer demographics) used to filter and group those measurements."
+      }
+    },
+    {
+      "id": "N15-04",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "CORRECT",
+        "criteria": [
+          {
+            "finding": "MET",
+            "evidence": [
+              "Natural keyboard focus follows DOM order and focusable native controls.",
+              "Positive tabindex jumps ahead into a separate numbered order.",
+              "Now keyboard users encounter fields in a different sequence."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "The cited answer covers the requested essentials."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "Natural keyboard focus follows DOM order and focusable native controls.",
+              "Positive tabindex jumps ahead into a separate numbered order.",
+              "Now keyboard users encounter fields in a different sequence."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The cited passage explains a true relevant mechanism, contrast or consequence."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [
+          "Accurately identifies DOM order as the determinant of natural keyboard focus",
+          "Correctly explains that positive tabindex creates a separate prioritized sequence that diverges from visual order",
+          "Highlights the usability consequence of unpredictable navigation for keyboard users",
+          "Provides appropriate guidance to maintain logical source order"
+        ],
+        "gaps": [],
+        "misconceptions": [],
+        "guidance": "The answer fully addresses the core requirements: explaining DOM order as the natural determinant and why positive tabindex values are discouraged due to creating an unpredictable navigation sequence. The explanation is concise and aligns with accessibility best practices."
+      }
+    },
+    {
+      "id": "N15-05",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "PARTIAL",
+        "criteria": [
+          {
+            "finding": "PARTIAL",
+            "evidence": [
+              "DOM order and native focusable controls determine the normal tab sequence.",
+              "Positive tabindex is bad because it is bad."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "Relevant understanding is present, with missing essentials or mixed claims."
+          },
+          {
+            "finding": "PARTIAL",
+            "evidence": [
+              "DOM order and native focusable controls determine the normal tab sequence.",
+              "Positive tabindex is bad because it is bad."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The answer contains both valid and false explanations."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [
+          "Accurately identifies DOM order and native focusable controls as determinants of natural keyboard focus sequence"
+        ],
+        "gaps": [
+          "Fails to explain why positive tabindex values are discouraged - missing contrast between natural document order and artificial numeric prioritization, and consequences for user navigation predictability"
+        ],
+        "misconceptions": [
+          "Positive tabindex is bad because it is bad."
+        ],
+        "guidance": "To fully answer, explain how positive tabindex creates a separate prioritized numeric order that can disconnect keyboard navigation from visual/document flow, making page navigation harder to predict and maintain."
+      }
+    },
+    {
+      "id": "N15-06",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "INCORRECT",
+        "criteria": [
+          {
+            "finding": "NOT_MET",
+            "evidence": [
+              "Git bisect chooses commits at random and decides whether code is broken from the commit message.",
+              "You never run a test or label good and bad revisions."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "The cited answer contains a false claim about the requested core concept."
+          },
+          {
+            "finding": "NOT_MET",
+            "evidence": [
+              "Git bisect chooses commits at random and decides whether code is broken from the commit message.",
+              "You never run a test or label good and bad revisions."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The cited passage contains an explicitly false explanation; this is separate from the knowledge verdict."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [],
+        "gaps": [
+          "No mention of marking known good and bad commits.",
+          "No reference to using `git bisect run` with a test script.",
+          "No explanation of why reproducible tests are required."
+        ],
+        "misconceptions": [
+          "Git bisect does not use commit messages to determine broken code; it requires running a test script and labeling revisions as good or bad based on exit codes.",
+          "Git bisect cannot identify the introducing commit without a deterministic good/bad classification from a reliable test."
+        ],
+        "guidance": "Git bisect performs a binary search between a known good and bad commit, checking out midpoint revisions. It relies on a reliable script that runs the test and returns a pass/fail exit code to classify each revision. Without this classification, bisect cannot isolate the introducing change."
+      }
+    },
+    {
+      "id": "N15-07",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "CORRECT",
+        "criteria": [
+          {
+            "finding": "MET",
+            "evidence": [
+              "A stale element points to a node from the old dome after a rerender or navigation replaced it.",
+              "Wait for the current page condition and locate the element again using its locator, then retry the action within a bound.",
+              "Reusing the old reference keeps targeting the detached node."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "The cited answer covers the requested essentials."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "A stale element points to a node from the old dome after a rerender or navigation replaced it.",
+              "Wait for the current page condition and locate the element again using its locator, then retry the action within a bound.",
+              "Reusing the old reference keeps targeting the detached node."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The cited passage explains a true relevant mechanism, contrast or consequence."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [
+          "A stale element points to a node from the old dome after a rerender or navigation replaced it.",
+          "Wait for the current page condition and locate the element again using its locator, then retry the action within a bound.",
+          "Reusing the old reference keeps targeting the detached node."
+        ],
+        "gaps": [],
+        "misconceptions": [],
+        "guidance": "Apply this understanding to a different example."
+      }
+    },
+    {
+      "id": "N15-08",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "PARTIAL",
+        "criteria": [
+          {
+            "finding": "PARTIAL",
+            "evidence": [
+              "A DOM replacement can detach the node held by the element reference.",
+              "Locate the current element again rather than reusing that reference.",
+              "Also, a sufficiently long implicit wait repairs any detached reference permanently because time reattaches the same object."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "Relevant understanding is present, with missing essentials or mixed claims."
+          },
+          {
+            "finding": "PARTIAL",
+            "evidence": [
+              "A DOM replacement can detach the node held by the element reference.",
+              "Locate the current element again rather than reusing that reference.",
+              "Also, a sufficiently long implicit wait repairs any detached reference permanently because time reattaches the same object."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The answer contains both valid and false explanations."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [
+          "Correctly identifies that DOM replacement detaches the node held by the element reference",
+          "Correctly states that the current element should be located again rather than reusing the stale reference"
+        ],
+        "gaps": [
+          "No explanation of why implicit waits cannot reattach detached DOM nodes"
+        ],
+        "misconceptions": [
+          "Belief that a sufficiently long implicit wait can permanently repair detached references by reattaching the same object"
+        ],
+        "guidance": "While correctly describing the need to relocate elements after detachment, the claim about implicit waits misrepresents how WebDriver handles stale references. Implicit waits only apply to element location attempts and cannot revive detached nodes; the proper recovery is bounded relocation using fresh locators after waiting for relevant page conditions."
+      }
+    },
+    {
+      "id": "S1-01",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "INCORRECT",
+        "criteria": [
+          {
+            "finding": "NOT_MET",
+            "evidence": [
+              "Fact tables and dimension tables have exactly the same role: both only store descriptive labels and never measurements or events.",
+              "There is no distinction between them."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "The cited answer contains a false claim about the requested core concept."
+          },
+          {
+            "finding": "NOT_MET",
+            "evidence": [
+              "Fact tables and dimension tables have exactly the same role: both only store descriptive labels and never measurements or events.",
+              "There is no distinction between them."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The cited passage contains an explicitly false explanation; this is separate from the knowledge verdict."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [],
+        "gaps": [
+          "No explanation of how dimension tables enable filtering/grouping of fact table measurements"
+        ],
+        "misconceptions": [
+          "Fact tables and dimension tables do not have the same role; fact tables store measurements/events while dimensions provide descriptive context",
+          "Fact tables absolutely contain measurements (e.g., sales amounts) and events, contrary to the claim that they 'never' store these"
+        ],
+        "guidance": "Remember that fact tables record business events at a defined grain (e.g., transactions), while dimension tables provide the descriptive attributes (e.g., product details, customer info) used to analyze those events."
+      }
+    },
+    {
+      "id": "S1-02",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "INCORRECT",
+        "criteria": [
+          {
+            "finding": "NOT_MET",
+            "evidence": [
+              "StaleElementReferenceException always means the remote server has permanently lost its internet connection; changes to the DOM never cause it.",
+              "The sound recovery is to disable every timeout permanently and keep the same element reference."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "The cited answer contains a false claim about the requested core concept."
+          },
+          {
+            "finding": "NOT_MET",
+            "evidence": [
+              "StaleElementReferenceException always means the remote server has permanently lost its internet connection; changes to the DOM never cause it.",
+              "The sound recovery is to disable every timeout permanently and keep the same element reference."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The cited passage contains an explicitly false explanation; this is separate from the knowledge verdict."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [],
+        "gaps": [
+          "Actual causes: DOM node removal/replacement, document changes, or browsing context changes",
+          "Sound recovery: re-locate the element using its locator after waiting for appropriate page conditions"
+        ],
+        "misconceptions": [
+          "StaleElementReferenceException is incorrectly attributed to permanent server connection loss rather than DOM node removal/replacement",
+          "Disabling timeouts and reusing the same stale reference is presented as valid recovery instead of relocating the element"
+        ],
+        "guidance": "Stale references occur when the underlying DOM element is detached. The correct pattern is to re-locate the element using its original locator after verifying page/frame context and waiting for stability, not to reuse stale references or disable timeouts."
+      }
+    },
+    {
+      "id": "G-ABSTAIN",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": true,
+      "result": {
+        "classification": "NOT_ANSWERED",
+        "responseKind": "DONT_KNOW",
+        "criteria": [
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "ACCURACY",
+            "explanation": "No subject understanding was demonstrated in this answer."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "REASONING",
+            "explanation": "No subject understanding was demonstrated in this answer."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "No subject understanding was demonstrated in this answer."
+          }
+        ],
+        "strengths": [],
+        "gaps": [],
+        "misconceptions": [],
+        "guidance": "You indicated that you do not know this answer. Review the concept before trying again."
+      }
+    },
+    {
+      "id": "G-REQUEST",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": true,
+      "result": {
+        "classification": "NOT_ANSWERED",
+        "responseKind": "REQUEST_ONLY",
+        "criteria": [
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "ACCURACY",
+            "explanation": "The response asked to repeat, skip or pause the question; it contains no technical answer to assess."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "REASONING",
+            "explanation": "The response asked to repeat, skip or pause the question; it contains no technical answer to assess."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "The response asked to repeat, skip or pause the question; it contains no technical answer to assess."
+          }
+        ],
+        "strengths": [],
+        "gaps": [],
+        "misconceptions": [],
+        "guidance": "This response was a request rather than an answer, so it says nothing about your knowledge. Spoken requests are not supported yet: use Repeat question or Skip question."
+      }
+    }
+  ]
+}

@@ -1,0 +1,82 @@
+{
+  "fixtureVersion": "ambiguity-contrasts-1",
+  "reviewer": "Owner-authorized AI technical adjudication; not independent expert calibration.",
+  "preRegistered": "New diagnostic contrasts drafted offline after the scoped-bank trial. No model results, repetitions or semantic success claimed. Requires a separately approved bounded allowance before paid execution. Historical cases remain unchanged.",
+  "namespace": "grading-scope-1",
+  "questions": {
+    "DE-NEW-001": {
+      "revision": 2,
+      "guidanceHash": "48bc579643612a2df18599d67320bd88cb9eed331b3fda2b9054b801b970fabc",
+      "guidanceIssues": []
+    }
+  },
+  "cases": [
+    {
+      "id": "C1-01",
+      "qid": "DE-NEW-001",
+      "category": "clear-direct",
+      "answer": "Fact rows store measured events at a defined grain. Dimension rows supply descriptive attributes used to filter and group those events.",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT"
+      ],
+      "notes": "Both requested roles are explicit."
+    },
+    {
+      "id": "C1-02",
+      "qid": "DE-NEW-001",
+      "category": "clear-resolved-pronouns",
+      "answer": "Fact rows store measured events at a defined grain. They can be filtered and grouped using descriptive attributes from dimension rows.",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT"
+      ],
+      "notes": "They has an explicit fact-row antecedent; pronouns alone are not uncertainty."
+    },
+    {
+      "id": "C1-03",
+      "qid": "DE-NEW-001",
+      "category": "clear-ellipsis",
+      "answer": "Fact rows... measured events at a defined grain. Dimension rows... descriptive attributes to filter and group those events.",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT"
+      ],
+      "notes": "Speech fragments still explicitly bind each role; ellipsis alone is not uncertainty."
+    },
+    {
+      "id": "C1-04",
+      "qid": "DE-NEW-001",
+      "category": "unresolved-role-mapping",
+      "answer": "One of those tables stores measured events at a defined grain. The other has descriptive attributes to filter and group. I cannot tell you which one is which.",
+      "expected": "UNASSESSED",
+      "acceptable": [
+        "UNASSESSED"
+      ],
+      "notes": "Technical roles are mentioned but assigning fact versus dimension would require guessing.",
+      "expectedDisposition": "REVIEW_REQUIRED"
+    },
+    {
+      "id": "C1-05",
+      "qid": "DE-NEW-001",
+      "category": "explicit-reversed-roles",
+      "answer": "Dimension rows store measured events at a defined grain. Fact rows supply descriptive attributes used to filter and group those events.",
+      "expected": "INCORRECT",
+      "acceptable": [
+        "INCORRECT"
+      ],
+      "notes": "Same topic vocabulary, explicitly false central relationship."
+    },
+    {
+      "id": "C1-06",
+      "qid": "DE-NEW-001",
+      "category": "recoverable-name-only",
+      "answer": "Fax tables store measured business events at a defined grain. Dimension tables give descriptive attributes used to filter and group those measurements.",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT"
+      ],
+      "notes": "Context establishes the fact-table concept despite a technical-name transcription substitution; no missing relation needs invention."
+    }
+  ]
+}
