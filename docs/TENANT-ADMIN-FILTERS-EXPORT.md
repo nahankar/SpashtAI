@@ -1,7 +1,33 @@
 # Tenant custom filters and Excel export handoff
 
-Status: reviewed, locally validated, awaiting merge/release approval. No merge,
-deployment, production feature enablement or real invitation send was performed.
+Status as of 9 November follow-up: reviewed release integrated into GitHub main;
+EC2 deployment blocked by SSH connectivity. No EC2 deployment, production feature
+enablement or real invitation send was performed.
+
+## GitHub integration and EC2 attempt, 9 November 2026
+
+The owner's "move to github and ec2" follow-up was treated as approval to integrate
+and deploy this release only. GitHub main was fast-forwarded from
+`810a65b0e76644d0722846e0ec3020823df96f9c` to
+`0dff6398ca33a7127412f44d94678e2f0229292b` and the remote revision was verified.
+No additional signup/voice/session-review follow-up branch was merged.
+The documentation-only status update follows this application/evidence release.
+
+EC2 inspection could not begin: SSH to `ubuntu@13.219.136.19` and
+`ubuntu@livekit.spasht.ai` on port 22 repeatedly timed out. Direct LiveKit DNS still
+resolved to that address. Both configured AWS profiles lacked permission for
+`ec2:DescribeInstances`, so neither confirmed a current instance address.
+Public `https://spasht.ai/w/klsvdit/admin/users` returned HTTP 200 and
+`https://api.spasht.ai/health` returned `{"status":"ok"}`; this proves public
+availability, **not deployment of this release**.
+
+Required prerequisite: restore the approved SSH route (VPN, bastion or
+security-group allowlist), or provide the current authorized SSH host/port.
+No EC2 files, credentials, security rules, processes or containers were changed.
+Once access is restored, inspect the live checkout/overlays/migration state before
+building and releasing API then web. The generic deployment script also reloads
+the voice agent; do not restart unrelated voice services blindly for this
+admin-only release.
 
 ## Inventory
 

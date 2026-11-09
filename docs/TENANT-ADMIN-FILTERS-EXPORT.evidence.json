@@ -2,8 +2,16 @@
   "branch": "feature/admin-field-filters-export",
   "applicationRevision": "240500026081961270c97c11d53867608493b25a",
   "cleanBrowserCheckout": true,
-  "merged": false,
+  "merged": true,
   "deployed": false,
+  "githubIntegratedRelease": "0dff6398ca33a7127412f44d94678e2f0229292b",
+  "ec2Deployment": {
+    "status": "blocked",
+    "reason": "SSH port 22 timed out; configured AWS profiles cannot DescribeInstances",
+    "publicAppHttpStatus": 200,
+    "publicApiHealth": "ok",
+    "ec2Modified": false
+  },
   "database": "spasht_filters_test",
   "results": {
     "server": { "passed": 627, "skipped": 296 },
