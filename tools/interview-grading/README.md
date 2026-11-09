@@ -73,3 +73,13 @@ new model fix works. Paid runs remain separate and require an available, approve
 is exhausted; this command cannot raise or reset quotas and never imports the paid calibration runner.
 
 See `docs/prepare/INTERVIEWS-GRADING-OFFLINE-AUDIT.md` for the current failure investigation and next experiment.
+
+To inspect the next proposed diagnostic without running it:
+
+```sh
+npm run grading:plan
+```
+
+This prints the frozen fixture/configuration hashes and proposed 12-call bound. It is offline and cannot
+submit work or authorize spending. Read `docs/prepare/INTERVIEWS-AMBIGUITY-DIAGNOSTIC.md` for the observed
+read-only bank/quota preflight and execution prerequisites. Planning is not a model-quality result.

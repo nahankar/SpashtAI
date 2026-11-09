@@ -1,0 +1,130 @@
+{
+  "fixtureVersion": "ambiguity-baseline-1",
+  "reviewer": "Owner-authorized AI technical adjudication; not independent expert calibration.",
+  "preRegistered": "Unchanged policy 16 diagnostic: six new contrasts plus three exact historical controls; nine fresh paid initial trials. Historical records are retained, not relabelled. No paid execution authorized by this fixture.",
+  "namespace": "grading-scope-1",
+  "questions": {
+    "DE-NEW-001": {
+      "revision": 2,
+      "guidanceHash": "48bc579643612a2df18599d67320bd88cb9eed331b3fda2b9054b801b970fabc",
+      "guidanceIssues": []
+    },
+    "DE-NEW-016": {
+      "revision": 2,
+      "guidanceHash": "669df3c4542a37d65177828d37fe2ff5908ac741f7edf5ba316be0af87bb3239",
+      "guidanceIssues": []
+    }
+  },
+  "cases": [
+    {
+      "id": "C1-01",
+      "qid": "DE-NEW-001",
+      "category": "clear-direct",
+      "answer": "Fact rows store measured events at a defined grain. Dimension rows supply descriptive attributes used to filter and group those events.",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT"
+      ],
+      "notes": "Both requested roles are explicit."
+    },
+    {
+      "id": "C1-02",
+      "qid": "DE-NEW-001",
+      "category": "clear-resolved-pronouns",
+      "answer": "Fact rows store measured events at a defined grain. They can be filtered and grouped using descriptive attributes from dimension rows.",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT"
+      ],
+      "notes": "They has an explicit fact-row antecedent; pronouns alone are not uncertainty."
+    },
+    {
+      "id": "C1-03",
+      "qid": "DE-NEW-001",
+      "category": "clear-ellipsis",
+      "answer": "Fact rows... measured events at a defined grain. Dimension rows... descriptive attributes to filter and group those events.",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT"
+      ],
+      "notes": "Speech fragments still explicitly bind each role; ellipsis alone is not uncertainty."
+    },
+    {
+      "id": "C1-04",
+      "qid": "DE-NEW-001",
+      "category": "unresolved-role-mapping",
+      "answer": "One of those tables stores measured events at a defined grain. The other has descriptive attributes to filter and group. I cannot tell you which one is which.",
+      "expected": "UNASSESSED",
+      "acceptable": [
+        "UNASSESSED"
+      ],
+      "notes": "Technical roles are mentioned but assigning fact versus dimension would require guessing.",
+      "expectedDisposition": "REVIEW_REQUIRED"
+    },
+    {
+      "id": "C1-05",
+      "qid": "DE-NEW-001",
+      "category": "explicit-reversed-roles",
+      "answer": "Dimension rows store measured events at a defined grain. Fact rows supply descriptive attributes used to filter and group those events.",
+      "expected": "INCORRECT",
+      "acceptable": [
+        "INCORRECT"
+      ],
+      "notes": "Same topic vocabulary, explicitly false central relationship."
+    },
+    {
+      "id": "C1-06",
+      "qid": "DE-NEW-001",
+      "category": "recoverable-name-only",
+      "answer": "Fax tables store measured business events at a defined grain. Dimension tables give descriptive attributes used to filter and group those measurements.",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT"
+      ],
+      "notes": "Context establishes the fact-table concept despite a technical-name transcription substitution; no missing relation needs invention."
+    },
+    {
+      "id": "N15-03",
+      "qid": "DE-NEW-001",
+      "category": "new-unresolved-referents",
+      "expected": "UNASSESSED",
+      "expectedDisposition": "REVIEW_REQUIRED",
+      "answer": "The table with the... event thing. The other has that one, the measure... no, the label. I mean the one we said, not the other.",
+      "notes": "Unresolved referents and self-correction do not establish which table has which role. Inventing those links would determine the grade. No knowledge update.",
+      "acceptable": [
+        "UNASSESSED"
+      ],
+      "sourceFixture": "new-ai-authored-2026-11-09"
+    },
+    {
+      "id": "N15-01",
+      "qid": "DE-NEW-001",
+      "category": "new-clear-concise",
+      "expected": "CORRECT",
+      "answer": "A fact row records a measurement at a specified grain, such as one sale line with quantity and amount. Dimensions supply descriptive context, like product category or customer region, for filtering and grouping those measurements.",
+      "expectReasoning": true,
+      "notes": "Defines grain, measures, descriptive context and their analytic relationship. No need to repeat every example from the reference answer.",
+      "acceptable": [
+        "CORRECT"
+      ],
+      "sourceFixture": "new-ai-authored-2026-11-09"
+    },
+    {
+      "id": "P2-02",
+      "qid": "DE-NEW-016",
+      "category": "control-empty-because",
+      "expected": "NOT_ANSWERED",
+      "acceptable": [
+        "NOT_ANSWERED"
+      ],
+      "reasoningMustNotBeMet": true,
+      "answer": "Joint types use the concrete case, because.\nThe identity, the incorrect assumption and its consequence.\nBasic behavior is good.",
+      "notes": "Control: empty 'because' plus instruction wording.",
+      "sourceCases": [
+        "pilot-2:P2-02",
+        "readiness-2026-11-06:P2-02"
+      ],
+      "sourceFixture": "pilot-2"
+    }
+  ]
+}

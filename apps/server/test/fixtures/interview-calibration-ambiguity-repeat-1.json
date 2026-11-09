@@ -1,0 +1,63 @@
+{
+  "fixtureVersion": "ambiguity-repeat-1",
+  "reviewer": "Owner-authorized AI technical adjudication; not independent expert calibration.",
+  "preRegistered": "Three fresh paid repeats of the identical original N15-03/N15-01/P2-02 inputs from ambiguity-baseline-1. Preserve initial evidence before normal fictional Admin-test deletion/resubmission; usage retained. Not reused results.",
+  "namespace": "grading-scope-1",
+  "questions": {
+    "DE-NEW-001": {
+      "revision": 2,
+      "guidanceHash": "48bc579643612a2df18599d67320bd88cb9eed331b3fda2b9054b801b970fabc",
+      "guidanceIssues": []
+    },
+    "DE-NEW-016": {
+      "revision": 2,
+      "guidanceHash": "669df3c4542a37d65177828d37fe2ff5908ac741f7edf5ba316be0af87bb3239",
+      "guidanceIssues": []
+    }
+  },
+  "cases": [
+    {
+      "id": "N15-03",
+      "qid": "DE-NEW-001",
+      "category": "new-unresolved-referents",
+      "expected": "UNASSESSED",
+      "expectedDisposition": "REVIEW_REQUIRED",
+      "answer": "The table with the... event thing. The other has that one, the measure... no, the label. I mean the one we said, not the other.",
+      "notes": "Unresolved referents and self-correction do not establish which table has which role. Inventing those links would determine the grade. No knowledge update.",
+      "acceptable": [
+        "UNASSESSED"
+      ],
+      "sourceFixture": "new-ai-authored-2026-11-09"
+    },
+    {
+      "id": "N15-01",
+      "qid": "DE-NEW-001",
+      "category": "new-clear-concise",
+      "expected": "CORRECT",
+      "answer": "A fact row records a measurement at a specified grain, such as one sale line with quantity and amount. Dimensions supply descriptive context, like product category or customer region, for filtering and grouping those measurements.",
+      "expectReasoning": true,
+      "notes": "Defines grain, measures, descriptive context and their analytic relationship. No need to repeat every example from the reference answer.",
+      "acceptable": [
+        "CORRECT"
+      ],
+      "sourceFixture": "new-ai-authored-2026-11-09"
+    },
+    {
+      "id": "P2-02",
+      "qid": "DE-NEW-016",
+      "category": "control-empty-because",
+      "expected": "NOT_ANSWERED",
+      "acceptable": [
+        "NOT_ANSWERED"
+      ],
+      "reasoningMustNotBeMet": true,
+      "answer": "Joint types use the concrete case, because.\nThe identity, the incorrect assumption and its consequence.\nBasic behavior is good.",
+      "notes": "Control: empty 'because' plus instruction wording.",
+      "sourceCases": [
+        "pilot-2:P2-02",
+        "readiness-2026-11-06:P2-02"
+      ],
+      "sourceFixture": "pilot-2"
+    }
+  ]
+}
