@@ -37,6 +37,13 @@ assumptions:
     verification: On 2026-11-09 all 33 HTTP assertions and 33 request events passed on the owned loopback stand-in, including v9 rejection and v10 review for the same overlong summary; invalid uncertain references and missing reasoning still rejected. Full server suite 763 passed, 290 skipped; focused 160 passed; build and script typecheck passed. No real provider calls or production changes.
     source: apps/server/test/interview-review-boundary.test.ts; apps/server/scripts/check-interview-evaluator-simulation.ts; docs/prepare/INTERVIEWS-GRADING-REVIEW-BOUNDARY-16.md; private policy-16-http-results.json and policy-16-simulation.ndjson.
     updated_at: "2026-11-09"
+  - id: scoped-bank-semantic-reliability
+    status: contradicted
+    claim: The scoped bank with policy 16 reliably separates actual stated understanding from unresolved references in the tested set.
+    reason: The real trial improved concise/mixed-answer grades but gave N15-03 CORRECT despite unresolved table-role references; exact source quotation did not establish the missing relationship. P2-02 also still reviewed rather than returning the expected empty-answer outcome. The local parser fixture cannot establish semantic reliability.
+    verification: On clean 524d4c9 ran the separately approved 20 Nova 2 Lite LOW calls: 18 initial and 2 fresh repeats. Initial frozen checks passed 16/18, preferred outcomes plus checks 15/18; repeats passed 2/2. Original labels unchanged. Counters 80 to 100; no further same-day calls. No production changes.
+    source: docs/prepare/INTERVIEWS-QUESTION-SCOPE-VALIDATION.md; private question-scope-1-summary.json, question-scope-1-initial-review.json and question-scope-1-reconciliation.json.
+    updated_at: "2026-11-09"
 fingerprints:
   - id: policy-11-http-fixtures
     date: "2026-11-08"
