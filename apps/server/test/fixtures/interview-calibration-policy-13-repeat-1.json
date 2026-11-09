@@ -1,0 +1,240 @@
+{
+  "fixtureVersion": "grading-policy-13-repeat-1",
+  "reviewer": "Codex AI-led technical adjudication accepted by owner; not independent human review.",
+  "preRegistered": "Four fresh accounted repeats: R1-08, H1-09, P2-07, P2-08. Preserve initial evidence and exact input hashes; no dedupe counts as repetition.",
+  "questions": {
+    "AUT-002": {
+      "revision": 2,
+      "guidanceIssues": [
+        "goodAnswerPoints credits 'Selenium Manager-backed condition waits'. Selenium Manager resolves driver/browser binaries; it provides no waits.",
+        "The misconception's 'Correction' sentence does not correct the stated misconception (mixing implicit and explicit waits)."
+      ]
+    },
+    "AUT-NEW-047": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-016": {
+      "revision": 2,
+      "guidanceIssues": [
+        "The misconception's 'Correction' restates the object model instead of saying pages in one context share cookies."
+      ]
+    },
+    "AUT-NEW-057": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-005": {
+      "revision": 2,
+      "guidanceIssues": [
+        "expectedDepth asks the candidate to 'identify why the stated misconception is false'; a correct answer need not mention the misconception."
+      ]
+    },
+    "AUT-NEW-060": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AAI-NEW-006": {
+      "revision": 2,
+      "guidanceIssues": [
+        "'Acceptable alternatives: cache-aware admission or paging strategies' is serving guidance, not an alternative answer to the question.",
+        "exampleAnswer calls 'it stores attention state for generation' a limitation; that is the definition, not a limitation."
+      ]
+    },
+    "BA-NEW-029": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "PY-NEW-021": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "OPS-NEW-001": {
+      "revision": 2,
+      "guidanceIssues": [
+        "Core states that deleting depends on parent-directory permissions, and Optional depth asks the same question."
+      ]
+    },
+    "MAN-NEW-019": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "SM-NEW-013": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DE-NEW-012": {
+      "revision": 2,
+      "guidanceIssues": [
+        "The misconception's 'Correction' is an unrelated example sentence."
+      ]
+    },
+    "DEV-NEW-080": {
+      "revision": 2,
+      "guidanceIssues": [
+        "The misconception's 'Correction' does not address the stated misconception.",
+        "A REST API design question is filed under the Java track."
+      ]
+    },
+    "PY-NEW-049": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AAI-NEW-033": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "WEB-NEW-077": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-041": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "WEB-NEW-033": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-056": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "WEB-NEW-055": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "WEB-003": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "WEB-008": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-028": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "PY-NEW-010": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DE-NEW-016": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DEV-NEW-016": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "WEB-NEW-099": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DE-NEW-001": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-097": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-019": {
+      "revision": 2,
+      "guidanceIssues": []
+    }
+  },
+  "cases": [
+    {
+      "id": "R1-08",
+      "qid": "AUT-NEW-016",
+      "category": "central-error",
+      "expected": "INCORRECT",
+      "acceptable": [
+        "INCORRECT"
+      ],
+      "answer": "Browser is the browser. A context is basically the same thing as a page, and each page always gets its own cookies, so two pages are completely isolated from each other.",
+      "evidence": [
+        "basically the same thing as a page",
+        "each page always gets its own cookies"
+      ],
+      "expectMisconception": true,
+      "sourceCases": [
+        "reviewed-1:R1-08"
+      ]
+    },
+    {
+      "id": "H1-09",
+      "qid": "AAI-NEW-033",
+      "category": "near-abstention-with-idea",
+      "expected": "PARTIAL",
+      "acceptable": [
+        "PARTIAL",
+        "NOT_ANSWERED"
+      ],
+      "mustNotBe": [
+        "CORRECT",
+        "INCORRECT"
+      ],
+      "answer": "I'm not really sure. Maybe you could translate the queries into Hindi first?",
+      "notes": "Mentions the accepted translation-assisted alternative without any testing method. Either PARTIAL or NOT_ANSWERED is defensible; a grade of CORRECT or INCORRECT is not.",
+      "sourceCases": [
+        "heldout-1:H1-09"
+      ]
+    },
+    {
+      "id": "P2-07",
+      "qid": "WEB-NEW-099",
+      "category": "fragmented-implicit-reasoning",
+      "expected": "PARTIAL",
+      "acceptable": [
+        "PARTIAL",
+        "CORRECT"
+      ],
+      "mustNotBe": [
+        "INCORRECT",
+        "NOT_ANSWERED"
+      ],
+      "answer": "Keyboard order follows semantic controls.\nAnd\nDom position.\nPositive TB index.\nCreates\nUh, competing manual order?\nUh, the example.\nI don't have one.\nMaybe, I don't know.",
+      "expectReasoning": true,
+      "mustNotSay": [
+        "does not provide any reasoning",
+        "lacks reasoning",
+        "no reasoning",
+        "does not explain why"
+      ],
+      "notes": "'Positive TB index. Creates ... competing manual order' is the reason positive tabindex is discouraged.",
+      "sourceCases": [
+        "pilot-2:P2-07",
+        "readiness-2026-11-06:P2-07"
+      ],
+      "sourceFixture": "pilot-2"
+    },
+    {
+      "id": "P2-08",
+      "qid": "DE-NEW-001",
+      "category": "vague-substantive-fragments",
+      "expected": "UNASSESSED",
+      "acceptable": [],
+      "mustNotBe": [
+        "CORRECT",
+        "PARTIAL",
+        "INCORRECT",
+        "NOT_ANSWERED"
+      ],
+      "answer": "Packed tables are the real data.\nUm,\nWhich are specific to any artifact dimensions can be\nCreated, derived.\nAcross the data.\ncombination of the data aggregation of the data.\nAgainst any specific\nOther fields, so multiple dimensions can be created.\nTo query all of the data at once, instead of the basic rows and columns that 1 may typically do.",
+      "mustNotQuote": [
+        "grain",
+        "measure"
+      ],
+      "notes": "AI-led adjudication, owner accepted 8 Nov 2026: the technical attempt is substantive but relationships cannot be reliably recovered from these fragments. Do not penalize packed/fact ASR substitution or invent knowledge. Preserve earlier labels in historical fixtures; require an ungraded review outcome in this new fixture.",
+      "sourceFixture": "pilot-2",
+      "expectedDisposition": "REVIEW_REQUIRED",
+      "sourceCases": [
+        "pilot-2:P2-08",
+        "readiness-2026-11-06:P2-08"
+      ]
+    }
+  ]
+}

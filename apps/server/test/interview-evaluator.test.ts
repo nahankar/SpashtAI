@@ -139,6 +139,7 @@ describe('learner policy registry and learner-evaluation-2 contract', () => {
       'interview-answer-12': '2637100b2cd89ab482854bdee9db6c75d7612d32480548577569bb75141e3f7f',
       'interview-answer-13': '0533c3ef96910ba99cf2288d7f3479c9a640e9ad8d3963665071f66abae04b22',
       'interview-answer-14': '0a94fdba6ce1d119151c859ea3d93f41c3adce7cce491e7f92dbbaa2e175c96f',
+      'interview-answer-15': '2597d10aa198ce0300f7f770650832be8a2b14d45737f9c6f1404e9077a5f566',
     })
     expect(LEARNER_PROMPT_6).toContain('"get dissect" for git bisect'); expect(LEARNER_PROMPT_6.startsWith(LEARNER_PROMPT_5.slice(0, 400))).toBe(true)
     for (const policy of Object.values(LEARNER_POLICIES)) expect(PROMPTS[policy.config.prompt]).toBeTruthy()
@@ -245,7 +246,7 @@ describe('learner policy registry and learner-evaluation-2 contract', () => {
     expect(explicitAbstention(`Sorry, ${'um, '.repeat(10)}I don't know.`)).toBe(true)
   })
   it('offers only learner policies with their own configuration as Admin previews', () => {
-    expect(PREVIEW_POLICIES).toEqual(['learner-evaluation-2', 'learner-evaluation-3', 'learner-evaluation-4', 'learner-evaluation-5', 'learner-evaluation-6', 'learner-evaluation-7', 'learner-evaluation-5-nova-pro', 'learner-evaluation-8', 'learner-evaluation-8-nova-pro', 'learner-evaluation-9', 'learner-evaluation-10', 'learner-evaluation-11', 'learner-evaluation-12'])
+    expect(PREVIEW_POLICIES).toEqual(['learner-evaluation-2', 'learner-evaluation-3', 'learner-evaluation-4', 'learner-evaluation-5', 'learner-evaluation-6', 'learner-evaluation-7', 'learner-evaluation-5-nova-pro', 'learner-evaluation-8', 'learner-evaluation-8-nova-pro', 'learner-evaluation-9', 'learner-evaluation-10', 'learner-evaluation-11', 'learner-evaluation-12', 'learner-evaluation-13'])
     expect(adminConfig('learner-evaluation-2')).toEqual(learner2); expect(previewPolicy(learner2)?.key).toBe('learner-evaluation-2')
     expect(previewPolicy(configFor('nova2_lite'))).toBeNull()
     expect(() => submitSchema.parse({ questionId: 'q', revision: 1, answer: testAnswer, model: 'learner-evaluation-1' })).toThrow()

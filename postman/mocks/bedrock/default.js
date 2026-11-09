@@ -14,7 +14,9 @@ http.createServer(async (req, res) => {
       res.end(JSON.stringify({ __type: 'ThrottlingException', message: 'Fixture rate limit' })); return
     }
     const toolOutput = request.toolConfig?.toolChoice?.tool?.name === 'grade_interview_answer'
-    const result = answer === '[REVIEW_REQUIRED]' ? { reviewRequired: true, claims: [], coverage: 'NONE',
+    const compact = Boolean(request.toolConfig?.tools?.[0]?.toolSpec?.inputSchema?.json?.properties?.decision)
+    const result = compact ? (answer === '[REVIEW_REQUIRED]' ? {decision:'REVIEW',correct:[],incorrect:[],reasoning:[],reviewReason:'Fixture ambiguity.'}
+      : {decision:'COMPLETE',correct:[1],incorrect:[],reasoning:[], ...(answer === '[BAD_FEEDBACK]' ? {feedback:{guidance:[]}} : {})}) : answer === '[REVIEW_REQUIRED]' ? { reviewRequired: true, claims: [], coverage: 'NONE',
       depth: { finding: 'NOT_ASSESSED', evidence: [], explanation: 'Transport-only ambiguous-answer fixture.' },
       gaps: [], guidance: 'Review the saved answer.', uncertainty: ['Fixture meaning cannot be resolved.'] }
       : toolOutput ? { reviewRequired: false, claims: [{ quote: answer, interpretedClaim: answer,

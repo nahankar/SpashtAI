@@ -4,7 +4,7 @@ purpose:
 assumptions:
   - id: review-outcome-is-not-provider-failure
     status: supported
-    claim: In the nine local stand-in scenarios, evaluator code distinguished a validated grade, review-required output, invalid JSON, provider throttling, and forced-tool assessment envelopes.
+    claim: In the thirteen local stand-in scenarios, evaluator code distinguished a validated grade, review-required output, invalid JSON, provider throttling, and forced-tool assessment envelopes.
     reason: The actual SDK HTTP path ran; parser uncertainty was nonretryable, while throttling was retryable. Scope is caller behavior against this owned fixture.
     verification: On 2026-11-08 ran check-interview-evaluator-simulation.ts against port 4931. The original four assertions passed; simulation request events confirmed POST Converse traffic and HTTP 200/429 responses. Repeated once using the committed launcher with the same outcomes. On the policy-12 candidate, nine assertions passed, including valid tool input, review-required input, wrong tool name and duplicate tools; nine POST request events confirmed actual SDK traffic.
     source: apps/server/scripts/check-interview-evaluator-simulation.ts; postman/mocks/bedrock/default.js; private policy-11-http-public-results.json, policy-11-simulation.ndjson, policy-12-http-results.json and policy-12-simulation.ndjson under /private/tmp/spasht-grading-validation/.
@@ -24,3 +24,8 @@ fingerprints:
 
 # Policy 12 exercises the actual SDK's forced-tool transport against authored fixture responses.
 # It does not establish that the real provider honors the schema or grades correctly.
+
+# On 2026-11-09 the compact preview ran thirteen actual SDK HTTP assertions (all passed),
+# including independently invalid optional feedback retaining the valid grade, a review outcome
+# and wrong-tool rejection. Thirteen POSTs are recorded in private policy-13-simulation.ndjson;
+# assertions in policy-13-http-results.json. This remains fixture-only transport evidence.

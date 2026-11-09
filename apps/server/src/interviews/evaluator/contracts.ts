@@ -56,6 +56,8 @@ export const LEARNER_POLICIES: Record<string, LearnerPolicy> = {
     prompt: 'interview-answer-13', schema: 'interview-result-6', rubric: 'bank-guidance-5', policy: 'learner-evaluation-11', temperature: 0, maxTokens: 2000, timeoutMs: 20_000 } },
   'learner-evaluation-12': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova2-lite-learner-12', modelId: 'us.amazon.nova-2-lite-v1:0', region: 'us-east-1', label: 'Nova 2 Lite · learner grading 12 (candidate)',
     prompt: 'interview-answer-14', schema: 'interview-result-6', rubric: 'bank-guidance-5', policy: 'learner-evaluation-12', temperature: 0, maxTokens: 2000, timeoutMs: 20_000, responseFormat: 'tool' } },
+  'learner-evaluation-13': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova2-lite-learner-13', modelId: 'us.amazon.nova-2-lite-v1:0', region: 'us-east-1', label: 'Nova 2 Lite · compact grading 13 (candidate)',
+    prompt: 'interview-answer-15', schema: 'interview-result-7', rubric: 'bank-guidance-6', policy: 'learner-evaluation-13', temperature: 0, maxTokens: 2000, timeoutMs: 20_000, responseFormat: 'tool' } },
 }
 // learner-evaluation-8: v5's prompt, rubric and model with the versioned interview-result-4 evidence matching.
 // Technical grading remains experimental (reasoning, mixed-answer strengths and no-answer classification are open).
@@ -134,6 +136,7 @@ export function originalPassage(answer: string, quote: string): string | null {
 export function parseResult(output: string, answer: string, schema = 'interview-result-2'): EvaluationResult {
   const raw: unknown = JSON.parse(output.replace(/^\s*```(?:json)?\s*/, '').replace(/\s*```\s*$/, ''))
   if (schema === 'interview-result-5') return parseClaimResult(raw, answer)
+  if (schema === 'interview-result-7') return parseCompactResult(raw, answer)
   if (schema === 'interview-result-6') return parseInterpretedClaimResult(raw, answer)
   const tolerant = schema === 'interview-result-4'
   const learner = schema === 'interview-result-3' || tolerant
@@ -206,6 +209,78 @@ function parseInterpretedClaimResult(raw: unknown, answer: string): EvaluationRe
   const notes = claims.filter(c => c.interpretation === 'NORMALIZED').slice(0, 2)
     .map(c => `Transcription interpretation: “${originalPassage(answer, c.quote)}” was understood as “${c.interpretedClaim}”. The original transcript was not changed.`)
   return notes.length ? { ...result, validationNotes: [...(result.validationNotes ?? []), ...notes] } : result
+}
+
+// Deterministic evidence addressing. Every returned passage is copied from the saved answer.
+// The full transcript is still supplied; these boundaries do not decide technical meaning.
+export function answerPassages(answer: string): { id: number; text: string }[] {
+  const passages: { id: number; text: string }[] = []
+  for (const match of answer.matchAll(/[^.!?\n]+[.!?]*/g)) {
+    for (let offset = 0; offset < match[0].length; offset += 1000) {
+      // submitSchema limits answers to 8000 chars; reserving eight slots retains the tail.
+      if (passages.length === 120) {
+        const tail = answer.slice(match.index + offset)
+        for (let start = 0; start < tail.length; start += 1000) {
+          const text = tail.slice(start, start + 1000).trim()
+          if (text) passages.push({ id: passages.length + 1, text })
+        }
+        return passages
+      }
+      const text = match[0].slice(offset, offset + 1000).trim()
+      if (text) passages.push({ id: passages.length + 1, text })
+    }
+  }
+  return passages
+}
+
+const passageIds = z.array(z.number().int().min(1).max(128)).max(6)
+const compactGradeSchema = z.object({
+  decision: z.enum(['COMPLETE', 'INCOMPLETE', 'FALSE_CORE', 'NO_SUBJECT', 'REVIEW']),
+  correct: passageIds, incorrect: passageIds, reasoning: passageIds,
+  reviewReason: z.unknown().optional(), feedback: z.unknown().optional(),
+}).strict()
+const compactFeedbackSchema = z.object({ gaps: z.array(text).max(6).optional(),
+  strengths: z.array(text).max(6).optional(), misconceptions: z.array(text).max(6).optional(), guidance: text.optional() }).strict()
+function parseCompactResult(raw: unknown, answer: string): EvaluationResult {
+  const grade = compactGradeSchema.parse(raw)
+  const passages = answerPassages(answer)
+  for (const ids of [grade.correct, grade.incorrect, grade.reasoning]) {
+    if (new Set(ids).size !== ids.length || ids.some(id => !passages.some(p => p.id === id))) throw new Error('INVALID_PASSAGE_REFERENCE')
+  }
+  if (grade.reasoning.some(id => !grade.correct.includes(id))) throw new Error('INCONSISTENT')
+  if (grade.decision === 'REVIEW' || grade.decision === 'NO_SUBJECT') {
+    if (grade.correct.length || grade.incorrect.length || grade.reasoning.length) throw new Error('INCONSISTENT')
+    if (grade.decision === 'REVIEW') {
+      if (!z.string().trim().min(1).max(800).safeParse(grade.reviewReason).success) throw new Error('INVALID_REVIEW_REASON')
+      throw new EvaluationReviewRequired()
+    }
+    return { ...abstentionResult(), guidance: 'No assessable technical claim was established. Explain the requested concept in your own words.',
+      validationNotes: ['No subject proposition was established; this is not evidence of an incorrect belief.'] }
+  }
+  if (grade.decision === 'COMPLETE' && (!grade.correct.length || grade.incorrect.length)
+    || grade.decision === 'INCOMPLETE' && !grade.correct.length
+    || grade.decision === 'FALSE_CORE' && !grade.incorrect.length) throw new Error('INCONSISTENT')
+  const classification = grade.decision === 'COMPLETE' ? 'CORRECT' : grade.decision === 'INCOMPLETE' ? 'PARTIAL' : 'INCORRECT'
+  const quote = (ids: number[], limit = 6) => ids.slice(0, limit).map(id => passages[id - 1].text)
+  // Optional presentation is independently validated. Missing/malformed prose cannot alter a grade.
+  const parsedFeedback = compactFeedbackSchema.safeParse(grade.feedback)
+  const feedback = parsedFeedback.success ? parsedFeedback.data : {}
+  const result = { classification, followUpQuestion: '', uncertainty: [],
+    criteria: [
+      { criterion: 'ACCURACY', finding: classification === 'CORRECT' ? 'MET' : classification === 'PARTIAL' ? 'PARTIAL' : 'NOT_MET',
+        evidence: quote(classification === 'INCORRECT' ? grade.incorrect : [...new Set([...grade.correct, ...grade.incorrect])], 3),
+        explanation: classification === 'CORRECT' ? 'The cited answer covers the requested essentials.' : classification === 'PARTIAL'
+          ? 'Relevant understanding is present, with missing essentials or mixed claims.' : 'The cited answer contains a false claim about the requested core concept.' },
+      { criterion: 'REASONING', finding: grade.reasoning.length ? 'MET' : 'NOT_ASSESSED', evidence: quote(grade.reasoning, 3),
+        explanation: grade.reasoning.length ? 'The cited passage explains a relevant mechanism, contrast or consequence.' : 'No valid subject explanation was established.' },
+      { criterion: 'DEPTH', finding: 'NOT_ASSESSED', evidence: [], explanation: 'This compact assessment does not assess optional depth.' },
+    ], strengths: feedback.strengths?.length ? feedback.strengths : quote(grade.correct),
+    misconceptions: grade.incorrect.length ? (feedback.misconceptions?.length ? feedback.misconceptions : quote(grade.incorrect)) : [],
+    gaps: classification === 'CORRECT' ? [] : feedback.gaps ?? [],
+    guidance: feedback.guidance ?? (classification === 'CORRECT' ? 'Apply this understanding to a different example.' : 'Review the requested distinction and explain your reasoning.'),
+  }
+  const validated = parseResult(JSON.stringify(result), answer, 'interview-result-4')
+  return !parsedFeedback.success && grade.feedback !== undefined ? { ...validated, validationNotes: [...(validated.validationNotes ?? []), 'Detailed feedback was unavailable; the assessment uses the cited original passages.'] } : validated
 }
 
 // Content-free diagnostics only: keep the same rejection/message, never include provider text.
@@ -289,7 +364,7 @@ export function invalidOutputReason(error: unknown) {
     const path = issue?.path.filter(p => typeof p === 'string').join('_')
     return `INVALID_OUTPUT_SCHEMA${path ? `_${path}` : ''}_${issue?.code ?? 'unknown'}`.slice(0, 80)
   }
-  return error instanceof Error && ['INVALID_CRITERIA', 'MISSING_EVIDENCE', 'UNSUPPORTED_EVIDENCE', 'INVALID_FOLLOW_UP', 'INCONSISTENT'].includes(error.message)
+  return error instanceof Error && ['INVALID_CRITERIA', 'MISSING_EVIDENCE', 'UNSUPPORTED_EVIDENCE', 'INVALID_FOLLOW_UP', 'INCONSISTENT', 'INVALID_PASSAGE_REFERENCE', 'INVALID_REVIEW_REASON'].includes(error.message)
     ? `INVALID_OUTPUT_${error.message}` : 'INVALID_OUTPUT'
 }
 /** bank-guidance-2: the bank's labelled goodAnswerPoints sections as separate rubric fields. */
