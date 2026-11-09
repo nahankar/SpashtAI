@@ -1,8 +1,57 @@
 # Tenant custom filters and Excel export handoff
 
-Status as of 9 November follow-up: reviewed release integrated into GitHub main;
-EC2 deployment blocked by SSH connectivity. No EC2 deployment, production feature
-enablement or real invitation send was performed.
+Status as of 9 November follow-up: reviewed release integrated into GitHub main
+and deployed to EC2 after the owner restored SSH access. No production feature
+flags or tenant enrollment settings were changed; no real invitation was sent.
+
+## Completed EC2 deployment, 9 November 2026
+
+After the owner enabled SSH for their IP, EC2 was verified on
+`810a65b0e76644d0722846e0ec3020823df96f9c`, branch main, with only its two
+production LiveKit YAML overlays modified. The main delta contained no agent,
+infrastructure or Prisma migration changes.
+
+Deployed source revision: `ac8b20a3a506bc4bb064cb47d13322ec7d15b149`
+(application code is the previously tested `2405000` tree). The source update was
+fast-forward only. Protected YAML files and the server environment retained their
+SHA-256 hashes. A private rollback backup is retained at
+`/home/ubuntu/spashtai-backups/tenant-admin-ac8b20a-20261109`: previous revision,
+source archive, served web archive, LiveKit overlays and protected-file digests.
+
+EC2 `npm ci`, Prisma generation, web typecheck and full server/web build passed.
+Prisma reported all 70 migrations up to date; no migration was applied. Only
+`spashtai-api` was reloaded, followed by an API-health wait, then the built web
+assets were published. The voice agent remained online with PID 124127 and restart
+count 96 unchanged. The API was online at PID 1792775 after one intentional reload.
+No nginx configuration, database settings or rollout flags were changed.
+
+Post-deployment verification:
+
+- Public API health returned `{"status":"ok"}`.
+- Public Users page served the new `index-D2NQXqDt.js` bundle.
+- Served index matched the EC2 build byte-for-byte; SHA-256:
+  `58c34bc8917d227ee46ab3c54114d1643a3945c656c44e14c8a78dfe349d1231`.
+- Authorized KLSVDIT Owner-scoped requests through the public API returned HTTP
+  200 for custom-field definitions, Users and Dashboard.
+- All three public Excel endpoints returned HTTP 200; their actual XLSX bytes
+  parsed successfully into the expected report/details sheets and retained
+  `private, no-store`. Workbooks were inspected only in memory on EC2; no
+  production learner data or tokens were copied into evidence.
+- KLSVDIT currently has zero **enabled** custom filters. The owner must check
+  **Add filter** on their desired custom choice fields; deployment did not
+  silently enable or edit any tenant field.
+
+Production smoke used a short-lived Owner-scoped token held only in memory,
+without interactive Google sign-in or changing membership. The three export
+requests wrote the normal content-free export audit entries. No account,
+invitation, enrollment answer or profile was created/changed.
+
+Private local evidence: `tenant-admin-ec2-deploy.log` and
+`tenant-admin-ec2-smoke.log` in the evidence directory below. Earlier connectivity
+failures remain historical evidence, not the current release state. Dynamic
+tenant titles and visible controls were verified in native Chromium locally;
+production verification here covered public assets and authorized API/XLSX paths,
+not an interactive production browser login or voice scenario.
 
 ## GitHub integration and EC2 attempt, 9 November 2026
 
@@ -13,7 +62,7 @@ and deploy this release only. GitHub main was fast-forwarded from
 No additional signup/voice/session-review follow-up branch was merged.
 The documentation-only status update follows this application/evidence release.
 
-EC2 inspection could not begin: SSH to `ubuntu@13.219.136.19` and
+Initially EC2 inspection could not begin: SSH to `ubuntu@13.219.136.19` and
 `ubuntu@livekit.spasht.ai` on port 22 repeatedly timed out. Direct LiveKit DNS still
 resolved to that address. Both configured AWS profiles lacked permission for
 `ec2:DescribeInstances`, so neither confirmed a current instance address.
@@ -21,10 +70,11 @@ Public `https://spasht.ai/w/klsvdit/admin/users` returned HTTP 200 and
 `https://api.spasht.ai/health` returned `{"status":"ok"}`; this proves public
 availability, **not deployment of this release**.
 
-Required prerequisite: restore the approved SSH route (VPN, bastion or
+The then-required prerequisite was to restore the approved SSH route (VPN, bastion or
 security-group allowlist), or provide the current authorized SSH host/port.
-No EC2 files, credentials, security rules, processes or containers were changed.
-Once access is restored, inspect the live checkout/overlays/migration state before
+No EC2 files, credentials, security rules, processes or containers were changed
+during that blocked attempt. The owner subsequently restored SSH; the completed
+deployment is recorded above. Once access is restored, inspect the live checkout/overlays/migration state before
 building and releasing API then web. The generic deployment script also reloads
 the voice agent; do not restart unrelated voice services blindly for this
 admin-only release.
@@ -137,17 +187,21 @@ authentication and prior failed/inconclusive evidence are not committed.
   this delivery. Playwright Chromium is not Safari. Northwind's missing third
   reply remains unresolved; this work establishes no provider root cause.
 
-## Merge dependencies and proposed release order
+## Original merge dependencies and release order
+
+The authorized GitHub integration and API-before-web EC2 release are now complete,
+as recorded above. These remain the constraints for future releases.
 
 1. Review this branch and its evidence independently of the signup/location,
    voice/lifecycle, recognizer and session-review follow-ups. No merges between
-   those release branches were performed.
+   those release branches were performed during this follow-up.
 2. On approval, integrate against the then-current main and rerun these gates.
    No migration is needed for the additive JSON metadata.
 3. Release API before the matching web bundle: the web needs the new filters/export
    routes. Existing web clients can continue normal unfiltered reports.
 4. Validate an authorized non-production tenant before considering production.
-   No release step has been executed here.
+   This was the original proposed gate; the owner later explicitly authorized
+   the production release documented above.
 
 A rollback to an older strict-schema API requires a separately reviewed/tested
 removal of only `filterable` metadata from workspace settings and invitation/member
