@@ -20,9 +20,9 @@ export function FieldFilters() {
   return <>
     <ErrorAlert error={error} />
     {loading && <p role="status" className="text-sm text-muted-foreground">Loading custom filters...</p>}
-    {data?.map(field => <div key={field.id} className="space-y-1.5">
-      <Label>{field.label}</Label>
-      <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" aria-label={`${field.label} filter`}>
+    {data?.map(field => <div key={field.id} className="flex flex-col items-start gap-1.5">
+      <Label htmlFor={`custom-filter-${field.id}`}>{field.label}</Label>
+      <DropdownMenu><DropdownMenuTrigger asChild><Button id={`custom-filter-${field.id}`} variant="outline" aria-label={`${field.label} filter`}>
         {selected.filter(v => v.startsWith(`${field.id}:`)).length || 'All'} {field.label}
       </Button></DropdownMenuTrigger>
         <DropdownMenuContent className="max-h-80 overflow-y-auto max-w-sm">
