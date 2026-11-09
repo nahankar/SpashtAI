@@ -64,6 +64,10 @@ export const LEARNER_POLICIES: Record<string, LearnerPolicy> = {
     prompt: 'interview-answer-16', schema: 'interview-result-8', rubric: 'bank-guidance-6', policy: 'learner-evaluation-14-budget-control', temperature: 0, maxTokens: 15000, timeoutMs: 40_000, responseFormat: 'tool' } },
   'learner-evaluation-14-thinking-low': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova2-lite-learner-14-thinking-low', modelId: 'us.amazon.nova-2-lite-v1:0', region: 'us-east-1', label: 'Nova 2 Lite · grading 14 low thinking (comparison)',
     prompt: 'interview-answer-16', schema: 'interview-result-8', rubric: 'bank-guidance-6', policy: 'learner-evaluation-14-thinking-low', temperature: 0, maxTokens: 15000, timeoutMs: 40_000, responseFormat: 'tool', reasoningEffort: 'low' } },
+  // Inactive preview: declared interpretation uncertainty is a server-enforced no-grade gate.
+  'learner-evaluation-15': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova2-lite-learner-15', modelId: 'us.amazon.nova-2-lite-v1:0', region: 'us-east-1', label: 'Nova 2 Lite · interpretation-first grading 15 (candidate)',
+    prompt: 'interview-answer-17', schema: 'interview-result-9', rubric: 'bank-guidance-6', policy: 'learner-evaluation-15', temperature: 0, maxTokens: 15000, timeoutMs: 40_000, responseFormat: 'tool', reasoningEffort: 'low' } },
+
 }
 // learner-evaluation-8: v5's prompt, rubric and model with the versioned interview-result-4 evidence matching.
 // Technical grading remains experimental (reasoning, mixed-answer strengths and no-answer classification are open).
@@ -143,6 +147,7 @@ export function originalPassage(answer: string, quote: string): string | null {
 export function parseResult(output: string, answer: string, schema = 'interview-result-2'): EvaluationResult {
   const raw: unknown = JSON.parse(output.replace(/^\s*```(?:json)?\s*/, '').replace(/\s*```\s*$/, ''))
   if (schema === 'interview-result-5') return parseClaimResult(raw, answer)
+  if (schema === 'interview-result-9') return parseInterpretationFirstResult(raw, answer)
   if (schema === 'interview-result-8') return parseSeparatedResult(raw, answer)
   if (schema === 'interview-result-7') return parseCompactResult(raw, answer)
   if (schema === 'interview-result-6') return parseInterpretedClaimResult(raw, answer)
@@ -327,6 +332,25 @@ function parseSeparatedResult(raw: unknown, answer: string): EvaluationResult {
       ? 'The cited passage contains an explicitly false explanation; this is separate from the knowledge verdict.' : 'No valid reasoning assessment was established.',
   }) }), answer, 'interview-result-4')
   return { ...validated, ...(notes.length ? { validationNotes: notes } : {}), ...(issues.length ? { assessmentIssues: issues } : {}) }
+}
+
+// v9 makes the interpretation check and reasoning review explicit. These are model judgments,
+// not verified ASR provenance. The server can enforce declared uncertainty, not detect hidden mistakes.
+const interpretationFirstSchema = separatedGradeSchema.extend({
+  interpretation: z.object({ status: z.enum(['CLEAR', 'NORMALIZED', 'UNCERTAIN']),
+    summary: z.string().trim().min(1).max(400), evidence: passageIds }).strict(),
+  validReasoning: passageIds, invalidReasoning: passageIds,
+}).strict()
+function parseInterpretationFirstResult(raw: unknown, answer: string): EvaluationResult {
+  const { interpretation, ...grade } = interpretationFirstSchema.parse(raw)
+  const passages = answerPassages(answer)
+  for (const ids of [interpretation.evidence, grade.correct, grade.incorrect, grade.validReasoning, grade.invalidReasoning]) {
+    if (new Set(ids).size !== ids.length || ids.some(id => !passages[id - 1])) throw new Error('INVALID_PASSAGE_REFERENCE')
+  }
+  if (interpretation.status !== 'CLEAR' && !interpretation.evidence.length) throw new Error('INVALID_PASSAGE_REFERENCE')
+  // Even a contradictory COMPLETE/FALSE_CORE must not publish a grade when meaning is uncertain.
+  if (interpretation.status === 'UNCERTAIN') throw new EvaluationReviewRequired()
+  return parseSeparatedResult(grade, answer)
 }
 
 // Content-free diagnostics only: keep the same rejection/message, never include provider text.

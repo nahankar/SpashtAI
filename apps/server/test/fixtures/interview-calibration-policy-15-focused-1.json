@@ -1,0 +1,464 @@
+{
+  "fixtureVersion": "policy-15-focused-1",
+  "reviewer": "AI-led technical adjudication accepted by owner; not independent human/domain-expert validation.",
+  "preRegistered": "Frozen before any policy-15 model call. Eight historical paid regressions, eight newly authored same-domain paid cases, and two free controls. New cases are unrun but AI-authored, not independent expert holdouts. No relabeling after outputs. Four fresh repeats: 20 paid calls in a future separately authorized run.",
+  "questions": {
+    "AUT-002": {
+      "revision": 2,
+      "guidanceIssues": [
+        "goodAnswerPoints credits 'Selenium Manager-backed condition waits'. Selenium Manager resolves driver/browser binaries; it provides no waits.",
+        "The misconception's 'Correction' sentence does not correct the stated misconception (mixing implicit and explicit waits)."
+      ]
+    },
+    "AUT-NEW-047": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-016": {
+      "revision": 2,
+      "guidanceIssues": [
+        "The misconception's 'Correction' restates the object model instead of saying pages in one context share cookies."
+      ]
+    },
+    "AUT-NEW-057": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-005": {
+      "revision": 2,
+      "guidanceIssues": [
+        "expectedDepth asks the candidate to 'identify why the stated misconception is false'; a correct answer need not mention the misconception."
+      ]
+    },
+    "AUT-NEW-060": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AAI-NEW-006": {
+      "revision": 2,
+      "guidanceIssues": [
+        "'Acceptable alternatives: cache-aware admission or paging strategies' is serving guidance, not an alternative answer to the question.",
+        "exampleAnswer calls 'it stores attention state for generation' a limitation; that is the definition, not a limitation."
+      ]
+    },
+    "BA-NEW-029": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "PY-NEW-021": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "OPS-NEW-001": {
+      "revision": 2,
+      "guidanceIssues": [
+        "Core states that deleting depends on parent-directory permissions, and Optional depth asks the same question."
+      ]
+    },
+    "MAN-NEW-019": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "SM-NEW-013": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DE-NEW-012": {
+      "revision": 2,
+      "guidanceIssues": [
+        "The misconception's 'Correction' is an unrelated example sentence."
+      ]
+    },
+    "DEV-NEW-080": {
+      "revision": 2,
+      "guidanceIssues": [
+        "The misconception's 'Correction' does not address the stated misconception.",
+        "A REST API design question is filed under the Java track."
+      ]
+    },
+    "PY-NEW-049": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AAI-NEW-033": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "WEB-NEW-077": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-041": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "WEB-NEW-033": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-056": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "WEB-NEW-055": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "WEB-003": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "WEB-008": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-028": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "PY-NEW-010": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DE-NEW-016": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DEV-NEW-016": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "WEB-NEW-099": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "DE-NEW-001": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-NEW-097": {
+      "revision": 2,
+      "guidanceIssues": []
+    },
+    "AUT-019": {
+      "revision": 2,
+      "guidanceIssues": []
+    }
+  },
+  "cases": [
+    {
+      "id": "R1-08",
+      "qid": "AUT-NEW-016",
+      "category": "central-error",
+      "expected": "INCORRECT",
+      "acceptable": [
+        "INCORRECT"
+      ],
+      "answer": "Browser is the browser. A context is basically the same thing as a page, and each page always gets its own cookies, so two pages are completely isolated from each other.",
+      "evidence": [
+        "basically the same thing as a page",
+        "each page always gets its own cookies"
+      ],
+      "expectMisconception": true,
+      "sourceCases": [
+        "reviewed-1:R1-08"
+      ]
+    },
+    {
+      "id": "H1-09",
+      "qid": "AAI-NEW-033",
+      "category": "near-abstention-with-idea",
+      "expected": "PARTIAL",
+      "acceptable": [
+        "PARTIAL",
+        "NOT_ANSWERED"
+      ],
+      "mustNotBe": [
+        "CORRECT",
+        "INCORRECT"
+      ],
+      "answer": "I'm not really sure. Maybe you could translate the queries into Hindi first?",
+      "notes": "Mentions the accepted translation-assisted alternative without any testing method. Either PARTIAL or NOT_ANSWERED is defensible; a grade of CORRECT or INCORRECT is not.",
+      "sourceCases": [
+        "heldout-1:H1-09"
+      ]
+    },
+    {
+      "id": "P2-07",
+      "qid": "WEB-NEW-099",
+      "category": "fragmented-implicit-reasoning",
+      "expected": "PARTIAL",
+      "acceptable": [
+        "PARTIAL",
+        "CORRECT"
+      ],
+      "mustNotBe": [
+        "INCORRECT",
+        "NOT_ANSWERED"
+      ],
+      "answer": "Keyboard order follows semantic controls.\nAnd\nDom position.\nPositive TB index.\nCreates\nUh, competing manual order?\nUh, the example.\nI don't have one.\nMaybe, I don't know.",
+      "expectReasoning": true,
+      "mustNotSay": [
+        "does not provide any reasoning",
+        "lacks reasoning",
+        "no reasoning",
+        "does not explain why"
+      ],
+      "notes": "'Positive TB index. Creates ... competing manual order' is the reason positive tabindex is discouraged.",
+      "sourceCases": [
+        "pilot-2:P2-07",
+        "readiness-2026-11-06:P2-07"
+      ],
+      "sourceFixture": "pilot-2"
+    },
+    {
+      "id": "P2-08",
+      "qid": "DE-NEW-001",
+      "category": "vague-substantive-fragments",
+      "expected": "UNASSESSED",
+      "acceptable": [],
+      "mustNotBe": [
+        "CORRECT",
+        "PARTIAL",
+        "INCORRECT",
+        "NOT_ANSWERED"
+      ],
+      "answer": "Packed tables are the real data.\nUm,\nWhich are specific to any artifact dimensions can be\nCreated, derived.\nAcross the data.\ncombination of the data aggregation of the data.\nAgainst any specific\nOther fields, so multiple dimensions can be created.\nTo query all of the data at once, instead of the basic rows and columns that 1 may typically do.",
+      "mustNotQuote": [
+        "grain",
+        "measure"
+      ],
+      "notes": "AI-led adjudication, owner accepted 8 Nov 2026: the technical attempt is substantive but relationships cannot be reliably recovered from these fragments. Do not penalize packed/fact ASR substitution or invent knowledge. Preserve earlier labels in historical fixtures; require an ungraded review outcome in this new fixture.",
+      "sourceFixture": "pilot-2",
+      "expectedDisposition": "REVIEW_REQUIRED",
+      "sourceCases": [
+        "pilot-2:P2-08",
+        "readiness-2026-11-06:P2-08"
+      ]
+    },
+    {
+      "id": "A1-01",
+      "qid": "AUT-NEW-097",
+      "category": "misheard-term-correct",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT",
+        "PARTIAL"
+      ],
+      "answer": "Mark a known good commit and the current bad commit, then let get dissect check out the midpoint, run the test, mark it good or bad, and repeat until it finds the first bad commit. You can automate it with get dissect run and a script whose exit code says good or bad, but the test has to be reproducible.",
+      "evidence": [
+        "known good commit",
+        "first bad commit"
+      ],
+      "mustNotGap": [
+        "dissect",
+        "misstated",
+        "familiar"
+      ],
+      "notes": "Core content is complete. PARTIAL is tolerable only for a genuine content gap; any gap or misconception about 'get dissect' is the defect under test.",
+      "sourceCases": [
+        "asr-1:A1-01"
+      ]
+    },
+    {
+      "id": "A1-05",
+      "qid": "AUT-NEW-005",
+      "category": "misheard-term-incorrect",
+      "expected": "INCORRECT",
+      "acceptable": [
+        "INCORRECT"
+      ],
+      "answer": "stale element reference exception happens when the element takes too long to load so it is basically a time out, you just retry the same web element in a loop until it works",
+      "evidence": [
+        "basically a time out",
+        "retry the same web element"
+      ],
+      "expectMisconception": true,
+      "notes": "Transcription leniency must not excuse a real false claim.",
+      "sourceCases": [
+        "asr-1:A1-05"
+      ]
+    },
+    {
+      "id": "P2-06",
+      "qid": "DEV-NEW-016",
+      "category": "mixed-correct-and-false",
+      "expected": "PARTIAL",
+      "acceptable": [
+        "PARTIAL",
+        "INCORRECT"
+      ],
+      "mustNotBe": [
+        "CORRECT",
+        "NOT_ANSWERED"
+      ],
+      "answer": "And asynchronous dependent call needs composition rather than nested future values.\nThe stated misconception is a false, and we should use synchronous calls whenever possible.",
+      "expectMisconception": true,
+      "expectStrength": [
+        "compos"
+      ],
+      "mustNotSay": [
+        "no explanation of why asynchronous dependent calls need composition"
+      ],
+      "notes": "First sentence is correct (dependent async calls need composition, not nested futures); 'use synchronous calls whenever possible' is false. The correct concept must be acknowledged.",
+      "sourceCases": [
+        "pilot-2:P2-06",
+        "readiness-2026-11-06:P2-06"
+      ],
+      "sourceFixture": "pilot-2"
+    },
+    {
+      "id": "P2-02",
+      "qid": "DE-NEW-016",
+      "category": "control-empty-because",
+      "expected": "NOT_ANSWERED",
+      "acceptable": [
+        "NOT_ANSWERED"
+      ],
+      "reasoningMustNotBeMet": true,
+      "answer": "Joint types use the concrete case, because.\nThe identity, the incorrect assumption and its consequence.\nBasic behavior is good.",
+      "notes": "Control: empty 'because' plus instruction wording.",
+      "sourceCases": [
+        "pilot-2:P2-02",
+        "readiness-2026-11-06:P2-02"
+      ],
+      "sourceFixture": "pilot-2"
+    },
+    {
+      "id": "N15-01",
+      "qid": "DE-NEW-001",
+      "category": "new-clear-concise",
+      "expected": "CORRECT",
+      "answer": "A fact row records a measurement at a specified grain, such as one sale line with quantity and amount. Dimensions supply descriptive context, like product category or customer region, for filtering and grouping those measurements.",
+      "expectReasoning": true,
+      "notes": "Defines grain, measures, descriptive context and their analytic relationship. No need to repeat every example from the reference answer.",
+      "acceptable": [
+        "CORRECT"
+      ],
+      "sourceFixture": "new-ai-authored-2026-11-09"
+    },
+    {
+      "id": "N15-02",
+      "qid": "DE-NEW-001",
+      "category": "new-clear-false-not-uncertain",
+      "expected": "INCORRECT",
+      "answer": "Fact tables and dimension tables have identical purposes. Both only store descriptive labels and never measurements. There is no distinction between them.",
+      "expectMisconception": true,
+      "notes": "Explicit false core distinction. Must not escape as review just because it is wrong.",
+      "acceptable": [
+        "INCORRECT"
+      ],
+      "sourceFixture": "new-ai-authored-2026-11-09"
+    },
+    {
+      "id": "N15-03",
+      "qid": "DE-NEW-001",
+      "category": "new-unresolved-referents",
+      "expected": "UNASSESSED",
+      "expectedDisposition": "REVIEW_REQUIRED",
+      "answer": "The table with the... event thing. The other has that one, the measure... no, the label. I mean the one we said, not the other.",
+      "notes": "Unresolved referents and self-correction do not establish which table has which role. Inventing those links would determine the grade. No knowledge update.",
+      "acceptable": [
+        "UNASSESSED"
+      ],
+      "sourceFixture": "new-ai-authored-2026-11-09"
+    },
+    {
+      "id": "N15-04",
+      "qid": "WEB-NEW-099",
+      "category": "new-implicit-contrast",
+      "expected": "CORRECT",
+      "answer": "Natural keyboard focus follows DOM order and focusable native controls. Positive tabindex jumps ahead into a separate numbered order. Visual order stays where it was. Now keyboard users encounter fields in a different sequence. Keep the source order logical rather than numbering your way around it.",
+      "expectReasoning": true,
+      "notes": "Consequence is expressed in adjacent sentences without because. Fully explains why manual positive ordering is discouraged.",
+      "acceptable": [
+        "CORRECT"
+      ],
+      "sourceFixture": "new-ai-authored-2026-11-09"
+    },
+    {
+      "id": "N15-05",
+      "qid": "WEB-NEW-099",
+      "category": "new-empty-reason-with-true-knowledge",
+      "expected": "PARTIAL",
+      "answer": "DOM order and native focusable controls determine the normal tab sequence. Positive tabindex is bad because it is bad.",
+      "reasoningMustNotBeMet": true,
+      "notes": "True core statement earns partial credit; empty repeated slogan supplies no mechanism. Do not claim false reasoning or full explanation.",
+      "acceptable": [
+        "PARTIAL"
+      ],
+      "sourceFixture": "new-ai-authored-2026-11-09"
+    },
+    {
+      "id": "N15-06",
+      "qid": "AUT-NEW-097",
+      "category": "new-clear-wrong-operation",
+      "expected": "INCORRECT",
+      "answer": "Git bisect chooses commits at random and decides whether code is broken from the commit message. You never run a test or label good and bad revisions.",
+      "expectMisconception": true,
+      "notes": "Clearly wrong description of the algorithm; cannot be rescued by name normalization or generic uncertainty.",
+      "acceptable": [
+        "INCORRECT"
+      ],
+      "sourceFixture": "new-ai-authored-2026-11-09"
+    },
+    {
+      "id": "N15-07",
+      "qid": "AUT-NEW-005",
+      "category": "new-asr-context-recoverable",
+      "expected": "CORRECT",
+      "answer": "A stale element points to a node from the old dome after a rerender or navigation replaced it. Wait for the current page condition and locate the element again using its locator, then retry the action within a bound. Reusing the old reference keeps targeting the detached node.",
+      "expectReasoning": true,
+      "notes": "Dome is an obvious DOM transcription substitution. Correct stale-reference mechanism and recovery, no penalty for spelling.",
+      "mustNotGap": [
+        "dome"
+      ],
+      "acceptable": [
+        "CORRECT"
+      ],
+      "sourceFixture": "new-ai-authored-2026-11-09"
+    },
+    {
+      "id": "N15-08",
+      "qid": "AUT-NEW-005",
+      "category": "new-mixed-reason",
+      "expected": "PARTIAL",
+      "answer": "A DOM replacement can detach the node held by the element reference. Locate the current element again rather than reusing that reference. Also, a sufficiently long implicit wait repairs any detached reference permanently because time reattaches the same object.",
+      "expectMisconception": true,
+      "reasoningMustNotBeMet": true,
+      "notes": "Meaningful correct cause and recovery mixed with explicitly false wait/reattachment claim. Retain true knowledge; mixed/false reasoning must not be fully MET.",
+      "acceptable": [
+        "PARTIAL"
+      ],
+      "sourceFixture": "new-ai-authored-2026-11-09"
+    },
+    {
+      "id": "G-ABSTAIN",
+      "qid": "WEB-NEW-033",
+      "category": "deterministic-control",
+      "expected": "NOT_ANSWERED",
+      "acceptable": [
+        "NOT_ANSWERED"
+      ],
+      "answer": "Sorry, I do not know this one.",
+      "expectedKind": "DONT_KNOW",
+      "sourceCases": [
+        "readiness-2026-11-06:G-ABSTAIN"
+      ]
+    },
+    {
+      "id": "G-REQUEST",
+      "qid": "WEB-NEW-033",
+      "category": "deterministic-control",
+      "expected": "NOT_ANSWERED",
+      "acceptable": [
+        "NOT_ANSWERED"
+      ],
+      "answer": "Could you repeat the question please?",
+      "expectedKind": "REQUEST_ONLY",
+      "sourceCases": [
+        "readiness-2026-11-06:G-REQUEST"
+      ]
+    }
+  ]
+}

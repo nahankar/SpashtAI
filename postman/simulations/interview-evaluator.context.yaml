@@ -16,6 +16,20 @@ assumptions:
     verification: Inspected owned mock; REVIEW_REQUIRED is selected by a synthetic marker and never evaluates meaning. No real provider call was made by the HTTP check.
     source: postman/mocks/bedrock/default.js; docs/prepare/INTERVIEWS-AI-ADJUDICATION-2026-11-08.md.
     updated_at: "2026-11-08"
+  - id: interpretation-first-gate-fixture
+    status: supported
+    claim: The v9 caller refuses a declared uncertain interpretation even when the fixture supplies a contradictory COMPLETE verdict, and rejects skipped reasoning and unsupported interpretation evidence.
+    reason: Actual SDK HTTP calls to the owned stand-in exercised the new request format and the production parser; this supports caller boundary behavior only.
+    verification: On 2026-11-09 ran check-interview-evaluator-simulation.ts against owned port 4931. All 25 assertions passed, including four v9 assertions. Request events confirm Converse HTTP traffic. Server build and focused tests passed. No real v15 provider call was made.
+    source: apps/server/scripts/check-interview-evaluator-simulation.ts; apps/server/test/interview-interpretation-first.test.ts; private policy-15-http-results.json and policy-15-simulation.ndjson.
+    updated_at: "2026-11-09"
+  - id: interpretation-first-semantic-quality
+    status: unknown
+    claim: The real provider consistently detects uncertain speech and credits implicit reasoning with the v15 prompt and required fields.
+    reason: Authored transport outputs cannot establish model judgment. The preceding real v14 LOW comparison improved two cases but still failed uncertainty and implicit reasoning; do not transfer that limited result into a v15 pass.
+    verification: Frozen policy-15 initial and repeat fixtures are prepared but unrun. No new paid calls, voice tests or production policy change.
+    source: docs/prepare/INTERVIEWS-GRADING-POLICY-15.md; docs/prepare/INTERVIEWS-GRADING-THINKING-COMPARISON.md.
+    updated_at: "2026-11-09"
 fingerprints:
   - id: policy-11-http-fixtures
     date: "2026-11-08"

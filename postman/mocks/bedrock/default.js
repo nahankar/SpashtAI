@@ -18,7 +18,7 @@ http.createServer(async (req, res) => {
     const toolOutput = request.toolConfig?.toolChoice?.tool?.name === 'grade_interview_answer'
     const compact = Boolean(request.toolConfig?.tools?.[0]?.toolSpec?.inputSchema?.json?.properties?.decision)
     const separated = Boolean(request.toolConfig?.tools?.[0]?.toolSpec?.inputSchema?.json?.properties?.validReasoning)
-    const result = separated ? (answer === '[REVIEW_REQUIRED]' ? {decision:'REVIEW',correct:[],incorrect:[],reviewReason:'Fixture ambiguity.'}
+    let result = separated ? (answer === '[REVIEW_REQUIRED]' ? {decision:'REVIEW',correct:[],incorrect:[],reviewReason:'Fixture ambiguity.'}
       : answer === '[REASONING_CONFLICT]' ? {decision:'FALSE_CORE',correct:[],incorrect:[1],validReasoning:[1]}
       : answer === '[FALSE_REASON]' ? {decision:'FALSE_CORE',correct:[],incorrect:[1],invalidReasoning:[1]}
       : answer === '[BAD_CORE]' ? {decision:'COMPLETE',correct:[],incorrect:[1]}
@@ -33,6 +33,14 @@ http.createServer(async (req, res) => {
       : { classification: 'CORRECT', criteria: ['ACCURACY', 'REASONING', 'DEPTH'].map(criterion => ({
       criterion, finding: criterion === 'ACCURACY' ? 'MET' : 'NOT_ASSESSED', evidence: criterion === 'ACCURACY' ? [answer] : [], explanation: 'Transport fixture finding.',
     })), strengths: ['Transport fixture'], gaps: [], misconceptions: [], guidance: 'Fixture guidance.', uncertainty: [], followUpQuestion: 'What would you test next?' }
+    const interpretationFirst = Boolean(request.toolConfig?.tools?.[0]?.toolSpec?.inputSchema?.json?.properties?.interpretation)
+    if (interpretationFirst) {
+      result = { ...result, validReasoning: result.validReasoning ?? [], invalidReasoning: result.invalidReasoning ?? [],
+        interpretation: {status: answer === '[UNCERTAIN_COMPLETE]' ? 'UNCERTAIN' : answer === '[NORMALIZED]' ? 'NORMALIZED' : 'CLEAR',
+          summary: 'Authored fixture interpretation.', evidence: [1]} }
+      if (answer === '[MISSING_REASONING]') delete result.validReasoning
+      if (answer === '[BAD_INTERPRETATION]') result.interpretation.evidence = [128]
+    }
     const tool = { toolUse: { toolUseId: 'fixture', name: answer === '[WRONG_TOOL]' ? 'other' : 'grade_interview_answer', input: result } }
     const content = toolOutput ? (answer === '[MULTIPLE_TOOLS]' ? [tool, tool] : [tool])
       : [{ text: answer === '[INVALID_OUTPUT]' ? 'not json' : JSON.stringify(result) }]
