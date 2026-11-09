@@ -13,7 +13,7 @@ type Case = { id?: string; name?: string; qid: string; category?: string; expect
   answer: string; evidence?: string[]; mustNotQuote?: string[]; mustNotGap?: string[]; expectMisconception?: boolean; expectGap?: string; notes?: string
   mustNotSay?: string[]; expectReasoning?: boolean; reasoningMustNotBeMet?: boolean; expectStrength?: string[]; expectedKind?: string; expectAcknowledged?: string[] }
 type Fixture = { fixtureVersion: string; reviewer?: string; questions?: Record<string, { revision: number; guidanceIssues: string[] }>; cases: Case[] }
-type Result = { classification?: string; criteria?: { criterion: string; finding: string; evidence: string[] }[]; strengths?: string[]
+type Result = { classification?: string; assessmentIssues?: string[]; criteria?: { criterion: string; finding: string; evidence: string[] }[]; strengths?: string[]
   gaps?: string[]; misconceptions?: string[]; uncertainty?: string[]; guidance?: string; responseKind?: string; next?: { action: string; topic: string | null; source: string } }
 
 const [actorId, output, ...flags] = process.argv.slice(2)
@@ -70,6 +70,7 @@ const write = () => {
   const graded = results.filter(r => r.review)
   const count = (pred: (r: Record<string, unknown>) => boolean) => results.filter(pred).length
   const summary = {
+    coreGradesRequiringHold: count(r => Boolean((r.result as Result | null)?.assessmentIssues?.length)),
     cases: results.length, completed: count(r => r.status === 'COMPLETED'),
     agreement: count(r => (r.review as { acceptable?: boolean } | null)?.acceptable === true), exactExpected: count(r => r.passed === true),
     forbiddenClassification: count(r => (r.review as { forbidden?: boolean } | null)?.forbidden === true),

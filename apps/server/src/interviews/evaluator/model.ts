@@ -168,11 +168,26 @@ export const COMPACT_TOOL_SCHEMA = {
     } },
   },
 }
+// The earlier prompt remains frozen; replace the reasoning contract rather than append exceptions.
+export const LEARNER_PROMPT_16 = LEARNER_PROMPT_15
+  .replace('reasoning IDs cite a TRUE relevant mechanism, contrast, cause or consequence and must also appear in correct.',
+    'validReasoning IDs cite a TRUE relevant mechanism, contrast, cause or consequence and must also appear in correct. invalidReasoning IDs cite an explicitly FALSE explanation and must also appear in incorrect. Empty or missing explanations are unassessed, not false. Reasoning is separate from the knowledge verdict: FALSE_CORE can have an invalid explanation without invalidating that core verdict. Do not list a false explanation under validReasoning.')
+  .replace('all three ID lists must be empty', 'both core ID lists and any reasoning lists must be empty')
+  .replace('Depth is not graded.', 'Depth is not graded. Omitted optional reasoning fields mean unassessed, never a knowledge penalty. Reasoning is required for coverage only if questionText actually asks for an explanation; boilerplate expectedDepth does not make it mandatory.')
+  .replace('The required assessment fields are decision, correct, incorrect and reasoning.',
+    'The required assessment fields are decision, correct and incorrect. validReasoning and invalidReasoning are optional integer-ID lists; do not return a reasoning field. Decide core knowledge first, independently of the presentation and separate reasoning assessment.')
+export const SEPARATED_TOOL_SCHEMA = {
+  ...COMPACT_TOOL_SCHEMA, required: ['decision', 'correct', 'incorrect'], properties: {
+    ...Object.fromEntries(Object.entries(COMPACT_TOOL_SCHEMA.properties).filter(([key]) => key !== 'reasoning')),
+    validReasoning: schemaArray({ type: 'integer', minimum: 1, maximum: 128 }, 6),
+    invalidReasoning: schemaArray({ type: 'integer', minimum: 1, maximum: 128 }, 6),
+  },
+}
 // Prompt text is part of its version: editing an entry requires a new ID (sha256 frozen in tests).
 export const PROMPTS: Record<string, string> = { 'interview-answer-4': SYSTEM_PROMPT, 'interview-answer-5': LEARNER_PROMPT_5, 'interview-answer-6': LEARNER_PROMPT_6,
   'interview-answer-7': LEARNER_PROMPT_7, 'interview-answer-8': LEARNER_PROMPT_8, 'interview-answer-9': LEARNER_PROMPT_9, 'interview-answer-10': LEARNER_PROMPT_10,
   'interview-answer-11': LEARNER_PROMPT_11, 'interview-answer-12': LEARNER_PROMPT_12, 'interview-answer-13': LEARNER_PROMPT_13,
-  'interview-answer-14': LEARNER_PROMPT_14, 'interview-answer-15': LEARNER_PROMPT_15 }
+  'interview-answer-14': LEARNER_PROMPT_14, 'interview-answer-15': LEARNER_PROMPT_15, 'interview-answer-16': LEARNER_PROMPT_16 }
 function userMessage(question: QuestionSnapshot, answer: string, assistance: string, rubric: string) {
   if (!['bank-guidance-2', 'bank-guidance-3', 'bank-guidance-4', 'bank-guidance-5', 'bank-guidance-6'].includes(rubric)) return { question, candidateAnswer: answer, assistance }
   const { questionText, track, topic, difficulty, experienceBand } = question
@@ -203,8 +218,8 @@ export async function evaluateAnswer(question: QuestionSnapshot, answer: string,
       messages: [{ role: 'user', content: [{ text: JSON.stringify(userMessage(question, answer, assistance, config.rubric)) }] }],
       inferenceConfig: { temperature: config.temperature, maxTokens: config.maxTokens },
       ...(toolOutput ? { toolConfig: { tools: [{ toolSpec: { name: CLAIM_TOOL_NAME,
-        description: config.schema === 'interview-result-7' ? 'Submit a knowledge decision and integer source-passage references, with optional feedback. This is data only; it executes no action.' : 'Submit quoted technical claims and interpretation uncertainty for one answer. This is data only; it executes no action.',
-        inputSchema: { json: (config.schema === 'interview-result-7' ? COMPACT_TOOL_SCHEMA : CLAIM_TOOL_SCHEMA) as ToolInputSchema.JsonMember['json'] } } }], toolChoice: { tool: { name: CLAIM_TOOL_NAME } } } } : {}),
+        description: ['interview-result-7', 'interview-result-8'].includes(config.schema) ? 'Submit a knowledge decision and integer source-passage references, with optional feedback. This is data only; it executes no action.' : 'Submit quoted technical claims and interpretation uncertainty for one answer. This is data only; it executes no action.',
+        inputSchema: { json: (config.schema === 'interview-result-8' ? SEPARATED_TOOL_SCHEMA : config.schema === 'interview-result-7' ? COMPACT_TOOL_SCHEMA : CLAIM_TOOL_SCHEMA) as ToolInputSchema.JsonMember['json'] } } }], toolChoice: { tool: { name: CLAIM_TOOL_NAME } } } } : {}),
     }), { abortSignal: AbortSignal.timeout(config.timeoutMs) })
     inputTokens = response.usage?.inputTokens ?? null; outputTokens = response.usage?.outputTokens ?? null
     if (response.stopReason !== (toolOutput ? 'tool_use' : 'end_turn')) throw new EvaluationFailure(STOP_REASONS[response.stopReason ?? ''] ?? 'INCOMPLETE_OUTPUT', false, { inputTokens, outputTokens, latencyMs: Date.now() - start })

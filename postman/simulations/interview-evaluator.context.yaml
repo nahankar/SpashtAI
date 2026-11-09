@@ -29,3 +29,9 @@ fingerprints:
 # including independently invalid optional feedback retaining the valid grade, a review outcome
 # and wrong-tool rejection. Thirteen POSTs are recorded in private policy-13-simulation.ndjson;
 # assertions in policy-13-http-results.json. This remains fixture-only transport evidence.
+
+# Policy 14: nineteen real SDK HTTP assertions passed on 2026-11-09 against the
+# owned loopback stand-in, including core retention with hold flags, false reasoning,
+# malformed reasoning, genuine review and rejected contradictory core evidence.
+# This validates caller behavior only; no real-provider v14 accuracy claim.
+# Evidence: private policy-14-http-results.json and policy-14-simulation.ndjson.

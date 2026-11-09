@@ -3,7 +3,7 @@ import {beforeEach,describe,expect,it,vi} from 'vitest'
 import {answerPassages,CURRENT_LEARNER_POLICY,hash,invalidOutputReason,LEARNER_POLICIES,parseResult} from '../src/interviews/evaluator/contracts'
 const sdk=vi.hoisted(()=>({send:vi.fn(),destroy:vi.fn()}))
 vi.mock('@aws-sdk/client-bedrock-runtime',()=>({BedrockRuntimeClient:class{send=sdk.send;destroy=sdk.destroy},ConverseCommand:class{constructor(public input:unknown){}}}))
-import {COMPACT_TOOL_SCHEMA,evaluateAnswer,LEARNER_PROMPT_15} from '../src/interviews/evaluator/model'
+import {SEPARATED_TOOL_SCHEMA,COMPACT_TOOL_SCHEMA,evaluateAnswer,LEARNER_PROMPT_15} from '../src/interviews/evaluator/model'
 const answer='Fresh data isolates tests. Shared rows let one test change another test’s result.'
 const grade=(overrides={})=>({decision:'COMPLETE',correct:[1,2],incorrect:[],reasoning:[2],...overrides})
 const parse=(input:unknown)=>parseResult(JSON.stringify(input),answer,'interview-result-7')
@@ -63,4 +63,12 @@ describe('compact assessment separates knowledge from prose',()=>{
   expect(input.toolConfig.tools[0].toolSpec.inputSchema.json).toEqual(COMPACT_TOOL_SCHEMA)
   expect(sdk.send).toHaveBeenCalledOnce()
  })
+ it('uses the separated tool contract for policy 14 and preserves usage on a held core result',async()=>{
+  sdk.send.mockResolvedValue({stopReason:'tool_use',output:{message:{content:[{toolUse:{name:'grade_interview_answer',input:{decision:'FALSE_CORE',correct:[],incorrect:[1],validReasoning:[1]}}}]}},usage:{inputTokens:123,outputTokens:45}})
+  const r=await evaluateAnswer(q,answer,LEARNER_POLICIES['learner-evaluation-14'].config,'NONE')
+  expect(r).toMatchObject({inputTokens:123,outputTokens:45,result:{classification:'INCORRECT',assessmentIssues:['REASONING_CONFLICT']}})
+  expect(sdk.send.mock.calls[0][0].input.toolConfig.tools[0].toolSpec.inputSchema.json).toEqual(SEPARATED_TOOL_SCHEMA)
+  expect(sdk.send).toHaveBeenCalledOnce()
+ })
+
 })

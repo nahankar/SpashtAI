@@ -10,7 +10,7 @@ export type CalibrationCase = {
   expectStrength?: string[]; expectedKind?: string; expectAcknowledged?: string[]
 }
 type Grade = {
-  classification?: string; responseKind?: string
+  classification?: string; responseKind?: string; assessmentIssues?: string[]
   criteria?: { criterion: string; finding: string; evidence: string[]; explanation?: string }[]
   strengths?: string[]; gaps?: string[]; misconceptions?: string[]; guidance?: string
 }
@@ -30,6 +30,7 @@ export function reviewCalibrationCase(test: CalibrationCase, row: CalibrationRow
   }
   const failures: string[] = []
   const check = (ok: boolean, code: string) => { if (!ok) failures.push(code) }
+  if (grade.assessmentIssues?.length) check(false, 'ASSESSMENT_REQUIRES_HOLD')
   const quotes = (grade.criteria ?? []).flatMap(c => c.evidence)
   const feedback = lower([...(grade.criteria ?? []).map(c => c.explanation ?? ''), ...(grade.gaps ?? []), ...(grade.strengths ?? []), grade.guidance ?? ''])
   check((test.acceptable ?? [test.expected]).includes(grade.classification), 'CLASSIFICATION_OUTSIDE_ACCEPTABLE')
@@ -66,11 +67,11 @@ export function reviewCalibration(fixture: { fixtureVersion: string; cases: Cali
     return reviewCalibrationCase(test, rows[0] ?? { id: test.id, model, status: 'MISSING' })
   }))
   const allRequiredChecksPass = reviews.every(r => (r.usable || ('reviewRequiredMatched' in r && r.reviewRequiredMatched)) && r.failures.length === 0)
-  const allRoutingLabelsMatch = reviews.every(r => ('reviewRequiredMatched' in r && r.reviewRequiredMatched) || (r.usable && 'exactExpected' in r && r.exactExpected))
+  const allRoutingLabelsMatch = reviews.every(r => ('reviewRequiredMatched' in r && r.reviewRequiredMatched) || (r.usable && !r.failures.includes('ASSESSMENT_REQUIRES_HOLD') && 'exactExpected' in r && r.exactExpected))
   return { fixtureVersion: fixture.fixtureVersion, calibrated: false,
     decision: allRequiredChecksPass && allRoutingLabelsMatch ? 'SAMPLE_PASSED_REVIEW_STILL_REQUIRED' : 'HOLD_GRADE_DRIVEN_ADAPTATION',
     limitation: 'Bank-relative AI-reviewed regression labels, not independent expert calibration or repeated-run reliability. A broader acceptable band can contain different adaptive actions; resolve routing-label disagreements before enablement.',
-    summary: { cases: reviews.length, usable: reviews.filter(r => r.usable).length,
+    summary: { coreGradesRequiringHold: run.results.filter(r => r.result?.assessmentIssues?.length).length, cases: reviews.length, usable: reviews.filter(r => r.usable).length,
       expectedUngradedReviews: fixture.cases.filter(c => c.expectedDisposition === 'REVIEW_REQUIRED').length * models.length,
       matchedUngradedReviews: reviews.filter(r => 'reviewRequiredMatched' in r && r.reviewRequiredMatched).length,
       acceptableClassification: reviews.filter(r => 'acceptableClassification' in r && r.acceptableClassification).length,

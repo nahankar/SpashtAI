@@ -58,6 +58,8 @@ export const LEARNER_POLICIES: Record<string, LearnerPolicy> = {
     prompt: 'interview-answer-14', schema: 'interview-result-6', rubric: 'bank-guidance-5', policy: 'learner-evaluation-12', temperature: 0, maxTokens: 2000, timeoutMs: 20_000, responseFormat: 'tool' } },
   'learner-evaluation-13': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova2-lite-learner-13', modelId: 'us.amazon.nova-2-lite-v1:0', region: 'us-east-1', label: 'Nova 2 Lite · compact grading 13 (candidate)',
     prompt: 'interview-answer-15', schema: 'interview-result-7', rubric: 'bank-guidance-6', policy: 'learner-evaluation-13', temperature: 0, maxTokens: 2000, timeoutMs: 20_000, responseFormat: 'tool' } },
+  'learner-evaluation-14': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova2-lite-learner-14', modelId: 'us.amazon.nova-2-lite-v1:0', region: 'us-east-1', label: 'Nova 2 Lite · separated grading 14 (candidate)',
+    prompt: 'interview-answer-16', schema: 'interview-result-8', rubric: 'bank-guidance-6', policy: 'learner-evaluation-14', temperature: 0, maxTokens: 2000, timeoutMs: 20_000, responseFormat: 'tool' } },
 }
 // learner-evaluation-8: v5's prompt, rubric and model with the versioned interview-result-4 evidence matching.
 // Technical grading remains experimental (reasoning, mixed-answer strengths and no-answer classification are open).
@@ -108,7 +110,8 @@ export const resultSchema = z.object({
 // Server-owned notes describe validation adjustments; the model cannot supply them. responseKind (v4+)
 // distinguishes a request to repeat/skip from an explicit "I don't know"; both are NOT_ANSWERED.
 export type ResponseKind = 'REQUEST_ONLY' | 'DONT_KNOW'
-export type EvaluationResult = z.infer<typeof resultSchema> & { validationNotes?: string[]; responseKind?: ResponseKind }
+export type AssessmentIssue = 'REASONING_CONFLICT' | 'REASONING_INVALID_OUTPUT'
+export type EvaluationResult = z.infer<typeof resultSchema> & { validationNotes?: string[]; responseKind?: ResponseKind; assessmentIssues?: AssessmentIssue[] }
 export function hash(value: unknown): string {
   const canonical = (v: unknown): unknown => Array.isArray(v) ? v.map(canonical)
     : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b)).map(([k, item]) => [k, canonical(item)])) : v
@@ -136,6 +139,7 @@ export function originalPassage(answer: string, quote: string): string | null {
 export function parseResult(output: string, answer: string, schema = 'interview-result-2'): EvaluationResult {
   const raw: unknown = JSON.parse(output.replace(/^\s*```(?:json)?\s*/, '').replace(/\s*```\s*$/, ''))
   if (schema === 'interview-result-5') return parseClaimResult(raw, answer)
+  if (schema === 'interview-result-8') return parseSeparatedResult(raw, answer)
   if (schema === 'interview-result-7') return parseCompactResult(raw, answer)
   if (schema === 'interview-result-6') return parseInterpretedClaimResult(raw, answer)
   const tolerant = schema === 'interview-result-4'
@@ -281,6 +285,44 @@ function parseCompactResult(raw: unknown, answer: string): EvaluationResult {
   }
   const validated = parseResult(JSON.stringify(result), answer, 'interview-result-4')
   return !parsedFeedback.success && grade.feedback !== undefined ? { ...validated, validationNotes: [...(validated.validationNotes ?? []), 'Detailed feedback was unavailable; the assessment uses the cited original passages.'] } : validated
+}
+
+// v8 retains a structurally valid primary verdict when a separate reasoning assessment fails.
+// Server-owned issues prevent that partial result being mistaken for an adaptive-ready assessment.
+const separatedGradeSchema = compactGradeSchema.omit({ reasoning: true }).extend({
+  validReasoning: z.unknown().optional(), invalidReasoning: z.unknown().optional(),
+}).strict()
+function parseSeparatedResult(raw: unknown, answer: string): EvaluationResult {
+  const grade = separatedGradeSchema.parse(raw)
+  const { validReasoning, invalidReasoning, ...coreInput } = grade
+  // Reuse the frozen v7 core/evidence/presentation guards; do not fabricate or upgrade a decision.
+  const core = parseCompactResult({ ...coreInput, reasoning: [] }, answer)
+  const notes = [...(core.validationNotes ?? [])]
+  const issues: AssessmentIssue[] = []
+  const ids = z.object({ valid: passageIds, invalid: passageIds }).safeParse({
+    valid: validReasoning === undefined ? [] : validReasoning,
+    invalid: invalidReasoning === undefined ? [] : invalidReasoning,
+  })
+  const passages = answerPassages(answer)
+  if (grade.decision === 'NO_SUBJECT' && ids.success && (ids.data.valid.length || ids.data.invalid.length)) throw new Error('INCONSISTENT')
+  let valid: number[] = [], invalid: number[] = []
+  if (!ids.success || [ids.data.valid, ids.data.invalid].some(items => new Set(items).size !== items.length || items.some(id => !passages[id - 1]))) {
+    issues.push('REASONING_INVALID_OUTPUT')
+    notes.push('The reasoning assessment was invalid and is left unassessed. The separate knowledge verdict was retained; adaptive progression is on hold.')
+  } else if (ids.data.valid.some(id => !grade.correct.includes(id)) || ids.data.invalid.some(id => !grade.incorrect.includes(id))) {
+    issues.push('REASONING_CONFLICT')
+    notes.push('The reasoning assessment conflicts with the knowledge evidence and is left unassessed. The knowledge verdict was not changed; adaptive progression is on hold.')
+  } else { valid = ids.data.valid; invalid = ids.data.invalid }
+  if (grade.decision === 'NO_SUBJECT' && (valid.length || invalid.length)) throw new Error('INCONSISTENT')
+  const finding = valid.length ? (invalid.length ? 'PARTIAL' : 'MET') : invalid.length ? 'NOT_MET' : 'NOT_ASSESSED'
+  const evidence = [...new Set([...valid, ...invalid])].slice(0, 3).map(id => passages[id - 1].text)
+  const { validationNotes: _notes, ...publicCore } = core
+  const validated = parseResult(JSON.stringify({ ...publicCore, criteria: core.criteria.map(c => c.criterion !== 'REASONING' ? c : {
+    criterion: 'REASONING', finding, evidence, explanation: finding === 'MET' ? 'The cited passage explains a true relevant mechanism, contrast or consequence.'
+      : finding === 'PARTIAL' ? 'The answer contains both valid and false explanations.' : finding === 'NOT_MET'
+      ? 'The cited passage contains an explicitly false explanation; this is separate from the knowledge verdict.' : 'No valid reasoning assessment was established.',
+  }) }), answer, 'interview-result-4')
+  return { ...validated, ...(notes.length ? { validationNotes: notes } : {}), ...(issues.length ? { assessmentIssues: issues } : {}) }
 }
 
 // Content-free diagnostics only: keep the same rejection/message, never include provider text.

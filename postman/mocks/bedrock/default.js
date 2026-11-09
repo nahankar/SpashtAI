@@ -15,7 +15,12 @@ http.createServer(async (req, res) => {
     }
     const toolOutput = request.toolConfig?.toolChoice?.tool?.name === 'grade_interview_answer'
     const compact = Boolean(request.toolConfig?.tools?.[0]?.toolSpec?.inputSchema?.json?.properties?.decision)
-    const result = compact ? (answer === '[REVIEW_REQUIRED]' ? {decision:'REVIEW',correct:[],incorrect:[],reasoning:[],reviewReason:'Fixture ambiguity.'}
+    const separated = Boolean(request.toolConfig?.tools?.[0]?.toolSpec?.inputSchema?.json?.properties?.validReasoning)
+    const result = separated ? (answer === '[REVIEW_REQUIRED]' ? {decision:'REVIEW',correct:[],incorrect:[],reviewReason:'Fixture ambiguity.'}
+      : answer === '[REASONING_CONFLICT]' ? {decision:'FALSE_CORE',correct:[],incorrect:[1],validReasoning:[1]}
+      : answer === '[FALSE_REASON]' ? {decision:'FALSE_CORE',correct:[],incorrect:[1],invalidReasoning:[1]}
+      : answer === '[BAD_CORE]' ? {decision:'COMPLETE',correct:[],incorrect:[1]}
+      : {decision:'COMPLETE',correct:[1],incorrect:[],validReasoning:answer === '[BAD_REASONING]' ? null : [1]}) : compact ? (answer === '[REVIEW_REQUIRED]' ? {decision:'REVIEW',correct:[],incorrect:[],reasoning:[],reviewReason:'Fixture ambiguity.'}
       : {decision:'COMPLETE',correct:[1],incorrect:[],reasoning:[], ...(answer === '[BAD_FEEDBACK]' ? {feedback:{guidance:[]}} : {})}) : answer === '[REVIEW_REQUIRED]' ? { reviewRequired: true, claims: [], coverage: 'NONE',
       depth: { finding: 'NOT_ASSESSED', evidence: [], explanation: 'Transport-only ambiguous-answer fixture.' },
       gaps: [], guidance: 'Review the saved answer.', uncertainty: ['Fixture meaning cannot be resolved.'] }
