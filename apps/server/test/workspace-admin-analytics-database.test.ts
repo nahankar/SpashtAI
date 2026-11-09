@@ -258,6 +258,18 @@ suite('organization admin reports and AI Analytics', () => {
       expect(maximum.status).toBe(200)
       const workbook = new ExcelJS.Workbook(); await workbook.xlsx.load(maximum.body)
       expect(workbook.getWorksheet('Users')!.rowCount).toBe(10001)
+      await admin.featureUsage.createMany({ data: capIds.map((userId, i) => ({ userId, workspaceId: cap.id, workspaceKind: 'ORGANIZATION', feature: 'elevate', action: `cap_${i % 201}`, timestamp: new Date() })) })
+      await admin.progressPulse.createMany({ data: capIds.map(userId => ({ userId, workspaceId: cap.id, workspaceKind: 'ORGANIZATION', source: 'elevate', skill: 'clarity', score: 8 })) })
+      for (const report of ['feature-usage', 'progress-pulse']) {
+        const page = await api.get(`/api/workspaces/current/admin/${report}`).set(token(cap.id, 'owner'))
+        expect(page.status).toBe(200); expect(page.body.learners).toHaveLength(500)
+        if (report === 'feature-usage') expect(page.body.features).toHaveLength(200)
+        const exported = await api.get(`/api/workspaces/current/admin/${report}/export.xlsx`).set(token(cap.id, 'owner')).buffer(true).parse(binary)
+        expect(exported.status).toBe(200)
+        const full = new ExcelJS.Workbook(); await full.xlsx.load(exported.body)
+        expect(full.getWorksheet('By learner')!.rowCount).toBe(10001)
+        if (report === 'feature-usage') expect(full.getWorksheet('By feature')!.rowCount).toBe(202)
+      }
     } finally {
       await admin.workspace.delete({ where: { id: cap.id } })
       await admin.user.deleteMany({ where: { id: { in: capIds } } })

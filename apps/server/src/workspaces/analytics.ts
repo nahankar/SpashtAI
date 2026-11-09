@@ -94,8 +94,10 @@ function activities(workspaceId: string, f: ResolvedFilters) {
 
 type Identity = { memberId: string | null; name: string; email: string | null; role: string | null }
 async function identities(tx: WorkspaceTx, workspaceId: string, userIds: string[]) {
-  const rows = userIds.length ? await tx.workspaceMember.findMany({ where: { workspaceId, userId: { in: userIds } },
-    select: { id: true, userId: true, role: true, user: { select: { firstName: true, lastName: true, email: true } } } }) : []
+  const fetch = (ids: string[]) => tx.workspaceMember.findMany({ where: { workspaceId, userId: { in: ids } },
+    select: { id: true, userId: true, role: true, user: { select: { firstName: true, lastName: true, email: true } } } })
+  const rows: Awaited<ReturnType<typeof fetch>> = []
+  for (let i = 0; i < userIds.length; i += 500) rows.push(...await fetch(userIds.slice(i, i + 500)))
   const map = new Map<string, Identity>(rows.map(row => [row.userId, {
     memberId: row.id, role: row.role, email: row.user.email,
     name: [row.user.firstName, row.user.lastName].filter(Boolean).join(' ') || row.user.email,
