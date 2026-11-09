@@ -6,13 +6,6 @@ import { useWorkspaceData } from '../shell/context'
 import { ErrorAlert } from './parts'
 
 interface Field { id: string; label: string; options: string[] }
-export function useFieldQuery(base = '') {
-  const [params] = useSearchParams()
-  const query = new URLSearchParams(base)
-  params.getAll('field').forEach(v => query.append('field', v))
-  return query.toString()
-}
-
 export function FieldFilters() {
   const [params, setParams] = useSearchParams()
   const { data, error, loading } = useWorkspaceData<Field[]>('/api/workspaces/current/admin/field-filters')

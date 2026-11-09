@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { getActiveWorkspace } from '../activeWorkspace'
 import { currentWorkspaceRequest, type Entry, type Snapshot } from '../client'
 
@@ -23,6 +24,13 @@ export function workspaceCall<T>(path: string, method = 'GET', body?: unknown) {
   const active = getActiveWorkspace()
   if (!active) return Promise.reject(new Error('Open the workspace again to continue'))
   return currentWorkspaceRequest<T>(active.token, path, method, body)
+}
+
+export function useFieldQuery(base = '') {
+  const [params] = useSearchParams()
+  const query = new URLSearchParams(base)
+  params.getAll('field').forEach(v => query.append('field', v))
+  return query.toString()
 }
 
 export function useWorkspaceData<T>(path: string | null) {

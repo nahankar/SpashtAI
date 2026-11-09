@@ -12,10 +12,10 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { EnrollmentField, EnrollmentResponses } from '../EnrollmentFields'
 import type { Feature, Membership } from '../client'
-import { useWorkspaceShell, workspaceCall } from '../shell/context'
+import { useWorkspaceShell, workspaceCall, useFieldQuery } from '../shell/context'
 import { featureLabel, canManage } from '../shell/model'
 import { EmptyState, ErrorAlert, Loading, PageHeader } from './parts'
-import { FieldFilters, useFieldQuery } from './FieldFilters'
+import { FieldFilters } from './FieldFilters'
 import { ExportButton } from './ExportButton'
 
 interface Member extends Membership {

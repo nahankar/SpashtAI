@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { useFieldQuery } from './FieldFilters'
 import { ExportButton } from './ExportButton'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -8,7 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { useWorkspaceData, workspaceCall } from '../shell/context'
+import { useWorkspaceData, workspaceCall, useFieldQuery } from '../shell/context'
 import { filterQuery, rangeLabel, type AnalyticsFilters } from '../shell/model'
 import { EmptyState, ErrorAlert, FilterBar, Loading, MemberSelect, PageHeader } from './parts'
 import {
