@@ -24,10 +24,10 @@ assumptions:
     source: apps/server/scripts/check-interview-evaluator-simulation.ts; apps/server/test/interview-interpretation-first.test.ts; private policy-15-http-results.json and policy-15-simulation.ndjson.
     updated_at: "2026-11-09"
   - id: interpretation-first-semantic-quality
-    status: unknown
+    status: contradicted
     claim: The real provider consistently detects uncertain speech and credits implicit reasoning with the v15 prompt and required fields.
-    reason: Authored transport outputs cannot establish model judgment. The preceding real v14 LOW comparison improved two cases but still failed uncertainty and implicit reasoning; do not transfer that limited result into a v15 pass.
-    verification: Frozen policy-15 initial and repeat fixtures are prepared but unrun. No new paid calls, voice tests or production policy change.
+    reason: The real v15 trial credits the earlier implicit explanation and identifies ambiguous meaning, but also falsely reviews an instruction-echo control, misses reasoning on a new correct answer, and rejects two declared-uncertain responses for oversized summaries. This contradicts consistent semantic reliability on the tested set.
+    verification: On clean b265cf0 ran the separately approved 20 Nova 2 Lite LOW calls, 16 initial plus 4 fresh repeats; counters 60 to 80. Initial frozen checks pass 12/16 but preferred grade/review plus checks pass 10/16; repeats pass 3/4. Two controls pass free. All labels unchanged. No voice tests or production policy change.
     source: docs/prepare/INTERVIEWS-GRADING-POLICY-15.md; docs/prepare/INTERVIEWS-GRADING-THINKING-COMPARISON.md.
     updated_at: "2026-11-09"
 fingerprints:
