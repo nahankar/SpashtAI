@@ -51,3 +51,65 @@ policy behavior. Fixture transport evidence does not establish real-model gradin
 Private evidence lives under `/private/tmp/spasht-grading-validation/`; no auth, credentials, audio or
 rejected model bodies are committed. No voice stack was changed or stopped. Integrated real voice/workspace
 validation and broader frozen grading acceptance remain prerequisites to a future learner/adaptive rollout.
+
+## Observed provider results — HOLD
+
+Tested `a2c73a1`, clean before execution, on 9 November 2026 UTC using the normal restricted-role ADMIN_TEST
+path. Sixteen initial + four repeated calls used exactly the normal 20-call allowance; persisted Admin and
+global counters both equal 20. No earlier additional allowance was reused, no quota counter was reset,
+and no source/production limit changed. All twelve required question snapshots passed the pinned metadata check.
+
+| Measure | Initial | Repeat |
+| --- | ---: | ---: |
+| Cases | 18 | 4 |
+| Paid model invocations | 16 | 4 |
+| Free deterministic controls | 2 | 0 |
+| Usable grades (including free controls) | 14 | 3 |
+| Accepted class | 13 | 2 |
+| Preferred class | 11 | 2 |
+| All declared checks pass | 10 | 2 |
+| Invalid outputs | 4 | 1 |
+| Expected review outcomes matched | 0 of 1 | 0 of 1 |
+| Provider failures/timeouts | 0 | 0 |
+
+Twelve of sixteen initial MODEL calls yielded usable grades; the other two completed results were free
+controls. Four outputs failed internal semantic consistency, rather than optional feedback schema. This
+removes one earlier source of failures, but does not establish grading reliability.
+
+Initial passing checks: H1-09 (relevant incomplete proposal), RS-02 (empty slogan), P2-02 (instruction echo),
+RS-03, H1-11, RS-05, RS-01, R1-01 and the two deterministic controls. Failures:
+
+- R1-08, A1-05, RS-04, R1-02: `INVALID_OUTPUT_INCONSISTENT`; no fabricated grades.
+- P2-07: class/reasoning improved, but optional feedback still contained forbidden wording. The repeat passed.
+- P2-08: NO_SUBJECT → NOT_ANSWERED, instead of the required ungraded review, on both trials.
+- A1-01: accepted alternative PARTIAL, but a forbidden ASR-related gap; preferred CORRECT not reached.
+- P2-06: INCORRECT (inside its broad historical band, but not preferred PARTIAL) and omitted credit for the
+  true composition concept. This would change adaptive routing; a broad acceptable band is not release clearance.
+
+Four repeats verified fresh IDs, `reused: false`, identical answer text and matching answer, question,
+config and input-key hashes. H1-09 and P2-07 passed; R1-08 again failed consistency and P2-08 again returned
+NOT_ANSWERED. Three stable usable class labels are not three successful cases; P2-08's stable label is wrong.
+
+Shape-only SDK observations explain one consistency failure: R1-08 returned FALSE_CORE, correct `[]`,
+incorrect `[1,2]`, reasoning `[2]`. The semantic contract requires reasoning to cite TRUE reasoning and therefore
+be among correct evidence. The primary decision appears appropriate, but its reasoning field conflicts, so
+the current validator rejects the result. This observation supports reviewing the separation of valid/invalid
+reasoning and primary knowledge decisions; it does not justify silently weakening the frozen policy-13 guard.
+
+An exploratory offline comparison applies the same eighteen case expectations to saved policy-12 results:
+12 usable (including the same two free controls), eight accepted/preferred classes, seven cases passing all
+checks. Policy 13 has fourteen usable, thirteen accepted, eleven preferred and ten fully passing. This is
+same-input regression evidence, not unseen calibration or proof that the compact design caused the difference;
+no new baseline model call was made. The full 65-case set has not been rerun for policy 13.
+
+Private evidence under `/private/tmp/spasht-grading-validation/`: `policy-13-initial.json`,
+`policy-13-initial-review.json`, `policy-13-repeat.json`, `policy-13-repeat-review.json`,
+`policy-13-repeat-audit.json`, `policy-13-repeat-verification.json`, `policy-13-repeat-shapes.ndjson`,
+`policy-13-budget-reconciliation.json`, and `policy-12-matched-subset-review.json`.
+No rejected provider text, credentials or auth state was committed. The owned HTTP fixture server was stopped;
+shared services were left alone. No real spoken candidate scenario was run or claimed for this preview.
+
+**Release decision:** keep adaptive production release on hold, keep policy 8 current, and request critical
+review of the actual contract/reference boundaries before another broad benchmark. The owner-authorized
+AI-led adjudication removes the outside-review dependency, not the measured technical failures. The external
+review brief is `INTERVIEWS-GRADING-EXTERNAL-REVIEW-BRIEF.md`.
