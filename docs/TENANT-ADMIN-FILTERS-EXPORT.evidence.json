@@ -1,0 +1,56 @@
+{
+  "branch": "feature/admin-field-filters-export",
+  "applicationRevision": "240500026081961270c97c11d53867608493b25a",
+  "cleanBrowserCheckout": true,
+  "merged": false,
+  "deployed": false,
+  "database": "spasht_filters_test",
+  "results": {
+    "server": { "passed": 627, "skipped": 296 },
+    "restrictedDatabase": { "passed": 55, "files": 4 },
+    "web": { "passed": 384, "files": 64 },
+    "serverBuild": "passed",
+    "webBuild": "passed",
+    "webTypecheck": "passed",
+    "targetedUiLint": "passed",
+    "browser": {
+      "name": "Playwright Chromium 156.0.8078.4",
+      "passed": 7,
+      "pageErrors": 0,
+      "targets": ["localhost:5333", "localhost:4170"],
+      "authentication": "synthetic seeded identity; not Google",
+      "api": "real routes in isolated harness",
+      "checks": [
+        "Users filter and reload persistence",
+        "Visible Users Excel download and workbook parsing",
+        "Visible Feature usage Excel download and workbook parsing",
+        "Visible Pulse Excel download and workbook parsing",
+        "Dashboard filtered member count",
+        "Settings choice-field filter controls",
+        "Tenant title and restoration on workspace exit"
+      ]
+    },
+    "boundary": {
+      "usersExportRows": 10000,
+      "featureUsageExportLearners": 10000,
+      "pulseExportLearners": 10000,
+      "featureActionGroups": 201,
+      "usersRejectedRows": 10001
+    }
+  },
+  "sha256": {
+    "admin-filters-browser-report.json": "a998b2f76f62c335b2b0a01e85f9c5e32d96aa729a2478128788ed0d2a339e4e",
+    "admin-filters-server-2405000.log": "5c7ab8c26c7b2accd261d0604b9a024f75ba281f3fe909aae31bb2ea60a4eebc",
+    "admin-filters-db-2405000.log": "817fff77cee081fb249d10d9667b7a0846f6843006c91239f1799e772517dc08",
+    "admin-filters-web-2405000.log": "fbc881a121945d9a042247a49952ef27ee054594728670e52d56e3aed55549db",
+    "admin-filters-build-2405000.log": "cc6e1b9cfd8f2d8a2c5addb3b1895652ffd547f46ea86694a9a497e31b6cbbbd"
+  },
+  "coverageLimits": [
+    "Other optional database suites remain skipped",
+    "No real Google sign-in",
+    "No Firefox, WebKit or actual Safari run for this admin change",
+    "No voice scenario for this admin-only change",
+    "Older strict-schema API metadata rollback not validated",
+    "Northwind missing third reply remains unresolved"
+  ]
+}
