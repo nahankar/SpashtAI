@@ -62,9 +62,9 @@ provisional grade as a fully passed assessment or adaptive-ready result.
 Keep first-trial evidence before replacing only owned fictional Admin snapshots; preserve quota and verify
 answer/question/config/input-key hashes. No case or label is changed because v14 retains more core grades.
 
-The 9 November normal Admin allowance was consumed by policy 13. No v14 provider call has been made and no
-limit reset/new actor/prior-day allowance is used. An available normal allowance or explicit approval for
-up to 20 additional local calls is needed. Any override is confined to the isolated process/database;
+At freeze, the normal 9 November allowance had been consumed by policy 13. The owner subsequently approved
+20 additional local calls for this batch. Observed results below retain every failed case. Any override is
+confined to the isolated process/database;
 source/production limits and the global cap remain unchanged. No high-effort or unbounded thinking experiment.
 
 ## Validation and release limits
@@ -84,3 +84,64 @@ Private evidence: `/private/tmp/spasht-grading-validation/policy-14-focused.log`
 No auth state, credentials, rejected model bodies or recordings belong in Git. This work changes preview
 grading and an unwired routing proposal only; no voice stack or actual spoken flow was changed. Broader
 frozen grading, repeated reliable routing and real candidate voice/workspace tests remain release prerequisites.
+
+
+## Observed provider round — HOLD
+
+Tested revision `ee36f99709fb95bda8b6ffcd621645cbed07b458`, clean at launch, on 9 November 2026 UTC.
+The frozen eighteen-case initial run used sixteen real provider calls and two free controls; the four
+critical repeats used four fresh provider calls. Saved typed ADMIN_TEST inputs are not a spoken test.
+
+| Measure | Initial | Repeats |
+| --- | ---: | ---: |
+| Cases | 18 | 4 |
+| Model invocations | 16 | 4 |
+| Usable core grades, including free controls | 15 | 4 |
+| Core grades marked for reasoning hold | 0 | 0 |
+| Classification within accepted labels | 13 | 3 |
+| Preferred classification | 12 | 3 |
+| All declared checks pass | 10 | 2 |
+| Invalid outputs | 3 | 0 |
+| Expected review matched | 0 of 1 | 0 of 1 |
+| Provider failures/timeouts | 0 | 0 |
+
+Initial model-only grade availability was **13/16**, not 15/16: two completed outcomes were deterministic
+free controls. Better core availability is not a semantic reliability pass. No retained-with-hold result was
+observed in this batch; unit and HTTP checks cover that fallback and forbid counting it as adaptive-ready.
+
+R1-08 now passes initial and repeat: the false core verdict is retained with an explicitly false reasoning
+assessment, rather than being discarded for contradictory reasoning. H1-09 (relevant incomplete suggestion)
+also passes twice. Empty slogan RS-02 and instruction echo P2-02 pass the initial tests.
+
+Remaining initial failures:
+
+- H1-11, RS-05 and R1-01: INVALID_OUTPUT_SCHEMA_incorrect_invalid_type. The field was missing or mistyped;
+  the rejected body is not persisted, so its precise shape is not asserted. No default empty list fabricated.
+- P2-07 and RS-03: valid implicit reasoning not credited. P2-07's repeat additionally has forbidden feedback
+  wording; its PARTIAL class is stable but the assessment does not pass.
+- P2-08: ambiguous technical attempt is again classified NOT_ANSWERED, rather than producing ungraded review.
+  The repeat has the same wrong disposition. Stable error is not successful repeatability.
+- A1-01: clear misheard-but-correct git-bisect answer is INCORRECT, outside accepted labels, with forbidden
+  transcription-related criticism. A1-05, the actual incorrect-ASR control, is correctly INCORRECT this time.
+- P2-06: INCORRECT (inside its historical broad band but not preferred PARTIAL) and missing credit for its
+  true composition concept. A broader accepted band is not a justified adaptive action.
+
+All four repeats use fresh assessment IDs (`reused: false`), matching answer text and answer/question/config/
+input-key hashes. All four primary labels are stable, but only R1-08 and H1-09 pass every declared check;
+P2-07 and P2-08 fail. No label/expectation was changed to accommodate these results.
+
+Quota reconciliation: exactly **20 additional calls**, daily Admin and global counters both moved from 20
+to 40. The private isolated process alone used ceiling 40; source/production per-Admin 20 and global 100 were
+unchanged. The process exited. No reset, new actor, prior-day allowance or production model call was used.
+All twelve required pinned questions were present, approved and active at their reviewed revisions.
+
+Private evidence under `/private/tmp/spasht-grading-validation/`: `policy-14-initial.json`,
+`policy-14-initial-review.json`, `policy-14-repeat.json`, `policy-14-repeat-review.json`,
+`policy-14-repeat-audit.json`, `policy-14-repeat-verification.json`, `policy-14-budget-reconciliation.json`.
+
+**Decision:** targeted core/reasoning conflict improved; overall grading and adaptive production release
+remain HOLD. Do not promote this preview or count structurally valid wrong grades as a pass. The next
+experiment should keep this exact prompt/schema/fixtures and test a separately pinned, bounded LOW extended-
+thinking configuration on Nova 2 Lite. This investigates model effort without another prompt rewrite or
+switching outside AWS. It needs its own approved call/token/time budget before execution. No such call is
+included in this batch, and no broader/voice acceptance has been established.
