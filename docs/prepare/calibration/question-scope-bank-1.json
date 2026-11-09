@@ -1,0 +1,52 @@
+{
+  "version": "question-scope-bank-1",
+  "targetNamespace": "grading-scope-1",
+  "reviewer": "Owner-authorized AI technical adjudication; not independent expert validation",
+  "purpose": "Local bank authoring data only; no runtime question-specific grading overrides. Original question text retained.",
+  "questions": [
+    {
+      "externalQid": "DE-NEW-001",
+      "baselineRevision": 2,
+      "goodAnswerPoints": "Core:\nA fact table records business events or measurements at a defined grain.\nA dimension provides descriptive context used to filter, group or label those events and measurements.\nAcceptable alternatives:\nA factless fact can represent events or coverage without numeric measures. Transaction or snapshot examples are valid if their grain is clear.\nOptional depth:\nA star-schema example; grain and safe aggregation; additive versus non-additive measures; dimension history.\nMisconceptions:\nA table is not a fact merely because it has numbers; a numeric identifier may describe an entity. Dimensions are not restricted to timeless text.",
+      "expectedDepth": "Explain the requested distinction between event/measurement rows and descriptive context. A concise correct distinction is sufficient; an example and safe-aggregation analysis are optional elaboration.",
+      "exampleAnswer": "A fact table records events or measurements at a specified grain, such as a sale line with quantity and amount. Dimensions describe context such as product or customer attributes used to filter and group those measurements.",
+      "referenceSources": [
+        "https://learn.microsoft.com/en-us/power-bi/guidance/star-schema"
+      ],
+      "questionText": "What distinguishes a fact table from a dimension table?"
+    },
+    {
+      "externalQid": "AUT-NEW-005",
+      "baselineRevision": 2,
+      "goodAnswerPoints": "Core:\nA WebElement can become stale when its referenced DOM node is removed/replaced, the document changes, or the browsing context is no longer the one containing that element.\nAfter establishing the appropriate page/frame and condition, locate the current element again rather than indefinitely reusing the stale reference.\nAcceptable alternatives:\nUse locators and bounded condition-based waits so an action resolves a fresh current element after a rerender.\nOptional depth:\nPage/component abstraction design; non-idempotent action protection; detailed wait policy and frame/window recovery examples.\nMisconceptions:\nIncreasing an implicit wait does not reattach a detached DOM node or repair a cached stale object. Repeating an action forever on the same detached reference cannot recover its identity.",
+      "expectedDepth": "Explain a valid cause of stale references and a sound fresh-lookup recovery. Extra architecture or a separate critique of a supplied misconception is not required unless the answer asserts that misconception.",
+      "exampleAnswer": "After a rerender replaces a node, the old WebElement can refer to a detached element. Wait for the relevant page condition and find the current element using its locator, then retry the intended action in a bounded way. Reusing the old reference does not locate the replacement.",
+      "referenceSources": [
+        "https://www.selenium.dev/documentation/webdriver/troubleshooting/errors/"
+      ],
+      "questionText": "What causes StaleElementReferenceException, and what is a sound recovery pattern?"
+    },
+    {
+      "externalQid": "DEV-NEW-016",
+      "baselineRevision": 2,
+      "goodAnswerPoints": "Core:\nthenApply transforms a completed result with a function.\nthenCompose flattens an asynchronous dependent result instead of nesting completion stages.\nthenCombine combines results from independently completed stages.\nFailures can be handled deliberately, for example with exceptionally for recovery, handle for a result/error transformation, or whenComplete to observe completion.\nAcceptable alternatives:\nEquivalent correct descriptions or code-free examples of the requested operations.\nOptional depth:\nExecutor choice and common-pool blocking; cancellation; detailed combined recovery behavior.\nMisconceptions:\nthenApply does not automatically flatten every future returned by its function. Blocking or synchronous calls are not a universal replacement for asynchronous composition.",
+      "expectedDepth": "Explain the four requested areas: transformation, dependent composition, independent combination and failure handling. Missing a requested area is a coverage gap. Concrete examples, executor design and cancellation analysis are optional.",
+      "exampleAnswer": "thenApply maps a result. thenCompose chains a function that returns another stage without leaving a nested future. thenCombine waits for independent results and combines them. exceptionally can recover a failed stage; handle can transform success or failure, while whenComplete observes completion.",
+      "referenceSources": [
+        "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/CompletableFuture.html"
+      ],
+      "questionText": "Explain thenApply, thenCompose, thenCombine, and exception handling in CompletableFuture."
+    },
+    {
+      "externalQid": "WEB-NEW-099",
+      "baselineRevision": 2,
+      "goodAnswerPoints": "Core:\nNatural sequential keyboard focus follows focusable controls in document order; DOM position determines their relative order.\nPositive tabindex creates a separate prioritized numeric order which can diverge from source/visual order, making navigation harder to predict and maintain.\nAcceptable alternatives:\nExplain the manual-versus-natural-order contrast or its confusing consequence in concise words, without requiring a causal keyword.\nOptional depth:\nA form layout example; tabindex zero and minus one; programmatic focus; visible focus indicators; responsive-layout focus management.\nMisconceptions:\nA negative tabindex does not make an element impossible to focus programmatically. Positive values do not simply preserve ordinary source order.",
+      "expectedDepth": "Address both what determines natural focus order and why a competing positive-tabindex order is discouraged. A clear contrast or consequence can explain why; a separate example or full accessibility checklist is optional.",
+      "exampleAnswer": "Focusable controls normally follow document order. Positive tabindex values put controls into a separate priority sequence, so the keyboard can jump differently from the logical or visible page order. Keeping the source order sensible avoids that competing sequence.",
+      "referenceSources": [
+        "https://html.spec.whatwg.org/multipage/interaction.html#the-tabindex-attribute"
+      ],
+      "questionText": "What determines keyboard focus order, and why are positive tabindex values discouraged?"
+    }
+  ]
+}

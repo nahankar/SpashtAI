@@ -1,18 +1,20 @@
 // Opt-in local/internal benchmark. Uses the same gate, quota and saved-job path as Admin.
 // Example: tsx scripts/calibrate-interview-evaluator.ts <admin-id> <report.json> [--fixture reviewed-1] [--model nova2_lite|nova_pro|learner-evaluation-2|all] [--only R1-01,R1-02] [--retry-failed]
+// --preflight checks every selected bank/configuration pin without queuing any assessment or provider call.
 // A learner-evaluation-N model previews that learner grading policy through the Admin test path.
 // The default fixture is the original synthetic set. Each model-evaluated case costs one Admin test
 // from the daily quota (a learner-policy preview of an explicit "I don't know" is deterministic and
 // free). Quotas are never raised or bypassed here, so a larger set runs across several UTC days.
 import { readFile, writeFile } from 'node:fs/promises'
 import { prisma } from '../src/lib/prisma'
-import { ADMIN_MODELS, CONFIGS, PREVIEW_POLICIES, adminConfig } from '../src/interviews/evaluator/contracts'
+import { ADMIN_MODELS, CONFIGS, PREVIEW_POLICIES, adminConfig, hash } from '../src/interviews/evaluator/contracts'
 import { assessmentDetail, enqueueAssessment, retryAssessment, sweepAssessments } from '../src/interviews/evaluator/service'
+import {calibrationNamespace,verifyCalibrationQuestion,type CalibrationQuestionPin} from './lib/calibration-bank'
 
 type Case = { id?: string; name?: string; qid: string; category?: string; expected: string; acceptable?: string[]; mustNotBe?: string[]
   answer: string; evidence?: string[]; mustNotQuote?: string[]; mustNotGap?: string[]; expectMisconception?: boolean; expectGap?: string; notes?: string
   mustNotSay?: string[]; expectReasoning?: boolean; reasoningMustNotBeMet?: boolean; expectStrength?: string[]; expectedKind?: string; expectAcknowledged?: string[] }
-type Fixture = { fixtureVersion: string; reviewer?: string; questions?: Record<string, { revision: number; guidanceIssues: string[] }>; cases: Case[] }
+type Fixture = { fixtureVersion: string; reviewer?: string; namespace?: string; questions?: Record<string, CalibrationQuestionPin>; cases: Case[] }
 type Result = { classification?: string; assessmentIssues?: string[]; criteria?: { criterion: string; finding: string; evidence: string[] }[]; strengths?: string[]
   gaps?: string[]; misconceptions?: string[]; uncertainty?: string[]; guidance?: string; responseKind?: string; next?: { action: string; topic: string | null; source: string } }
 
@@ -23,8 +25,10 @@ const fixtureName = flag('fixture')
 const fixturePath = new URL(`../test/fixtures/${fixtureName ? `interview-calibration-${fixtureName}` : 'interview-calibration'}.json`, import.meta.url)
 const raw = JSON.parse(await readFile(fixturePath, 'utf8')) as Fixture | Case[]
 const fixture: Fixture = Array.isArray(raw) ? { fixtureVersion: 'synthetic-1', cases: raw } : raw
+const namespace = calibrationNamespace(fixture.namespace)
 const only = flag('only')?.split(',')
 const cases = fixture.cases.filter(c => !only || only.includes(c.id ?? c.name ?? ''))
+if (!cases.length) throw new Error('No calibration cases selected')
 const modelFlag = flag('model') ?? 'nova2_lite'
 const models = modelFlag === 'all' ? Object.keys(CONFIGS) : [modelFlag]
 if (!models.every(m => ADMIN_MODELS.includes(m))) throw new Error(`Unknown model ${modelFlag}`)
@@ -86,18 +90,27 @@ const write = () => {
       invocationsWithUnknownUsage: usage.filter(u => u.inputTokens === null || u.outputTokens === null).length },
     quotesExact: graded.every(r => (r.review as { quotesExact: boolean }).quotesExact),
   }
-  return writeFile(output, JSON.stringify({ fixtureVersion: fixture.fixtureVersion, reviewer: fixture.reviewer ?? null, source: 'ADMIN_TEST',
+  return writeFile(output, JSON.stringify({ fixtureVersion: fixture.fixtureVersion, reviewer: fixture.reviewer ?? null, source: 'ADMIN_TEST', namespace,
     configs: models.map(m => adminConfig(m)), questions: fixture.questions ?? null, calibrated: false,
     limitation: 'Small development set reviewed against bank guidance. Agreement on this sample is not a calibration claim.', summary, results }, null, 2))
 }
+async function reviewedQuestion(qid: string) {
+  const question = await prisma.questionBankQuestion.findUniqueOrThrow({ where: { namespace_externalQid: { namespace, externalQid: qid } } })
+  if (!question.approved || !question.active) throw new Error(`Activate the pilot question ${qid} before running calibration`)
+  verifyCalibrationQuestion(question, fixture.questions?.[qid], namespace)
+  return question
+}
 try {
-  for (const model of models) {
+  // Validate every selected question before spending on the first one; recheck at each submission too.
+  for (const qid of new Set(cases.map(test => test.qid))) await reviewedQuestion(qid)
+  if (flags.includes('--preflight')) {
+    await writeFile(output, JSON.stringify({ fixtureVersion: fixture.fixtureVersion, namespace, preflightPassed: true,
+      cases: cases.length, questions: fixture.questions ?? null, configHashes: models.map(model => ({ model, hash: hash(adminConfig(model)) })),
+      limitation: 'Bank/configuration pins only. No model call, authentication, provider access, quota, or grading-quality validation.' }, null, 2))
+    console.log(JSON.stringify({ preflightPassed: true, namespace, cases: cases.length }))
+  } else for (const model of models) {
     for (const test of cases) {
-      const question = await prisma.questionBankQuestion.findUniqueOrThrow({ where: { namespace_externalQid: { namespace: 'automation-pilot', externalQid: test.qid } } })
-      if (!question.approved || !question.active) throw new Error(`Activate the pilot question ${test.qid} before running calibration`)
-      const pinned = fixture.questions?.[test.qid]?.revision
-      // Labels were reviewed against a specific guidance revision.
-      if (pinned !== undefined && pinned !== question.revision) throw new Error(`${test.qid} changed from reviewed revision ${pinned} to ${question.revision}; re-review the labels`)
+      const question = await reviewedQuestion(test.qid)
       const start = Date.now()
       const submitted = await enqueueAssessment({ questionId: question.id, revision: question.revision, answer: test.answer, source: 'ADMIN_TEST', model }, actorId)
       // The normal API worker may claim the job concurrently. Persisted input keys share its result.
