@@ -1,0 +1,80 @@
+{
+  "version": "question-scope-proposal-1",
+  "status": "AI-reviewed proposal only; not applied to any bank/database or production",
+  "reviewer": "Owner-authorized AI technical judgment, not independent expert validation",
+  "purpose": "Review question-author requirements before another prompt rewrite. This file is documentation/data for normal bank-authoring workflow, never a runtime qid override or benchmark-specific grading rule.",
+  "constraints": [
+    "Preserve original question text and domain truth.",
+    "Separate explicitly asked essentials from optional depth.",
+    "Retain true parts and explicitly false additions separately.",
+    "Keep old revisions/results/expected labels immutable.",
+    "Any future bank revision requires a newly frozen fixture, guidance hash and re-reviewed expectations; no retroactive rescoring."
+  ],
+  "questions": [
+    {
+      "externalQid": "DE-NEW-001",
+      "baselineRevision": 2,
+      "questionText": "What distinguishes a fact table from a dimension table?",
+      "proposedRequiredUnderstanding": [
+        "Distinguish business measurements/events at a specified grain from descriptive context used to filter, group or label those events.",
+        "Accept concise wording that explains the two roles; examples are useful but not a separate requirement of this question."
+      ],
+      "proposedOptionalDepth": [
+        "A concrete star-schema example.",
+        "How grain prevents double counting across different fact levels.",
+        "Additive versus non-additive measures, factless facts and dimension history."
+      ],
+      "reviewRationale": "The existing Core section adds an example and a grain/aggregation explanation beyond the distinction asked in questionText; expectedDepth repeats the example demand. N15-01 was penalized for not explaining safe aggregation despite correctly describing the requested roles."
+    },
+    {
+      "externalQid": "AUT-NEW-005",
+      "baselineRevision": 2,
+      "questionText": "What causes StaleElementReferenceException, and what is a sound recovery pattern?",
+      "proposedRequiredUnderstanding": [
+        "Identify replacement/detachment of the referenced DOM node, navigation, or browsing-context change as a cause of staleness.",
+        "Describe a sound recovery using a fresh element lookup after the relevant page condition, rather than indefinitely reusing the stale object.",
+        "A clear false claim that waiting repairs a detached reference is an actual error; preserve meaningful correct cause/recovery knowledge beside that error."
+      ],
+      "proposedOptionalDepth": [
+        "Page-object/locator abstraction design.",
+        "Non-idempotent action safeguards and detailed wait policy.",
+        "Explicitly refuting a supplied rubric misconception when the learner did not assert it."
+      ],
+      "reviewRationale": "The existing depth boilerplate demands refutation of a supplied misconception and an explicit failure-boundary justification. N15-08 already states correct cause and re-location recovery beside an explicit false extra belief; expected PARTIAL remains unchanged."
+    },
+    {
+      "externalQid": "DEV-NEW-016",
+      "baselineRevision": 2,
+      "questionText": "Explain thenApply, thenCompose, thenCombine, and exception handling in CompletableFuture.",
+      "proposedRequiredUnderstanding": [
+        "Explain thenApply as transformation of a completed value.",
+        "Explain thenCompose as flattening a dependent asynchronous result.",
+        "Explain thenCombine as combining independently completed results.",
+        "Explain deliberate exception handling, for example exceptionally, handle or whenComplete.",
+        "A relevant correct composition claim with missing APIs is incomplete knowledge, not empty or wholly false; an additional false synchronous-call recommendation should not erase it."
+      ],
+      "proposedOptionalDepth": [
+        "Dedicated executor implementation details and common-pool blocking analysis.",
+        "Cancellation and combined recovery follow-ups.",
+        "Refuting a prewritten rubric misconception not actually asserted."
+      ],
+      "reviewRationale": "This question explicitly asks four areas, so omissions are genuine coverage gaps. P2-06 only covers dependent composition and adds a false recommendation: meaningful incomplete mixed knowledge rather than a fully correct answer. Do not lower requirements to make this case pass."
+    },
+    {
+      "externalQid": "WEB-NEW-099",
+      "baselineRevision": 2,
+      "questionText": "What determines keyboard focus order, and why are positive tabindex values discouraged?",
+      "proposedRequiredUnderstanding": [
+        "Identify natural keyboard navigation through focusable controls in document order, with DOM position as an ordering determinant.",
+        "Explain why positive tabindex creates a separate priority/manual order that may diverge from logical or visual order and confuse navigation.",
+        "Credit an implicit contrast or consequence when relationships are clear in the answer, without requiring the word because."
+      ],
+      "proposedOptionalDepth": [
+        "A concrete form-layout example.",
+        "Details of tabindex zero/minus one and programmatic focus.",
+        "Focus indicators, responsive-layout design and broader accessibility checks."
+      ],
+      "reviewRationale": "The question asks both order and why positive values are discouraged. The existing core evidence checklist adds several other accessibility topics. The short P2-07 response is in a pre-existing PARTIAL/CORRECT accepted band; a unique adaptive routing label needs a separate coverage adjudication, not post-result relabeling."
+    }
+  ]
+}

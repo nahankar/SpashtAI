@@ -248,7 +248,7 @@ describe('learner policy registry and learner-evaluation-2 contract', () => {
     expect(explicitAbstention(`Sorry, ${'um, '.repeat(10)}I don't know.`)).toBe(true)
   })
   it('offers only learner policies with their own configuration as Admin previews', () => {
-    expect(PREVIEW_POLICIES).toEqual(['learner-evaluation-2', 'learner-evaluation-3', 'learner-evaluation-4', 'learner-evaluation-5', 'learner-evaluation-6', 'learner-evaluation-7', 'learner-evaluation-5-nova-pro', 'learner-evaluation-8', 'learner-evaluation-8-nova-pro', 'learner-evaluation-9', 'learner-evaluation-10', 'learner-evaluation-11', 'learner-evaluation-12', 'learner-evaluation-13', 'learner-evaluation-14', 'learner-evaluation-14-budget-control', 'learner-evaluation-14-thinking-low', 'learner-evaluation-15'])
+    expect(PREVIEW_POLICIES).toEqual(['learner-evaluation-2', 'learner-evaluation-3', 'learner-evaluation-4', 'learner-evaluation-5', 'learner-evaluation-6', 'learner-evaluation-7', 'learner-evaluation-5-nova-pro', 'learner-evaluation-8', 'learner-evaluation-8-nova-pro', 'learner-evaluation-9', 'learner-evaluation-10', 'learner-evaluation-11', 'learner-evaluation-12', 'learner-evaluation-13', 'learner-evaluation-14', 'learner-evaluation-14-budget-control', 'learner-evaluation-14-thinking-low', 'learner-evaluation-15', 'learner-evaluation-16'])
     expect(adminConfig('learner-evaluation-2')).toEqual(learner2); expect(previewPolicy(learner2)?.key).toBe('learner-evaluation-2')
     expect(previewPolicy(configFor('nova2_lite'))).toBeNull()
     expect(() => submitSchema.parse({ questionId: 'q', revision: 1, answer: testAnswer, model: 'learner-evaluation-1' })).toThrow()

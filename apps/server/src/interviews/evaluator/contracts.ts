@@ -68,6 +68,10 @@ export const LEARNER_POLICIES: Record<string, LearnerPolicy> = {
   'learner-evaluation-15': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova2-lite-learner-15', modelId: 'us.amazon.nova-2-lite-v1:0', region: 'us-east-1', label: 'Nova 2 Lite · interpretation-first grading 15 (candidate)',
     prompt: 'interview-answer-17', schema: 'interview-result-9', rubric: 'bank-guidance-6', policy: 'learner-evaluation-15', temperature: 0, maxTokens: 15000, timeoutMs: 40_000, responseFormat: 'tool', reasoningEffort: 'low' } },
 
+  // Parser-only preview: identical v15 model request; presentation summary cannot gate an assessment.
+  'learner-evaluation-16': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova2-lite-learner-16', modelId: 'us.amazon.nova-2-lite-v1:0', region: 'us-east-1', label: 'Nova 2 Lite · review boundary 16 (candidate)',
+    prompt: 'interview-answer-17', schema: 'interview-result-10', rubric: 'bank-guidance-6', policy: 'learner-evaluation-16', temperature: 0, maxTokens: 15000, timeoutMs: 40_000, responseFormat: 'tool', reasoningEffort: 'low' } },
+
 }
 // learner-evaluation-8: v5's prompt, rubric and model with the versioned interview-result-4 evidence matching.
 // Technical grading remains experimental (reasoning, mixed-answer strengths and no-answer classification are open).
@@ -147,6 +151,7 @@ export function originalPassage(answer: string, quote: string): string | null {
 export function parseResult(output: string, answer: string, schema = 'interview-result-2'): EvaluationResult {
   const raw: unknown = JSON.parse(output.replace(/^\s*```(?:json)?\s*/, '').replace(/\s*```\s*$/, ''))
   if (schema === 'interview-result-5') return parseClaimResult(raw, answer)
+  if (schema === 'interview-result-10') return parseReviewBoundaryResult(raw, answer)
   if (schema === 'interview-result-9') return parseInterpretationFirstResult(raw, answer)
   if (schema === 'interview-result-8') return parseSeparatedResult(raw, answer)
   if (schema === 'interview-result-7') return parseCompactResult(raw, answer)
@@ -351,6 +356,26 @@ function parseInterpretationFirstResult(raw: unknown, answer: string): Evaluatio
   // Even a contradictory COMPLETE/FALSE_CORE must not publish a grade when meaning is uncertain.
   if (interpretation.status === 'UNCERTAIN') throw new EvaluationReviewRequired()
   return parseSeparatedResult(grade, answer)
+}
+
+// v10 separates non-grade-bearing prose from the safety decision. The provider-facing schema
+// stays unchanged; malformed summaries are discarded, never repaired, quoted, logged or persisted.
+const reviewBoundarySchema = interpretationFirstSchema.extend({
+  interpretation: interpretationFirstSchema.shape.interpretation.extend({ summary: z.unknown().optional() }).strict(),
+}).strict()
+function parseReviewBoundaryResult(raw: unknown, answer: string): EvaluationResult {
+  const { interpretation, ...grade } = reviewBoundarySchema.parse(raw)
+  const passages = answerPassages(answer)
+  for (const ids of [interpretation.evidence, grade.correct, grade.incorrect, grade.validReasoning, grade.invalidReasoning]) {
+    if (new Set(ids).size !== ids.length || ids.some(id => !passages[id - 1])) throw new Error('INVALID_PASSAGE_REFERENCE')
+  }
+  if (interpretation.status !== 'CLEAR' && !interpretation.evidence.length) throw new Error('INVALID_PASSAGE_REFERENCE')
+  // Required status and all source references must pass before we honor an ungraded review.
+  if (interpretation.status === 'UNCERTAIN') throw new EvaluationReviewRequired()
+  const result = parseSeparatedResult(grade, answer)
+  const summary = interpretationFirstSchema.shape.interpretation.shape.summary.safeParse(interpretation.summary)
+  return summary.success ? result : { ...result, validationNotes: [...(result.validationNotes ?? []),
+    'The interpretation summary was unavailable; only the validated status and original source references were used.'] }
 }
 
 // Content-free diagnostics only: keep the same rejection/message, never include provider text.

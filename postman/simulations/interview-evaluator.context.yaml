@@ -30,6 +30,13 @@ assumptions:
     verification: On clean b265cf0 ran the separately approved 20 Nova 2 Lite LOW calls, 16 initial plus 4 fresh repeats; counters 60 to 80. Initial frozen checks pass 12/16 but preferred grade/review plus checks pass 10/16; repeats pass 3/4. Two controls pass free. All labels unchanged. No voice tests or production policy change.
     source: docs/prepare/INTERVIEWS-GRADING-POLICY-15.md; docs/prepare/INTERVIEWS-GRADING-THINKING-COMPARISON.md.
     updated_at: "2026-11-09"
+  - id: non-grade-bearing-summary-boundary
+    status: supported
+    claim: The v10 caller honors validated uncertainty despite malformed or overlong presentation summaries, while preserving strict critical status and source-reference validation.
+    reason: Actual SDK HTTP fixtures exercise the measured failure class; the parser-only preview sends an identical model request to policy 15. Historical v9 behavior remains frozen. This is caller validation, not evidence of improved model semantics.
+    verification: On 2026-11-09 all 33 HTTP assertions and 33 request events passed on the owned loopback stand-in, including v9 rejection and v10 review for the same overlong summary; invalid uncertain references and missing reasoning still rejected. Full server suite 763 passed, 290 skipped; focused 160 passed; build and script typecheck passed. No real provider calls or production changes.
+    source: apps/server/test/interview-review-boundary.test.ts; apps/server/scripts/check-interview-evaluator-simulation.ts; docs/prepare/INTERVIEWS-GRADING-REVIEW-BOUNDARY-16.md; private policy-16-http-results.json and policy-16-simulation.ndjson.
+    updated_at: "2026-11-09"
 fingerprints:
   - id: policy-11-http-fixtures
     date: "2026-11-08"

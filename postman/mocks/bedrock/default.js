@@ -40,6 +40,12 @@ http.createServer(async (req, res) => {
           summary: 'Authored fixture interpretation.', evidence: [1]} }
       if (answer === '[MISSING_REASONING]') delete result.validReasoning
       if (answer === '[BAD_INTERPRETATION]') result.interpretation.evidence = [128]
+      if (['[LONG_UNCERTAIN_SUMMARY]', '[BAD_UNCERTAIN_SUMMARY]', '[MISSING_UNCERTAIN_SUMMARY]', '[BAD_UNCERTAIN_EVIDENCE]'].includes(answer)) result.interpretation.status = 'UNCERTAIN'
+      if (answer === '[LONG_UNCERTAIN_SUMMARY]') result.interpretation.summary = 'FIXTURE_LONG_SUMMARY'.repeat(30)
+      if (['[BAD_UNCERTAIN_SUMMARY]', '[BAD_CLEAR_SUMMARY]'].includes(answer)) result.interpretation.summary = {untrusted: 'FIXTURE_BAD_SUMMARY_NOT_OUTPUT'}
+      if (answer === '[MISSING_UNCERTAIN_SUMMARY]') delete result.interpretation.summary
+      if (answer === '[BAD_UNCERTAIN_EVIDENCE]') { result.interpretation.summary = null; result.interpretation.evidence = [128] }
+
     }
     const tool = { toolUse: { toolUseId: 'fixture', name: answer === '[WRONG_TOOL]' ? 'other' : 'grade_interview_answer', input: result } }
     const content = toolOutput ? (answer === '[MULTIPLE_TOOLS]' ? [tool, tool] : [tool])
