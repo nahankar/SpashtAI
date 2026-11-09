@@ -15,6 +15,8 @@ import type { Feature, Membership } from '../client'
 import { useWorkspaceShell, workspaceCall } from '../shell/context'
 import { featureLabel, canManage } from '../shell/model'
 import { EmptyState, ErrorAlert, Loading, PageHeader } from './parts'
+import { FieldFilters, useFieldQuery } from './FieldFilters'
+import { ExportButton } from './ExportButton'
 
 interface Member extends Membership {
   name: string; email: string; acceptedAt: string | null
@@ -35,8 +37,9 @@ export function WorkspaceUsers() {
   const [q, setQ] = useState(''), [role, setRole] = useState<string>(), [state, setState] = useState<string>()
   const [pages, setPages] = useState<MemberPage[]>([])
   const [error, setError] = useState(''), [notice, setNotice] = useState(''), [loading, setLoading] = useState(true), [busy, setBusy] = useState(false)
-  const query = useCallback((after?: string) => new URLSearchParams(Object.entries({ q: q.trim() || undefined, role, state, after })
-    .filter(([, v]) => v) as Array<[string, string]>).toString(), [q, role, state])
+  const filteredQuery = useFieldQuery(new URLSearchParams(Object.entries({ q: q.trim() || undefined, role, state })
+    .filter(([, v]) => v) as Array<[string, string]>).toString())
+  const query = useCallback((after?: string) => { const params = new URLSearchParams(filteredQuery); if (after) params.set('after', after); return params.toString() }, [filteredQuery])
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try { setPages([await workspaceCall<MemberPage>(`/api/workspaces/current/members?${query()}`)]) }
@@ -57,7 +60,7 @@ export function WorkspaceUsers() {
   }
   const items = pages.flatMap(p => p.items)
   return <div className="space-y-5">
-    <PageHeader title="Users" description={`${pages[0]?.total ?? 0} members. Workspace roles apply only inside ${snapshot.workspace.name}.`} />
+    <PageHeader title="Users" description={`${pages[0]?.total ?? 0} members. Workspace roles apply only inside ${snapshot.workspace.name}.`} actions={<ExportButton path={`/api/workspaces/current/members/export.xlsx?${query()}`} filename="users.xlsx" />} />
     <div className="flex flex-wrap items-end gap-4 rounded-lg border bg-card p-4">
       <div className="space-y-1.5"><Label htmlFor="member-search">Search</Label><Input id="member-search" placeholder="Name or email" value={q} onChange={e => setQ(e.target.value)} className="w-64" /></div>
       <div className="space-y-1.5"><Label>Role</Label><Select value={role ?? ALL} onValueChange={v => setRole(v === ALL ? undefined : v)}>
@@ -66,6 +69,7 @@ export function WorkspaceUsers() {
       <div className="space-y-1.5"><Label>Status</Label><Select value={state ?? ALL} onValueChange={v => setState(v === ALL ? undefined : v)}>
         <SelectTrigger aria-label="Status filter" className="w-36"><SelectValue /></SelectTrigger>
         <SelectContent><SelectItem value={ALL}>All statuses</SelectItem>{STATES.map(s => <SelectItem key={s} value={s}>{words(s)}</SelectItem>)}</SelectContent></Select></div>
+      <FieldFilters />
     </div>
     <ErrorAlert error={error} />{notice && <p role="status" className="text-sm text-emerald-700">{notice}</p>}
     <Card><CardContent className="pt-6">

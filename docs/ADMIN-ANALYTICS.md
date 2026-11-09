@@ -62,3 +62,17 @@ Timescale `pgai` is not used. It was archived and became unsupported in February
 Microsoft Clarity is complementary UX diagnostics, not the source of these numbers. The web app loads Clarity only in production, after the learner grants analytics consent, when `VITE_CLARITY_PROJECT_ID` is present. It never loads on `/admin`. Microsoft does not support embedding the general Clarity dashboard in a custom iframe, so the admin page links to the Clarity project for recordings and heatmaps.
 
 On EC2, set `VITE_CLARITY_PROJECT_ID` and optionally `VITE_CLARITY_DASHBOARD_URL` in `apps/server/.env`. `infra/ec2/deploy.sh` reads them and bakes them into the frontend build. Changing either value requires another web deployment.
+
+## Tenant administration: custom fields and Excel
+
+This section concerns `/w/<slug>/admin`, not the platform demographic analytics above.
+
+Workspace Owners and Admins can enable custom signup choice-field filters in Workspace settings. They apply to Dashboard membership/activity, Users, Feature usage and Progress Pulse, combined with existing report/search/role/status filters. Membership answers and all product queries are bound to the authorized organization. Personal and foreign-tenant records remain inaccessible. Workspace-wide capacity, current voice occupancy and evaluation-budget cards remain organization totals, not cohort metrics. No default-profile demographic filters or small-group suppression rules are added to these tenant reports.
+
+**Export to Excel** on Users, Feature usage and Progress Pulse downloads a real `.xlsx` file using the current page filters. Users includes all matching members rather than just the 50-row page, and includes current custom-field columns and explicit product restrictions. Feature usage includes By feature, Daily and By learner sheets; Pulse includes Skills, Daily and By learner. Analytics exports are not silently limited to the UI's 200 actions/500 learners.
+
+There is a 10,000-row limit **per sheet**. Exceeding it returns an explicit error asking for narrower filters, not a partial workbook. Users relation reads are batched to avoid oversized database predicates. Report details include workspace, generation time, timezone, period and filter selections. Accepted timestamps are Excel dates in UTC; day labels are organization calendar dates. All user-supplied cells are text, never formulas. XML line-ending normalization may turn a carriage return into a line feed.
+
+Export requests use workspace authentication in headers, return private/no-store attachments, and recheck current active Owner/Admin access. These are read-only **admin report** exports, independent of learner product text/audio-download settings. No transcripts, recordings, session names, event metadata or feedback bodies are exported. They do not add session-review delete/export/reprocess permissions. Export audit metadata records the report, row count, field identifiers and choice counts, never answer values, names or emails.
+
+Authenticated organization tabs show `SpashtAI beta - <workspace name>`. Leaving the workspace restores the prior title. Unavailable workspace states do not disclose a tenant name.

@@ -4,16 +4,22 @@ import { WorkspaceError } from './contracts'
 import { requireWorkspaceManager, type WorkspaceTx, type establishWorkspace } from './context'
 
 const text = z.string().trim().min(1).max(200)
+export const CHOICE_FIELD_TYPES = ['dropdown', 'radio', 'checkbox'] as const
+export const isChoiceField = (f: { type: string }) => (CHOICE_FIELD_TYPES as readonly string[]).includes(f.type)
 export const enrollmentFieldSchema = z.object({
   id: z.string().regex(/^[a-z][a-z0-9_]{0,39}$/).refine(v => !['constructor', 'prototype', '__proto__'].includes(v), 'Choose a different field identifier'),
   type: z.enum(['text', 'dropdown', 'radio', 'checkbox', 'message']),
   label: text,
   required: z.boolean().default(false),
   options: z.array(z.string().trim().min(1).max(120)).max(30).default([]),
+  /** Offered to Owners/Admins as a report filter; older settings and snapshots without the key are not filters. */
+  filterable: z.boolean().default(false),
 }).strict().superRefine((f, ctx) => {
-  const choice = ['dropdown', 'radio', 'checkbox'].includes(f.type)
+  const choice = isChoiceField(f)
   if (choice && (!f.options.length || new Set(f.options).size !== f.options.length)) ctx.addIssue({ code: 'custom', message: 'Choice fields need 1–30 unique options', path: ['options'] })
   if (!choice && f.options.length) ctx.addIssue({ code: 'custom', message: 'Only choice fields can have options', path: ['options'] })
+  if (f.filterable && !choice) ctx.addIssue({ code: 'custom', message: 'Only dropdown, radio and checkbox fields can be filters', path: ['filterable'] })
+  if (f.filterable && f.options.includes('__none__')) ctx.addIssue({ code: 'custom', message: '__none__ is reserved for unanswered fields', path: ['options'] })
   if (f.type === 'message' && f.required) ctx.addIssue({ code: 'custom', message: 'A message cannot require an answer', path: ['required'] })
 })
 export const enrollmentFieldsSchema = z.array(enrollmentFieldSchema).max(20).superRefine((fields, ctx) => {
@@ -26,6 +32,10 @@ export const emailContentSchema = z.object({
 export const enrollmentSettingsSchema = z.object({ fields: enrollmentFieldsSchema.default([]), email: emailContentSchema.default({}) }).strict()
 export type EnrollmentField = z.infer<typeof enrollmentFieldSchema>
 export function readEnrollmentSettings(value: unknown) { return enrollmentSettingsSchema.parse(value) }
+/** The workspace's current choice fields that Owners/Admins chose to use as report filters. */
+export function filterableEnrollmentFields(settings: unknown) {
+  return readEnrollmentSettings(settings).fields.filter(f => f.filterable && isChoiceField(f))
+}
 export function validateEnrollmentResponses(fields: unknown, input: unknown): Prisma.InputJsonObject {
   const schema = enrollmentFieldsSchema.parse(fields)
   const parsed = z.record(z.union([z.string().max(1000), z.array(z.string().max(120)).max(30)])).safeParse(input ?? {})

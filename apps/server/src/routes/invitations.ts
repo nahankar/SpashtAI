@@ -47,7 +47,14 @@ router.post('/lookup', invitationAcceptLimiter, async (req: Request, res: Respon
       workspaceInvitation: Boolean(inv.workspaceId),
       workspace: inv.workspace,
       proposedRole: inv.proposedRole,
-      enrollmentFields: inv.status === 'PENDING' && effectiveStatus(inv) === 'pending' ? inv.enrollmentFields : [],
+      // The recipient's form needs only the questions, not the organization's report-filter settings.
+      enrollmentFields: inv.status === 'PENDING' && effectiveStatus(inv) === 'pending' && Array.isArray(inv.enrollmentFields)
+        ? inv.enrollmentFields.map(field => {
+          if (!field || typeof field !== 'object' || Array.isArray(field)) return field
+          const { filterable: _filterable, ...question } = field as Record<string, unknown>
+          return question
+        })
+        : [],
     })
   } catch (err) {
     logger.error({ err }, 'Invitation lookup failed')

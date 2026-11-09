@@ -35,6 +35,12 @@ export function WorkspaceShell({ slug }: { slug: string }) {
   const [state, setState] = useState<WorkspaceSessionState>({ status: 'loading' })
   const [accepting, setAccepting] = useState(false)
   const [session] = useState(() => createWorkspaceSession(slug, { request: workspaceRequest, identity: identityToken, onState: setState }))
+  const workspaceName = state.status === 'ready' ? state.snapshot.workspace.name : state.status === 'invited' ? state.entry.workspace.name : null
+  useEffect(() => {
+    const base = document.title
+    if (workspaceName) document.title = `${base} - ${workspaceName}`
+    return () => { document.title = base }
+  }, [workspaceName])
 
   useEffect(() => {
     // A diagnostics recorder loaded on a Personal page must not observe organization pages.

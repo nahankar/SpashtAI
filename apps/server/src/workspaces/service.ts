@@ -1,4 +1,5 @@
 import { readEnrollmentSettings } from './enrollment'
+import { fieldQuerySchema, resolveFieldSelections, fieldMemberWhere } from './fieldFilters'
 import { reservedWorkspaceSeats } from './invitations'
 import { z } from 'zod'
 import type { Workspace } from '@prisma/client'
@@ -137,22 +138,45 @@ const memberQuerySchema = z.object({
   role: z.enum(['OWNER', 'ADMIN', 'LEARNER']).optional(),
   state: z.enum(['ACTIVE', 'INVITED', 'SUSPENDED']).optional(),
   after: z.string().min(1).max(64).optional(),
+  field: fieldQuerySchema,
 }).strict()
 
-export async function listWorkspaceMembers(tx: WorkspaceTx, scope: Awaited<ReturnType<typeof establishWorkspace>>, input: unknown = {}) {
+export async function listWorkspaceMembers(tx: WorkspaceTx, scope: Awaited<ReturnType<typeof establishWorkspace>>, input: unknown = {}, exporting = false) {
   requireWorkspaceManager(scope)
   const query = memberQuerySchema.parse(input ?? {})
+  if (exporting && query.after) throw new WorkspaceError(400, 'INVALID_EXPORT_CURSOR', 'Exports include all matches; remove the page cursor')
+  const fieldWhere = await fieldMemberWhere(tx, scope, resolveFieldSelections(scope, query.field))
   const where: Prisma.WorkspaceMemberWhereInput = { workspaceId: scope.workspace.id,
+    ...fieldWhere,
     ...(query.role ? { role: query.role } : {}), ...(query.state ? { state: query.state } : {}),
     ...(query.q ? { user: { OR: ['email', 'firstName', 'lastName'].map(field => ({ [field]: { contains: query.q, mode: 'insensitive' } })) } } : {}) }
-  const [rows, total] = await Promise.all([
-    tx.workspaceMember.findMany({ where, include: { user: { select: { firstName: true, lastName: true, email: true } }, features: true },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take: 51, ...(query.after ? { cursor: { id: query.after }, skip: 1 } : {}) }),
-    tx.workspaceMember.count({ where }),
-  ])
-  const items = rows.slice(0, 50).map(row => ({ id: row.id, role: row.role, state: row.state, acceptedAt: row.acceptedAt,
+  const fetchPage = (after?: string, take = 51) => tx.workspaceMember.findMany({
+    where, include: { user: { select: { firstName: true, lastName: true, email: true } }, features: true },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take, ...(after ? { cursor: { id: after }, skip: 1 } : {}),
+  })
+  let rows: Awaited<ReturnType<typeof fetchPage>>
+  let total: number
+  if (exporting) {
+    total = await tx.workspaceMember.count({ where })
+    if (total > 10000) throw new WorkspaceError(422, 'EXPORT_TOO_LARGE', 'Export supports at most 10,000 rows. Narrow the filters and retry.')
+    rows = []
+    // Bound Prisma's relation batches as well as the workbook, rather than building a 10,000-way SQL predicate.
+    let after: string | undefined
+    for (;;) {
+      const page = await fetchPage(after, 500)
+      rows.push(...page)
+      if (rows.length > 10000) throw new WorkspaceError(422, 'EXPORT_TOO_LARGE', 'Export supports at most 10,000 rows. Narrow the filters and retry.')
+      if (page.length < 500) break
+      after = page.at(-1)!.id
+    }
+  } else {
+    const result = await Promise.all([fetchPage(query.after), tx.workspaceMember.count({ where })])
+    rows = result[0]; total = result[1]
+  }
+  if (exporting && total > 10000) throw new WorkspaceError(422, 'EXPORT_TOO_LARGE', 'Export supports at most 10,000 rows. Narrow the filters and retry.')
+  const items = rows.slice(0, exporting ? 10000 : 50).map(row => ({ id: row.id, role: row.role, state: row.state, acceptedAt: row.acceptedAt,
     enrollmentResponses: row.enrollmentResponses, enrollmentFields: row.enrollmentFields, name: [row.user.firstName, row.user.lastName].filter(Boolean).join(' '), email: row.user.email, features: row.features.map(f => ({ feature: f.feature, allowed: f.allowed })) }))
-  return { items, nextCursor: rows.length > 50 ? items.at(-1)!.id : null, total }
+  return { items, nextCursor: !exporting && rows.length > 50 ? items.at(-1)!.id : null, total }
 }
 
 export async function configureWorkspaceFeature(tx: WorkspaceTx, scope: Awaited<ReturnType<typeof establishWorkspace>>, feature: string, input: unknown) {

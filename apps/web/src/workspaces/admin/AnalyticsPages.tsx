@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { useFieldQuery } from './FieldFilters'
+import { ExportButton } from './ExportButton'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -19,7 +21,7 @@ const initial: AnalyticsFilters = { days: 30 }
 
 export function WorkspaceDashboard() {
   const [filters, setFilters] = useState(initial)
-  const q = filterQuery(filters)
+  const q = useFieldQuery(filterQuery(filters))
   const overview = useWorkspaceData<Overview>(`${BASE}/overview?${q}`)
   const daily = useWorkspaceData<DailyActivity>(`${BASE}/activity/daily?${q}`)
   const learners = useWorkspaceData<LearnerActivity>(`${BASE}/activity/learners?${q}`)
@@ -35,9 +37,10 @@ export function WorkspaceDashboard() {
 
 export function WorkspaceFeatureUsage() {
   const [filters, setFilters] = useState(initial)
-  const usage = useWorkspaceData<FeatureUsage>(`${BASE}/feature-usage?${filterQuery(filters)}`)
+  const q = useFieldQuery(filterQuery(filters))
+  const usage = useWorkspaceData<FeatureUsage>(`${BASE}/feature-usage?${q}`)
   return <div className="space-y-5">
-    <PageHeader title="Feature usage" description={rangeLabel(usage.data?.range) || 'How members use each product in this workspace'} />
+    <PageHeader title="Feature usage" description={rangeLabel(usage.data?.range) || 'How members use each product in this workspace'} actions={<ExportButton path={`${BASE}/feature-usage/export.xlsx?${q}`} filename="feature-usage.xlsx" />} />
     <FilterBar filters={filters} onChange={setFilters} />
     <ErrorAlert error={usage.error} />
     {usage.loading && !usage.data ? <Loading /> : usage.data && <FeatureUsageView data={usage.data} />}
@@ -48,9 +51,10 @@ const PULSE_PRODUCTS = [{ id: 'elevate', label: 'Elevate' }, { id: 'replay', lab
 
 export function WorkspaceProgressPulse() {
   const [filters, setFilters] = useState(initial)
-  const pulse = useWorkspaceData<PulseReport>(`${BASE}/progress-pulse?${filterQuery(filters)}`)
+  const q = useFieldQuery(filterQuery(filters))
+  const pulse = useWorkspaceData<PulseReport>(`${BASE}/progress-pulse?${q}`)
   return <div className="space-y-5">
-    <PageHeader title="Progress Pulse" description={rangeLabel(pulse.data?.range) || 'Communication skill scores across the workspace'} />
+    <PageHeader title="Progress Pulse" description={rangeLabel(pulse.data?.range) || 'Communication skill scores across the workspace'} actions={<ExportButton path={`${BASE}/progress-pulse/export.xlsx?${q}`} filename="progress-pulse.xlsx" />} />
     <FilterBar filters={filters} onChange={setFilters} skill products={PULSE_PRODUCTS} />
     <ErrorAlert error={pulse.error} />
     {pulse.loading && !pulse.data ? <Loading /> : pulse.data && <ProgressPulseView data={pulse.data} />}

@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { PULSE_SKILL_BLOCKS } from '@/lib/pulse-skills'
 import { useWorkspaceData } from '../shell/context'
 import { PERIODS, PRODUCTS, type AnalyticsFilters } from '../shell/model'
+import { FieldFilters } from './FieldFilters'
 
 const ALL = 'all'
 
@@ -83,5 +84,6 @@ export function FilterBar({ filters, onChange, product = true, skill = false, le
       </Select>
     </div>}
     {learner && <MemberSelect value={filters.learner} onChange={id => onChange({ ...filters, learner: id })} />}
+    <FieldFilters />
   </div>
 }

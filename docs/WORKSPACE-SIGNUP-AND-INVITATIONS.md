@@ -11,6 +11,16 @@ The invited person completes this form before Google sign-in. The normal phone, 
 
 Each new email invitation stores its own form and email snapshot. Changing settings affects future invitations only. Resend preserves the original form and message; revoke an old invitation and create a new one to use revised settings. Already accepted links do not overwrite responses. These changes do not force existing members to fill a new form on every sign-in, and the bootstrap Owner's direct membership acceptance remains unchanged.
 
+### Custom-field report filters
+
+Owners/Admins can check **Add filter** on a custom dropdown, radio or checkbox field in Workspace settings. Text fields and messages are not filters. Default profile fields (mobile number, date of birth, gender and pincode) are excluded.
+
+The workspace's **current** filter configuration drives Dashboard, Users, Feature usage and Progress Pulse. This is independent of invitation form snapshots: enabling a filter can use already-collected membership answers, but never recollects or overwrites them. Disabled/deleted fields are no longer accepted as filters. Changed options do not rewrite old answers; only current options can be selected. `__none__` is reserved and cannot be a filterable option.
+
+Choose multiple options for an OR within a field; selections across fields use AND. **No answer** includes absent/null/blank answers and empty checkbox lists. There are at most ten selected choices. Custom selections are stored in the page URL and survive reload; **Clear custom filters** removes them, including stale selections after a settings change.
+
+The invited recipient sees the questions, not the report-filter flag. This does not change signup validation, account profiles, membership permissions or Personal history.
+
 Required fields and choice values are validated on the server under the invitation/workspace locks, before an account is created. Invalid input leaves the invitation pending and creates no identity or membership. Responses, membership acceptance and audit commit together. Custom responses and email bodies are not copied to audit metadata. Membership/account deletion removes the responses through existing cascade rules. No organization product access is enabled by these changes.
 
 ## Email content

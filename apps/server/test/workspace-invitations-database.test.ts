@@ -6,7 +6,9 @@ import request from 'supertest'
 import { randomUUID } from 'node:crypto'
 vi.mock('../src/lib/prisma', async () => {
   const { PrismaClient } = await import('@prisma/client')
-  return { prisma: new PrismaClient({ datasourceUrl: 'postgresql://tenancy_test_app@127.0.0.1:55443/postgres' }) }
+  const url = process.env.WORKSPACE_TEST_DATABASE_URL
+  if (url && !['postgresql://postgres@127.0.0.1:55443/postgres', 'postgresql://postgres@127.0.0.1:55443/spasht_filters_test'].includes(url)) throw new Error('Use the isolated tenancy database')
+  return { prisma: new PrismaClient({ datasourceUrl: url?.replace('postgresql://postgres@', 'postgresql://tenancy_test_app@') ?? 'postgresql://unused:5432/unused' }) }
 })
 const delivery = vi.hoisted(() => ({ sendEmail: vi.fn().mockResolvedValue({ sent: true }) }))
 vi.mock('../src/lib/email', () => ({ sendEmail: delivery.sendEmail }))
@@ -17,7 +19,7 @@ vi.mock('../src/lib/google-auth', () => ({ verifyGoogleIdToken: async (credentia
   return { googleId: `google-${data.email}`, email: data.email, emailVerified: data.verified !== false, firstName: 'Test', lastName: 'Learner', avatar: null }
 } }))
 const url = process.env.WORKSPACE_TEST_DATABASE_URL
-if (url && url !== 'postgresql://postgres@127.0.0.1:55443/postgres') throw new Error('Use the isolated tenancy database')
+if (url && !['postgresql://postgres@127.0.0.1:55443/postgres', 'postgresql://postgres@127.0.0.1:55443/spasht_filters_test'].includes(url)) throw new Error('Use the isolated tenancy database')
 const suite = url ? describe : describe.skip
 suite('workspace email invitation boundaries with a restricted runtime role', () => {
   const admin = new PrismaClient({ datasourceUrl: url || 'postgresql://unused:5432/unused' })
@@ -207,7 +209,7 @@ suite('workspace email invitation boundaries with a restricted runtime role', ()
   })
   it('restricts configuration to managers, snapshots invitation forms and atomically stores workspace-only responses', async () => {
     const settings = { fields: [
-      { id: 'department', type: 'dropdown', label: 'Department', required: true, options: ['CS', 'ECE'] },
+      { id: 'department', type: 'dropdown', label: 'Department', required: true, options: ['CS', 'ECE'], filterable: true },
       { id: 'skills', type: 'checkbox', label: 'Skills', required: true, options: ['Java', 'Python'] },
       { id: 'roll', type: 'text', label: 'Roll number', required: true, options: [] },
       { id: 'welcome', type: 'message', label: 'Welcome to the college', required: false, options: [] },
@@ -221,7 +223,8 @@ suite('workspace email invitation boundaries with a restricted runtime role', ()
     // Editing defaults cannot change a form or email somebody has already received.
     expect((await request(app).put(`/api/admin/workspaces/${alpha}/enrollment`).set(bearer(platformToken)).send({ fields: [], email: {} })).status).toBe(200)
     const lookup = await request(app).post('/api/invitations/lookup').send({ token })
-    expect(lookup.body.enrollmentFields).toEqual(settings.fields)
+    // The recipient sees only the questions; report-filter settings stay with the organization.
+    expect(lookup.body.enrollmentFields).toEqual(settings.fields.map(({ filterable: _filterable, ...field }: { filterable?: boolean }) => field))
     expect((await accept(token, email)).status).toBe(400)
     expect(await admin.user.findUnique({ where: { email } })).toBeNull()
     const responses = { department: 'CS', skills: ['Java', 'Python'], roll: 'CS-42' }
@@ -229,7 +232,7 @@ suite('workspace email invitation boundaries with a restricted runtime role', ()
     expect(accepted.status, JSON.stringify(accepted.body)).toBe(200)
     const user = await admin.user.findUniqueOrThrow({ where: { email } })
     const m = await admin.workspaceMember.findUniqueOrThrow({ where: { workspaceId_userId: { workspaceId: alpha, userId: user.id } } })
-    expect(m.enrollmentResponses).toEqual(responses); expect(m.enrollmentFields).toEqual(settings.fields)
+    expect(m.enrollmentResponses).toEqual(responses); expect(m.enrollmentFields).toEqual(settings.fields.map(f => ({ filterable: false, ...f })))
     const managers = await request(app).get('/api/workspaces/current/members').set(bearer(tokenManager))
     expect(managers.body.items.find((row: { id: string }) => row.id === m.id).enrollmentResponses).toEqual(responses)
     expect((await request(app).get('/api/workspaces/current/members').set(bearer(tokenLearner))).status).toBe(403)

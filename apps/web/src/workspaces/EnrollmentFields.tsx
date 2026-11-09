@@ -3,7 +3,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-export interface EnrollmentField { id: string; type: 'text' | 'dropdown' | 'radio' | 'checkbox' | 'message'; label: string; required: boolean; options: string[] }
+export interface EnrollmentField { id: string; type: 'text' | 'dropdown' | 'radio' | 'checkbox' | 'message'; label: string; required: boolean; options: string[]; filterable?: boolean }
 export interface EnrollmentSettings { fields: EnrollmentField[]; email: { subject: string; message: string } }
 export type EnrollmentResponses = Record<string, string | string[]>
 export function EnrollmentFields({ fields, values, onChange }: { fields: EnrollmentField[]; values: EnrollmentResponses; onChange: (v: EnrollmentResponses) => void }) {

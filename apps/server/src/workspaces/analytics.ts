@@ -4,6 +4,7 @@ import { PULSE_SKILLS } from '../analytics/adminAnalyticsFilters'
 import { establishWorkspace, requireWorkspaceManager, type WorkspaceTx } from './context'
 import { idSchema, WorkspaceError } from './contracts'
 import { addDays, daysBetween, workspaceDay } from './time'
+import { fieldQuerySchema, resolveFieldSelections, fieldMemberQuery, fieldMemberWhere, type FieldSelection } from './fieldFilters'
 
 type Scope = Awaited<ReturnType<typeof establishWorkspace>>
 
@@ -20,6 +21,7 @@ export const workspaceFiltersSchema = z.object({
   learner: idSchema.optional(),
   product: z.enum(WORKSPACE_PRODUCTS).optional(),
   skill: z.enum(PULSE_SKILLS).optional(),
+  field: fieldQuerySchema,
 }).strict()
 export type WorkspaceFilters = z.infer<typeof workspaceFiltersSchema>
 
@@ -30,6 +32,8 @@ export interface ResolvedFilters {
   learner: { memberId: string; userId: string } | null
   product: WorkspaceProduct | null
   skill: string | null
+  workspaceId: string
+  fields: FieldSelection[]
 }
 
 /**
@@ -54,7 +58,8 @@ export async function resolveFilters(tx: WorkspaceTx, scope: Scope, input: unkno
     if (!member) throw new WorkspaceError(404, 'LEARNER_NOT_FOUND', 'Learner not found in this workspace')
     learner = { memberId: member.id, userId: member.userId }
   }
-  return { from, to, timeZone, learner, product: filters.product ?? null, skill: filters.skill ?? null }
+  return { from, to, timeZone, learner, product: filters.product ?? null, skill: filters.skill ?? null,
+    workspaceId: scope.workspace.id, fields: resolveFieldSelections(scope, filters.field) }
 }
 
 /** Timestamps are stored as UTC without zone; this is their calendar day in the organization. */
@@ -65,7 +70,9 @@ function inRange(column: string, f: ResolvedFilters) {
 function dayOf(column: string, f: ResolvedFilters) {
   return Prisma.sql`to_char(${localDay(column)} ${f.timeZone}), 'YYYY-MM-DD')`
 }
-const learnerClause = (f: ResolvedFilters) => f.learner ? Prisma.sql`AND "userId" = ${f.learner.userId}` : Prisma.empty
+const learnerClause = (f: ResolvedFilters) => Prisma.sql`
+  ${f.learner ? Prisma.sql`AND "userId" = ${f.learner.userId}` : Prisma.empty}
+  ${f.fields.length ? Prisma.sql`AND "userId" IN (${fieldMemberQuery(f.workspaceId, f.fields)})` : Prisma.empty}`
 
 /** One row per practice activity (Elevate, Interviews, Replay), with only who, when and which product. */
 function activities(workspaceId: string, f: ResolvedFilters) {
@@ -97,15 +104,16 @@ async function identities(tx: WorkspaceTx, workspaceId: string, userIds: string[
 }
 
 function presentRange(f: ResolvedFilters) {
-  return { from: f.from, to: f.to, timeZone: f.timeZone, learner: f.learner?.memberId ?? null, product: f.product, skill: f.skill }
+  return { from: f.from, to: f.to, timeZone: f.timeZone, learner: f.learner?.memberId ?? null, product: f.product, skill: f.skill, fields: f.fields }
 }
 
 export async function workspaceOverview(tx: WorkspaceTx, scope: Scope, input: unknown) {
   await asWorkspaceManager(tx, scope)
   const f = await resolveFilters(tx, scope, input)
   const workspaceId = scope.workspace.id
+  const memberWhere = await fieldMemberWhere(tx, scope, f.fields)
   const [states, products, learners, budget, voice] = await Promise.all([
-    tx.workspaceMember.groupBy({ by: ['state'], where: { workspaceId }, _count: { _all: true } }),
+    tx.workspaceMember.groupBy({ by: ['state'], where: { workspaceId, ...memberWhere, ...(f.learner ? { userId: f.learner.userId } : {}) }, _count: { _all: true } }),
     tx.$queryRaw<Array<{ product: string; count: bigint }>>`SELECT product, count(*) AS count FROM (${activities(workspaceId, f)}) a GROUP BY product`,
     tx.$queryRaw<Array<{ count: bigint }>>`SELECT count(DISTINCT "userId") AS count FROM (${activities(workspaceId, f)}) a`,
     tx.interviewEvaluatorBudget.findUnique({ where: { scope_day: { scope: `workspace-${workspaceId}`, day: workspaceDay(f.timeZone) } } }),
@@ -154,7 +162,7 @@ export async function workspaceLearnerActivity(tx: WorkspaceTx, scope: Scope, in
   return { range: presentRange(f), learners }
 }
 
-export async function workspaceFeatureUsage(tx: WorkspaceTx, scope: Scope, input: unknown) {
+export async function workspaceFeatureUsage(tx: WorkspaceTx, scope: Scope, input: unknown, exporting = false) {
   await asWorkspaceManager(tx, scope)
   const f = await resolveFilters(tx, scope, input)
   const features = f.product ? [f.product] : [...WORKSPACE_USAGE_FEATURES]
@@ -162,23 +170,23 @@ export async function workspaceFeatureUsage(tx: WorkspaceTx, scope: Scope, input
     AND feature IN (${Prisma.join(features)}) AND ${inRange('timestamp', f)} ${learnerClause(f)}`
   const [byAction, daily, byLearner] = await Promise.all([
     tx.$queryRaw<Array<{ feature: string; action: string; count: bigint; learners: bigint }>>`
-      SELECT feature, action, count(*) AS count, count(DISTINCT "userId") AS learners ${base} GROUP BY feature, action ORDER BY count(*) DESC LIMIT 200`,
+      SELECT feature, action, count(*) AS count, count(DISTINCT "userId") AS learners ${base} GROUP BY feature, action ORDER BY count(*) DESC, feature, action LIMIT ${exporting ? 10001 : 200}`,
     tx.$queryRaw<Array<{ day: string; feature: string; count: bigint }>>`
       SELECT ${dayOf('timestamp', f)} AS day, feature, count(*) AS count ${base} GROUP BY 1, feature`,
     tx.$queryRaw<Array<{ userId: string; count: bigint; lastDay: string }>>`
-      SELECT "userId", count(*) AS count, max(${dayOf('timestamp', f)}) AS "lastDay" ${base} GROUP BY "userId" ORDER BY count(*) DESC LIMIT 500`,
+      SELECT "userId", count(*) AS count, max(${dayOf('timestamp', f)}) AS "lastDay" ${base} GROUP BY "userId" ORDER BY count(*) DESC, "userId" LIMIT ${exporting ? 10001 : 500}`,
   ])
   const who = await identities(tx, scope.workspace.id, byLearner.map(row => row.userId))
   return {
     range: presentRange(f),
     features: byAction.map(row => ({ feature: row.feature, action: row.action, events: Number(row.count), learners: Number(row.learners) })),
-    days: daysBetween(f.from, f.to).map(d => ({ day: d,
+    days: daysBetween(f.from, f.to).map((d): Record<string, string | number> => ({ day: d,
       ...Object.fromEntries(features.map(feature => [feature, Number(daily.find(row => row.day === d && row.feature === feature)?.count ?? 0)])) })),
     learners: byLearner.map(row => ({ ...who(row.userId), events: Number(row.count), lastActiveDay: row.lastDay })),
   }
 }
 
-export async function workspaceProgressPulse(tx: WorkspaceTx, scope: Scope, input: unknown) {
+export async function workspaceProgressPulse(tx: WorkspaceTx, scope: Scope, input: unknown, exporting = false) {
   await asWorkspaceManager(tx, scope)
   const f = await resolveFilters(tx, scope, input)
   if (f.product === 'interviews') throw new WorkspaceError(400, 'PULSE_SOURCE_UNSUPPORTED', 'Progress Pulse covers Elevate and Replay communication practice')
@@ -192,7 +200,7 @@ export async function workspaceProgressPulse(tx: WorkspaceTx, scope: Scope, inpu
     tx.$queryRaw<Array<{ day: string; average: number; samples: bigint }>>`
       SELECT ${dayOf('recordedAt', f)} AS day, avg(score)::float8 AS average, count(*) AS samples ${base} GROUP BY 1`,
     tx.$queryRaw<Array<{ userId: string; average: number; samples: bigint; lastDay: string }>>`
-      SELECT "userId", avg(score)::float8 AS average, count(*) AS samples, max(${dayOf('recordedAt', f)}) AS "lastDay" ${base} GROUP BY "userId" ORDER BY avg(score) DESC LIMIT 500`,
+      SELECT "userId", avg(score)::float8 AS average, count(*) AS samples, max(${dayOf('recordedAt', f)}) AS "lastDay" ${base} GROUP BY "userId" ORDER BY avg(score) DESC, "userId" LIMIT ${exporting ? 10001 : 500}`,
   ])
   const who = await identities(tx, scope.workspace.id, byLearner.map(row => row.userId))
   const round = (value: number) => Math.round(value * 10) / 10

@@ -18,6 +18,8 @@ import { withWorkspaceAccess, requireWorkspaceManager } from './context'
 import * as service from './service'
 import * as analytics from './analytics'
 import * as plans from './analyticsPlans'
+import { workspaceFieldFilters } from './fieldFilters'
+import { workspaceExport, type ExportReport } from './exports'
 
 export const workspaceRouter = Router()
 export const platformWorkspacesRouter = Router()
@@ -80,6 +82,22 @@ workspaceRouter.get('/current/sessions/:sessionId/transcript', scoped((tx, scope
 workspaceRouter.get('/current/sessions/:sessionId/recordings/:recordingId/stream', streamWorkspaceRecording)
 workspaceRouter.get('/current', scoped((tx, scope) => service.workspaceSnapshot(tx, scope)))
 workspaceRouter.get('/current/members', scoped((tx, scope, req) => service.listWorkspaceMembers(tx, scope, req.query)))
+workspaceRouter.get('/current/admin/field-filters', scoped((_tx, scope) => Promise.resolve(workspaceFieldFilters(scope))))
+for (const [path, report] of [
+  ['/current/members/export.xlsx', 'users'],
+  ['/current/admin/feature-usage/export.xlsx', 'feature-usage'],
+  ['/current/admin/progress-pulse/export.xlsx', 'progress-pulse'],
+] as const satisfies ReadonlyArray<readonly [string, ExportReport]>) {
+  workspaceRouter.get(path, workspaceAnalyticsLimiter, async (req, res, next) => {
+    try {
+      const result = await withWorkspaceAccess(workspaceClaims(req), (tx, scope) => workspaceExport(tx, scope, report, req.query), { lockWorkspace: true })
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`)
+      res.send(result.buffer)
+    } catch (error) { next(error) }
+  })
+}
 workspaceRouter.get('/current/admin/overview', scoped((tx, scope, req) => analytics.workspaceOverview(tx, scope, req.query)))
 workspaceRouter.get('/current/admin/activity/daily', scoped((tx, scope, req) => analytics.workspaceDailyActivity(tx, scope, req.query)))
 workspaceRouter.get('/current/admin/activity/learners', scoped((tx, scope, req) => analytics.workspaceLearnerActivity(tx, scope, req.query)))

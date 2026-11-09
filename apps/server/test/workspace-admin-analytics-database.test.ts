@@ -8,9 +8,18 @@ import { signToken, signWorkspaceToken } from '../src/lib/jwt'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import ExcelJS from 'exceljs'
+import type { IncomingMessage } from 'node:http'
+
+function binary(res: IncomingMessage, done: (error: Error | null, body?: Buffer) => void) {
+  const chunks: Buffer[] = []
+  res.on('data', (chunk: Buffer) => chunks.push(chunk))
+  res.on('end', () => done(null, Buffer.concat(chunks)))
+  res.on('error', done)
+}
 
 const url = process.env.WORKSPACE_TEST_DATABASE_URL
-if (url && url !== 'postgresql://postgres@127.0.0.1:55443/postgres') throw new Error('Use only the isolated tenancy container')
+if (url && !['postgresql://postgres@127.0.0.1:55443/postgres', 'postgresql://postgres@127.0.0.1:55443/spasht_filters_test'].includes(url)) throw new Error('Use only the isolated tenancy container and an approved test database')
 const suite = url ? describe : describe.skip
 
 const model = vi.hoisted(() => ({ complete: vi.fn<(prompt: string) => Promise<string>>() }))
@@ -38,7 +47,7 @@ suite('organization admin reports and AI Analytics', () => {
 
   beforeAll(async () => {
     await prepareWorkspaceTestRole(admin)
-    process.env.DATABASE_URL = 'postgresql://tenancy_test_app@127.0.0.1:55443/postgres'
+    process.env.DATABASE_URL = url!.replace('postgresql://postgres@', 'postgresql://tenancy_test_app@')
     process.env.WORKSPACES_ENABLED = 'true'
     db = (await import('../src/lib/prisma')).prisma
     scopes = await import('../src/lib/dataScope')
@@ -65,6 +74,22 @@ suite('organization admin reports and AI Analytics', () => {
     }
     await join(alpha, 'owner', 'OWNER'); await join(alpha, 'admin', 'ADMIN'); await join(alpha, 'learner', 'LEARNER'); await join(alpha, 'second', 'LEARNER')
     await join(beta, 'betaOwner', 'OWNER'); await join(beta, 'learner', 'LEARNER')
+    const fields = [
+      { id: 'department', label: 'Department', type: 'dropdown', required: false, options: ['CS', 'ECE'], filterable: true },
+      { id: 'skills', label: 'Skills', type: 'checkbox', required: false, options: ['Java', 'Python'], filterable: true },
+      { id: 'roll', label: 'Roll number', type: 'text', required: false, options: [] },
+      { id: 'unfiltered', label: 'Not enabled', type: 'radio', required: false, options: ['A'] },
+    ]
+    await admin.workspace.update({ where: { id: alpha }, data: { enrollmentSettings: { fields, email: {} } } })
+    await admin.workspace.update({ where: { id: beta }, data: { enrollmentSettings: { fields, email: {} } } })
+    await admin.workspaceMember.update({ where: { id: members[`${alpha}:learner`] }, data: { enrollmentResponses: { department: 'CS', skills: ['Java', 'Python'] } } })
+    await admin.workspaceMember.update({ where: { id: members[`${alpha}:second`] }, data: { enrollmentResponses: { department: 'ECE', skills: [] } } })
+    await admin.workspaceMember.update({ where: { id: members[`${alpha}:owner`] }, data: { enrollmentResponses: { skills: null } } })
+    await admin.workspaceMember.update({ where: { id: members[`${alpha}:admin`] }, data: { enrollmentResponses: { skills: '' } } })
+    await admin.workspaceMember.update({ where: { id: members[`${beta}:learner`] }, data: { enrollmentResponses: { department: 'ECE', skills: ['Java'] } } })
+    const personal = await admin.workspace.create({ data: { kind: 'PERSONAL', name: 'Personal', slug: `${tag}-personal`, personalOwnerId: users.outsider, isolationStage: 'PERSONAL_LEGACY' } })
+    await join(personal.id, 'outsider', 'OWNER')
+    members.personalWorkspace = personal.id
 
     // Kiritimati is UTC+14: 2026-11-01T11:00Z is the organization's 2 November, and 2026-11-02T12:00Z its 3 November.
     await inScope(alpha, 'learner', async () => {
@@ -111,6 +136,133 @@ suite('organization admin reports and AI Analytics', () => {
     const forged = { Authorization: `Bearer ${signWorkspaceToken({ userId: users.outsider, workspaceId: alpha, membershipId: members[`${alpha}:owner`] })}` }
     expect((await api.get('/api/workspaces/current/admin/overview').set(forged)).status).toBe(403)
   })
+
+  it('offers only enabled custom choice fields to managers', async () => {
+    const response = await api.get('/api/workspaces/current/admin/field-filters').set(token(alpha, 'admin'))
+    expect(response.status).toBe(200)
+    expect(response.body.map((f: { id: string }) => f.id)).toEqual(['department', 'skills'])
+    expect((await api.get('/api/workspaces/current/admin/field-filters').set(token(alpha, 'learner'))).status).toBe(403)
+    for (const value of ['gender:Female', 'roll:CS', 'unfiltered:A', 'department:foreign', 'foreign:CS']) {
+      expect((await api.get(`/api/workspaces/current/admin/overview?field=${value}`).set(token(alpha, 'owner'))).status).toBe(400)
+      expect((await api.get(`/api/workspaces/current/members?field=${value}`).set(token(alpha, 'owner'))).status).toBe(400)
+    }
+    expect((await api.get('/api/workspaces/current/members?' + Array(11).fill('field=department:CS').join('&')).set(token(alpha, 'owner'))).status).toBe(400)
+  })
+
+  it('uses same-field OR, cross-field AND, missing answers and tenant-local membership for every report', async () => {
+    const get = (path: string, fields: string) => api.get(`/api/workspaces/current/${path}?${range}&${fields}`).set(token(alpha, 'admin'))
+    const cs = 'field=department:CS&field=skills:Java'
+    const overview = await get('admin/overview', cs)
+    expect(overview.status).toBe(200)
+    expect(overview.body.members.active).toBe(1)
+    expect(overview.body.activeLearners).toBe(1)
+    expect(overview.body.activity).toEqual({ elevate: 1, replay: 1, interviews: 1 })
+    const daily = await get('admin/activity/daily', cs)
+    expect(daily.body.days.reduce((sum: number, r: { elevate: number }) => sum + r.elevate, 0)).toBe(1)
+    expect((await get('admin/activity/learners', cs)).body.learners.map((r: { memberId: string }) => r.memberId)).toEqual([members[`${alpha}:learner`]])
+    expect((await get('admin/feature-usage', cs)).body.features[0].events).toBe(1)
+    expect((await get('admin/progress-pulse', cs)).body.skills.map((r: { skill: string }) => r.skill)).toEqual(['clarity'])
+    expect((await get('admin/overview', 'field=department:CS&field=department:ECE')).body.members.active).toBe(2)
+    expect((await get('admin/overview', 'field=department:ECE&field=skills:Java')).body.members.active).toBe(0)
+    const missing = await api.get('/api/workspaces/current/members?field=skills:__none__').set(token(alpha, 'admin'))
+    expect(missing.body.total).toBe(3) // two absent answers and one empty checkbox array
+    const foreign = await api.get(`/api/workspaces/current/admin/overview?${range}&field=department:CS&learner=${members[`${beta}:learner`]}`).set(token(alpha, 'admin'))
+    expect(foreign.status).toBe(404)
+    const membersPage = await api.get('/api/workspaces/current/members?field=department:CS&role=LEARNER').set(token(alpha, 'admin'))
+    expect(membersPage.body.total).toBe(1)
+    expect(membersPage.body.items[0].id).toBe(members[`${alpha}:learner`])
+    expect((await get('admin/overview', `field=department:CS&learner=${members[`${alpha}:second`]}`)).body.activeLearners).toBe(0)
+  })
+
+  it('exports safe real XLSX workbooks with active filters, no private content and content-free audits', async () => {
+    for (const [route, sheet] of [['members', 'Users'], ['admin/feature-usage', 'By feature'], ['admin/progress-pulse', 'Skills']]) {
+      expect((await api.get(`/api/workspaces/current/${route}/export.xlsx`).set(token(alpha, 'learner'))).status).toBe(403)
+      const query = route === 'members' ? 'field=department:CS' : `${range}&field=department:CS`
+      const response = await api.get(`/api/workspaces/current/${route}/export.xlsx?${query}`).set(token(alpha, 'admin')).buffer(true).parse(binary)
+      expect(response.status).toBe(200)
+      expect(response.headers['content-type']).toContain('spreadsheetml.sheet')
+      expect(response.headers['cache-control']).toBe('private, no-store')
+      expect(response.headers['content-disposition']).toContain(`${tag}-alpha-`)
+      const workbook = new ExcelJS.Workbook()
+      await workbook.xlsx.load(response.body)
+      expect(workbook.getWorksheet(sheet)?.rowCount).toBeGreaterThan(1)
+      expect(workbook.getWorksheet('By learner')?.rowCount ?? 2).toBe(2)
+      expect(JSON.stringify(workbook.model)).not.toContain('SECRET-')
+      expect(JSON.stringify(workbook.model)).not.toContain(`${tag}-second@`)
+      expect(workbook.getWorksheet('Report details')).toBeDefined()
+    }
+    const audits = await admin.workspaceAudit.findMany({ where: { workspaceId: alpha, action: 'admin_report_exported' } })
+    expect(audits.length).toBe(3)
+    expect(JSON.stringify(audits.map(a => a.metadata))).not.toContain('@')
+    expect(JSON.stringify(audits.map(a => a.metadata))).not.toContain('"CS"')
+  })
+
+  it('exports beyond the UI page with text-only formula canaries and enforces a non-truncating cap', async () => {
+    const canaries = ['=1+1', '+1+1', '-1+1', '@SUM(A1)', '\t=1+1', '\r=1+1']
+    for (let i = 0; i < 55; i++) {
+      const who = `export-${i}`
+      users[who] = (await admin.user.create({ data: { email: `${tag}-${who}@example.invalid`, firstName: canaries[i % canaries.length], emailVerified: true } })).id
+      await admin.workspaceMember.create({ data: { workspaceId: alpha, userId: users[who], role: 'LEARNER', state: 'ACTIVE', acceptedAt: new Date(), enrollmentResponses: { department: 'CS' } } })
+    }
+    try {
+      const page = await api.get('/api/workspaces/current/members?field=department:CS').set(token(alpha, 'owner'))
+      expect(page.body.items).toHaveLength(50); expect(page.body.total).toBe(56)
+      const response = await api.get('/api/workspaces/current/members/export.xlsx?field=department:CS').set(token(alpha, 'owner')).buffer(true).parse(binary)
+      expect(response.status).toBe(200)
+      const workbook = new ExcelJS.Workbook(); await workbook.xlsx.load(response.body)
+      const sheet = workbook.getWorksheet('Users')!
+      expect(sheet.rowCount).toBe(57)
+      canaries.forEach(value => {
+        const normalized = value.replaceAll('\r', '\n')
+        const cell = sheet.getColumn(1).values.find(v => v === normalized)
+        expect(cell).toBe(normalized)
+      })
+      sheet.eachRow((row, index) => { if (index > 1) expect(row.getCell(1).type).toBe(ExcelJS.ValueType.String) })
+      const { addExportSheet } = await import('../src/workspaces/exports')
+      expect(() => addExportSheet(new ExcelJS.Workbook(), 'Too many', ['Value'], Array.from({ length: 10001 }, () => ['canary']))).toThrow('10,000')
+    } finally {
+      const ids = Object.entries(users).filter(([key]) => key.startsWith('export-')).map(([, id]) => id)
+      await admin.user.deleteMany({ where: { id: { in: ids } } })
+    }
+  }, 30000)
+
+  it('rechecks export membership and role and rejects Personal or foreign scopes', async () => {
+    const exportPath = '/api/workspaces/current/members/export.xlsx'
+    expect((await api.get(exportPath).set(token(members.personalWorkspace, 'outsider'))).status).toBe(403)
+    const foreign = { Authorization: `Bearer ${signWorkspaceToken({ userId: users.betaOwner, workspaceId: alpha, membershipId: members[`${beta}:betaOwner`] })}` }
+    expect((await api.get(exportPath).set(foreign)).status).toBe(403)
+    const betaExport = await api.get(`${exportPath}?field=department:CS`).set(token(beta, 'betaOwner')).buffer(true).parse(binary)
+    const workbook = new ExcelJS.Workbook(); await workbook.xlsx.load(betaExport.body)
+    expect(workbook.getWorksheet('Users')!.rowCount).toBe(1)
+    const id = members[`${alpha}:admin`]
+    try {
+      await admin.workspaceMember.update({ where: { id }, data: { role: 'LEARNER' } })
+      expect((await api.get(exportPath).set(token(alpha, 'admin'))).status).toBe(403)
+      await admin.workspaceMember.update({ where: { id }, data: { role: 'ADMIN', state: 'SUSPENDED' } })
+      expect((await api.get(exportPath).set(token(alpha, 'admin'))).status).toBe(403)
+    } finally { await admin.workspaceMember.update({ where: { id }, data: { role: 'ADMIN', state: 'ACTIVE' } }) }
+  })
+
+  it('fails an oversized Users export explicitly instead of returning only the first 10,000', async () => {
+    const cap = await admin.workspace.create({ data: { kind: 'ORGANIZATION', name: 'Cap test', slug: `${tag}-cap`, maxMembers: 20000 } })
+    const capIds = Array.from({ length: 10000 }, (_, i) => `${tag}-cap-${i}`)
+    try {
+      await admin.user.createMany({ data: capIds.map(id => ({ id, email: `${id}@example.invalid`, emailVerified: true })) })
+      await admin.workspaceMember.createMany({ data: capIds.map(userId => ({ workspaceId: cap.id, userId, role: 'LEARNER', state: 'ACTIVE', acceptedAt: new Date() })) })
+      members[`${cap.id}:owner`] = (await admin.workspaceMember.create({ data: { workspaceId: cap.id, userId: users.owner, role: 'OWNER', state: 'ACTIVE', acceptedAt: new Date() } })).id
+      const response = await api.get('/api/workspaces/current/members/export.xlsx').set(token(cap.id, 'owner'))
+      expect(response.status).toBe(422)
+      expect(response.text).toContain('10,000')
+      expect(response.headers['content-type']).not.toContain('spreadsheetml')
+      const maximum = await api.get('/api/workspaces/current/members/export.xlsx?role=LEARNER').set(token(cap.id, 'owner')).buffer(true).parse(binary)
+      expect(maximum.status).toBe(200)
+      const workbook = new ExcelJS.Workbook(); await workbook.xlsx.load(maximum.body)
+      expect(workbook.getWorksheet('Users')!.rowCount).toBe(10001)
+    } finally {
+      await admin.workspace.delete({ where: { id: cap.id } })
+      await admin.user.deleteMany({ where: { id: { in: capIds } } })
+    }
+  }, 60000)
 
   it('groups activity by the organization calendar day and never counts Personal or other organizations', async () => {
     const daily = await api.get(`/api/workspaces/current/admin/activity/daily?${range}`).set(token(alpha, 'admin'))

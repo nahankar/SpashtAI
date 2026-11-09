@@ -27,4 +27,11 @@ describe('workspace signup fields', () => {
     expect(html).toContain('existing links keep their original form and message')
     expect(html).toContain('Invitation subject'); expect(html).toContain('Invitation message'); expect(html).toContain('Add field')
   })
+  it('offers Add filter only for custom choice fields, never default profile fields', () => {
+    const html = renderToStaticMarkup(<EnrollmentSettingsEditor busy={false} settings={{ fields, email: { subject: '', message: '' } }} onSave={() => {}} />)
+    expect(html.match(/>Add filter</g)).toHaveLength(3)
+    expect(html).toContain('department-filter')
+    expect(html).not.toContain('roll-filter'); expect(html).not.toContain('notice-filter')
+    expect(html).not.toContain('Mobile number'); expect(html).not.toContain('Gender')
+  })
 })

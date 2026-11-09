@@ -32,6 +32,16 @@ export async function currentWorkspaceRequest<T>(token: string, path: string, me
   }
 }
 export function identityToken() { return localStorage.getItem('spashtai_token') || '' }
+export async function currentWorkspaceDownload(token: string, path: string) {
+  const response = await fetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${token}` } })
+  if (!response.ok) {
+    const data = await response.json()
+    if (isWorkspaceFailure(data.code)) reportWorkspaceFailure(data.code)
+    throw new ApiError(data.issues?.map((i: { message: string }) => i.message).join('; ') || data.message || data.error || 'Unable to export', response.status, data.code)
+  }
+  if (!response.headers.get('content-type')?.includes('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')) throw new Error('The export response was not an Excel workbook')
+  return { blob: await response.blob(), filename: response.headers.get('content-disposition')?.match(/filename="([^"]+)"/)?.[1] }
+}
 export interface Workspace {
   id: string; slug: string; name: string; kind: 'PERSONAL' | 'ORGANIZATION'; state: 'ACTIVE' | 'SUSPENDED';
   logoDataUrl: string | null; accentColor: string; timeZone: string; isolationStage: string;
