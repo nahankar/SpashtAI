@@ -4,46 +4,60 @@ purpose:
 assumptions:
   - id: review-outcome-is-not-provider-failure
     status: supported
-    claim: In the thirteen local stand-in scenarios, evaluator code distinguished a validated grade, review-required output, invalid JSON, provider throttling, and forced-tool assessment envelopes.
-    reason: The actual SDK HTTP path ran; parser uncertainty was nonretryable, while throttling was retryable. Scope is caller behavior against this owned fixture.
-    verification: On 2026-11-08 ran check-interview-evaluator-simulation.ts against port 4931. The original four assertions passed; simulation request events confirmed POST Converse traffic and HTTP 200/429 responses. Repeated once using the committed launcher with the same outcomes. On the policy-12 candidate, nine assertions passed, including valid tool input, review-required input, wrong tool name and duplicate tools; nine POST request events confirmed actual SDK traffic.
-    source: apps/server/scripts/check-interview-evaluator-simulation.ts; postman/mocks/bedrock/default.js; private policy-11-http-public-results.json, policy-11-simulation.ndjson, policy-12-http-results.json and policy-12-simulation.ndjson under /private/tmp/spasht-grading-validation/.
+    claim: "In the thirteen local stand-in scenarios, evaluator code distinguished a validated grade, review-required output, invalid JSON, provider throttling, and forced-tool assessment envelopes."
+    reason: "The actual SDK HTTP path ran; parser uncertainty was nonretryable, while throttling was retryable. Scope is caller behavior against this owned fixture."
+    verification: "On 2026-11-08 ran check-interview-evaluator-simulation.ts against port 4931. The original four assertions passed; simulation request events confirmed POST Converse traffic and HTTP 200/429 responses. Repeated once using the committed launcher with the same outcomes. On the policy-12 candidate, nine assertions passed, including valid tool input, review-required input, wrong tool name and duplicate tools; nine POST request events confirmed actual SDK traffic."
+    source: "apps/server/scripts/check-interview-evaluator-simulation.ts; postman/mocks/bedrock/default.js; private policy-11-http-public-results.json, policy-11-simulation.ndjson, policy-12-http-results.json and policy-12-simulation.ndjson under /private/tmp/spasht-grading-validation/."
     updated_at: "2026-11-08"
   - id: stand-in-does-not-prove-model-judgment
     status: unknown
-    claim: The real model consistently distinguishes ambiguous speech from clear incorrect subject claims under policy 11.
-    reason: The local response is authored fixture JSON, not a model judgment. Real-model tests are required to establish semantic quality.
-    verification: Inspected owned mock; REVIEW_REQUIRED is selected by a synthetic marker and never evaluates meaning. No real provider call was made by the HTTP check.
-    source: postman/mocks/bedrock/default.js; docs/prepare/INTERVIEWS-AI-ADJUDICATION-2026-11-08.md.
+    claim: "The real model consistently distinguishes ambiguous speech from clear incorrect subject claims under policy 11."
+    reason: "The local response is authored fixture JSON, not a model judgment. Real-model tests are required to establish semantic quality."
+    verification: "Inspected owned mock; REVIEW_REQUIRED is selected by a synthetic marker and never evaluates meaning. No real provider call was made by the HTTP check."
+    source: "postman/mocks/bedrock/default.js; docs/prepare/INTERVIEWS-AI-ADJUDICATION-2026-11-08.md."
     updated_at: "2026-11-08"
   - id: interpretation-first-gate-fixture
     status: supported
-    claim: The v9 caller refuses a declared uncertain interpretation even when the fixture supplies a contradictory COMPLETE verdict, and rejects skipped reasoning and unsupported interpretation evidence.
-    reason: Actual SDK HTTP calls to the owned stand-in exercised the new request format and the production parser; this supports caller boundary behavior only.
-    verification: On 2026-11-09 ran check-interview-evaluator-simulation.ts against owned port 4931. All 25 assertions passed, including four v9 assertions. Request events confirm Converse HTTP traffic. Server build and focused tests passed. No real v15 provider call was made.
-    source: apps/server/scripts/check-interview-evaluator-simulation.ts; apps/server/test/interview-interpretation-first.test.ts; private policy-15-http-results.json and policy-15-simulation.ndjson.
+    claim: "The v9 caller refuses a declared uncertain interpretation even when the fixture supplies a contradictory COMPLETE verdict, and rejects skipped reasoning and unsupported interpretation evidence."
+    reason: "Actual SDK HTTP calls to the owned stand-in exercised the new request format and the production parser; this supports caller boundary behavior only."
+    verification: "On 2026-11-09 ran check-interview-evaluator-simulation.ts against owned port 4931. All 25 assertions passed, including four v9 assertions. Request events confirm Converse HTTP traffic. Server build and focused tests passed. No real v15 provider call was made."
+    source: "apps/server/scripts/check-interview-evaluator-simulation.ts; apps/server/test/interview-interpretation-first.test.ts; private policy-15-http-results.json and policy-15-simulation.ndjson."
     updated_at: "2026-11-09"
   - id: interpretation-first-semantic-quality
     status: contradicted
-    claim: The real provider consistently detects uncertain speech and credits implicit reasoning with the v15 prompt and required fields.
-    reason: The real v15 trial credits the earlier implicit explanation and identifies ambiguous meaning, but also falsely reviews an instruction-echo control, misses reasoning on a new correct answer, and rejects two declared-uncertain responses for oversized summaries. This contradicts consistent semantic reliability on the tested set.
-    verification: On clean b265cf0 ran the separately approved 20 Nova 2 Lite LOW calls, 16 initial plus 4 fresh repeats; counters 60 to 80. Initial frozen checks pass 12/16 but preferred grade/review plus checks pass 10/16; repeats pass 3/4. Two controls pass free. All labels unchanged. No voice tests or production policy change.
-    source: docs/prepare/INTERVIEWS-GRADING-POLICY-15.md; docs/prepare/INTERVIEWS-GRADING-THINKING-COMPARISON.md.
+    claim: "The real provider consistently detects uncertain speech and credits implicit reasoning with the v15 prompt and required fields."
+    reason: "The real v15 trial credits the earlier implicit explanation and identifies ambiguous meaning, but also falsely reviews an instruction-echo control, misses reasoning on a new correct answer, and rejects two declared-uncertain responses for oversized summaries. This contradicts consistent semantic reliability on the tested set."
+    verification: "On clean b265cf0 ran the separately approved 20 Nova 2 Lite LOW calls, 16 initial plus 4 fresh repeats; counters 60 to 80. Initial frozen checks pass 12/16 but preferred grade/review plus checks pass 10/16; repeats pass 3/4. Two controls pass free. All labels unchanged. No voice tests or production policy change."
+    source: "docs/prepare/INTERVIEWS-GRADING-POLICY-15.md; docs/prepare/INTERVIEWS-GRADING-THINKING-COMPARISON.md."
     updated_at: "2026-11-09"
   - id: non-grade-bearing-summary-boundary
     status: supported
-    claim: The v10 caller honors validated uncertainty despite malformed or overlong presentation summaries, while preserving strict critical status and source-reference validation.
-    reason: Actual SDK HTTP fixtures exercise the measured failure class; the parser-only preview sends an identical model request to policy 15. Historical v9 behavior remains frozen. This is caller validation, not evidence of improved model semantics.
-    verification: On 2026-11-09 all 33 HTTP assertions and 33 request events passed on the owned loopback stand-in, including v9 rejection and v10 review for the same overlong summary; invalid uncertain references and missing reasoning still rejected. Full server suite 763 passed, 290 skipped; focused 160 passed; build and script typecheck passed. No real provider calls or production changes.
-    source: apps/server/test/interview-review-boundary.test.ts; apps/server/scripts/check-interview-evaluator-simulation.ts; docs/prepare/INTERVIEWS-GRADING-REVIEW-BOUNDARY-16.md; private policy-16-http-results.json and policy-16-simulation.ndjson.
+    claim: "The v10 caller honors validated uncertainty despite malformed or overlong presentation summaries, while preserving strict critical status and source-reference validation."
+    reason: "Actual SDK HTTP fixtures exercise the measured failure class; the parser-only preview sends an identical model request to policy 15. Historical v9 behavior remains frozen. This is caller validation, not evidence of improved model semantics."
+    verification: "On 2026-11-09 all 33 HTTP assertions and 33 request events passed on the owned loopback stand-in, including v9 rejection and v10 review for the same overlong summary; invalid uncertain references and missing reasoning still rejected. Full server suite 763 passed, 290 skipped; focused 160 passed; build and script typecheck passed. No real provider calls or production changes."
+    source: "apps/server/test/interview-review-boundary.test.ts; apps/server/scripts/check-interview-evaluator-simulation.ts; docs/prepare/INTERVIEWS-GRADING-REVIEW-BOUNDARY-16.md; private policy-16-http-results.json and policy-16-simulation.ndjson."
     updated_at: "2026-11-09"
   - id: scoped-bank-semantic-reliability
     status: contradicted
-    claim: The scoped bank with policy 16 reliably separates actual stated understanding from unresolved references in the tested set.
-    reason: The real trial improved concise/mixed-answer grades but gave N15-03 CORRECT despite unresolved table-role references; exact source quotation did not establish the missing relationship. P2-02 also still reviewed rather than returning the expected empty-answer outcome. The local parser fixture cannot establish semantic reliability.
-    verification: On clean 524d4c9 ran the separately approved 20 Nova 2 Lite LOW calls: 18 initial and 2 fresh repeats. Initial frozen checks passed 16/18, preferred outcomes plus checks 15/18; repeats passed 2/2. Original labels unchanged. Counters 80 to 100; no further same-day calls. No production changes.
-    source: docs/prepare/INTERVIEWS-QUESTION-SCOPE-VALIDATION.md; private question-scope-1-summary.json, question-scope-1-initial-review.json and question-scope-1-reconciliation.json.
+    claim: "The scoped bank with policy 16 reliably separates actual stated understanding from unresolved references in the tested set."
+    reason: "The real trial improved concise/mixed-answer grades but gave N15-03 CORRECT despite unresolved table-role references; exact source quotation did not establish the missing relationship. P2-02 also still reviewed rather than returning the expected empty-answer outcome. The local parser fixture cannot establish semantic reliability."
+    verification: "On clean 524d4c9 ran the separately approved 20 Nova 2 Lite LOW calls: 18 initial and 2 fresh repeats. Initial frozen checks passed 16/18, preferred outcomes plus checks 15/18; repeats passed 2/2. Original labels unchanged. Counters 80 to 100; no further same-day calls. No production changes."
+    source: "docs/prepare/INTERVIEWS-QUESTION-SCOPE-VALIDATION.md; private question-scope-1-summary.json, question-scope-1-initial-review.json and question-scope-1-reconciliation.json."
     updated_at: "2026-11-09"
+  - id: medium-reasoning-transport
+    status: supported
+    claim: "The inactive policy-16 MEDIUM comparison preserves grading input and bounds, serializes the requested effort, honors declared uncertainty, and excludes fixture reasoning content."
+    reason: "Actual SDK HTTP requests exercised the owned stand-in and production caller/parser. This supports transport/validation only, not real Bedrock acceptance or grading accuracy."
+    verification: "On 2026-11-11 local time, 38 assertions and 38 request events passed on owned loopback port 4932, including MEDIUM payload checks, review-required input, throttling, wrong tool and missing reasoning. Mocked tests pin the unchanged LOW config/current policy and compare request envelopes. No real provider calls."
+    source: "apps/server/test/interview-thinking-medium.test.ts; apps/server/scripts/check-interview-evaluator-simulation.ts; postman/mocks/bedrock/default.js; docs/prepare/INTERVIEWS-MEDIUM-THINKING-COMPARISON.md; private http-results.json and simulation.ndjson under /private/tmp/spasht-medium-preparation/."
+    updated_at: "2026-11-11"
+  - id: medium-reasoning-semantic-quality
+    status: unknown
+    claim: "MEDIUM thinking reliably improves uncertain/no-subject grading over the matched LOW baseline within the same resource envelope."
+    reason: "AWS documents the setting but no real-model trial on this profile has occurred. Authored stand-in outcomes cannot establish semantic improvement or account/request compatibility."
+    verification: "Prepared six initial and two repeat cases per arm, a proposed 16-call bound. Read-only restricted-role bank/config preflights passed; normal remaining actor quota was insufficient and no new paid allowance exists. No invocation made."
+    source: "docs/prepare/INTERVIEWS-MEDIUM-THINKING-COMPARISON.md; apps/server/test/fixtures/interview-calibration-thinking-medium-focused-1.json; apps/server/test/fixtures/interview-calibration-thinking-medium-repeat-1.json; https://docs.aws.amazon.com/nova/latest/nova2-userguide/extended-thinking.html."
+    updated_at: "2026-11-11"
 fingerprints:
   - id: policy-11-http-fixtures
     date: "2026-11-08"

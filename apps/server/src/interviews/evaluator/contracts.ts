@@ -9,7 +9,7 @@ export const CONFIGS = {
 export const VERSIONS = { prompt: 'interview-answer-4', schema: 'interview-result-2', rubric: 'bank-guidance-1', policy: 'adaptive-1' } as const
 export const LIMITS = { dailyPerAdmin: 20, dailyGlobal: 100, concurrent: 2, attempts: 3, timeoutMs: 20_000, leaseMs: 60_000, maxTokens: 2000 }
 export type EvaluatorConfig = { id: string; modelId: string; region: string; label: string; prompt: string; schema: string; rubric: string; policy: string
-  temperature: number; maxTokens: number; timeoutMs: number; responseFormat?: 'tool'; reasoningEffort?: 'low' }
+  temperature: number; maxTokens: number; timeoutMs: number; responseFormat?: 'tool'; reasoningEffort?: 'low' | 'medium' }
 // Learner grading policies are frozen literals: a run pins one at launch and keeps evaluating
 // with exactly that entry. Never edit an entry in place; add a version and move CURRENT.
 // learner-evaluation-1 reproduces configFor('nova2_lite') as first pinned (hash checked in tests).
@@ -71,6 +71,10 @@ export const LEARNER_POLICIES: Record<string, LearnerPolicy> = {
   // Parser-only preview: identical v15 model request; presentation summary cannot gate an assessment.
   'learner-evaluation-16': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova2-lite-learner-16', modelId: 'us.amazon.nova-2-lite-v1:0', region: 'us-east-1', label: 'Nova 2 Lite · review boundary 16 (candidate)',
     prompt: 'interview-answer-17', schema: 'interview-result-10', rubric: 'bank-guidance-6', policy: 'learner-evaluation-16', temperature: 0, maxTokens: 15000, timeoutMs: 40_000, responseFormat: 'tool', reasoningEffort: 'low' } },
+
+  // Benchmark only: identical grading instructions/validation/bounds to v16; changes LOW to MEDIUM.
+  'learner-evaluation-16-thinking-medium': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova2-lite-learner-16-thinking-medium', modelId: 'us.amazon.nova-2-lite-v1:0', region: 'us-east-1', label: 'Nova 2 Lite · grading 16 medium thinking (benchmark)',
+    prompt: 'interview-answer-17', schema: 'interview-result-10', rubric: 'bank-guidance-6', policy: 'learner-evaluation-16-thinking-medium', temperature: 0, maxTokens: 15000, timeoutMs: 40_000, responseFormat: 'tool', reasoningEffort: 'medium' } },
 
 }
 // learner-evaluation-8: v5's prompt, rubric and model with the versioned interview-result-4 evidence matching.

@@ -83,7 +83,7 @@ try {
     'test/interview-interpretation-first.test.ts', 'test/interview-review-boundary.test.ts',
     'test/interview-calibration-bank.test.ts', 'test/interview-calibration-review.test.ts',
     'test/interview-grading-saved-evidence.test.ts', 'test/interview-diagnostic-plan.test.ts',
-    'test/interview-ambiguity-saved-evidence.test.ts', 'test/interview-grading-boundaries.test.ts',
+    'test/interview-ambiguity-saved-evidence.test.ts', 'test/interview-grading-boundaries.test.ts', 'test/interview-thinking-medium.test.ts',
     '--no-file-parallelism', '--maxWorkers', '1', '--reporter=json',
     '--outputFile', path.join(output, 'tests.json')], path.join(root, 'apps/server'));
   if (summary.tests.exitCode !== 0 || summary.tests.timedOut) throw new Error('Regression tests failed or timed out. Inspect tests.log.');

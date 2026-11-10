@@ -1,0 +1,150 @@
+{
+  "fixtureVersion": "thinking-medium-focused-1",
+  "reviewer": "Owner-authorized AI technical adjudication; not independent expert calibration.",
+  "preRegistered": "Future LOW-vs-MEDIUM same-model comparison. Six exact cases from grading-boundaries-1 per arm, followed by two repeats per arm: 16 paid calls maximum including canaries, no retries. No paid execution authorized or model results claimed.",
+  "namespace": "grading-scope-1",
+  "questions": {
+    "DE-NEW-001": {
+      "revision": 2,
+      "guidanceHash": "48bc579643612a2df18599d67320bd88cb9eed331b3fda2b9054b801b970fabc",
+      "guidanceIssues": []
+    },
+    "DE-NEW-016": {
+      "revision": 2,
+      "guidanceHash": "669df3c4542a37d65177828d37fe2ff5908ac741f7edf5ba316be0af87bb3239",
+      "guidanceIssues": []
+    },
+    "WEB-NEW-099": {
+      "revision": 2,
+      "guidanceHash": "714e044f82f57429823bf283f80b7ddbb5604c9f28642c753a59f26d0bc13e29",
+      "guidanceIssues": []
+    }
+  },
+  "cases": [
+    {
+      "id": "B1-03",
+      "qid": "DE-NEW-001",
+      "category": "new-unresolved-referents",
+      "expected": "UNASSESSED",
+      "expectedDisposition": "REVIEW_REQUIRED",
+      "answer": "The table with the... event thing. The other has that one, the measure... no, the label. I mean the one we said, not the other.",
+      "notes": "Unresolved referents and self-correction do not establish which table has which role. Inventing those links would determine the grade. No knowledge update.",
+      "acceptable": [
+        "UNASSESSED"
+      ],
+      "sourceFixture": "new-ai-authored-2026-11-09",
+      "adjudication": {
+        "sourceCaseId": "N15-03",
+        "sourceFixtureVersion": "question-scope-focused-1",
+        "sourceFixtureSha256": "3a456d7e074a66c73d35adceac17c8c2242f1ab20aaf39c098989d29d24345db",
+        "previousExpected": "UNASSESSED",
+        "decision": "Retained ungraded review: fragment relationships require invention, rather than merely omitting an essential.",
+        "appliesTo": "Future fixture only; source record and historical results unchanged"
+      }
+    },
+    {
+      "id": "B1-04",
+      "qid": "DE-NEW-016",
+      "category": "control-empty-because",
+      "expected": "NOT_ANSWERED",
+      "acceptable": [
+        "NOT_ANSWERED"
+      ],
+      "reasoningMustNotBeMet": true,
+      "answer": "Joint types use the concrete case, because.\nThe identity, the incorrect assumption and its consequence.\nBasic behavior is good.",
+      "notes": "Control: empty 'because' plus instruction wording.",
+      "sourceCases": [
+        "pilot-2:P2-02",
+        "readiness-2026-11-06:P2-02"
+      ],
+      "sourceFixture": "pilot-2",
+      "adjudication": {
+        "sourceCaseId": "P2-02",
+        "sourceFixtureVersion": "question-scope-focused-1",
+        "sourceFixtureSha256": "3a456d7e074a66c73d35adceac17c8c2242f1ab20aaf39c098989d29d24345db",
+        "previousExpected": "NOT_ANSWERED",
+        "decision": "Retained no-answer expectation: instruction echo and empty causal wording assert no substantive proposition. Do not create a knowledge gap or mistake it for an explicit false belief.",
+        "appliesTo": "Future fixture only; source record and historical results unchanged"
+      }
+    },
+    {
+      "id": "B1-01",
+      "qid": "DE-NEW-001",
+      "category": "unresolved-role-mapping",
+      "answer": "One of those tables stores measured events at a defined grain. The other has descriptive attributes to filter and group. I cannot tell you which one is which.",
+      "expected": "PARTIAL",
+      "acceptable": [
+        "PARTIAL"
+      ],
+      "notes": "Technical roles are mentioned but assigning fact versus dimension would require guessing.",
+      "adjudication": {
+        "sourceCaseId": "C1-04",
+        "sourceFixtureVersion": "ambiguity-baseline-1",
+        "sourceFixtureSha256": "02b144247ee4a3c1a2d5a01454474308e75e71f0dc6b7a005c8cb7dbde774acf",
+        "previousExpected": "UNASSESSED",
+        "decision": "Clear partial knowledge: both correct technical roles are described, but fact/dimension name assignment is missing. Do not invent the mapping or award CORRECT. A missing essential is not automatically unclear transcript meaning.",
+        "appliesTo": "Future fixture only; source record and historical results unchanged"
+      }
+    },
+    {
+      "id": "B1-02",
+      "qid": "WEB-NEW-099",
+      "category": "fragmented-implicit-reasoning",
+      "expected": "CORRECT",
+      "acceptable": [
+        "CORRECT"
+      ],
+      "mustNotBe": [
+        "INCORRECT",
+        "NOT_ANSWERED"
+      ],
+      "answer": "Keyboard order follows semantic controls.\nAnd\nDom position.\nPositive TB index.\nCreates\nUh, competing manual order?\nUh, the example.\nI don't have one.\nMaybe, I don't know.",
+      "expectReasoning": true,
+      "mustNotSay": [
+        "does not provide any reasoning",
+        "lacks reasoning",
+        "no reasoning",
+        "does not explain why"
+      ],
+      "notes": "'Positive TB index. Creates ... competing manual order' is the reason positive tabindex is discouraged.",
+      "sourceCases": [
+        "pilot-2:P2-07",
+        "readiness-2026-11-06:P2-07"
+      ],
+      "sourceFixture": "pilot-2",
+      "adjudication": {
+        "sourceCaseId": "P2-07",
+        "sourceFixtureVersion": "question-scope-focused-1",
+        "sourceFixtureSha256": "3a456d7e074a66c73d35adceac17c8c2242f1ab20aaf39c098989d29d24345db",
+        "previousExpected": "PARTIAL",
+        "decision": "The reviewed question asks natural focus order and why positive tabindex is discouraged. DOM position and a competing manual order address both; an extra example is optional. Speech fragments and uncertainty about an example do not erase asserted understanding.",
+        "appliesTo": "Future fixture only; source record and historical results unchanged"
+      },
+      "mustNotGap": [
+        "example"
+      ]
+    },
+    {
+      "id": "B1-05",
+      "qid": "DE-NEW-001",
+      "category": "clear-incomplete",
+      "answer": "Fact tables keep measured business events at a fixed grain. I cannot explain what dimensions add.",
+      "expected": "PARTIAL",
+      "acceptable": [
+        "PARTIAL"
+      ],
+      "notes": "A correct fact-table proposition is understandable; dimension context is missing. No full-credit mapping and no blanket review based on cannot."
+    },
+    {
+      "id": "B1-08",
+      "qid": "DE-NEW-001",
+      "category": "clear-false-core",
+      "answer": "Fact tables contain descriptive labels, while dimensions hold measured sales events.",
+      "expected": "INCORRECT",
+      "acceptable": [
+        "INCORRECT"
+      ],
+      "notes": "Explicitly reverses the requested core roles. Clear wrong knowledge is not ambiguous speech."
+    }
+  ]
+}

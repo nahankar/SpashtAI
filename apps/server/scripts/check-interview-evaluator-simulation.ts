@@ -14,9 +14,12 @@ for(const [answer,version,expected] of [['Fixture valid.','learner-evaluation-8'
  ['[LONG_UNCERTAIN_SUMMARY]','learner-evaluation-15','INVALID_OUTPUT_SCHEMA_interpretation_summary_too_big'],
  ['[LONG_UNCERTAIN_SUMMARY]','learner-evaluation-16','EVALUATION_REVIEW_REQUIRED'],['[BAD_UNCERTAIN_SUMMARY]','learner-evaluation-16','EVALUATION_REVIEW_REQUIRED'],
  ['[MISSING_UNCERTAIN_SUMMARY]','learner-evaluation-16','EVALUATION_REVIEW_REQUIRED'],['[BAD_UNCERTAIN_EVIDENCE]','learner-evaluation-16','INVALID_OUTPUT_INVALID_PASSAGE_REFERENCE'],
- ['[BAD_CLEAR_SUMMARY]','learner-evaluation-16','CORRECT'],['[MISSING_REASONING]','learner-evaluation-16','INVALID_OUTPUT_SCHEMA_validReasoning_invalid_type'],['[NORMALIZED]','learner-evaluation-16','CORRECT']] as const){
+ ['[BAD_CLEAR_SUMMARY]','learner-evaluation-16','CORRECT'],['[MISSING_REASONING]','learner-evaluation-16','INVALID_OUTPUT_SCHEMA_validReasoning_invalid_type'],['[NORMALIZED]','learner-evaluation-16','CORRECT'],
+ ['[MEDIUM_REASONING]','learner-evaluation-16-thinking-medium','CORRECT'],['[UNCERTAIN_COMPLETE]','learner-evaluation-16-thinking-medium','EVALUATION_REVIEW_REQUIRED'],
+ ['[THROTTLE]','learner-evaluation-16-thinking-medium','MODEL_UNAVAILABLE'],['[WRONG_TOOL]','learner-evaluation-16-thinking-medium','INVALID_OUTPUT_TOOL_ENVELOPE'],
+ ['[MISSING_REASONING]','learner-evaluation-16-thinking-medium','INVALID_OUTPUT_SCHEMA_validReasoning_invalid_type']] as const){
  try{const r=await evaluateAnswer(q,answer,LEARNER_POLICIES[version].config,'NONE');if(r.result.classification!==expected)throw Error('Unexpected grade');
- if(version==='learner-evaluation-14-thinking-low' && JSON.stringify(r).includes('FIXTURE_PRIVATE_REASONING'))throw Error('Reasoning content escaped');
+ if(['learner-evaluation-14-thinking-low','learner-evaluation-16-thinking-medium'].includes(version) && JSON.stringify(r).includes('FIXTURE_PRIVATE_REASONING'))throw Error('Reasoning content escaped');
  if(version==='learner-evaluation-16'){
    if(JSON.stringify(r).includes('FIXTURE_BAD_SUMMARY_NOT_OUTPUT'))throw Error('Discarded summary escaped');
    if(answer==='[BAD_CLEAR_SUMMARY]'&&!r.result.validationNotes?.some(n=>n.includes('summary was unavailable')))throw Error('Missing summary degradation note');

@@ -96,3 +96,7 @@ tests are code tests, not fresh model trials or proof of semantic reliability.
 Historical snapshots remain failed even after a future model fix. Their replay is an audit, not a requirement
 to rewrite old evidence until it turns green. Candidate release readiness must use separately identified fresh
 results for that candidate; the current adaptive feature still lacks that passing reliability evidence.
+
+An inactive LOW/MEDIUM comparison is prepared in `docs/prepare/INTERVIEWS-MEDIUM-THINKING-COMPARISON.md`.
+Its transport tests use the owned HTTP fixture, not real grading. The default offline check includes its
+request-envelope tests; running `grading:check` still cannot spend the proposed 16-call allowance.
