@@ -205,3 +205,6 @@ Next work should separate clear incomplete knowledge from unresolvable transcrip
 unsafe outcome, and address unnecessary reviews. Do not change another prompt just because two repeats were
 safe. Any proposed model/parser change needs its own measured comparison and new bounded allowance. Broader
 reliability and actual automated voice/workspace validation remain required before adaptive release.
+
+Future-only resolution of C1-04 and P2-07 is recorded in `INTERVIEWS-GRADING-BOUNDARY-ADJUDICATION.md`.
+The completed trial above retains its original labels, outcomes and HOLD conclusion.

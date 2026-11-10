@@ -30,7 +30,7 @@ export function diagnosticPlan(initial: Fixture, repeat: Fixture, original: Fixt
   if ([...initial.cases, ...repeat.cases].some(c => deterministicResult(policy, c.answer))) throw Error('Paid-call count includes a deterministic control')
   const config = policy.config
   if (hash(config) !== expectedConfig) throw Error('Policy 16 configuration changed')
-  return { status: 'PREPARED_NOT_EXECUTED', callsAuthorized: false, paidCallsProposed: 12, initialTrials: 9, freshRepeats: 3,
+  return { status: 'OFFLINE_DEFINITION_ONLY', executionHistory: 'See docs/prepare/INTERVIEWS-AMBIGUITY-DIAGNOSTIC.md; this definition does not inspect run history or authorize another submission', callsAuthorized: false, paidCallsProposed: 12, initialTrials: 9, freshRepeats: 3,
     policy: config.policy, modelId: config.modelId, region: config.region, configHash: expectedConfig,
     reasoningEffort: config.reasoningEffort, maxTokensPerInvocation: config.maxTokens,
     maximumConfiguredOutputTokens: config.maxTokens * 12, timeoutMsPerInvocation: config.timeoutMs,

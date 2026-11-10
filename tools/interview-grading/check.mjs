@@ -68,6 +68,10 @@ try {
   const state = await run('git-state', 'git', ['status', '--porcelain'], root, 5000);
   if (state.exitCode !== 0) throw new Error('Cannot identify checkout changes.');
   summary.workingTreeDirty = Boolean((await readFile(path.join(output, 'git-state.log'), 'utf8')).trim());
+  const futureFile = path.join(root, 'apps/server/test/fixtures/interview-calibration-grading-boundaries-1.json');
+  const futureFixture = JSON.parse(await readFile(futureFile, 'utf8'));
+  summary.futureAcceptance = { fixtureVersion: futureFixture.fixtureVersion, cases: futureFixture.cases.length,
+    sha256: await digest(futureFile), modelTested: false };
   summary.fixtureHash = await digest(fixture);
   summary.savedEvidenceHash = await digest(saved);
   const provenance = JSON.parse(await readFile(saved, 'utf8')).provenance;
@@ -79,7 +83,7 @@ try {
     'test/interview-interpretation-first.test.ts', 'test/interview-review-boundary.test.ts',
     'test/interview-calibration-bank.test.ts', 'test/interview-calibration-review.test.ts',
     'test/interview-grading-saved-evidence.test.ts', 'test/interview-diagnostic-plan.test.ts',
-    'test/interview-ambiguity-saved-evidence.test.ts',
+    'test/interview-ambiguity-saved-evidence.test.ts', 'test/interview-grading-boundaries.test.ts',
     '--no-file-parallelism', '--maxWorkers', '1', '--reporter=json',
     '--outputFile', path.join(output, 'tests.json')], path.join(root, 'apps/server'));
   if (summary.tests.exitCode !== 0 || summary.tests.timedOut) throw new Error('Regression tests failed or timed out. Inspect tests.log.');

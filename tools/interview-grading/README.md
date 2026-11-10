@@ -74,7 +74,7 @@ is exhausted; this command cannot raise or reset quotas and never imports the pa
 
 See `docs/prepare/INTERVIEWS-GRADING-OFFLINE-AUDIT.md` for the current failure investigation and next experiment.
 
-To inspect the next proposed diagnostic without running it:
+To inspect the original 12-call diagnostic definition without running it:
 
 ```sh
 npm run grading:plan
@@ -87,3 +87,12 @@ read-only bank/quota preflight and execution prerequisites. Planning is not a mo
 The 10 November 12-call results are in `docs/prepare/INTERVIEWS-AMBIGUITY-DIAGNOSTIC.md`. The saved C1-04
 expectation is disputed but retained. A test passing because it detects that disagreement is not model-quality
 success. Each saved dataset has its own review JSON and provenance in the compact summary.
+
+The future acceptance decisions are recorded in `docs/prepare/INTERVIEWS-GRADING-BOUNDARY-ADJUDICATION.md`.
+There are ten new/versioned cases with **no model results yet**. The offline summary marks them
+`modelTested: false`; they do not replace or rescore the 32 historical saved rows. Synthetic acceptance-checker
+tests are code tests, not fresh model trials or proof of semantic reliability.
+
+Historical snapshots remain failed even after a future model fix. Their replay is an audit, not a requirement
+to rewrite old evidence until it turns green. Candidate release readiness must use separately identified fresh
+results for that candidate; the current adaptive feature still lacks that passing reliability evidence.

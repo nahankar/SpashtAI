@@ -6,7 +6,7 @@ import original from './fixtures/interview-calibration-question-scope-focused-1.
 import { diagnosticPlan, loadDiagnosticPlan } from '../scripts/plan-interview-diagnostic'
 describe('bounded unchanged-model ambiguity diagnostic plan', () => {
   it('plans twelve calls without authorizing or claiming a model result', async () => {
-    expect(diagnosticPlan(initial, repeat, original, contrasts)).toMatchObject({ status: 'PREPARED_NOT_EXECUTED',
+    expect(diagnosticPlan(initial, repeat, original, contrasts)).toMatchObject({ status: 'OFFLINE_DEFINITION_ONLY',
       callsAuthorized: false, paidCallsProposed: 12, initialTrials: 9, freshRepeats: 3, release: 'HOLD', maximumConfiguredOutputTokens: 180000 })
     expect((await loadDiagnosticPlan()).fixtures.every(f => /^[a-f0-9]{64}$/.test(f.sha256))).toBe(true)
   })
