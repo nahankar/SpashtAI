@@ -1,0 +1,76 @@
+{
+  "fixtureVersion": "ambiguity-repeat-1",
+  "provenance": {
+    "type": "Saved synthetic validated-result projection; no fresh provider calls on replay",
+    "applicationRevision": "ffa70ed326db3cfd737227fce08c65fc4cbbb379",
+    "date": "2026-11-10",
+    "policy": "learner-evaluation-16",
+    "model": "us.amazon.nova-2-lite-v1:0",
+    "configHash": "0f6f309aec2d53806612cac4180f1b4349b6dca98c4681fe1e6e5f93ebe0148a",
+    "fixtureSha256": "009c65857825e678b1caab38dbe41481a0023d87a37f4ce11da1b9cd70cdf185",
+    "scope": "repeat: 3 fresh paid trials from the approved 12-call diagnostic; no reused controls",
+    "omitted": "Operational identifiers, usage logs, auth, recordings, raw provider bodies and hidden reasoning",
+    "warning": "Frozen expectations retained, including the disputed C1-04 review label. Replaying this report is not a fresh model validation."
+  },
+  "results": [
+    {
+      "id": "N15-03",
+      "model": "learner-evaluation-16",
+      "status": "FAILED",
+      "errorCode": "EVALUATION_REVIEW_REQUIRED",
+      "reused": false,
+      "result": null
+    },
+    {
+      "id": "N15-01",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "CORRECT",
+        "criteria": [
+          {
+            "finding": "MET",
+            "evidence": [
+              "A fact row records a measurement at a specified grain, such as one sale line with quantity and amount.",
+              "Dimensions supply descriptive context, like product category or customer region, for filtering and grouping those measurements."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "The cited answer covers the requested essentials."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "A fact row records a measurement at a specified grain, such as one sale line with quantity and amount.",
+              "Dimensions supply descriptive context, like product category or customer region, for filtering and grouping those measurements."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The cited passage explains a true relevant mechanism, contrast or consequence."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [
+          "A fact row records a measurement at a specified grain, such as one sale line with quantity and amount.",
+          "Dimensions supply descriptive context, like product category or customer region, for filtering and grouping those measurements."
+        ],
+        "gaps": [],
+        "misconceptions": [],
+        "guidance": "Apply this understanding to a different example."
+      }
+    },
+    {
+      "id": "P2-02",
+      "model": "learner-evaluation-16",
+      "status": "FAILED",
+      "errorCode": "EVALUATION_REVIEW_REQUIRED",
+      "reused": false,
+      "result": null
+    }
+  ]
+}

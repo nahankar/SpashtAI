@@ -28,9 +28,9 @@ For code checks alone:
 npm run grading:check -- --code-only
 ```
 
-That command makes **no grading-quality or release-readiness claim**. Default replay uses all 20 initial
-synthetic rows: 18 model results plus two reused deterministic controls. The two later paid repeats are
-not in this projection. Its provenance pins the original application/configuration and fixture hash.
+That command makes **no grading-quality or release-readiness claim**. Default replay includes the historical 20 initial synthetic rows (18 model results plus two reused
+deterministic controls), and the 10 November diagnostic's nine initial results plus three fresh repeats.
+The historical trial's two later paid repeats are not in its projection. Each projection pins its original application/configuration and fixture hash.
 The projection excludes operational identifiers, usage logs, raw provider bodies and hidden reasoning.
 Only synthetic answers/results are committed; no learner data, credentials, audio or authentication state.
 
@@ -69,7 +69,7 @@ voice test or complete application test. Retain the original evidence; do not ov
 
 A changed model, prompt, bank or active grading path requires fresh bounded validation, followed by relevant
 real automated voice/workspace acceptance before release. Replaying old results cannot demonstrate that a
-new model fix works. Paid runs remain separate and require an available, approved allowance. Today's allowance
+new model fix works. Paid runs remain separate and require an available, approved allowance. The latest approved allowance
 is exhausted; this command cannot raise or reset quotas and never imports the paid calibration runner.
 
 See `docs/prepare/INTERVIEWS-GRADING-OFFLINE-AUDIT.md` for the current failure investigation and next experiment.
@@ -83,3 +83,7 @@ npm run grading:plan
 This prints the frozen fixture/configuration hashes and proposed 12-call bound. It is offline and cannot
 submit work or authorize spending. Read `docs/prepare/INTERVIEWS-AMBIGUITY-DIAGNOSTIC.md` for the observed
 read-only bank/quota preflight and execution prerequisites. Planning is not a model-quality result.
+
+The 10 November 12-call results are in `docs/prepare/INTERVIEWS-AMBIGUITY-DIAGNOSTIC.md`. The saved C1-04
+expectation is disputed but retained. A test passing because it detects that disagreement is not model-quality
+success. Each saved dataset has its own review JSON and provenance in the compact summary.

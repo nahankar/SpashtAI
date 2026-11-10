@@ -23,6 +23,13 @@ const output = path.join(root, 'tools/interview-grading/runs', new Date().toISOS
 const guard = path.join(root, 'tools/interview-grading/deny-network.cjs');
 const fixture = path.join(root, 'apps/server/test/fixtures/interview-calibration-question-scope-focused-1.json');
 const saved = path.join(root, 'apps/server/test/fixtures/interview-grading-saved-scope-1.json');
+const datasets = [
+  { name: 'historical-scope', fixture, saved },
+  ...['ambiguity-baseline-1', 'ambiguity-repeat-1'].map(name => ({ name,
+    fixture: path.join(root, `apps/server/test/fixtures/interview-calibration-${name}.json`),
+    saved: path.join(root, `apps/server/test/fixtures/interview-grading-saved-${name}.json`),
+  })),
+];
 const summary = { mode: 'offline', freshProviderCalls: 0, codeOnly, codeChecks: 'ERROR', gradingEvidence: 'NOT_REVIEWED', release: 'NOT_ASSESSED' };
 const env = Object.fromEntries(['PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'SystemRoot', 'USERPROFILE'].filter(k => process.env[k]).map(k => [k, process.env[k]]));
 Object.assign(env, { NODE_ENV: 'test', AWS_EC2_METADATA_DISABLED: 'true',
@@ -72,6 +79,7 @@ try {
     'test/interview-interpretation-first.test.ts', 'test/interview-review-boundary.test.ts',
     'test/interview-calibration-bank.test.ts', 'test/interview-calibration-review.test.ts',
     'test/interview-grading-saved-evidence.test.ts', 'test/interview-diagnostic-plan.test.ts',
+    'test/interview-ambiguity-saved-evidence.test.ts',
     '--no-file-parallelism', '--maxWorkers', '1', '--reporter=json',
     '--outputFile', path.join(output, 'tests.json')], path.join(root, 'apps/server'));
   if (summary.tests.exitCode !== 0 || summary.tests.timedOut) throw new Error('Regression tests failed or timed out. Inspect tests.log.');
@@ -80,19 +88,29 @@ try {
   summary.codeChecks = 'PASS';
   summary.passedTests = tests.numPassedTests;
   if (!codeOnly) {
-    const result = await run('saved-review', process.execPath, ['--import', 'tsx',
-      'apps/server/scripts/review-interview-calibration.ts', fixture, saved, path.join(output, 'review.json')], root);
-    if (result.timedOut || ![0, 1].includes(result.exitCode)) throw new Error('Saved evidence review could not complete.');
-    const review = JSON.parse(await readFile(path.join(output, 'review.json'), 'utf8'));
-    const held = review.decision === 'HOLD_GRADE_DRIVEN_ADAPTATION';
-    if (![ 'HOLD_GRADE_DRIVEN_ADAPTATION', 'SAMPLE_PASSED_REVIEW_STILL_REQUIRED' ].includes(review.decision)
-      || result.exitCode !== (held ? 1 : 0) || !review.summary?.cases) throw new Error('Invalid saved review outcome.');
+    summary.savedReviews = [];
+    summary.disagreements = [];
+    let held = false;
+    for (const dataset of datasets) {
+      const fixtureHash = await digest(dataset.fixture);
+      const evidenceProvenance = JSON.parse(await readFile(dataset.saved, 'utf8')).provenance;
+      if (evidenceProvenance.fixtureSha256 !== fixtureHash) throw new Error(`Frozen fixture changed: ${dataset.name}`);
+      const result = await run(dataset.name, process.execPath, ['--import', 'tsx',
+        'apps/server/scripts/review-interview-calibration.ts', dataset.fixture, dataset.saved,
+        path.join(output, `${dataset.name}-review.json`)], root);
+      if (result.timedOut || ![0, 1].includes(result.exitCode)) throw new Error(`Saved evidence review incomplete: ${dataset.name}`);
+      const review = JSON.parse(await readFile(path.join(output, `${dataset.name}-review.json`), 'utf8'));
+      const datasetHeld = review.decision === 'HOLD_GRADE_DRIVEN_ADAPTATION';
+      if (!['HOLD_GRADE_DRIVEN_ADAPTATION', 'SAMPLE_PASSED_REVIEW_STILL_REQUIRED'].includes(review.decision)
+        || result.exitCode !== (datasetHeld ? 1 : 0) || !review.summary?.cases) throw new Error('Invalid saved review outcome.');
+      held ||= datasetHeld;
+      summary.savedReviews.push({ name: dataset.name, decision: review.decision, summary: review.summary,
+        fixtureHash, savedEvidenceHash: await digest(dataset.saved), evidenceProvenance });
+      summary.disagreements.push(...review.reviews.filter(r => r.failures.length || r.exactExpected === false)
+        .map(r => ({ dataset: dataset.name, id: r.id, actual: r.actual, failures: r.failures,
+          preferredLabelMismatch: r.exactExpected === false })));
+    }
     summary.gradingEvidence = held ? 'HOLD' : 'SAVED_SAMPLE_PASS_ONLY';
-    summary.savedReview = review.summary;
-    summary.disagreements = review.reviews.filter(r => r.failures.length || r.exactExpected === false)
-      .map(r => ({ id: r.id, actual: r.actual, failures: r.failures,
-        preferredLabelMismatch: r.exactExpected === false }));
-    summary.evidenceProvenance = JSON.parse(await readFile(saved, 'utf8')).provenance;
     summary.release = held ? 'HOLD' : 'FRESH_VALIDATION_STILL_REQUIRED';
     process.exitCode = held ? 2 : 0;
   }
@@ -107,6 +125,6 @@ try {
   console.log(`Saved grading evidence: ${summary.gradingEvidence}. Release: ${summary.release}.`);
   console.log('No fresh model evaluation. No database, app or voice validation.');
   if (summary.error) console.error(summary.error);
-  if (summary.disagreements?.length) console.log(`Disagreements: ${summary.disagreements.map(r => r.id).join(', ')}`);
+  if (summary.disagreements?.length) console.log(`Disagreements: ${summary.disagreements.map(r => `${r.dataset}/${r.id}`).join(', ')}`);
   console.log(`Evidence: ${path.relative(root, output)}/summary.json`);
 }

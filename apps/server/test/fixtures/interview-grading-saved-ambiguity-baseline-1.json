@@ -1,0 +1,334 @@
+{
+  "fixtureVersion": "ambiguity-baseline-1",
+  "provenance": {
+    "type": "Saved synthetic validated-result projection; no fresh provider calls on replay",
+    "applicationRevision": "ffa70ed326db3cfd737227fce08c65fc4cbbb379",
+    "date": "2026-11-10",
+    "policy": "learner-evaluation-16",
+    "model": "us.amazon.nova-2-lite-v1:0",
+    "configHash": "0f6f309aec2d53806612cac4180f1b4349b6dca98c4681fe1e6e5f93ebe0148a",
+    "fixtureSha256": "02b144247ee4a3c1a2d5a01454474308e75e71f0dc6b7a005c8cb7dbde774acf",
+    "scope": "initial: 9 fresh paid trials from the approved 12-call diagnostic; no reused controls",
+    "omitted": "Operational identifiers, usage logs, auth, recordings, raw provider bodies and hidden reasoning",
+    "warning": "Frozen expectations retained, including the disputed C1-04 review label. Replaying this report is not a fresh model validation."
+  },
+  "results": [
+    {
+      "id": "C1-01",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "CORRECT",
+        "criteria": [
+          {
+            "finding": "MET",
+            "evidence": [
+              "Fact rows store measured events at a defined grain.",
+              "Dimension rows supply descriptive attributes used to filter and group those events."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "The cited answer covers the requested essentials."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "Fact rows store measured events at a defined grain.",
+              "Dimension rows supply descriptive attributes used to filter and group those events."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The cited passage explains a true relevant mechanism, contrast or consequence."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [
+          "Fact rows store measured events at a defined grain.",
+          "Dimension rows supply descriptive attributes used to filter and group those events."
+        ],
+        "gaps": [],
+        "misconceptions": [],
+        "guidance": "Apply this understanding to a different example."
+      }
+    },
+    {
+      "id": "C1-02",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "CORRECT",
+        "criteria": [
+          {
+            "finding": "MET",
+            "evidence": [
+              "Fact rows store measured events at a defined grain.",
+              "They can be filtered and grouped using descriptive attributes from dimension rows."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "The cited answer covers the requested essentials."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "Fact rows store measured events at a defined grain.",
+              "They can be filtered and grouped using descriptive attributes from dimension rows."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The cited passage explains a true relevant mechanism, contrast or consequence."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [
+          "Fact rows store measured events at a defined grain.",
+          "They can be filtered and grouped using descriptive attributes from dimension rows."
+        ],
+        "gaps": [],
+        "misconceptions": [],
+        "guidance": "Apply this understanding to a different example."
+      }
+    },
+    {
+      "id": "C1-03",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "CORRECT",
+        "criteria": [
+          {
+            "finding": "MET",
+            "evidence": [
+              "measured events at a defined grain.",
+              "descriptive attributes to filter and group those events."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "The cited answer covers the requested essentials."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "measured events at a defined grain.",
+              "descriptive attributes to filter and group those events."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The cited passage explains a true relevant mechanism, contrast or consequence."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [
+          "Accurately captures the core distinction between fact tables (measured events at a defined grain) and dimension tables (descriptive attributes for filtering/grouping)."
+        ],
+        "gaps": [],
+        "misconceptions": [],
+        "guidance": "Apply this understanding to a different example."
+      }
+    },
+    {
+      "id": "C1-04",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "PARTIAL",
+        "criteria": [
+          {
+            "finding": "PARTIAL",
+            "evidence": [
+              "One of those tables stores measured events at a defined grain.",
+              "The other has descriptive attributes to filter and group."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "Relevant understanding is present, with missing essentials or mixed claims."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "One of those tables stores measured events at a defined grain.",
+              "The other has descriptive attributes to filter and group."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The cited passage explains a true relevant mechanism, contrast or consequence."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [
+          "Accurately describes the core purpose of both table types: measuring events vs. providing descriptive context"
+        ],
+        "gaps": [
+          "Fails to identify which table type (fact vs. dimension) corresponds to each description"
+        ],
+        "misconceptions": [],
+        "guidance": "To fully distinguish fact and dimension tables, specify that the table storing measured events at a defined grain is the fact table, while the table with descriptive attributes for filtering/grouping is the dimension table."
+      }
+    },
+    {
+      "id": "C1-05",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "INCORRECT",
+        "criteria": [
+          {
+            "finding": "NOT_MET",
+            "evidence": [
+              "Dimension rows store measured events at a defined grain.",
+              "Fact rows supply descriptive attributes used to filter and group those events."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "The cited answer contains a false claim about the requested core concept."
+          },
+          {
+            "finding": "NOT_MET",
+            "evidence": [
+              "Dimension rows store measured events at a defined grain.",
+              "Fact rows supply descriptive attributes used to filter and group those events."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The cited passage contains an explicitly false explanation; this is separate from the knowledge verdict."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [],
+        "gaps": [
+          "No correct distinction between event/measurement storage (fact) and descriptive context (dimension)"
+        ],
+        "misconceptions": [
+          "Confused fact and dimension roles by stating dimensions store measured events and facts provide descriptive attributes"
+        ],
+        "guidance": "Fact tables record business events or measurements (e.g., sales amounts) at a defined grain, while dimension tables provide descriptive context (e.g., product attributes) used to filter and group those measurements."
+      }
+    },
+    {
+      "id": "C1-06",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "CORRECT",
+        "criteria": [
+          {
+            "finding": "MET",
+            "evidence": [
+              "Fax tables store measured business events at a defined grain.",
+              "Dimension tables give descriptive attributes used to filter and group those measurements."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "The cited answer covers the requested essentials."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "Fax tables store measured business events at a defined grain.",
+              "Dimension tables give descriptive attributes used to filter and group those measurements."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The cited passage explains a true relevant mechanism, contrast or consequence."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [
+          "Accurately captures the core distinction between fact tables (measured events) and dimension tables (descriptive context)."
+        ],
+        "gaps": [],
+        "misconceptions": [],
+        "guidance": "Minor speech clarification: 'Fact' tables, not 'Fax', store business measurements. The conceptual explanation remains correct."
+      }
+    },
+    {
+      "id": "N15-03",
+      "model": "learner-evaluation-16",
+      "status": "FAILED",
+      "errorCode": "EVALUATION_REVIEW_REQUIRED",
+      "reused": false,
+      "result": null
+    },
+    {
+      "id": "N15-01",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "CORRECT",
+        "criteria": [
+          {
+            "finding": "MET",
+            "evidence": [
+              "A fact row records a measurement at a specified grain, such as one sale line with quantity and amount.",
+              "Dimensions supply descriptive context, like product category or customer region, for filtering and grouping those measurements."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "The cited answer covers the requested essentials."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "A fact row records a measurement at a specified grain, such as one sale line with quantity and amount.",
+              "Dimensions supply descriptive context, like product category or customer region, for filtering and grouping those measurements."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The cited passage explains a true relevant mechanism, contrast or consequence."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [
+          "A fact row records a measurement at a specified grain, such as one sale line with quantity and amount.",
+          "Dimensions supply descriptive context, like product category or customer region, for filtering and grouping those measurements."
+        ],
+        "gaps": [],
+        "misconceptions": [],
+        "guidance": "Apply this understanding to a different example."
+      }
+    },
+    {
+      "id": "P2-02",
+      "model": "learner-evaluation-16",
+      "status": "FAILED",
+      "errorCode": "EVALUATION_REVIEW_REQUIRED",
+      "reused": false,
+      "result": null
+    }
+  ]
+}

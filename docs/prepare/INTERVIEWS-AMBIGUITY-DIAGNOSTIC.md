@@ -1,6 +1,7 @@
 # Unchanged-model ambiguity diagnostic — 9 November 2026
 
-**Prepared and bank/configuration-preflighted, not model-tested. Adaptive release HOLD.**
+**Completed the separately approved 12-call diagnostic on 10 November 2026. Adaptive release HOLD.**
+The preparation record below is retained; observed real-model results follow it.
 This checkpoint does not introduce policy 17, change a prompt/model/parser, or touch active learner policy 8.
 It measures the remaining question before proposing another patch: does policy 16 reliably distinguish a
 stated relationship from the same topic words without that relationship?
@@ -101,3 +102,106 @@ synthetic evidence; its current HOLD/exit 2 is expected. See `tools/interview-gr
 altered repeat answers, changed question pins, duplicate cases and drifting contrast answers. The standalone
 planner passed strict TypeScript checking. Default saved-evidence review still reports HOLD, preserving the
 three existing disagreements. These are offline/regression results, not twelve new model observations.
+
+## Completed approved diagnostic — 10 November 2026
+
+Tested clean application **`ffa70ed326db3cfd737227fce08c65fc4cbbb379`**, unchanged policy 16/configuration above,
+normal restricted local runtime, and the frozen nine-case/three-repeat fixtures. No evaluator/agent source changes
+exist between the prior scoped-bank trial and this tested revision. The owner approved at most 12 AWS calls.
+**Exactly 12 fresh invocations completed**, no reused results, retries, timeouts, provider/access errors,
+max-token failures or invalid-output jobs. All 12 responses had a reasoning-content block; only its presence
+was recorded, never hidden reasoning text. Actual results are the normal service's parsed/persisted output.
+
+The private launcher verifies approval, UTC day, isolated database, clean revision, access, restricted role,
+question pins and normal remaining quota. Exclusive durable per-call reservations enforce the cumulative
+12-send bound across phases; restarting a process cannot renew it. SDK max attempts remained one. Only this
+launcher process reduced the worker's retry ceiling from three to one to enforce the approved no-retry run;
+no source, quota ceiling, model configuration or active scoring policy changed. Existing private credentials
+were loaded without printing them. No extra model/provider-access probe was used.
+
+Before initial submission, full private evidence for exactly three selected fictional owned ADMIN_TEST records
+was archived, then those records were deleted through the normal service. Before repeats, the three new initial
+records were likewise archived and normally deleted. Content-free usage was retained. Every submission was
+fresh; repeat IDs differed while answer/question/configuration/input-key and actual provider-request hashes
+matched. The six other initial results remain saved normally. No learner records were deleted.
+
+| Diagnostic case | Frozen expectation | Initial observation | Fresh repeat |
+| --- | --- | --- | --- |
+| C1-01 explicit correct roles | CORRECT | CORRECT | Not selected |
+| C1-02 resolved pronouns | CORRECT | CORRECT | Not selected |
+| C1-03 meaningful ellipses | CORRECT | CORRECT | Not selected |
+| C1-04 clear role descriptions, names unassigned | Ungraded review | PARTIAL; missing mapping acknowledged | Not selected |
+| C1-05 explicit reversed roles | INCORRECT | INCORRECT | Not selected |
+| C1-06 recoverable technical-name ASR | CORRECT | CORRECT, NORMALIZED | Not selected |
+| N15-03 genuinely unresolved fragments | Ungraded review | EVALUATION_REVIEW_REQUIRED | Same |
+| N15-01 concise correct distinction | CORRECT | CORRECT | Same |
+| P2-02 instruction echo / empty slogan | NOT_ANSWERED | EVALUATION_REVIEW_REQUIRED | Same |
+
+Initial: **7/9** rows satisfy all frozen checks (six expected grades plus one expected ungraded review).
+Seven structurally usable grades were published, including the disputed C1-04 PARTIAL. Repeats: **2/3**
+satisfy frozen checks (one grade plus one expected review). All three repeat dispositions were stable.
+Those counts preserve the frozen labels; they do not count every ungraded output as success.
+
+### Interpretation of the two disagreements
+
+**C1-04 is a label-boundary dispute, not demonstrated invented mapping.** Its answer clearly describes two
+roles and then admits it cannot attach fact/dimension names to them. The result explicitly lists the missing
+mapping as a gap and gives PARTIAL. It does not falsely assert that the learner named both table types correctly.
+This differs from N15-03, whose fragments do not establish a connected proposition. My AI technical review
+recommends treating C1-04 as understandable but incomplete knowledge in a future version, while retaining
+review for unclear meaning. That recommendation is not independent expert validation. The frozen fixture
+has **not** been changed, and this trial has not been retroactively rescored. Treating both kinds of uncertainty
+as the same would encourage unnecessary review. The early description of this result as unsafe credit was
+too strong; inspecting the actual feedback supports this narrower conclusion.
+
+**P2-02 remains an unnecessary review under the original expectation.** It contains instruction-like wording
+and an empty causal fragment, without a substantive proposition to grade. Both new trials abstained for
+uncertainty instead of recognizing NOT_ANSWERED. Neither produced a false knowledge grade. In the existing
+shadow policy, review holds the turn whereas NOT_ANSWERED requests clarification; this is a functionality
+boundary as well as an availability issue.
+
+### The historical unsafe result is still relevant
+
+N15-03 is correctly ungraded in both fresh trials today. However, its archived 9 November result was CORRECT.
+The old/new answer hash, question hash, configuration hash and persisted input key are identical. No evaluator
+source change occurred. The provider request hashes also match between today's two trials; the old trial's
+transport hash used a different projection, so no byte-identical old/new transport-body comparison is claimed.
+Today's success is evidence of two safe outcomes, **not evidence of a fix** or reliable ambiguity detection.
+A temperature-zero run can still vary. The older unsafe outcome remains in the offline replay and continues
+to block a reliability claim. P2-07's separate preferred adaptive-label disagreement remains outside this trial.
+
+### Accounting, preservation and evidence
+
+- Actor and global day usage each advanced **0 -> 12**, within unchanged normal limits 20/admin and 100/global.
+  The approved 12-call allowance is exhausted. No additional calls are authorized by unused normal quota.
+- Exactly 12 added usage records; old content/token/timing/outcome records retained. Normal deletion only
+  removes their links to the selected archived tests. All 252 unrelated assessments and the entire local
+  question bank compare unchanged after normalizing database Date objects to saved JSON representation.
+- The first reconciliation reported a difference because the private audit hashed Date instances differently
+  from their saved strings. Field comparison found no content differences, missing/extra rows or order changes.
+  Read-only reconciliation with consistent serialization passed. No database repair or model rerun occurred.
+- Input tokens **29,874**; output tokens **9,716**; unknown usage **0**. Model latency p50 **6,442 ms**,
+  p95/max **12,360 ms**. These are measured model-call times, not a general performance or price claim.
+- Shadow routing was inspected under an explicit COMPLETE typed-capture assumption only. No live question
+  selection, knowledge-state update, voice test, production operation, merge or deploy occurred. Active policy 8
+  stays unchanged. A valid-looking C1-04 PARTIAL would currently permit a shadow knowledge update; whether
+  that is desired follows the label/product boundary above, not a hidden API/voice pass.
+
+Private evidence directory: `/private/tmp/spasht-grading-validation/ambiguity-2026-11-10/` (mode 700).
+It contains the exclusive call reservations, `baseline.json`, `historical-selected-archive.json`,
+`repeat-initial-archive.json`, normal `initial-cases/` and `repeat-cases/` reports, combined reports,
+`transport.ndjson` (content-free metadata), `*-proofs.json`, `*-review.json`, `prior-input-comparison.json`,
+`reconciliation.json`, the initial `verification-difference.json`, and compact `summary.json`.
+Private launch/audit helpers remain outside Git; credentials, operational identifiers, recordings, raw provider
+bodies and hidden reasoning are not committed.
+
+Two allowlisted synthetic result projections are committed so `npm run grading:check` now replays the old
+20-row evidence and today's nine initial/three repeat rows without provider calls. It preserves all failures and
+reports each dataset separately. The new projection tests pin source revision and expectation-file hashes.
+**200 focused tests plus six network-guard checks passed; the combined saved-evidence result is HOLD.**
+This is code/replay validation, not 32 new model trials.
+
+Next work should separate clear incomplete knowledge from unresolvable transcript meaning, preserve the old
+unsafe outcome, and address unnecessary reviews. Do not change another prompt just because two repeats were
+safe. Any proposed model/parser change needs its own measured comparison and new bounded allowance. Broader
+reliability and actual automated voice/workspace validation remain required before adaptive release.
