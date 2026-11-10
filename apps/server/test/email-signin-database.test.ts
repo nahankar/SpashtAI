@@ -89,7 +89,7 @@ describe.skipIf(!config.url)('email sign-in and invitation codes (isolated Postg
 
   it('creates no account on send, stores no plaintext code, and requires a profile before signup', async () => {
     const email = addr()
-    const sent = await request(app).post('/api/auth/email-code/request').send({ email })
+    const sent = await request(app).post('/api/auth/email-code/request').send({ email, purpose: 'signup' })
     expect(sent.status).toBe(200); expect(sent.headers['cache-control']).toBe('no-store')
     expect(sent.body).not.toHaveProperty('code')
     expect(config.mails[0].logBody).toBe(false)
@@ -150,10 +150,50 @@ describe.skipIf(!config.url)('email sign-in and invitation codes (isolated Postg
 
   it('reports email failure and invalidates the undelivered code', async () => {
     const email = addr(); config.sent = false
+    await prisma.user.create({ data: { email } })
     const result = await request(app).post('/api/auth/email-code/request').send({ email })
     expect(result.status).toBe(503); expect(result.body.error).toBe('email_delivery_failed')
     const [row] = await prisma.$queryRaw<{ codeHash: string | null }[]>`SELECT "codeHash" FROM "EmailSignInCode" WHERE "email" = ${email}`
     expect(row.codeHash).toBeNull()
+  })
+
+  it('does not send or reserve a sign-in code for an unregistered address and directs them to Signup', async () => {
+    const email = addr()
+    for (const body of [{ email }, { email, purpose: 'signin' }]) {
+      const response = await request(app).post('/api/auth/email-code/request').send(body)
+      expect(response.status).toBe(404)
+      expect(response.headers['cache-control']).toBe('no-store')
+      expect(response.body.error).toBe('signup_required')
+      expect(response.body.message).toContain('Signup')
+      expect(response.body.challengeId).toBeUndefined()
+    }
+    expect(config.mails).toHaveLength(0)
+    expect(await prisma.user.findUnique({ where: { email } })).toBeNull()
+    expect(await prisma.$queryRaw`SELECT * FROM "EmailSignInCode" WHERE "email" = ${email}`).toEqual([])
+  })
+
+  it('sends and verifies sign-in codes for registered non-Google and Google accounts, including normalized addresses', async () => {
+    for (const google of [false, true]) {
+      const email = addr()
+      const user = await prisma.user.create({ data: { email, googleId: google ? `google-${email}` : null, role: 'ADMIN', enableUltra: false } })
+      const response = await request(app).post('/api/auth/email-code/request').send({ email: ` ${email.toUpperCase()} ` })
+      expect(response.status).toBe(200)
+      expect(config.mails.at(-1)!.to).toBe(email)
+      const result = await verify(response.body.challengeId, codeFor(email))
+      expect(result.status).toBe(200)
+      expect(result.body.user.id).toBe(user.id)
+      expect(await prisma.user.findUnique({ where: { email } })).toMatchObject({ googleId: user.googleId, role: 'ADMIN', enableUltra: false })
+    }
+  })
+
+  it('rejects invalid purposes and paused signup sends without email while retaining existing-user sign-in', async () => {
+    const email = addr()
+    expect((await request(app).post('/api/auth/email-code/request').send({ email, purpose: 'other' })).status).toBe(400)
+    config.paused = true
+    expect((await request(app).post('/api/auth/email-code/request').send({ email, purpose: 'signup' })).status).toBe(403)
+    expect(config.mails).toHaveLength(0)
+    await prisma.user.create({ data: { email } })
+    expect((await request(app).post('/api/auth/email-code/request').send({ email, purpose: 'signin' })).status).toBe(200)
   })
 
   it('keeps public signups paused while allowing existing users to sign in', async () => {

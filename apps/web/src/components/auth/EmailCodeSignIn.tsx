@@ -2,12 +2,15 @@ import { useId, useState, type FormEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Link } from 'react-router-dom'
 
 const API = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:4000'
 
-export function EmailCodeSignIn({ invitedEmail, invitationToken, onVerify }: {
+export function EmailCodeSignIn({ invitedEmail, invitationToken, purpose = 'signin', signupPath = '/auth/register', onVerify }: {
   invitedEmail?: string
   invitationToken?: string
+  purpose?: 'signin' | 'signup'
+  signupPath?: string
   onVerify: (challengeId: string, code: string) => Promise<void>
 }) {
   const id = useId()
@@ -16,19 +19,25 @@ export function EmailCodeSignIn({ invitedEmail, invitationToken, onVerify }: {
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [signupRequired, setSignupRequired] = useState(false)
   const [sent, setSent] = useState(false)
   const [resendAt, setResendAt] = useState(0)
 
   async function requestCode() {
-    setBusy(true); setError('')
+    setBusy(true); setError(''); setSignupRequired(false)
     try {
       if (Date.now() < resendAt) throw new Error('Please wait one minute before requesting another code.')
       const response = await fetch(`${API}${invitationToken ? '/api/invitations' : '/api/auth'}/email-code/request`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(invitationToken ? { token: invitationToken } : { email: email.trim() }),
+        body: JSON.stringify(invitationToken ? { token: invitationToken } : { email: email.trim(), purpose }),
       })
       const data = await response.json()
-      if (!response.ok) throw new Error(data.message || data.error || 'Could not send your code.')
+      if (!response.ok) {
+        if (data.error === 'signup_required') {
+          setSignupRequired(true); setSent(false); setChallengeId(''); setCode('')
+        }
+        throw new Error(data.message || data.error || 'Could not send your code.')
+      }
       setChallengeId(data.challengeId); setCode(''); setSent(true)
       setResendAt(Date.now() + data.resendAfterSeconds * 1000)
     } catch (err) { setError(err instanceof Error ? err.message : 'Could not send your code.') }
@@ -49,7 +58,7 @@ export function EmailCodeSignIn({ invitedEmail, invitationToken, onVerify }: {
       <div className="space-y-2">
         <Label htmlFor={`${id}-email`}>Email address</Label>
         <Input id={`${id}-email`} type="email" autoComplete="email" required value={email} readOnly={Boolean(invitedEmail)} disabled={busy}
-          onChange={event => { setEmail(event.target.value); setSent(false); setChallengeId(''); setCode(''); setError('') }} />
+          onChange={event => { setEmail(event.target.value); setSent(false); setChallengeId(''); setCode(''); setError(''); setSignupRequired(false) }} />
       </div>
       {sent && <>
         <p role="status" className="text-sm text-muted-foreground">A six-digit code was sent to {email}. It expires in 10 minutes. Check your spam folder too.</p>
@@ -60,6 +69,7 @@ export function EmailCodeSignIn({ invitedEmail, invitationToken, onVerify }: {
         </div>
       </>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+      {signupRequired && <Link to={signupPath} className="block text-sm font-medium underline">Go to Signup</Link>}
       <Button type="submit" className="w-full" disabled={busy}>{busy ? 'Please wait…' : sent ? 'Verify code and continue' : 'Email me a sign-in code'}</Button>
       {sent && <Button type="button" variant="ghost" className="w-full" disabled={busy} onClick={requestCode}>Send a new code</Button>}
       <p className="text-xs text-muted-foreground">No Google Account or password required.</p>

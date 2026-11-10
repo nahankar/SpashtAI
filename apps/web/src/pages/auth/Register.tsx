@@ -112,13 +112,13 @@ export function Register() {
 
               {detailsReady && (
                 <>
-                <EmailCodeSignIn onVerify={handleEmailCode} />
-                <p className="text-center text-xs text-muted-foreground">Or continue with Google</p>
                 <GoogleSignInButton
                   label="signup_with"
                   onCredential={handleGoogleCredential}
                   onError={setError}
                 />
+                <p className="text-center text-xs text-muted-foreground">Or sign up with email</p>
+                <EmailCodeSignIn purpose="signup" onVerify={handleEmailCode} />
                 </>
               )}
 

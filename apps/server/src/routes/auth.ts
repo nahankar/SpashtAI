@@ -30,6 +30,12 @@ router.post('/email-code/request', authLimiter, async (req: Request, res: Respon
   res.setHeader('Cache-Control', 'no-store')
   try {
     const email = normalizeSignInEmail(req.body?.email)
+    const purpose = req.body?.purpose ?? 'signin'
+    if (purpose !== 'signin' && purpose !== 'signup') throw new EmailCodeError(400, 'invalid_purpose', 'Choose sign in or Signup.')
+    if (purpose === 'signin') {
+      const existing = await prisma.user.findUnique({ where: { email }, select: { id: true } })
+      if (!existing) throw new EmailCodeError(404, 'signup_required', 'No account is registered with this email address. Please Signup first.')
+    } else if (await rejectIfSignupsPaused(res)) return
     res.json(await requestEmailSignInCode(email))
   } catch (err) {
     if (err instanceof EmailCodeError) { res.status(err.status).json({ error: err.code, message: err.message }); return }

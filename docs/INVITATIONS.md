@@ -19,6 +19,18 @@ invitation email goes to the recipient (or, in development, that it is captured 
   requirements. Email-code authentication is deployed; inbox delivery is not established by automated tests.
   Standalone magic-link login is not implemented; initial invitation acceptance uses its single-use emailed link.
 
+## Sign-in versus Signup
+
+Google appears above the email-code option wherever both authentication methods are offered.
+Ordinary email sign-in sends codes only to registered addresses, including Google-linked accounts.
+An unregistered address receives a Signup message and link without reserving or sending a code.
+This intentionally reveals account existence; the existing IP rate limiter remains in place.
+Signup explicitly requests `purpose: "signup"` and still requires the regular profile and verified code
+before creating an account. Public signup pause is enforced before sending signup codes.
+Invitation-specific codes remain bound to the invitation and are unaffected by this registered-account check.
+After rolling out the API and web changes together, older cached Signup tabs must reload to send the
+explicit signup purpose. Existing sign-in tabs continue to work for registered accounts.
+
 ## Organization-only email policy
 
 Accepting an organization invitation converts that email to tenant-only access, whether the account is

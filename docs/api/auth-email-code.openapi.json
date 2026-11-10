@@ -8,7 +8,7 @@
     "/api/auth/email-code/request": {
       "post": {
         "summary": "Email a sign-in code",
-        "description": "Sends for both existing and unknown addresses without revealing account existence. Does not create an account. Mailbox budget shared across API instances: one send per minute, five per hour, plus existing IP auth limiter. SMTP failure invalidates the code and returns 503. No development code is exposed or logged.",
+        "description": "Defaults to purpose=signin: sends only for registered accounts (including Google-linked accounts); an unknown address returns 404 signup_required directing the user to Signup without creating a challenge or sending mail. Explicit purpose=signup permits a new address and obeys the signup pause; account creation still requires successful code verification and a complete profile. This intentional UX reveals account existence and remains protected by the IP auth limiter. Mailbox budget shared across API instances: one send per minute, five per hour. SMTP failure invalidates the code and returns 503. No development code is exposed or logged. Older signup clients must reload to send purpose=signup.",
         "security": [],
         "requestBody": {
           "required": true,
@@ -20,6 +20,11 @@
                   "email"
                 ],
                 "properties": {
+                  "purpose": {
+                    "type": "string",
+                    "enum": ["signin", "signup"],
+                    "default": "signin"
+                  },
                   "email": {
                     "type": "string",
                     "format": "email"

@@ -82,13 +82,13 @@ export function Login() {
             </div>
           )}
 
-          <EmailCodeSignIn onVerify={handleEmailCode} />
-          <p className="text-center text-xs text-muted-foreground">Or continue with Google</p>
           <GoogleSignInButton
             label="signin_with"
             onCredential={handleGoogleCredential}
             onError={setError}
           />
+          <p className="text-center text-xs text-muted-foreground">Or sign in with email</p>
+          <EmailCodeSignIn signupPath={next ? `/auth/register?next=${encodeURIComponent(next)}` : '/auth/register'} onVerify={handleEmailCode} />
 
           {import.meta.env.DEV && (
             <form onSubmit={handleLocalSignIn} className="space-y-3 border-t pt-4">
