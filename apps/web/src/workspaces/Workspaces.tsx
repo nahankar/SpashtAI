@@ -1,3 +1,4 @@
+import { InvitationLimitsCard } from './InvitationLimitsCard'
 import { useAuth } from '@/hooks/useAuth'
 import { OwnerAccessPanel, type WorkspaceOwner } from './OwnerAccessPanel'
 import { EnrollmentSettingsEditor } from './EnrollmentForm'
@@ -106,6 +107,7 @@ export function PlatformWorkspaces() {
           <div className="sm:col-span-3"><Button type="submit" disabled={busy}>Save limits</Button></div>
         </form>
       </CardContent></Card>
+      <InvitationLimitsCard key={JSON.stringify(workspace.invitationLimits)} limits={workspace.invitationLimits ?? { batchSize: 20, hourlyLimit: 60 }} busy={busy} onSave={invitationLimits => action(`/api/admin/workspaces/${workspace.id}`, 'PATCH', { invitationLimits })} />
       <PlatformFeatures features={workspace.features} busy={busy} onSave={(feature, value) => action(`/api/admin/workspaces/${workspace.id}/features/${feature}`, 'PUT', value)} />
       <EnrollmentSettingsEditor key={JSON.stringify(workspace.enrollmentSettings)} settings={workspace.enrollmentSettings} workspaceName={workspace.name} onEmailPreview={body => request(`/api/admin/workspaces/${workspace.id}/invitations/preview`, identityToken(), 'POST', body)} busy={busy} onSave={body => action(`/api/admin/workspaces/${workspace.id}/enrollment`, 'PUT', body)} />
       <Button variant="outline" disabled={busy} onClick={() => action(`/api/admin/workspaces/${workspace.id}`, 'PATCH', { state: workspace.state === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE' })}>{workspace.state === 'ACTIVE' ? 'Suspend workspace' : 'Reactivate workspace'}</Button>

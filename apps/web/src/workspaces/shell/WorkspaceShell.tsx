@@ -178,7 +178,7 @@ function ManagersOnly() {
 
 function InvitationsPage() {
   const { snapshot } = useWorkspaceShell()
-  return <WorkspaceInvitations role={snapshot.membership.role} features={snapshot.features} emailContent={snapshot.workspace.enrollmentSettings?.email}
+  return <WorkspaceInvitations invitationLimits={snapshot.workspace.invitationLimits} role={snapshot.membership.role} features={snapshot.features} emailContent={snapshot.workspace.enrollmentSettings?.email}
     workspaceName={snapshot.workspace.name} enrollmentFields={snapshot.workspace.enrollmentSettings?.fields} />
 }
 

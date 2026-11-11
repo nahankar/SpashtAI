@@ -221,3 +221,23 @@ Enter `SMTP_PASS` only in `/opt/spashtai/apps/server/.env` using a secure editor
 the password or a chat message. The sender and credentials must refer to the same authorized Zoho mailbox.
 After editing, run the no-mail check script, reload the API with the configured environment, and send a real
 test only to an explicitly approved recipient. Configuration checks do not establish inbox delivery.
+
+## Configurable tenant invitation limits
+
+Platform Admin → Workspaces → select an organization → Invitation limits lets the Admin set
+recipients per batch (1–500) and invitation attempts per hour (1–10,000), or select **No hourly
+limit**. PATCH `/api/admin/workspaces/:workspaceId` accepts
+`{ "invitationLimits": { "batchSize": 100, "hourlyLimit": null } }`.
+`null` removes the hourly cap; it does not remove the per-batch bound. Existing tenants default
+to 20 per batch and 60 per hour. Omitting these settings preserves their current values.
+
+A tenant's allowance is shared across its Owners/Admins and platform-triggered Owner access
+emails. New recipient deliveries, resends and failed SMTP deliveries count; rejected recipient
+validation does not. The first attempt starts an hour-long window. Usage is stored on the
+workspace and serialized with its row lock, so parallel requests and API restarts cannot reset
+or exceed the allowance. Changing/removing a cap retains usage; re-enabling it takes that usage
+into account until the window expires. No per-identity 60/hour workspace middleware cap remains.
+Normal API abuse protection, SMTP provider limits, member seats and invitation permissions remain.
+
+Platform invitations without a tenant retain their separate 20-per-batch/60-per-hour behavior.
+No real recipient email is sent by the automated limit tests.

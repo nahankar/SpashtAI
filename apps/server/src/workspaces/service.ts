@@ -7,7 +7,7 @@ import { Prisma } from '@prisma/client'
 import { signWorkspaceToken } from '../lib/jwt'
 import {
   brandingSchema, createWorkspaceSchema, effectiveWorkspaceFeature, featureSettingsSchema,
-  featureSchema, limitsSchema, platformFeatureSchema, updateMemberSchema, WORKSPACE_FEATURES, WorkspaceError,
+  featureSchema, limitsSchema, invitationLimitsSchema, platformFeatureSchema, updateMemberSchema, WORKSPACE_FEATURES, WorkspaceError,
 } from './contracts'
 import { memberFeatureDecisions } from './productAccess'
 import { eraseMemberHistory } from './memberDeletion'
@@ -19,6 +19,7 @@ export function presentWorkspace(workspace: Workspace) {
   return { id: workspace.id, slug: workspace.kind === 'PERSONAL' ? 'personal' : workspace.slug,
     enrollmentSettings: readEnrollmentSettings(workspace.enrollmentSettings), name: workspace.kind === 'PERSONAL' ? 'Personal' : workspace.name, kind: workspace.kind, state: workspace.state,
     logoDataUrl: workspace.logoDataUrl, accentColor: workspace.accentColor, timeZone: workspace.timeZone,
+    invitationLimits: { batchSize: workspace.invitationBatchSize, hourlyLimit: workspace.invitationHourlyLimit },
     isolationStage: workspace.isolationStage, limits: { maxMembers: workspace.maxMembers,
       dailyEvaluations: workspace.dailyEvaluations, concurrentVoice: workspace.concurrentVoice } }
 }
@@ -89,7 +90,7 @@ export function createOrganization(actorId: string, input: unknown) {
     if (!owner) throw new WorkspaceError(409, 'OWNER_ACCOUNT_REQUIRED', 'The initial Owner needs a verified SpashtAI account. Invite them to SpashtAI first, then create the workspace.')
     const branding = brandingSchema.parse({ name: body.name, logoDataUrl: body.logoDataUrl, accentColor: body.accentColor, timeZone: body.timeZone })
     const limits = body.limits
-    const row = await tx.workspace.create({ data: { ...branding, name: body.name, slug: body.slug, ...limits, kind: 'ORGANIZATION', isolationStage: 'FOUNDATION_ONLY',
+    const row = await tx.workspace.create({ data: { ...branding, name: body.name, slug: body.slug, ...limits, ...(body.invitationLimits ? { invitationBatchSize: body.invitationLimits.batchSize, invitationHourlyLimit: body.invitationLimits.hourlyLimit } : {}), kind: 'ORGANIZATION', isolationStage: 'FOUNDATION_ONLY',
       members: { create: { userId: owner.id, role: 'OWNER', state: 'INVITED' } },
       features: { create: WORKSPACE_FEATURES.map(feature => ({ feature, entitled: false, enabled: false })) } } })
     await audit(tx, row.id, actorId, 'workspace_created', owner.id, { membershipState: 'INVITED', emailSent: false })
@@ -98,18 +99,18 @@ export function createOrganization(actorId: string, input: unknown) {
 }
 
 export function updatePlatformWorkspace(actorId: string, workspaceId: string, input: unknown) {
-  const body = brandingSchema.extend({ state: z.enum(['ACTIVE', 'SUSPENDED']).optional(), limits: limitsSchema.optional() }).strict().parse(input)
+  const body = brandingSchema.extend({ state: z.enum(['ACTIVE', 'SUSPENDED']).optional(), limits: limitsSchema.optional(), invitationLimits: invitationLimitsSchema.optional() }).strict().parse(input)
   return withPlatformWorkspaceAdmin(actorId, async tx => {
     const workspace = await tx.workspace.findFirst({ where: { id: workspaceId, kind: 'ORGANIZATION' } })
     if (!workspace) throw new WorkspaceError(404, 'WORKSPACE_NOT_FOUND', 'Organization workspace not found')
     await tx.$queryRaw`SELECT id FROM "Workspace" WHERE id=${workspaceId} FOR UPDATE`
-    const { limits, ...settings } = body
+    const { limits, invitationLimits, ...settings } = body
     if (limits) {
       const seats = await reservedWorkspaceSeats(tx, workspaceId)
       if (limits.maxMembers < seats) throw new WorkspaceError(409, 'SEAT_LIMIT_BELOW_MEMBERS', 'The seat limit cannot be lower than current members and invitations')
     }
-    const row = await tx.workspace.update({ where: { id: workspaceId }, data: { ...settings, ...limits } })
-    await audit(tx, workspaceId, actorId, 'workspace_updated', undefined, { fields: Object.keys(body) })
+    const row = await tx.workspace.update({ where: { id: workspaceId }, data: { ...settings, ...limits, ...(invitationLimits ? { invitationBatchSize: invitationLimits.batchSize, invitationHourlyLimit: invitationLimits.hourlyLimit } : {}) } })
+    await audit(tx, workspaceId, actorId, 'workspace_updated', undefined, { fields: Object.keys(body), ...(invitationLimits ? { invitationLimits } : {}) })
     return presentWorkspace(row)
   })
 }

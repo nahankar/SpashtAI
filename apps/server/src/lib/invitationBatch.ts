@@ -1,10 +1,11 @@
 import { z } from 'zod'
 import { WorkspaceError } from '../workspaces/contracts'
 
-export const batchEmailsSchema = z.array(z.string().trim().toLowerCase().email().max(254)).min(1).max(20)
+export const batchEmailsSchemaFor = (max: number) => z.array(z.string().trim().toLowerCase().email().max(254)).min(1).max(max)
   .refine(emails => new Set(emails).size === emails.length, 'Remove duplicate email addresses')
-// Shared recipient budget across platform/workspace sends (including bulk). The existing
-// request limiters remain; this prevents one batch request multiplying their allowance.
+export const batchEmailsSchema = batchEmailsSchemaFor(20)
+// Platform recipient budget, including bulk. Tenant budgets are persisted separately
+// in the workspace, using its Admin-configured allowance.
 const sends = new Map<string, { count: number; until: number }>()
 export function reserveInvitationSend(actorId: string) {
   if (process.env.NODE_ENV !== 'production') return

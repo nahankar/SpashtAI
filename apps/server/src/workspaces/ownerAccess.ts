@@ -3,7 +3,7 @@ import { WorkspaceError } from './contracts'
 import { sendEmail } from '../lib/email'
 import { invitationDeliveryMode } from '../lib/invitations'
 import { logger } from '../lib/logger'
-import { reserveInvitationSend } from '../lib/invitationBatch'
+import { reserveWorkspaceInvitationSend } from './invitationLimits'
 
 export function buildOwnerAccessEmail(workspace: { name: string; slug: string }, baseUrl: string) {
   const url = `${baseUrl.replace(/\/$/, '')}/w/${encodeURIComponent(workspace.slug)}`
@@ -25,7 +25,7 @@ export async function sendOwnerAccess(actorId: string, workspaceId: string, memb
     if (!workspace || workspace.kind !== 'ORGANIZATION' || workspace.state !== 'ACTIVE' || workspace.storageMode !== 'SHARED' || workspace.databaseKey !== 'primary') throw new WorkspaceError(403, 'WORKSPACE_UNAVAILABLE', 'This workspace is unavailable')
     const owner = await tx.workspaceMember.findFirst({ where: { id: membershipId, workspaceId, role: 'OWNER', state: { in: ['INVITED', 'ACTIVE'] } }, include: { user: { select: { email: true, emailVerified: true } } } })
     if (!owner || !owner.user.emailVerified) throw new WorkspaceError(404, 'OWNER_UNAVAILABLE', 'An active or pending Owner with a verified account is required')
-    reserveInvitationSend(actorId)
+    await reserveWorkspaceInvitationSend(tx, workspace)
     await tx.workspaceAudit.create({ data: { workspaceId, actorUserId: actorId, action: 'owner_access_email_requested', subjectId: owner.id } })
     return { workspace, email: owner.user.email }
   })

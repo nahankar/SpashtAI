@@ -236,6 +236,10 @@ model Workspace {
   maxMembers       Int                     @default(25)
   dailyEvaluations Int                     @default(30)
   concurrentVoice  Int                     @default(2)
+  invitationBatchSize Int                  @default(20)
+  invitationHourlyLimit Int?               @default(60)
+  invitationWindowStartedAt DateTime?
+  invitationWindowCount Int                @default(0)
   storageMode      WorkspaceStorageMode    @default(SHARED)
   databaseKey      String                  @default("primary")
   createdAt        DateTime                @default(now())

@@ -81,16 +81,6 @@ export const invitationAcceptLimiter = authRateLimitDisabled
       legacyHeaders: false,
     })
 
-/** Workspace sends share a per-identity budget across all their workspaces. */
-export const workspaceInvitationSendLimiter = authRateLimitDisabled ? passthrough : rateLimit({
-  windowMs: 60 * 60 * 1000, max: 60,
-  keyGenerator: req => {
-    try { return `workspace-invite:${verifyWorkspaceToken(req.headers.authorization?.slice(7) || '').userId}` }
-    catch { return 'workspace-invite:unauthenticated' }
-  },
-  message: { error: 'Too many invitations sent, please try again later' }, standardHeaders: true, legacyHeaders: false,
-})
-
 /** AI Analytics interpretation calls a model; one budget per identity across workspaces. */
 export const workspaceAnalyticsLimiter = authRateLimitDisabled ? passthrough : rateLimit({
   windowMs: 60_000, max: 10,

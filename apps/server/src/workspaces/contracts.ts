@@ -30,6 +30,10 @@ export const brandingSchema = z.object({
   accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   timeZone: timeZoneSchema.optional(),
 }).strict()
+export const invitationLimitsSchema = z.object({
+  batchSize: z.number().int().min(1).max(500),
+  hourlyLimit: z.number().int().min(1).max(10_000).nullable(),
+}).strict()
 export const limitsSchema = z.object({
   maxMembers: z.number().int().min(1).max(100_000),
   dailyEvaluations: z.number().int().min(0).max(100_000),
@@ -39,6 +43,7 @@ export const createWorkspaceSchema = brandingSchema.extend({
   name: z.string().trim().min(2).max(100), slug: slugSchema,
   ownerEmail: z.string().trim().toLowerCase().email().max(254),
   limits: limitsSchema.optional(),
+  invitationLimits: invitationLimitsSchema.optional(),
 }).strict()
 export const featureSettingsSchema = z.object({
   enabled: z.boolean(), memberDefault: z.boolean(),

@@ -714,7 +714,7 @@
     "/api/admin/workspaces/{workspaceId}": {
       "patch": {
         "summary": "Set branding, suspension and configured limits",
-        "description": "",
+        "description": "Platform Admin only. invitationLimits configures this tenant\u2019s batch size and shared hourly recipient allowance; hourlyLimit:null removes its hourly cap. Existing settings and current-hour usage remain unchanged when omitted.",
         "security": [
           {
             "identity": []
@@ -1463,7 +1463,7 @@
     "/api/workspaces/current/invitations/bulk": {
       "post": {
         "summary": "Invite up to 20 workspace learners with separate private emails",
-        "description": "See docs/WORKSPACE-SIGNUP-AND-INVITATIONS.md for field types, validation, snapshot behavior and per-recipient outcomes.",
+        "description": "Requires a current Owner/Admin. Maximum recipients is the tenant-configured batchSize (1\u2013500, default 20). Oversized batches are rejected before any sends. Each recipient reserves the tenant\u2019s persistent shared hourly allowance under the workspace row lock. hourlyLimit:null disables that cap. Per-recipient failures are returned; successful recipients are not rolled back.",
         "security": [
           {
             "workspace": []
@@ -3069,6 +3069,9 @@
           },
           "limits": {
             "$ref": "#/components/schemas/Limits"
+          },
+          "invitationLimits": {
+            "$ref": "#/components/schemas/InvitationLimits"
           }
         },
         "required": [
@@ -3109,6 +3112,9 @@
           },
           "limits": {
             "$ref": "#/components/schemas/Limits"
+          },
+          "invitationLimits": {
+            "$ref": "#/components/schemas/InvitationLimits"
           }
         },
         "required": []
@@ -3422,6 +3428,32 @@
           "report",
           "explanation"
         ]
+      },
+      "InvitationLimits": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "batchSize",
+          "hourlyLimit"
+        ],
+        "properties": {
+          "batchSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "default": 20
+          },
+          "hourlyLimit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 10000,
+            "default": 60,
+            "description": "null removes the hourly tenant invitation cap. Numeric allowances are shared by all tenant senders, including new recipients, resends and Owner access emails. Counters persist across API restarts."
+          }
+        }
       }
     },
     "responses": {

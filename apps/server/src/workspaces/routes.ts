@@ -1,10 +1,9 @@
 import { invitationPreview } from './invitationPreview'
 import { sendOwnerAccess } from './ownerAccess'
-import { invitationSendLimiter } from '../middleware/rate-limit'
 import * as invitations from './invitations'
 import { saveManagedEnrollment, saveEnrollmentSettings } from './enrollment'
 import { withPlatformWorkspaceAdmin } from './context'
-import { workspaceAnalyticsLimiter, workspaceInvitationSendLimiter } from '../middleware/rate-limit'
+import { workspaceAnalyticsLimiter } from '../middleware/rate-limit'
 import { archiveSessionDetail, archiveSessionTranscript, listArchiveSessions } from './sessionArchive'
 import { streamWorkspaceRecording } from './sessionMedia'
 import { Router, type Request, type Response, type NextFunction } from 'express'
@@ -71,10 +70,10 @@ workspaceRouter.post('/current/invitations/preview', scoped(async (_tx, scope, r
   return invitationPreview(scope.workspace.name, req.body)
 }))
 workspaceRouter.put('/current/enrollment', scopedWrite((tx, scope, req) => saveManagedEnrollment(tx, scope, req.body)))
-workspaceRouter.post('/current/invitations/bulk', workspaceInvitationSendLimiter, route(req => invitations.createWorkspaceInvitationBatch(workspaceClaims(req), req.body)))
+workspaceRouter.post('/current/invitations/bulk', route(req => invitations.createWorkspaceInvitationBatch(workspaceClaims(req), req.body)))
 workspaceRouter.get('/current/invitations', scoped((tx, scope, req) => invitations.listWorkspaceInvitations(tx, scope, req.query)))
-workspaceRouter.post('/current/invitations', workspaceInvitationSendLimiter, route(req => invitations.createWorkspaceInvitation(workspaceClaims(req), req.body)))
-workspaceRouter.post('/current/invitations/:id/resend', workspaceInvitationSendLimiter, route(req => invitations.changeWorkspaceInvitation(workspaceClaims(req), idSchema.parse(req.params.id), 'resend')))
+workspaceRouter.post('/current/invitations', route(req => invitations.createWorkspaceInvitation(workspaceClaims(req), req.body)))
+workspaceRouter.post('/current/invitations/:id/resend', route(req => invitations.changeWorkspaceInvitation(workspaceClaims(req), idSchema.parse(req.params.id), 'resend')))
 workspaceRouter.post('/current/invitations/:id/revoke', route(req => invitations.changeWorkspaceInvitation(workspaceClaims(req), idSchema.parse(req.params.id), 'revoke')))
 workspaceRouter.get('/current/sessions', scoped((tx, scope, req) => listArchiveSessions(tx, scope, req.query)))
 workspaceRouter.get('/current/sessions/:sessionId', scoped((tx, scope, req) => archiveSessionDetail(tx, scope, idSchema.parse(req.params.sessionId))))
@@ -133,7 +132,7 @@ platformWorkspacesRouter.post('/:workspaceId/invitations/preview', route(req => 
   if (!workspace) throw new WorkspaceError(404, 'WORKSPACE_NOT_FOUND', 'Workspace not found')
   return invitationPreview(workspace.name, req.body)
 })))
-platformWorkspacesRouter.post('/:workspaceId/owners/:membershipId/send-access', invitationSendLimiter, route(req => sendOwnerAccess(req.user!.userId, idSchema.parse(req.params.workspaceId), idSchema.parse(req.params.membershipId))))
+platformWorkspacesRouter.post('/:workspaceId/owners/:membershipId/send-access', route(req => sendOwnerAccess(req.user!.userId, idSchema.parse(req.params.workspaceId), idSchema.parse(req.params.membershipId))))
 platformWorkspacesRouter.get('/', route(req => service.listPlatformWorkspaces(req.user!.userId)))
 platformWorkspacesRouter.post('/', route(req => service.createOrganization(req.user!.userId, req.body)))
 platformWorkspacesRouter.patch('/:workspaceId', route(req => service.updatePlatformWorkspace(req.user!.userId, idSchema.parse(req.params.workspaceId), req.body)))

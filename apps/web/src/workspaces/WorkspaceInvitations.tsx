@@ -23,7 +23,7 @@ const STATUSES = ['pending', 'accepted', 'expired', 'revoked'] as const
 const DELIVERY: Record<string, string> = { DEV_CAPTURED: 'Captured locally', SENT: 'Sent to mail server', FAILED: 'Not sent', SENDING: 'Sending / outcome pending' }
 const INVITE_FEATURES = ['elevate', 'replay', 'interviews', 'progress_pulse', 'feedback']
 
-export function WorkspaceInvitations({ role, features, emailContent, workspaceName, enrollmentFields }: { role: Membership['role']; features: Feature[]; emailContent?: { subject: string; message: string }; workspaceName?: string; enrollmentFields?: EnrollmentField[] }) {
+export function WorkspaceInvitations({ role, features, emailContent, workspaceName, enrollmentFields, invitationLimits }: { invitationLimits?: { batchSize: number; hourlyLimit: number | null }; role: Membership['role']; features: Feature[]; emailContent?: { subject: string; message: string }; workspaceName?: string; enrollmentFields?: EnrollmentField[] }) {
   const [rows, setRows] = useState<Page | null>(null), [page, setPage] = useState(1)
   const [status, setStatus] = useState<string>('pending'), [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false)
   const [email, setEmail] = useState(''), [name, setName] = useState(''), [inviteRole, setInviteRole] = useState<Membership['role']>('LEARNER')
@@ -73,7 +73,7 @@ export function WorkspaceInvitations({ role, features, emailContent, workspaceNa
         <Button type="submit" disabled={busy}>Review invitation</Button>
       </form>
     </CardContent></Card>
-    <BulkInvitations key={JSON.stringify(emailContent)} workspace emailContent={emailContent} workspaceName={workspaceName} fields={enrollmentFields} preview={body => call<EmailPreview>('/preview', 'POST', body)} send={async body => { const result = await call<BatchResult>('/bulk', 'POST', body); await load(); return result }} />
+    <BulkInvitations key={JSON.stringify(emailContent)} workspace invitationLimits={invitationLimits} emailContent={emailContent} workspaceName={workspaceName} fields={enrollmentFields} preview={body => call<EmailPreview>('/preview', 'POST', body)} send={async body => { const result = await call<BatchResult>('/bulk', 'POST', body); await load(); return result }} />
     <Dialog open={Boolean(draft)} onOpenChange={open => { if (!open) setDraft(null) }}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">{draft && <>
         <DialogHeader><DialogTitle>Confirm workspace invitation</DialogTitle>
