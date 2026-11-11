@@ -1,0 +1,55 @@
+{
+  "fixtureVersion": "thinking-medium-repeat-1",
+  "provenance": {
+    "type": "Saved synthetic validated-result projection; replay makes no fresh provider calls",
+    "applicationRevision": "4eaca2b918c8c4dcbfe3c0538345df836955431d",
+    "date": "2026-11-11",
+    "policies": [
+      "learner-evaluation-16",
+      "learner-evaluation-16-thinking-medium"
+    ],
+    "model": "us.amazon.nova-2-lite-v1:0",
+    "fixtureSha256": "a30e836c6ff155914f4c0ed20fe770fd72c7c6df2e7cbd0fdfca11b37d382fd6",
+    "scope": "repeat: 4 fresh paid paired trials; no reused rows",
+    "omitted": "Operational identifiers, private accounting, auth, raw provider bodies and hidden reasoning",
+    "warning": "A saved format failure is not a valid review outcome; preserve all frozen expectations.",
+    "configHashes": {
+      "learner-evaluation-16": "0f6f309aec2d53806612cac4180f1b4349b6dca98c4681fe1e6e5f93ebe0148a",
+      "learner-evaluation-16-thinking-medium": "96c9ca8b6facab1f7e014435ed51bbb685936e989166785210ba3565c2e6feda"
+    }
+  },
+  "results": [
+    {
+      "id": "B1-03",
+      "model": "learner-evaluation-16",
+      "status": "FAILED",
+      "errorCode": "EVALUATION_REVIEW_REQUIRED",
+      "reused": false,
+      "result": null
+    },
+    {
+      "id": "B1-03",
+      "model": "learner-evaluation-16-thinking-medium",
+      "status": "FAILED",
+      "errorCode": "INVALID_OUTPUT_INCONSISTENT",
+      "reused": false,
+      "result": null
+    },
+    {
+      "id": "B1-04",
+      "model": "learner-evaluation-16-thinking-medium",
+      "status": "FAILED",
+      "errorCode": "EVALUATION_REVIEW_REQUIRED",
+      "reused": false,
+      "result": null
+    },
+    {
+      "id": "B1-04",
+      "model": "learner-evaluation-16",
+      "status": "FAILED",
+      "errorCode": "EVALUATION_REVIEW_REQUIRED",
+      "reused": false,
+      "result": null
+    }
+  ]
+}

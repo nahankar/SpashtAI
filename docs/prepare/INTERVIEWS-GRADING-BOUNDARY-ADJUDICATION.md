@@ -114,3 +114,8 @@ The retained-result replay is a historical audit, not a fresh release certificat
 supply its own new validation evidence; it must not make old failed snapshots pass by rewriting their labels.
 Old reports retain their recorded HOLD outcomes even if a later candidate eventually fixes the defects.
 The current adaptive feature remains held because no such candidate has yet demonstrated that reliability.
+
+Follow-up on 11 November: the six selected boundary cases were measured on LOW and MEDIUM (six initial and
+two repeated cases per arm), with no label changes. Four of the ten cases remain untested. The companion
+`INTERVIEWS-MEDIUM-THINKING-COMPARISON.md` records both failed arms. The historical audit now replays 48 rows;
+that does not imply 48 independent cases or a full pass on the ten-case boundary fixture.

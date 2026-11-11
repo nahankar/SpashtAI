@@ -1,7 +1,10 @@
 # LOW/MEDIUM reasoning comparison preparation — 11 November 2026
 
-**Prepared, not real-model tested. Adaptive release HOLD.** This is an inactive Admin benchmark; active learner
-policy remains 8. No paid call, production change, schema migration, deployment or live voice test occurred.
+**Completed the authorized 16-call comparison on 11 November 2026. MEDIUM rejected for promotion; adaptive release HOLD.**
+The original preparation record below is retained; observed results follow it. ## Original preparation record
+
+This is an inactive Admin benchmark; active learner
+policy remains 8. At preparation time, no paid call, production change, schema migration, deployment or live voice test had occurred.
 The previously approved 12-call diagnostic is complete and its allowance is exhausted.
 
 ## Why this experiment
@@ -131,3 +134,107 @@ never automatic promotion. Actual cost/latency must be measured; no pricing rati
 
 The simulation context also had an older unquoted colon in a prose scalar. Existing claim text was preserved
 and quoted consistently; the resulting YAML parsed successfully with both new claims and all prior entries.
+
+## Completed real-model comparison — 11 November 2026
+
+**Decision: do not adopt MEDIUM; do not enable score-driven adaptive Interviews.** The owner instructed us
+to proceed with the prepared 16-call bound. Tested a clean **`4eaca2b918c8c4dcbfe3c0538345df836955431d`**
+with the exact configs, fixtures and constraints above. No prompt, labels, bank guidance, parser or resource
+limits changed during measurement. This is a small paired diagnostic, not an independent expert calibration.
+
+The local Docker engine and existing isolated database were initially stopped. Started Docker Desktop and
+only the existing `spasht-tenancy-test` PostgreSQL container; no data reset, migration or shared service stop.
+All four bank/config preflights passed on restricted `walkthrough_app`, the original fictional admin was
+verified by its retained hash, and normal day usage was zero. Four selected owned fictional ADMIN_TEST records
+were archived before normal service deletion for fresh initial trials. All unrelated records were preserved.
+
+Ran the ambiguous canary pair LOW then MEDIUM, alternating first arm for subsequent case pairs. There were
+**12 fresh initial calls and four fresh repeats**, no reused rows or retries. Both initial arms' four repeat
+source records were archived before normal deletion/resubmission. Exclusive durable per-call reservations
+prevented restarting the allowance. Only the private launcher's process lowered its worker attempt ceiling
+to one; normal source limits stayed 20/admin, 100/global, SDK attempts one. No resource limits were raised.
+The launcher stopped no shared workers and made no extra provider-access probe.
+
+### Outcomes under unchanged frozen expectations
+
+| Measure (initial + repeat) | LOW | MEDIUM |
+| --- | ---: | ---: |
+| Fresh actual invocations | 8 | 8 |
+| Structurally usable knowledge grades | 4 | 4 |
+| All required frozen checks pass | **3/8** | **3/8** |
+| Invalid-output jobs, grade withheld | 1 | 2 |
+| Review-required jobs | 3 | 2 |
+| Provider/access/bounds failures or timeouts | 0 | 0 |
+| Input tokens | 19,997 | 19,877 |
+| Output tokens, including reasoning | 9,540 | 22,184 |
+| Unknown-usage rows | 0 | 0 |
+| Model latency p50 | 8,118 ms | 17,201 ms |
+| Model latency p95 / max | 30,772 ms | 36,336 ms |
+
+The MEDIUM arm used about **2.33 times as many output tokens** and had about **2.12 times the median model
+latency in this sample**, without a better frozen-check pass count. These are measured sample ratios, not
+price estimates or general performance claims. Input-token totals differ despite the verified matched
+request fields; do not infer changed candidate content from those usage counters. All sixteen responses had
+a reasoning-content block. Only its presence was recorded; no hidden reasoning or rejected raw body was saved.
+
+| Case | Expected | LOW initial -> repeat | MEDIUM initial -> repeat |
+| --- | --- | --- | --- |
+| B1-03 unresolved fragments | Ungraded review | PARTIAL -> valid review | Invalid inconsistent output -> same invalid code |
+| B1-04 instruction echo | NOT_ANSWERED | Unnecessary review -> same | Unnecessary review -> same |
+| B1-01 clear roles, names missing | PARTIAL | Missing/invalid reasoning-list format; no grade | PARTIAL, checks pass |
+| B1-02 complete focus-order answer | CORRECT with valid reasoning | CORRECT, but valid reasoning uncredited | PARTIAL, outside frozen accepted grade |
+| B1-05 new clear partial | PARTIAL | PARTIAL, checks pass | PARTIAL, checks pass |
+| B1-08 clear reversed roles | INCORRECT | INCORRECT, checks pass | INCORRECT, checks pass |
+
+Only B1-03 and B1-04 were repeated. LOW's B1-03 changed from a published PARTIAL grade to ungraded review
+on identical inputs. MEDIUM's B1-03 was stable only in the sense that it produced the same invalid-output
+code twice; **that is not stable correct uncertainty handling**. Both had declared CLEAR interpretation for
+that initial ambiguous answer. MEDIUM also declared CLEAR on its repeated invalid result. The parser withheld
+those inconsistent outputs, but this does not establish a correct interpretation by the model.
+
+MEDIUM did fix availability for B1-01 in its one initial trial. That does not offset its other failed checks.
+For B1-02 it acknowledged DOM order and competing manual order, but demanded a more explicit consequence;
+its reasoning result also claimed mixed valid/false explanation. LOW gave the expected knowledge grade but
+left the valid reasoning unassessed. Both fail the frozen requirement. No expectation was edited afterward.
+
+### Accounting and preservation
+
+The reconciliation passed: exactly **16 new usage rows**, normal actor/global counters **0 -> 16**, unchanged
+older quota-day rows, unchanged entire question bank and all unrelated assessments, and retained old usage
+content. Normal deletion only removed links to the exact archived fictional tests. All four repeats have fresh
+IDs but matching answer/question/config/input keys and actual provider-request hashes within their arm.
+For every initial/repeat pair across arms, normalized request hashes match after removing only the effort
+value. This demonstrates the intended request-level comparison; it does not make a randomized trial.
+
+The approved 16-call allowance is now exhausted. The normal remaining four admin units do not authorize more
+calls. Active learner policy stays 8. Nothing was merged, deployed, enabled, written to live knowledge state,
+or tested as a real spoken/tenant user flow. Shadow consequences were inspected with an explicit COMPLETE
+typed-capture assumption: the initial unsafe LOW PARTIAL would allow a knowledge update; no such update
+was executed. MEDIUM's invalid outputs remain withheld rather than silently mapped to incorrect knowledge.
+
+### Reuse and next decision
+
+Durable private evidence is in ignored `tools/interview-grading/runs/low-medium-2026-11-11/` (directory 700,
+files private): `baseline.json`, historical/repeat archives, exact per-case/combined reports, exclusive call
+reservations, `transport.ndjson`, `*-proofs.json`, `*-review.json`, `reconciliation.json` and compact
+`summary.json`. Credentials/auth/recordings/raw provider bodies/hidden reasoning are not committed.
+
+Allowlisted synthetic validated-result projections preserve these sixteen outcomes for free offline replay.
+The default checker now reviews **48 saved rows across five datasets**, including the older failures. Six of
+the ten future boundary cases have now been measured via this comparison; four remain untested. Its summary
+reports that partial coverage rather than claiming either complete validation or no testing at all.
+
+Stop LOW/MEDIUM parameter tuning on this evidence. Increasing resources did not resolve the uncertainty,
+no-subject and implicit-reasoning boundaries in this focused set. Do not increase token/time caps, loosen
+validation, rewrite labels or promote MEDIUM to obtain a pass. The next change must target a demonstrated
+semantic/decision-path failure and have separate validation; another model/parameter sweep is not justified
+by this result alone. Broader reliability and actual automated voice/workspace acceptance remain required
+before any score-driven adaptive release.
+
+Post-results verification: **215 focused offline tests and six network-guard checks passed**. All sixteen
+committed synthetic projections were compared field-for-field with the retained normal persisted results,
+including failures; strict typing and simulation-context YAML parsing passed. No additional provider call
+was made during this replay. The full 805-test server run recorded earlier belongs to the preparation
+checkpoint; no grading logic changed after the frozen trial, so it is not misrepresented as a new full run.
+The compact replay summary now includes the model for each disagreement, avoiding ambiguity between paired
+rows with the same case ID. Future-case coverage is derived from the recorded model-result IDs.

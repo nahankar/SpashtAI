@@ -72,7 +72,8 @@ export const LEARNER_POLICIES: Record<string, LearnerPolicy> = {
   'learner-evaluation-16': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova2-lite-learner-16', modelId: 'us.amazon.nova-2-lite-v1:0', region: 'us-east-1', label: 'Nova 2 Lite · review boundary 16 (candidate)',
     prompt: 'interview-answer-17', schema: 'interview-result-10', rubric: 'bank-guidance-6', policy: 'learner-evaluation-16', temperature: 0, maxTokens: 15000, timeoutMs: 40_000, responseFormat: 'tool', reasoningEffort: 'low' } },
 
-  // Benchmark only: identical grading instructions/validation/bounds to v16; changes LOW to MEDIUM.
+  // Measured benchmark, rejected for promotion (11 Nov 2026); retained for historical config support.
+  // Identical grading instructions/validation/bounds to v16; changes LOW to MEDIUM.
   'learner-evaluation-16-thinking-medium': { deterministicAbstention: true, deterministicRequests: true, config: { id: 'nova2-lite-learner-16-thinking-medium', modelId: 'us.amazon.nova-2-lite-v1:0', region: 'us-east-1', label: 'Nova 2 Lite · grading 16 medium thinking (benchmark)',
     prompt: 'interview-answer-17', schema: 'interview-result-10', rubric: 'bank-guidance-6', policy: 'learner-evaluation-16-thinking-medium', temperature: 0, maxTokens: 15000, timeoutMs: 40_000, responseFormat: 'tool', reasoningEffort: 'medium' } },
 

@@ -1,0 +1,405 @@
+{
+  "fixtureVersion": "thinking-medium-focused-1",
+  "provenance": {
+    "type": "Saved synthetic validated-result projection; replay makes no fresh provider calls",
+    "applicationRevision": "4eaca2b918c8c4dcbfe3c0538345df836955431d",
+    "date": "2026-11-11",
+    "policies": [
+      "learner-evaluation-16",
+      "learner-evaluation-16-thinking-medium"
+    ],
+    "model": "us.amazon.nova-2-lite-v1:0",
+    "fixtureSha256": "5735cc81c4f4f9ee7e171588d9a80cb4f9553db88d98889f996b058a705692a2",
+    "scope": "initial: 12 fresh paid paired trials; no reused rows",
+    "omitted": "Operational identifiers, private accounting, auth, raw provider bodies and hidden reasoning",
+    "warning": "A saved format failure is not a valid review outcome; preserve all frozen expectations.",
+    "configHashes": {
+      "learner-evaluation-16": "0f6f309aec2d53806612cac4180f1b4349b6dca98c4681fe1e6e5f93ebe0148a",
+      "learner-evaluation-16-thinking-medium": "96c9ca8b6facab1f7e014435ed51bbb685936e989166785210ba3565c2e6feda"
+    }
+  },
+  "results": [
+    {
+      "id": "B1-03",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "PARTIAL",
+        "criteria": [
+          {
+            "finding": "PARTIAL",
+            "evidence": [
+              "event thing.",
+              "no, the label.",
+              "The other has that one, the measure..."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "Relevant understanding is present, with missing essentials or mixed claims."
+          },
+          {
+            "finding": "NOT_MET",
+            "evidence": [
+              "The other has that one, the measure..."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The cited passage contains an explicitly false explanation; this is separate from the knowledge verdict."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [
+          "Identifies that fact tables relate to events/measures",
+          "Recognizes dimensions provide descriptive labels"
+        ],
+        "gaps": [
+          "Lacks clarity on grain or aggregation safety",
+          "No concrete example or context explanation",
+          "Fragmented phrasing obscures full distinction"
+        ],
+        "misconceptions": [
+          "The other has that one, the measure..."
+        ],
+        "guidance": "Clarify that fact tables store measurable business events at a specific grain (e.g., transactions), while dimension tables store descriptive attributes (e.g., product details) used for filtering and grouping. Provide a concrete example to illustrate the relationship."
+      }
+    },
+    {
+      "id": "B1-03",
+      "model": "learner-evaluation-16-thinking-medium",
+      "status": "FAILED",
+      "errorCode": "INVALID_OUTPUT_INCONSISTENT",
+      "reused": false,
+      "result": null
+    },
+    {
+      "id": "B1-04",
+      "model": "learner-evaluation-16-thinking-medium",
+      "status": "FAILED",
+      "errorCode": "EVALUATION_REVIEW_REQUIRED",
+      "reused": false,
+      "result": null
+    },
+    {
+      "id": "B1-04",
+      "model": "learner-evaluation-16",
+      "status": "FAILED",
+      "errorCode": "EVALUATION_REVIEW_REQUIRED",
+      "reused": false,
+      "result": null
+    },
+    {
+      "id": "B1-01",
+      "model": "learner-evaluation-16",
+      "status": "FAILED",
+      "errorCode": "INVALID_OUTPUT_SCHEMA_invalidReasoning_invalid_type",
+      "reused": false,
+      "result": null
+    },
+    {
+      "id": "B1-01",
+      "model": "learner-evaluation-16-thinking-medium",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "PARTIAL",
+        "criteria": [
+          {
+            "finding": "PARTIAL",
+            "evidence": [
+              "One of those tables stores measured events at a defined grain.",
+              "The other has descriptive attributes to filter and group."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "Relevant understanding is present, with missing essentials or mixed claims."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "One of those tables stores measured events at a defined grain.",
+              "The other has descriptive attributes to filter and group."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The cited passage explains a true relevant mechanism, contrast or consequence."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [
+          "Accurately describes the core function of storing measured events at a defined grain",
+          "Correctly identifies the role of descriptive attributes for filtering and grouping"
+        ],
+        "gaps": [
+          "Fails to map the descriptions to the specific table types (fact vs. dimension)"
+        ],
+        "misconceptions": [],
+        "guidance": "To distinguish fact tables from dimension tables, explicitly state that fact tables record business events/measurements (e.g., sales amounts) at a defined grain, while dimension tables provide descriptive context (e.g., product details) used for filtering and grouping."
+      }
+    },
+    {
+      "id": "B1-02",
+      "model": "learner-evaluation-16-thinking-medium",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "PARTIAL",
+        "criteria": [
+          {
+            "finding": "PARTIAL",
+            "evidence": [
+              "Dom position.",
+              "Uh, competing manual order?",
+              "Keyboard order follows semantic controls."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "Relevant understanding is present, with missing essentials or mixed claims."
+          },
+          {
+            "finding": "PARTIAL",
+            "evidence": [
+              "Dom position.",
+              "Uh, competing manual order?",
+              "Keyboard order follows semantic controls."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The answer contains both valid and false explanations."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [
+          "Correctly identifies that DOM position determines natural keyboard focus order.",
+          "Recognizes that positive tabindex creates a competing manual order which disrupts expected navigation."
+        ],
+        "gaps": [
+          "No explicit explanation of why competing manual order is problematic (e.g., unpredictability, maintenance issues)."
+        ],
+        "misconceptions": [
+          "Believes keyboard focus order follows semantic controls as a determinant, whereas focus order is determined by DOM position, not semantic meaning."
+        ],
+        "guidance": "Focus your answer on DOM source order as the primary determinant. Explain clearly that positive tabindex values create a separate numeric sequence that can detach navigation from visual/logical page flow, making it harder for users to predict where focus will land."
+      }
+    },
+    {
+      "id": "B1-02",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "CORRECT",
+        "criteria": [
+          {
+            "finding": "MET",
+            "evidence": [
+              "Keyboard order follows semantic controls.",
+              "Dom position.",
+              "Positive TB index."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "The cited answer covers the requested essentials."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "REASONING",
+            "explanation": "No valid reasoning assessment was established."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [
+          "Keyboard order follows semantic controls.",
+          "Dom position.",
+          "Positive TB index.",
+          "Uh, competing manual order?"
+        ],
+        "gaps": [],
+        "misconceptions": [],
+        "guidance": "Apply this understanding to a different example."
+      }
+    },
+    {
+      "id": "B1-05",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "PARTIAL",
+        "criteria": [
+          {
+            "finding": "PARTIAL",
+            "evidence": [
+              "Fact tables keep measured business events at a fixed grain."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "Relevant understanding is present, with missing essentials or mixed claims."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "Fact tables keep measured business events at a fixed grain."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The cited passage explains a true relevant mechanism, contrast or consequence."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [
+          "Accurately defines fact tables as storing measured business events at a fixed grain."
+        ],
+        "gaps": [
+          "Fails to explain how dimension tables provide descriptive context used to filter, group, or label fact table measurements."
+        ],
+        "misconceptions": [],
+        "guidance": "To fully distinguish fact from dimension tables, note that dimensions store descriptive attributes (e.g., product details, customer information) that enable analysis of fact table measurements."
+      }
+    },
+    {
+      "id": "B1-05",
+      "model": "learner-evaluation-16-thinking-medium",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "PARTIAL",
+        "criteria": [
+          {
+            "finding": "PARTIAL",
+            "evidence": [
+              "Fact tables keep measured business events at a fixed grain."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "Relevant understanding is present, with missing essentials or mixed claims."
+          },
+          {
+            "finding": "MET",
+            "evidence": [
+              "Fact tables keep measured business events at a fixed grain."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The cited passage explains a true relevant mechanism, contrast or consequence."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [
+          "Accurately describes fact tables as storing measured business events at a fixed grain."
+        ],
+        "gaps": [
+          "Fails to explain how dimension tables provide descriptive context used to filter, group, or label fact table measurements."
+        ],
+        "misconceptions": [],
+        "guidance": "To distinguish fact from dimension tables, note that dimensions supply persistent descriptive attributes (e.g., product details, customer demographics) that enable analysis of fact table measurements. Dimensions are not merely numeric identifiers but contextual data used for grouping and filtering."
+      }
+    },
+    {
+      "id": "B1-08",
+      "model": "learner-evaluation-16-thinking-medium",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "INCORRECT",
+        "criteria": [
+          {
+            "finding": "NOT_MET",
+            "evidence": [
+              "Fact tables contain descriptive labels, while dimensions hold measured sales events."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "The cited answer contains a false claim about the requested core concept."
+          },
+          {
+            "finding": "NOT_MET",
+            "evidence": [
+              "Fact tables contain descriptive labels, while dimensions hold measured sales events."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The cited passage contains an explicitly false explanation; this is separate from the knowledge verdict."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [],
+        "gaps": [],
+        "misconceptions": [
+          "Reversed the core roles: fact tables should hold measured events/quantities (e.g., sales amounts), while dimension tables provide descriptive context (e.g., product attributes)."
+        ],
+        "guidance": "Fact tables record business measurements at a defined grain (e.g., individual transactions), while dimension tables supply filtering/grouping context (e.g., customer or product details)."
+      }
+    },
+    {
+      "id": "B1-08",
+      "model": "learner-evaluation-16",
+      "status": "COMPLETED",
+      "errorCode": null,
+      "reused": false,
+      "result": {
+        "classification": "INCORRECT",
+        "criteria": [
+          {
+            "finding": "NOT_MET",
+            "evidence": [
+              "Fact tables contain descriptive labels, while dimensions hold measured sales events."
+            ],
+            "criterion": "ACCURACY",
+            "explanation": "The cited answer contains a false claim about the requested core concept."
+          },
+          {
+            "finding": "NOT_MET",
+            "evidence": [
+              "Fact tables contain descriptive labels, while dimensions hold measured sales events."
+            ],
+            "criterion": "REASONING",
+            "explanation": "The cited passage contains an explicitly false explanation; this is separate from the knowledge verdict."
+          },
+          {
+            "finding": "NOT_ASSESSED",
+            "evidence": [],
+            "criterion": "DEPTH",
+            "explanation": "This compact assessment does not assess optional depth."
+          }
+        ],
+        "strengths": [],
+        "gaps": [],
+        "misconceptions": [
+          "Reversed the core distinction: fact tables hold measurements/events (e.g., sales amounts), while dimension tables provide descriptive context (e.g., product attributes)."
+        ],
+        "guidance": "Fact tables record business events or measurements at a defined grain (e.g., sales quantities). Dimension tables supply descriptive context used to filter and group those measurements (e.g., product, customer, time attributes)."
+      }
+    }
+  ]
+}

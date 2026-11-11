@@ -29,7 +29,7 @@ npm run grading:check -- --code-only
 ```
 
 That command makes **no grading-quality or release-readiness claim**. Default replay includes the historical 20 initial synthetic rows (18 model results plus two reused
-deterministic controls), and the 10 November diagnostic's nine initial results plus three fresh repeats.
+deterministic controls), the 10 November diagnostic's nine initial results plus three fresh repeats, and the 11 November LOW/MEDIUM comparison's sixteen paired results.
 The historical trial's two later paid repeats are not in its projection. Each projection pins its original application/configuration and fixture hash.
 The projection excludes operational identifiers, usage logs, raw provider bodies and hidden reasoning.
 Only synthetic answers/results are committed; no learner data, credentials, audio or authentication state.
@@ -89,14 +89,12 @@ expectation is disputed but retained. A test passing because it detects that dis
 success. Each saved dataset has its own review JSON and provenance in the compact summary.
 
 The future acceptance decisions are recorded in `docs/prepare/INTERVIEWS-GRADING-BOUNDARY-ADJUDICATION.md`.
-There are ten new/versioned cases with **no model results yet**. The offline summary marks them
-`modelTested: false`; they do not replace or rescore the 32 historical saved rows. Synthetic acceptance-checker
+There are ten versioned acceptance cases; six have now been measured in the LOW/MEDIUM comparison and four remain untested. The offline summary marks this coverage as partial; they do not replace or rescore older saved rows. Synthetic acceptance-checker
 tests are code tests, not fresh model trials or proof of semantic reliability.
 
 Historical snapshots remain failed even after a future model fix. Their replay is an audit, not a requirement
 to rewrite old evidence until it turns green. Candidate release readiness must use separately identified fresh
 results for that candidate; the current adaptive feature still lacks that passing reliability evidence.
 
-An inactive LOW/MEDIUM comparison is prepared in `docs/prepare/INTERVIEWS-MEDIUM-THINKING-COMPARISON.md`.
-Its transport tests use the owned HTTP fixture, not real grading. The default offline check includes its
-request-envelope tests; running `grading:check` still cannot spend the proposed 16-call allowance.
+The completed inactive LOW/MEDIUM comparison is recorded in `docs/prepare/INTERVIEWS-MEDIUM-THINKING-COMPARISON.md`.
+Its preparation transport tests used the owned HTTP fixture; its subsequent 16 real-model calls rejected MEDIUM for promotion. The offline check replays those saved results and request-envelope tests without making provider calls.

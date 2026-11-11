@@ -52,11 +52,18 @@ assumptions:
     source: "apps/server/test/interview-thinking-medium.test.ts; apps/server/scripts/check-interview-evaluator-simulation.ts; postman/mocks/bedrock/default.js; docs/prepare/INTERVIEWS-MEDIUM-THINKING-COMPARISON.md; private http-results.json and simulation.ndjson under /private/tmp/spasht-medium-preparation/."
     updated_at: "2026-11-11"
   - id: medium-reasoning-semantic-quality
-    status: unknown
-    claim: "MEDIUM thinking reliably improves uncertain/no-subject grading over the matched LOW baseline within the same resource envelope."
-    reason: "AWS documents the setting but no real-model trial on this profile has occurred. Authored stand-in outcomes cannot establish semantic improvement or account/request compatibility."
-    verification: "Prepared six initial and two repeat cases per arm, a proposed 16-call bound. Read-only restricted-role bank/config preflights passed; normal remaining actor quota was insufficient and no new paid allowance exists. No invocation made."
-    source: "docs/prepare/INTERVIEWS-MEDIUM-THINKING-COMPARISON.md; apps/server/test/fixtures/interview-calibration-thinking-medium-focused-1.json; apps/server/test/fixtures/interview-calibration-thinking-medium-repeat-1.json; https://docs.aws.amazon.com/nova/latest/nova2-userguide/extended-thinking.html."
+    status: "contradicted"
+    claim: "MEDIUM improves this focused grading comparison over the matched LOW baseline within the same resource envelope."
+    reason: "Both arms passed only 3/8 frozen outcome checks. MEDIUM returned two invalid ambiguous-answer outputs and still reviewed instruction echo; it also under-credited the complete focus-order answer. LOW still graded ambiguity and varied on repeat. A model-parameter change is not supported by this result."
+    verification: "On clean 4eaca2b, 11 November UTC, ran the authorized 16 fresh Nova 2 Lite calls, eight per arm, no retries. Four fresh repeats matched input/config/provider hashes; paired inputs differed only in reasoning effort. MEDIUM output tokens 22184 vs LOW 9540; no timeout or provider failure. Normal day quota 0 to 16; bank, unrelated tests and old usage retained. No learner-policy/production change."
+    source: "docs/prepare/INTERVIEWS-MEDIUM-THINKING-COMPARISON.md; ignored tools/interview-grading/runs/low-medium-2026-11-11/summary.json and reconciliation.json."
+    updated_at: "2026-11-11"
+  - id: medium-real-request-acceptance
+    status: "supported"
+    claim: "The real provider accepted both frozen LOW/MEDIUM requests used in this bounded comparison and returned accounted responses."
+    reason: "Sixteen actual Converse calls returned tool responses and measured usage without provider/configuration/access errors. This supports the request combination on the tested account/model/date only, not semantic reliability."
+    verification: "Tested us.amazon.nova-2-lite-v1:0 from us-east-1 at temperature 0, maxTokens 15000 and timeout 40000 ms. Eight calls per arm; all sixteen had a reasoning-content block, never persisted. Parser failures remain distinct from validated review outcomes."
+    source: "docs/prepare/INTERVIEWS-MEDIUM-THINKING-COMPARISON.md; ignored tools/interview-grading/runs/low-medium-2026-11-11/transport.ndjson and per-case reports."
     updated_at: "2026-11-11"
 fingerprints:
   - id: policy-11-http-fixtures

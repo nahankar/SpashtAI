@@ -25,7 +25,7 @@ const fixture = path.join(root, 'apps/server/test/fixtures/interview-calibration
 const saved = path.join(root, 'apps/server/test/fixtures/interview-grading-saved-scope-1.json');
 const datasets = [
   { name: 'historical-scope', fixture, saved },
-  ...['ambiguity-baseline-1', 'ambiguity-repeat-1'].map(name => ({ name,
+  ...['ambiguity-baseline-1', 'ambiguity-repeat-1', 'thinking-medium-focused-1', 'thinking-medium-repeat-1'].map(name => ({ name,
     fixture: path.join(root, `apps/server/test/fixtures/interview-calibration-${name}.json`),
     saved: path.join(root, `apps/server/test/fixtures/interview-grading-saved-${name}.json`),
   })),
@@ -70,8 +70,12 @@ try {
   summary.workingTreeDirty = Boolean((await readFile(path.join(output, 'git-state.log'), 'utf8')).trim());
   const futureFile = path.join(root, 'apps/server/test/fixtures/interview-calibration-grading-boundaries-1.json');
   const futureFixture = JSON.parse(await readFile(futureFile, 'utf8'));
+  const measuredReport = JSON.parse(await readFile(path.join(root, 'apps/server/test/fixtures/interview-grading-saved-thinking-medium-focused-1.json'), 'utf8'));
+  const measured = [...new Set(measuredReport.results.map(r => r.id))];
   summary.futureAcceptance = { fixtureVersion: futureFixture.fixtureVersion, cases: futureFixture.cases.length,
-    sha256: await digest(futureFile), modelTested: false };
+    sha256: await digest(futureFile), modelCoverage: 'PARTIAL', fullFixtureModelTested: false,
+    measuredCaseIds: measured, untestedCaseIds: futureFixture.cases.filter(c => !measured.includes(c.id)).map(c => c.id),
+    measuredVia: ['thinking-medium-focused-1', 'thinking-medium-repeat-1'] };
   summary.fixtureHash = await digest(fixture);
   summary.savedEvidenceHash = await digest(saved);
   const provenance = JSON.parse(await readFile(saved, 'utf8')).provenance;
@@ -83,7 +87,7 @@ try {
     'test/interview-interpretation-first.test.ts', 'test/interview-review-boundary.test.ts',
     'test/interview-calibration-bank.test.ts', 'test/interview-calibration-review.test.ts',
     'test/interview-grading-saved-evidence.test.ts', 'test/interview-diagnostic-plan.test.ts',
-    'test/interview-ambiguity-saved-evidence.test.ts', 'test/interview-grading-boundaries.test.ts', 'test/interview-thinking-medium.test.ts',
+    'test/interview-ambiguity-saved-evidence.test.ts', 'test/interview-grading-boundaries.test.ts', 'test/interview-thinking-medium.test.ts', 'test/interview-thinking-medium-evidence.test.ts',
     '--no-file-parallelism', '--maxWorkers', '1', '--reporter=json',
     '--outputFile', path.join(output, 'tests.json')], path.join(root, 'apps/server'));
   if (summary.tests.exitCode !== 0 || summary.tests.timedOut) throw new Error('Regression tests failed or timed out. Inspect tests.log.');
@@ -111,7 +115,7 @@ try {
       summary.savedReviews.push({ name: dataset.name, decision: review.decision, summary: review.summary,
         fixtureHash, savedEvidenceHash: await digest(dataset.saved), evidenceProvenance });
       summary.disagreements.push(...review.reviews.filter(r => r.failures.length || r.exactExpected === false)
-        .map(r => ({ dataset: dataset.name, id: r.id, actual: r.actual, failures: r.failures,
+        .map(r => ({ dataset: dataset.name, model: r.model, id: r.id, actual: r.actual, failures: r.failures,
           preferredLabelMismatch: r.exactExpected === false })));
     }
     summary.gradingEvidence = held ? 'HOLD' : 'SAVED_SAMPLE_PASS_ONLY';
@@ -129,6 +133,6 @@ try {
   console.log(`Saved grading evidence: ${summary.gradingEvidence}. Release: ${summary.release}.`);
   console.log('No fresh model evaluation. No database, app or voice validation.');
   if (summary.error) console.error(summary.error);
-  if (summary.disagreements?.length) console.log(`Disagreements: ${summary.disagreements.map(r => `${r.dataset}/${r.id}`).join(', ')}`);
+  if (summary.disagreements?.length) console.log(`Disagreements: ${summary.disagreements.length} assessment rows; see summary.json.`);
   console.log(`Evidence: ${path.relative(root, output)}/summary.json`);
 }
