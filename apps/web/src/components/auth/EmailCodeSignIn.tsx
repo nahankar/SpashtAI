@@ -37,7 +37,9 @@ export function EmailCodeSignIn({ invitedEmail, invitationToken, purpose = 'sign
         if (data.error === 'signup_required') {
           setSignupRequired(true); setSent(false); setChallengeId(''); setCode('')
         }
-        throw new Error(data.message || data.error || 'Could not send your code.')
+        throw new Error(workspaceSlug && (data.error === 'signup_required' || data.error === 'INVITATION_REQUIRED')
+          ? 'Use the email address invited to this workspace. If you need access, contact your workspace administrator.'
+          : data.message || data.error || 'Could not send your code.')
       }
       setChallengeId(data.challengeId); setCode(''); setSent(true)
       setResendAt(Date.now() + data.resendAfterSeconds * 1000)
@@ -70,7 +72,7 @@ export function EmailCodeSignIn({ invitedEmail, invitationToken, purpose = 'sign
         </div>
       </>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-      {signupRequired && <Link to={signupPath} className="block text-sm font-medium underline">Go to Signup</Link>}
+      {signupRequired && !workspaceSlug && <Link to={signupPath} className="block text-sm font-medium underline">Go to Signup</Link>}
       <Button type="submit" className="w-full" disabled={busy}>{busy ? 'Please wait…' : sent ? 'Verify code and continue' : 'Email me a sign-in code'}</Button>
       {sent && <Button type="button" variant="ghost" className="w-full" disabled={busy} onClick={requestCode}>Send a new code</Button>}
       <p className="text-xs text-muted-foreground">No Google Account or password required.</p>

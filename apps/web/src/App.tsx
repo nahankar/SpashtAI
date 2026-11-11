@@ -1,4 +1,5 @@
 import { UserDropdown } from '@/components/layout/UserDropdown'
+import { workspaceSlugFromNext } from '@/components/auth/useSignInPolicy'
 import { OrganizationWorkspace, PlatformWorkspaces, WorkspaceLink, WorkspaceList } from '@/workspaces/Workspaces'
 import { useState, useRef, useEffect } from 'react'
 import { BrowserRouter, Link, Navigate, Route, Routes, useLocation, useSearchParams } from 'react-router-dom'
@@ -189,6 +190,8 @@ function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const location = useLocation()
   const headerRef = useRef<HTMLElement>(null)
+  const tenantSignIn = location.pathname === '/auth/login' && Boolean(workspaceSlugFromNext(safeAppPath(new URLSearchParams(location.search).get('next'))))
+  const signInPath = tenantSignIn ? `${location.pathname}${location.search}` : '/auth/login'
 
   useEffect(() => {
     setMobileOpen(false)
@@ -325,8 +328,8 @@ function Navbar() {
             </>
           ) : (
             <>
-              <Link className="hover:underline" to="/auth/login">Sign In</Link>
-              {!signupsPaused && (
+              <Link className="hover:underline" to={signInPath}>Sign In</Link>
+              {!tenantSignIn && !signupsPaused && (
                 <Link className="hover:underline" to="/auth/register">Signup</Link>
               )}
             </>
@@ -375,8 +378,8 @@ function Navbar() {
             </>
           ) : (
             <>
-              <Link className={navLinkClass} to="/auth/login" onClick={() => setMobileOpen(false)}>Sign In</Link>
-              {!signupsPaused && (
+              <Link className={navLinkClass} to={signInPath} onClick={() => setMobileOpen(false)}>Sign In</Link>
+              {!tenantSignIn && !signupsPaused && (
                 <Link className={navLinkClass} to="/auth/register" onClick={() => setMobileOpen(false)}>Signup</Link>
               )}
             </>

@@ -111,7 +111,7 @@ export function Login() {
           )}
 
           <div className="text-center text-sm text-muted-foreground">
-            {!signupsPaused && (
+            {!workspaceSlug && !signupsPaused && (
               <>
                 Don&apos;t have an account?{' '}
                 <Link
