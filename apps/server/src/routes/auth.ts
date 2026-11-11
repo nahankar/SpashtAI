@@ -203,9 +203,8 @@ router.post('/dev-login', authLimiter, async (req: Request, res: Response) => {
   }
 })
 
-// POST /api/auth/login
+// Dedicated Admin password sign-in is independent of the user/tenant provider switches.
 router.post('/login', authLimiter, async (req: Request, res: Response) => {
-  if (process.env.NODE_ENV === 'production') { res.status(403).json({ error: 'Use an enabled Google or email-code sign-in method.' }); return }
   try {
     const { email, password } = req.body
 
@@ -232,6 +231,11 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
     if (!valid) {
       reqLog(req).warn({ event: 'auth.login_failed', reason: 'bad_password', userId: user.id }, 'login failed')
       res.status(401).json({ error: 'Invalid credentials' })
+      return
+    }
+
+    if (process.env.NODE_ENV === 'production' && user.role !== 'ADMIN' && user.role !== 'SUPER_ADMIN') {
+      res.status(403).json({ error: 'Use an enabled Google or email-code sign-in method.' })
       return
     }
 
