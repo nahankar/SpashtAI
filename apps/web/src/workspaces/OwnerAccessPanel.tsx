@@ -10,7 +10,7 @@ export function OwnerAccessPanel({ name, slug, owners, disabled, onSend }: { nam
   const origin = typeof window === 'undefined' ? 'https://spasht.ai' : window.location.origin
   const url = `${origin}/w/${encodeURIComponent(slug)}`
   function instructions(owner: WorkspaceOwner) {
-    return `Your ${name} workspace\nLogin email: ${owner.email}\nWorkspace: ${url}\nSign in with an emailed code or Google using this email. There is no separate workspace password. If shown, select Accept invitation. As Owner you can invite learners and workspace administrators and manage this workspace. After acceptance, this email has organization access only; previous Personal history is preserved but unavailable. Workspace analytics are available to Owners and Admins; practice products appear as they become available for your organization.`
+    return `Your ${name} workspace\nLogin email: ${owner.email}\nWorkspace: ${url}\nSign in using a method enabled for this workspace and this email. There is no separate workspace password. If shown, select Accept invitation. As Owner you can invite learners and workspace administrators and manage this workspace. After acceptance, this email has organization access only; previous Personal history is preserved but unavailable. Workspace analytics are available to Owners and Admins; practice products appear as they become available for your organization.`
   }
   async function send() {
     if (!confirm) return
@@ -24,7 +24,7 @@ export function OwnerAccessPanel({ name, slug, owners, disabled, onSend }: { nam
   }
   return <section className="rounded-lg border p-5 space-y-4" aria-label="Workspace Owner access">
     <h2 className="text-xl font-semibold">Workspace Owner access</h2>
-    <p>Share the workspace link with the assigned Owner. They use their own Google Account, accept the pending membership, then manage invitations at this workspace address. The platform Admin panel is separate.</p>
+    <p>Share the workspace link with the assigned Owner. They sign in using an enabled workspace method, accept the pending membership, then manage invitations at this workspace address. The platform Admin panel is separate.</p>
     <p className="break-all"><strong>Workspace login link:</strong> {url}</p>
     <p>Creating a workspace does not send an email automatically. Sending access instructions does not change anyone’s role or permissions.</p>
     {owners.length === 0 && <p>No Owner is assigned. Contact the platform administrator.</p>}
@@ -36,7 +36,7 @@ export function OwnerAccessPanel({ name, slug, owners, disabled, onSend }: { nam
     <AlertDialog open={Boolean(confirm)} onOpenChange={open => { if (!open && !sending) setConfirm(null) }}>
       <AlertDialogContent>{confirm && <><AlertDialogHeader><AlertDialogTitle>Confirm Owner access email</AlertDialogTitle>
         <AlertDialogDescription>Send access instructions for {name} to <strong>{confirm.email}</strong>? Production sends a real email. Development mode sends nothing.</AlertDialogDescription></AlertDialogHeader>
-        <p className="text-sm">This link requires their existing membership and Google sign-in. It is not a password or a public access grant.</p>
+        <p className="text-sm">This link requires their existing membership and an enabled workspace sign-in method. It is not a password or a public access grant.</p>
         <AlertDialogFooter><AlertDialogCancel disabled={sending}>Cancel</AlertDialogCancel><Button disabled={sending || disabled} onClick={send}>{sending ? 'Sending…' : 'Confirm and send access email'}</Button></AlertDialogFooter></>}
       </AlertDialogContent>
     </AlertDialog>

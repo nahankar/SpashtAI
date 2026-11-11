@@ -1,3 +1,4 @@
+import { requireLearnerDomain } from '../lib/signInPolicy'
 import { reserveWorkspaceInvitationSend } from './invitationLimits'
 import { z } from 'zod'
 import { batchEmailsSchemaFor, runInvitationBatch } from '../lib/invitationBatch'
@@ -51,6 +52,7 @@ export async function createWorkspaceInvitation(claims: WorkspaceTokenPayload, i
     mayManage(scope, body.role)
     const existing = await tx.user.findUnique({ where: { email: body.email }, select: { id: true } })
     const member = existing && await tx.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: scope.workspace.id, userId: existing.id } } })
+    requireLearnerDomain(scope.workspace, body.email, body.role, Boolean(member))
     if (member?.state === 'SUSPENDED') throw new WorkspaceError(409, 'MEMBER_SUSPENDED', 'Reactivate the suspended membership instead of inviting again')
     if (member?.state === 'ACTIVE') throw new WorkspaceError(409, 'ALREADY_MEMBER', 'This person is already an active member')
     if (member && member.role !== body.role) throw new WorkspaceError(409, 'MEMBERSHIP_ROLE_CONFLICT', 'The existing pending membership has a different role')
@@ -85,6 +87,11 @@ export async function changeWorkspaceInvitation(claims: WorkspaceTokenPayload, i
     if (current.status === 'ACCEPTED' || action === 'resend' && current.status === 'REVOKED') throw new WorkspaceError(409, 'INVITATION_CLOSED', 'This invitation cannot be changed')
     if (action === 'revoke' && current.status === 'REVOKED') return { invitation: current, token, workspaceName: scope.workspace.name, workspaceSlug: scope.workspace.slug }
     if (action === 'resend' && effectiveStatus(current) !== 'pending' && await reservedWorkspaceSeats(tx, scope.workspace.id) >= scope.workspace.maxMembers) throw new WorkspaceError(409, 'SEAT_LIMIT', 'This workspace has no available seats')
+    if (action === 'resend') {
+      const existing = await tx.user.findUnique({ where: { email: current.email }, select: { id: true } })
+      const member = existing && await tx.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: scope.workspace.id, userId: existing.id } } })
+      requireLearnerDomain(scope.workspace, current.email, current.proposedRole!, Boolean(member))
+    }
     if (action === 'resend') await reserveWorkspaceInvitationSend(tx, scope.workspace)
     const invitation = await tx.userInvitation.update({ where: { id }, data: action === 'revoke'
       ? { status: 'REVOKED', pendingKey: null, revokedAt: now, revokedById: scope.member.userId }

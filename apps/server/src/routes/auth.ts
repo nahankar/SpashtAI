@@ -1,3 +1,5 @@
+import { assertAccountSignIn, publicSignInPolicy } from '../lib/signInPolicy'
+import { WorkspaceError } from '../workspaces/contracts'
 import { Router, Request, Response } from 'express'
 import crypto from 'crypto'
 import { prisma } from '../lib/prisma'
@@ -15,6 +17,11 @@ import { areSignupsPaused, getSignupsPausedMessage } from '../lib/platformSettin
 import { consumeEmailSignInCode, EmailCodeError, normalizeSignInEmail, requestEmailSignInCode } from '../lib/emailSignIn'
 
 const router = Router()
+router.get('/sign-in-policy', authLimiter, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store')
+  try { res.json(await publicSignInPolicy(typeof req.query.workspace === 'string' ? req.query.workspace : undefined)) }
+  catch (e) { res.status(e instanceof WorkspaceError ? e.status : 503).json({ error: e instanceof Error ? e.message : 'Sign-in settings are unavailable' }) }
+})
 
 async function rejectIfSignupsPaused(res: Response): Promise<boolean> {
   if (!(await areSignupsPaused())) return false
@@ -30,6 +37,7 @@ router.post('/email-code/request', authLimiter, async (req: Request, res: Respon
   res.setHeader('Cache-Control', 'no-store')
   try {
     const email = normalizeSignInEmail(req.body?.email)
+    await assertAccountSignIn(email, 'emailCode', typeof req.body?.workspaceSlug === 'string' ? req.body.workspaceSlug : undefined)
     const purpose = req.body?.purpose ?? 'signin'
     if (purpose !== 'signin' && purpose !== 'signup') throw new EmailCodeError(400, 'invalid_purpose', 'Choose sign in or Signup.')
     if (purpose === 'signin') {
@@ -38,6 +46,7 @@ router.post('/email-code/request', authLimiter, async (req: Request, res: Respon
     } else if (await rejectIfSignupsPaused(res)) return
     res.json(await requestEmailSignInCode(email))
   } catch (err) {
+    if (err instanceof WorkspaceError) { res.status(err.status).json({ error: err.code, message: err.message }); return }
     if (err instanceof EmailCodeError) { res.status(err.status).json({ error: err.code, message: err.message }); return }
     logger.error({ event: 'auth.email_code_request_failed' }, 'Email code request failed')
     res.status(500).json({ error: 'Could not send a sign-in code' })
@@ -55,8 +64,9 @@ router.post('/email-code/verify', authLimiter, async (req: Request, res: Respons
     const result = await signInWithVerifiedIdentity(identity, req, profile)
     if (!result.ok) { res.status(result.status).json(result.body); return }
     const { user } = result
-    res.json({ token: signToken({ userId: user.id, email: user.email, role: user.role }), user: await authUserForClient(user) })
+    res.json({ token: signToken({ userId: user.id, email: user.email, role: user.role, authMethod: 'emailCode' }), user: await authUserForClient(user) })
   } catch (err) {
+    if (err instanceof WorkspaceError) { res.status(err.status).json({ error: err.code, message: err.message }); return }
     if (err instanceof EmailCodeError) { res.status(err.status).json({ error: err.code, message: err.message }); return }
     logger.error({ event: 'auth.email_code_verify_failed' }, 'Email code sign-in failed')
     res.status(500).json({ error: 'Could not sign in. Request a new code and try again.' })
@@ -65,6 +75,7 @@ router.post('/email-code/verify', authLimiter, async (req: Request, res: Respons
 
 // POST /api/auth/register
 router.post('/register', authLimiter, async (req: Request, res: Response) => {
+  if (process.env.NODE_ENV === 'production') { res.status(403).json({ error: 'Use an enabled Google or email-code signup method.' }); return }
   try {
     if (await rejectIfSignupsPaused(res)) return
 
@@ -194,6 +205,7 @@ router.post('/dev-login', authLimiter, async (req: Request, res: Response) => {
 
 // POST /api/auth/login
 router.post('/login', authLimiter, async (req: Request, res: Response) => {
+  if (process.env.NODE_ENV === 'production') { res.status(403).json({ error: 'Use an enabled Google or email-code sign-in method.' }); return }
   try {
     const { email, password } = req.body
 
@@ -285,10 +297,11 @@ router.post('/google', authLimiter, async (req: Request, res: Response) => {
     }
     const { user } = result
 
-    const token = signToken({ userId: user.id, email: user.email, role: user.role })
+    const token = signToken({ userId: user.id, email: user.email, role: user.role, authMethod: 'google' })
 
     res.json({ token, user: await authUserForClient(user) })
   } catch (err) {
+    if (err instanceof WorkspaceError) { res.status(err.status).json({ error: err.code, message: err.message }); return }
     logger.error({ err: err }, 'Google auth error:')
     const message = err instanceof Error ? err.message : 'Google sign-in failed'
     res.status(401).json({ error: message })

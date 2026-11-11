@@ -1,3 +1,5 @@
+import { AccessPolicyCard, AccessPolicyFields } from './AccessPolicyCard'
+import { defaultAccessPolicy } from './accessPolicy'
 import { InvitationLimitsCard } from './InvitationLimitsCard'
 import { useAuth } from '@/hooks/useAuth'
 import { OwnerAccessPanel, type WorkspaceOwner } from './OwnerAccessPanel'
@@ -71,14 +73,14 @@ export function PlatformWorkspaces() {
   const [rows, setRows] = useState<PlatformWorkspace[]>([])
   const [selected, setSelected] = useState('')
   const [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false)
-  const [create, setCreate] = useState({ name: '', slug: '', ownerEmail: '' })
+  const [create, setCreate] = useState({ name: '', slug: '', ownerEmail: '', accessPolicy: defaultAccessPolicy })
   const load = useCallback(async () => setRows(await request<PlatformWorkspace[]>('/api/admin/workspaces', identityToken())), [])
   useEffect(() => { load().catch(e => setError(e.message)) }, [load])
   async function action(path: string, method: string, body: unknown) {
     setBusy(true); setError(''); setNotice('')
     try {
       const result = await request<{ workspace?: Workspace }>(path, identityToken(), method, body); await load()
-      if (result.workspace) { setSelected(result.workspace.id); setCreate({ name: '', slug: '', ownerEmail: '' }); setNotice('Organization created. Owner acceptance is pending. No email was sent.') } else setNotice('Saved')
+      if (result.workspace) { setSelected(result.workspace.id); setCreate({ name: '', slug: '', ownerEmail: '', accessPolicy: defaultAccessPolicy }); setNotice('Organization created. Owner acceptance is pending. No email was sent.') } else setNotice('Saved')
     } catch (e) { setError(e instanceof Error ? e.message : 'Unable to save') } finally { setBusy(false) }
   }
   function submitCreate(event: FormEvent) { event.preventDefault(); action('/api/admin/workspaces', 'POST', create) }
@@ -91,6 +93,7 @@ export function PlatformWorkspaces() {
         <div className="space-y-1.5"><Label htmlFor="org-name">Name</Label><Input id="org-name" placeholder="KLS VDIT" minLength={2} maxLength={100} required value={create.name} onChange={e => setCreate(c => ({ ...c, name: e.target.value }))} /></div>
         <div className="space-y-1.5"><Label htmlFor="org-slug">Address · /w/</Label><Input id="org-slug" placeholder="klsvdit" pattern="[a-z0-9]+(-[a-z0-9]+)*" minLength={3} maxLength={48} required value={create.slug} onChange={e => setCreate(c => ({ ...c, slug: e.target.value }))} /></div>
         <div className="space-y-1.5"><Label htmlFor="org-owner">Owner email</Label><Input id="org-owner" type="email" required value={create.ownerEmail} onChange={e => setCreate(c => ({ ...c, ownerEmail: e.target.value }))} /></div>
+        <div className="sm:col-span-3"><AccessPolicyFields value={create.accessPolicy} onChange={accessPolicy => setCreate(c => ({ ...c, accessPolicy }))} /></div>
         <div className="sm:col-span-3"><Button type="submit" disabled={busy}>Create workspace</Button></div>
       </form>
     </CardContent></Card>
@@ -107,6 +110,7 @@ export function PlatformWorkspaces() {
           <div className="sm:col-span-3"><Button type="submit" disabled={busy}>Save limits</Button></div>
         </form>
       </CardContent></Card>
+      <AccessPolicyCard key={`access:${workspace.id}:${JSON.stringify(workspace.accessPolicy)}`} policy={workspace.accessPolicy ?? defaultAccessPolicy} busy={busy} onSave={accessPolicy => action(`/api/admin/workspaces/${workspace.id}`, 'PATCH', { accessPolicy })} />
       <InvitationLimitsCard key={JSON.stringify(workspace.invitationLimits)} limits={workspace.invitationLimits ?? { batchSize: 20, hourlyLimit: 60 }} busy={busy} onSave={invitationLimits => action(`/api/admin/workspaces/${workspace.id}`, 'PATCH', { invitationLimits })} />
       <PlatformFeatures features={workspace.features} busy={busy} onSave={(feature, value) => action(`/api/admin/workspaces/${workspace.id}/features/${feature}`, 'PUT', value)} />
       <EnrollmentSettingsEditor key={JSON.stringify(workspace.enrollmentSettings)} settings={workspace.enrollmentSettings} workspaceName={workspace.name} onEmailPreview={body => request(`/api/admin/workspaces/${workspace.id}/invitations/preview`, identityToken(), 'POST', body)} busy={busy} onSave={body => action(`/api/admin/workspaces/${workspace.id}/enrollment`, 'PUT', body)} />

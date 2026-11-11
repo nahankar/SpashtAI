@@ -1,3 +1,4 @@
+import { requireWorkspaceMethod } from '../lib/signInPolicy'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '../lib/prisma'
 import type { WorkspaceTokenPayload } from '../lib/jwt'
@@ -69,6 +70,7 @@ export function withWorkspaceAccess<T>(
     }
     const scope = await establishWorkspace(tx, claims.userId, workspace.slug)
     if (scope.member.id !== claims.membershipId || scope.member.state !== 'ACTIVE') throw new WorkspaceError(403, 'MEMBERSHIP_INACTIVE', 'Your workspace membership is no longer active')
+    requireWorkspaceMethod(scope.workspace, claims.authMethod)
     return work(tx, scope)
   })
 }

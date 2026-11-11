@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
+import { PlatformSignInCard } from '@/components/admin/PlatformSignInCard'
 import { TrafficLimitsCard } from '@/components/admin/TrafficLimitsCard'
 import { useAuth } from '@/hooks/useAuth'
 import { useConfirm } from '@/hooks/useConfirm'
@@ -347,6 +348,7 @@ export function Users() {
         </CardContent>
       </Card>
 
+      <PlatformSignInCard />
       {user?.role === 'SUPER_ADMIN' && <TrafficLimitsCard />}
 
       <h2 className="text-lg font-semibold">Accounts</h2>

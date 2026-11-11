@@ -20,6 +20,7 @@ vi.mock('../src/lib/prisma', async () => {
   return { prisma: new PrismaClient({ datasourceUrl: testDb.url || 'postgresql://postgres@127.0.0.1:55441/simple_bank' }) }
 })
 vi.mock('../src/lib/platformSettings', () => ({
+  getPlatformSettings: async () => ({ googleSignInEnabled: true, emailCodeSignInEnabled: true }),
   // The acceptance route checks the pause just before resolving the account, so tests can change the
   // invitation "mid-sign-in" from here.
   areSignupsPaused: async () => { await mocks.onPauseCheck?.(); return mocks.signupsPaused },

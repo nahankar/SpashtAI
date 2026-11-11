@@ -1,3 +1,5 @@
+import { AccessPolicyCard } from '../AccessPolicyCard'
+import { defaultAccessPolicy } from '../accessPolicy'
 import { useState, type FormEvent } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -28,6 +30,7 @@ export function WorkspaceSettings() {
     <ErrorAlert error={error} />{notice && <p role="status" className="text-sm text-emerald-700">{notice}</p>}
     <BrandingCard key={`${workspace.id}:${workspace.name}:${workspace.timeZone}:${workspace.accentColor}:${workspace.logoDataUrl?.length ?? 0}`} workspace={workspace} busy={busy}
       onSave={body => save('/api/workspaces/current/branding', 'PATCH', body, 'Branding saved.')} />
+    <AccessPolicyCard key={JSON.stringify(workspace.accessPolicy)} policy={workspace.accessPolicy ?? defaultAccessPolicy} busy={busy} onSave={body => save('/api/workspaces/current/access-policy', 'PUT', body, 'Sign-in policy saved.')} />
     <FeaturesCard features={snapshot.features} busy={busy} onSave={(feature, body) => save(`/api/workspaces/current/features/${feature}`, 'PUT', body, `${featureLabel(feature)} updated.`)} />
     <EnrollmentSettingsEditor key={JSON.stringify(workspace.enrollmentSettings)} settings={workspace.enrollmentSettings} workspaceName={workspace.name} busy={busy}
       onEmailPreview={body => workspaceCall<EmailPreview>('/api/workspaces/current/invitations/preview', 'POST', body)}

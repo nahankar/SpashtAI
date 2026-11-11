@@ -1,3 +1,4 @@
+import { assertAccountSignIn } from './signInPolicy'
 import type { Request } from 'express'
 import { Prisma, type User } from '@prisma/client'
 import { prisma } from './prisma'
@@ -158,6 +159,8 @@ export async function signInWithVerifiedIdentity(
   req: Request,
   profile?: SignupProfile | null,
 ): Promise<GoogleSignInResult> {
+  const linked = googleUser.googleId ? await prisma.user.findUnique({ where: { googleId: googleUser.googleId }, select: { email: true } }) : null
+  await assertAccountSignIn(linked?.email ?? googleUser.email, googleUser.googleId ? 'google' : 'emailCode', typeof req.body?.workspaceSlug === 'string' ? req.body.workspaceSlug : undefined)
   const policy = await loadSignupPolicy()
   return withAccountRaceRetry((tx) => resolveGoogleAccount(tx, googleUser, req, { policy, profile: profile ?? null }))
 }

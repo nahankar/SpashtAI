@@ -2993,6 +2993,80 @@
           }
         }
       }
+    },
+    "/api/workspaces/current/access-policy": {
+      "put": {
+        "summary": "Owner/Admin configures tenant sign-in methods and new-Learner email domains",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessPolicy"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Policy saved and audited"
+          },
+          "400": {
+            "description": "Invalid policy or no method enabled"
+          },
+          "403": {
+            "description": "Tenant manager required"
+          }
+        }
+      }
+    },
+    "/api/auth/sign-in-policy": {
+      "get": {
+        "summary": "Public main-site or tenant sign-in choices; no account information",
+        "parameters": [
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Allowed methods and optional tenant branding"
+          },
+          "404": {
+            "description": "No active tenant"
+          }
+        }
+      }
+    },
+    "/api/admin/platform/sign-in": {
+      "put": {
+        "summary": "Platform Admin configures non-tenant sign-in methods",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignInMethods"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved and audited"
+          },
+          "400": {
+            "description": "At least one method required"
+          },
+          "403": {
+            "description": "Platform Admin required"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3612,6 +3686,59 @@
             "maximum": 10000,
             "default": 60,
             "description": "null removes the hourly tenant invitation cap. Numeric allowances are shared by all tenant senders, including new recipients, resends and Owner access emails. Counters persist across API restarts."
+          }
+        }
+      },
+      "SignInMethods": {
+        "type": "object",
+        "required": [
+          "google",
+          "emailCode"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "google": {
+            "type": "boolean"
+          },
+          "emailCode": {
+            "type": "boolean"
+          }
+        },
+        "anyOf": [
+          {
+            "properties": {
+              "google": {
+                "const": true
+              }
+            }
+          },
+          {
+            "properties": {
+              "emailCode": {
+                "const": true
+              }
+            }
+          }
+        ]
+      },
+      "AccessPolicy": {
+        "type": "object",
+        "required": [
+          "methods",
+          "learnerEmailDomains"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "methods": {
+            "$ref": "#/components/schemas/SignInMethods"
+          },
+          "learnerEmailDomains": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "example": "klsvdit.edu.in"
+            }
           }
         }
       }

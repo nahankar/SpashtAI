@@ -94,6 +94,7 @@ const WORKSPACE_FAILURES = new Set([
 
 /** A workspace access failure needs the workspace re-opened, not a sign-out. */
 export function isWorkspaceFailure(code: string | undefined): code is string {
+  if (code === 'SIGN_IN_REQUIRED') return true
   return Boolean(code && WORKSPACE_FAILURES.has(code))
 }
 

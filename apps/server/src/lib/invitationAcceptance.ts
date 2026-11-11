@@ -1,3 +1,5 @@
+import { getPlatformSettings } from './platformSettings'
+import { requireLearnerDomain, requireMethod, methodsFor } from './signInPolicy'
 import { lockInvitationTarget, acceptInvitedMembership } from '../workspaces/invitationMembership'
 import { validateEnrollmentResponses } from '../workspaces/enrollment'
 import { WorkspaceError } from '../workspaces/contracts'
@@ -42,6 +44,7 @@ export async function acceptInvitation(
   // Read once, outside the transaction, so the transaction never needs a second pool connection. Whether an
   // invitation may create an account while paused depends on the invitation being pending, checked under the lock.
   const policy = await loadSignupPolicy()
+  const platformMethods = methodsFor(await getPlatformSettings())
   // Lookup is network I/O — keep it outside the invitation row lock.
   const existingLocation = profile && googleUser
     ? await prisma.user.findFirst({
@@ -56,6 +59,13 @@ export async function acceptInvitation(
       const snapshot = await tx.userInvitation.findUnique({ where: { id: invitation.id } })
       if (!snapshot || snapshot.tokenHash !== invitation.tokenHash) return fail(404, INVALID_LINK)
       const workspace = await lockInvitationTarget(tx, snapshot)
+      if (!workspace && googleUser) requireMethod(platformMethods, googleUser.googleId ? 'google' : 'emailCode')
+      if (workspace) {
+        const existing = await tx.user.findUnique({ where: { email: snapshot.email }, select: { id: true } })
+        const member = existing && await tx.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: workspace.id, userId: existing.id } } })
+        requireLearnerDomain(workspace, snapshot.email, snapshot.proposedRole!, Boolean(member))
+        if (googleUser) requireMethod(methodsFor(workspace), googleUser.googleId ? 'google' : 'emailCode')
+      }
       const workspacePath = workspace ? `/w/${workspace.slug}` : undefined
       await tx.$queryRaw`SELECT 1 FROM "UserInvitation" WHERE "id" = ${invitation.id} FOR UPDATE`
       const inv = await tx.userInvitation.findUnique({ where: { id: invitation.id } })

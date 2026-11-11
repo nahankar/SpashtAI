@@ -46,8 +46,8 @@ export interface AuthContextType {
   loading: boolean
   login: (email: string, password: string) => Promise<AuthUser>
   loginForDevelopment: (email: string, password: string) => Promise<AuthUser>
-  loginWithGoogle: (credential: string, profile?: { phone: string; dateOfBirth: string; gender: string; pincode: string }) => Promise<AuthUser>
-  loginWithEmailCode: (challengeId: string, code: string, profile?: { phone: string; dateOfBirth: string; gender: string; pincode: string }) => Promise<AuthUser>
+  loginWithGoogle: (credential: string, profile?: { phone: string; dateOfBirth: string; gender: string; pincode: string }, workspaceSlug?: string) => Promise<AuthUser>
+  loginWithEmailCode: (challengeId: string, code: string, profile?: { phone: string; dateOfBirth: string; gender: string; pincode: string }, workspaceSlug?: string) => Promise<AuthUser>
   register: (data: RegisterData) => Promise<AuthUser>
   logout: () => void
   isAdmin: boolean
@@ -130,11 +130,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loginWithGoogle = useCallback(async (
     credential: string,
-    profile?: { phone: string; dateOfBirth: string; gender: string; pincode: string },
+    profile?: { phone: string; dateOfBirth: string; gender: string; pincode: string }, workspaceSlug?: string,
   ): Promise<AuthUser> => {
     const data = await apiClient<{ token: string; user: AuthUser }>('/api/auth/google', {
       method: 'POST',
-      body: JSON.stringify({ credential, ...profile }),
+      body: JSON.stringify({ credential, ...profile, workspaceSlug }),
       skipAuth: true,
     })
     localStorage.setItem(TOKEN_KEY, data.token)
@@ -144,10 +144,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loginWithEmailCode = useCallback(async (
     challengeId: string, code: string,
-    profile?: { phone: string; dateOfBirth: string; gender: string; pincode: string },
+    profile?: { phone: string; dateOfBirth: string; gender: string; pincode: string }, workspaceSlug?: string,
   ): Promise<AuthUser> => {
     const data = await apiClient<{ token: string; user: AuthUser }>('/api/auth/email-code/verify', {
-      method: 'POST', body: JSON.stringify({ challengeId, code, ...profile }), skipAuth: true,
+      method: 'POST', body: JSON.stringify({ challengeId, code, ...profile, workspaceSlug }), skipAuth: true,
     })
     localStorage.setItem(TOKEN_KEY, data.token)
     setUser(data.user)

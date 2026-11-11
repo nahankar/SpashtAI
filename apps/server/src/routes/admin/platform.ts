@@ -1,3 +1,4 @@
+import { signInPolicySchema } from '../../lib/signInPolicy'
 import { Router, type Request, type Response } from 'express'
 import { prisma } from '../../lib/prisma'
 import { ensurePlatformSettings, getPlatformSettings } from '../../lib/platformSettings'
@@ -15,6 +16,20 @@ router.get('/', async (_req: Request, res: Response) => {
     console.error('Admin platform settings error:', err)
     res.status(500).json({ error: 'Failed to load platform settings' })
   }
+})
+
+router.put('/sign-in', async (req, res) => {
+  const parsed = signInPolicySchema.safeParse(req.body)
+  if (!parsed.success) { res.status(400).json({ error: 'Select at least one sign-in method' }); return }
+  try {
+    await ensurePlatformSettings()
+    const settings = await prisma.$transaction(async tx => {
+      const value = await tx.platformSettings.update({ where: { id: 'default' }, data: { googleSignInEnabled: parsed.data.google, emailCodeSignInEnabled: parsed.data.emailCode, updatedBy: req.user!.userId } })
+      await tx.adminAction.create({ data: { adminId: req.user!.userId, action: 'platform.sign_in_policy_updated', metadata: parsed.data } })
+      return value
+    })
+    res.json({ settings })
+  } catch { res.status(500).json({ error: 'Unable to save sign-in settings' }) }
 })
 
 router.put('/signups', async (req: Request, res: Response) => {

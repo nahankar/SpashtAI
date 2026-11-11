@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { useSignInPolicy, workspaceSlugFromNext } from '@/components/auth/useSignInPolicy'
 import { EmailCodeSignIn } from '@/components/auth/EmailCodeSignIn'
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
 import { ProfileDetailsRow, type ProfileGender } from '@/components/auth/ProfileDetailsRow'
@@ -26,6 +27,8 @@ export function Register() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const next = safeAppPath(searchParams.get('next'))
+  const workspaceSlug = workspaceSlugFromNext(next)
+  const policy = useSignInPolicy(workspaceSlug)
 
   useEffect(() => {
     const API = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
@@ -43,7 +46,7 @@ export function Register() {
   }, [])
 
   async function handleGoogleCredential(credential: string) {
-    const user = await loginWithGoogle(credential, { phone, dateOfBirth, gender, pincode })
+    const user = await loginWithGoogle(credential, { phone, dateOfBirth, gender, pincode }, workspaceSlug)
     if (user.needsProfileCompletion) {
       navigate(next ? `/auth/complete-profile?next=${encodeURIComponent(next)}` : '/auth/complete-profile')
       return
@@ -52,7 +55,7 @@ export function Register() {
   }
 
   async function handleEmailCode(challengeId: string, code: string) {
-    const user = await loginWithEmailCode(challengeId, code, { phone, dateOfBirth, gender, pincode })
+    const user = await loginWithEmailCode(challengeId, code, { phone, dateOfBirth, gender, pincode }, workspaceSlug)
     navigate(user.needsProfileCompletion
       ? (next ? `/auth/complete-profile?next=${encodeURIComponent(next)}` : '/auth/complete-profile')
       : accountDestination(user, next))
@@ -112,13 +115,15 @@ export function Register() {
 
               {detailsReady && (
                 <>
-                <GoogleSignInButton
+                {policy.loading && <p role="status" className="text-sm">Loading sign-in options…</p>}
+          {policy.error && <p role="alert" className="text-sm text-destructive">{policy.error}</p>}
+          {policy.methods.google && <GoogleSignInButton
                   label="signup_with"
                   onCredential={handleGoogleCredential}
                   onError={setError}
-                />
-                <p className="text-center text-xs text-muted-foreground">Or sign up with email</p>
-                <EmailCodeSignIn purpose="signup" onVerify={handleEmailCode} />
+                />}
+                {policy.methods.google && policy.methods.emailCode && <p className="text-center text-xs text-muted-foreground">Or sign up with email</p>}
+                {policy.methods.emailCode && <EmailCodeSignIn workspaceSlug={workspaceSlug} purpose="signup" onVerify={handleEmailCode} />}
                 </>
               )}
 

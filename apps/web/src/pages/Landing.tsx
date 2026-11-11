@@ -5,6 +5,7 @@ import { safeAppPath } from '@/lib/safe-next-path'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { useSignInPolicy } from '@/components/auth/useSignInPolicy'
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
 import { LogoWithBeta } from '@/components/brand/LogoWithBeta'
 import {
@@ -285,6 +286,7 @@ function FeatureSection({
 /* ─────────────────────────── Landing page ─────────────────────────── */
 
 export function Landing() {
+  const signInPolicy = useSignInPolicy()
   const { loginWithGoogle } = useAuth()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -334,11 +336,11 @@ export function Landing() {
                   {error}
                 </div>
               )}
-              <GoogleSignInButton
+              {signInPolicy.methods.google && <GoogleSignInButton
                 label="signup_with"
                 onCredential={handleGoogleCredential}
                 onError={setError}
-              />
+              />}
               <p className="mt-2 text-xs text-muted-foreground">
                 Free to start. No credit card required.
               </p>

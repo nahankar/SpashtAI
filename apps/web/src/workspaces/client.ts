@@ -43,6 +43,7 @@ export async function currentWorkspaceDownload(token: string, path: string) {
   return { blob: await response.blob(), filename: response.headers.get('content-disposition')?.match(/filename="([^"]+)"/)?.[1] }
 }
 export interface Workspace {
+  accessPolicy?: import('./accessPolicy').AccessPolicy;
   invitationLimits?: { batchSize: number; hourlyLimit: number | null };
   id: string; slug: string; name: string; kind: 'PERSONAL' | 'ORGANIZATION'; state: 'ACTIVE' | 'SUSPENDED';
   logoDataUrl: string | null; accentColor: string; timeZone: string; isolationStage: string;

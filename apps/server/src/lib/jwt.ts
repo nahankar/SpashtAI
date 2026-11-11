@@ -8,7 +8,9 @@ if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || process
   throw new Error('FATAL: JWT_SECRET must be set to a secure value in production')
 }
 
+export type AuthMethod = 'google' | 'emailCode' | 'invitation'
 export interface TokenPayload {
+  authMethod?: AuthMethod
   userId: string
   email: string
   role: string
@@ -27,6 +29,7 @@ export function verifyToken(token: string): TokenPayload {
 }
 
 export interface WorkspaceTokenPayload {
+  authMethod?: AuthMethod
   tokenUse: 'workspace'
   userId: string
   workspaceId: string

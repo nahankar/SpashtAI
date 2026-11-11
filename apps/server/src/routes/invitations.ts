@@ -1,3 +1,6 @@
+import { methodsFor, requireMethod } from '../lib/signInPolicy'
+import { getPlatformSettings } from '../lib/platformSettings'
+import { WorkspaceError } from '../workspaces/contracts'
 import { Router, type Request, type Response } from 'express'
 import { consumeEmailSignInCode, EmailCodeError, requestEmailSignInCode } from '../lib/emailSignIn'
 import type { VerifiedSignInIdentity } from '../lib/googleSignIn'
@@ -22,8 +25,10 @@ router.post('/email-code/request', invitationAcceptLimiter, async (req: Request,
     if (!['pending', 'accepted'].includes(effectiveStatus(inv))) {
       res.status(410).json({ error: 'invitation_closed', message: 'This invitation has expired or was withdrawn. Ask your administrator for a new one.' }); return
     }
+    requireMethod(methodsFor(inv.workspace ?? await getPlatformSettings()), 'emailCode')
     res.json(await requestEmailSignInCode(inv.email, token))
   } catch (err) {
+    if (err instanceof WorkspaceError) { res.status(err.status).json({ error: err.code, message: err.message }); return }
     if (err instanceof EmailCodeError) { res.status(err.status).json({ error: err.code, message: err.message }); return }
     logger.error({ event: 'invitation.email_code_request_failed' }, 'Invitation code request failed')
     res.status(500).json({ error: 'Could not send a sign-in code' })
@@ -39,6 +44,7 @@ router.post('/lookup', invitationAcceptLimiter, async (req: Request, res: Respon
       return
     }
     res.json({
+      methods: methodsFor(inv.workspace ?? await getPlatformSettings()),
       status: effectiveStatus(inv),
       recipientName: inv.recipientName,
       // The link holder is shown the full address so they know which address to verify.
@@ -94,7 +100,7 @@ router.post('/accept', invitationAcceptLimiter, async (req: Request, res: Respon
       res.status(result.status).json(result.body)
       return
     }
-    const jwt = signToken({ userId: result.user.id, email: result.user.email, role: result.user.role })
+    const jwt = signToken({ userId: result.user.id, email: result.user.email, role: result.user.role, authMethod: googleUser ? (googleUser.googleId ? 'google' : 'emailCode') : 'invitation' })
     res.json({ token: jwt, user: await authUserForClient(result.user), alreadyAccepted: result.alreadyAccepted, newAccount: result.newAccount, workspacePath: result.workspacePath })
   } catch (err) {
     logger.error({ err }, 'Invitation acceptance failed')

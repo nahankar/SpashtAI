@@ -13,6 +13,7 @@ vi.mock('../src/lib/email', () => ({ sendEmail: vi.fn(), buildPasswordResetEmail
 vi.mock('../src/lib/google-auth', () => ({ verifyGoogleIdToken: vi.fn() }))
 vi.mock('../src/lib/googleSignIn', () => ({ signInWithGoogleUser: vi.fn() }))
 vi.mock('../src/lib/platformSettings', () => ({
+  getPlatformSettings: async () => ({ googleSignInEnabled: true, emailCodeSignInEnabled: true }),
   areSignupsPaused: async () => false,
   getSignupsPausedMessage: async () => '',
   areRewardPointsEnabled: async () => false,

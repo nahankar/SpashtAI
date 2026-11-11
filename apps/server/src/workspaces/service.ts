@@ -1,3 +1,4 @@
+import { accessPolicySchema, policyData, methodsFor, requireLearnerDomain, requireWorkspaceMethod, type SignInMethod } from '../lib/signInPolicy'
 import { readEnrollmentSettings } from './enrollment'
 import { fieldQuerySchema, resolveFieldSelections, fieldMemberWhere } from './fieldFilters'
 import { reservedWorkspaceSeats } from './invitations'
@@ -19,6 +20,7 @@ export function presentWorkspace(workspace: Workspace) {
   return { id: workspace.id, slug: workspace.kind === 'PERSONAL' ? 'personal' : workspace.slug,
     enrollmentSettings: readEnrollmentSettings(workspace.enrollmentSettings), name: workspace.kind === 'PERSONAL' ? 'Personal' : workspace.name, kind: workspace.kind, state: workspace.state,
     logoDataUrl: workspace.logoDataUrl, accentColor: workspace.accentColor, timeZone: workspace.timeZone,
+    accessPolicy: { methods: methodsFor(workspace), learnerEmailDomains: workspace.learnerEmailDomains },
     invitationLimits: { batchSize: workspace.invitationBatchSize, hourlyLimit: workspace.invitationHourlyLimit },
     isolationStage: workspace.isolationStage, limits: { maxMembers: workspace.maxMembers,
       dailyEvaluations: workspace.dailyEvaluations, concurrentVoice: workspace.concurrentVoice } }
@@ -50,19 +52,21 @@ export function listMyWorkspaces(userId: string) {
   })
 }
 
-export function enterWorkspace(userId: string, slug: string) {
+export function enterWorkspace(userId: string, slug: string, method?: SignInMethod) {
   return withWorkspaceActor(userId, async tx => {
     const scope = await establishWorkspace(tx, userId, slug)
+    requireWorkspaceMethod(scope.workspace, method)
     const member = scope.member
     return { workspace: presentWorkspace(scope.workspace), membership: { id: member.id, role: member.role, state: member.state },
-      accessToken: member.state === 'ACTIVE' ? signWorkspaceToken({ userId, workspaceId: scope.workspace.id, membershipId: member.id }) : null,
+      accessToken: member.state === 'ACTIVE' ? signWorkspaceToken({ userId, workspaceId: scope.workspace.id, membershipId: member.id, authMethod: method }) : null,
       expiresInSeconds: member.state === 'ACTIVE' ? 900 : 0, notice: WORKSPACE_PRIVACY_NOTICE }
   })
 }
 
-export function acceptWorkspaceMembership(userId: string, slug: string) {
+export function acceptWorkspaceMembership(userId: string, slug: string, method?: SignInMethod) {
   return withWorkspaceActor(userId, async tx => {
     const { workspace } = await establishWorkspace(tx, userId, slug)
+    requireWorkspaceMethod(workspace, method)
     await tx.$queryRaw`SELECT id FROM "Workspace" WHERE id=${workspace.id} FOR UPDATE`
     await establishWorkspace(tx, userId, slug)
     const user = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { emailVerified: true } })
@@ -90,7 +94,7 @@ export function createOrganization(actorId: string, input: unknown) {
     if (!owner) throw new WorkspaceError(409, 'OWNER_ACCOUNT_REQUIRED', 'The initial Owner needs a verified SpashtAI account. Invite them to SpashtAI first, then create the workspace.')
     const branding = brandingSchema.parse({ name: body.name, logoDataUrl: body.logoDataUrl, accentColor: body.accentColor, timeZone: body.timeZone })
     const limits = body.limits
-    const row = await tx.workspace.create({ data: { ...branding, name: body.name, slug: body.slug, ...limits, ...(body.invitationLimits ? { invitationBatchSize: body.invitationLimits.batchSize, invitationHourlyLimit: body.invitationLimits.hourlyLimit } : {}), kind: 'ORGANIZATION', isolationStage: 'FOUNDATION_ONLY',
+    const row = await tx.workspace.create({ data: { ...branding, name: body.name, slug: body.slug, ...limits, ...(body.accessPolicy ? policyData(body.accessPolicy) : {}), ...(body.invitationLimits ? { invitationBatchSize: body.invitationLimits.batchSize, invitationHourlyLimit: body.invitationLimits.hourlyLimit } : {}), kind: 'ORGANIZATION', isolationStage: 'FOUNDATION_ONLY',
       members: { create: { userId: owner.id, role: 'OWNER', state: 'INVITED' } },
       features: { create: WORKSPACE_FEATURES.map(feature => ({ feature, entitled: false, enabled: false })) } } })
     await audit(tx, row.id, actorId, 'workspace_created', owner.id, { membershipState: 'INVITED', emailSent: false })
@@ -99,17 +103,17 @@ export function createOrganization(actorId: string, input: unknown) {
 }
 
 export function updatePlatformWorkspace(actorId: string, workspaceId: string, input: unknown) {
-  const body = brandingSchema.extend({ state: z.enum(['ACTIVE', 'SUSPENDED']).optional(), limits: limitsSchema.optional(), invitationLimits: invitationLimitsSchema.optional() }).strict().parse(input)
+  const body = brandingSchema.extend({ state: z.enum(['ACTIVE', 'SUSPENDED']).optional(), limits: limitsSchema.optional(), invitationLimits: invitationLimitsSchema.optional(), accessPolicy: accessPolicySchema.optional() }).strict().parse(input)
   return withPlatformWorkspaceAdmin(actorId, async tx => {
     const workspace = await tx.workspace.findFirst({ where: { id: workspaceId, kind: 'ORGANIZATION' } })
     if (!workspace) throw new WorkspaceError(404, 'WORKSPACE_NOT_FOUND', 'Organization workspace not found')
     await tx.$queryRaw`SELECT id FROM "Workspace" WHERE id=${workspaceId} FOR UPDATE`
-    const { limits, invitationLimits, ...settings } = body
+    const { limits, invitationLimits, accessPolicy, ...settings } = body
     if (limits) {
       const seats = await reservedWorkspaceSeats(tx, workspaceId)
       if (limits.maxMembers < seats) throw new WorkspaceError(409, 'SEAT_LIMIT_BELOW_MEMBERS', 'The seat limit cannot be lower than current members and invitations')
     }
-    const row = await tx.workspace.update({ where: { id: workspaceId }, data: { ...settings, ...limits, ...(invitationLimits ? { invitationBatchSize: invitationLimits.batchSize, invitationHourlyLimit: invitationLimits.hourlyLimit } : {}) } })
+    const row = await tx.workspace.update({ where: { id: workspaceId }, data: { ...settings, ...limits, ...(accessPolicy ? policyData(accessPolicy) : {}), ...(invitationLimits ? { invitationBatchSize: invitationLimits.batchSize, invitationHourlyLimit: invitationLimits.hourlyLimit } : {}) } })
     await audit(tx, workspaceId, actorId, 'workspace_updated', undefined, { fields: Object.keys(body), ...(invitationLimits ? { invitationLimits } : {}) })
     return presentWorkspace(row)
   })
@@ -289,6 +293,7 @@ export async function addExistingMember(tx: WorkspaceTx, scope: Awaited<ReturnTy
   if (seats >= scope.workspace.maxMembers) throw new WorkspaceError(409, 'SEAT_LIMIT', 'This workspace has no available seats')
   const user = await tx.user.findFirst({ where: { email: { equals: body.email, mode: 'insensitive' }, emailVerified: true }, select: { id: true } })
   if (!user) throw new WorkspaceError(409, 'VERIFIED_ACCOUNT_REQUIRED', 'This address needs a verified SpashtAI account first. Email invitations are not connected yet.')
+  requireLearnerDomain(scope.workspace, body.email, body.role)
   const member = await tx.workspaceMember.create({ data: { workspaceId: scope.workspace.id, userId: user.id, role: body.role, state: 'INVITED' } })
   await audit(tx, scope.workspace.id, scope.member.userId, 'membership_proposed', member.id, { role: body.role, emailSent: false })
   return { id: member.id, role: member.role, state: member.state, emailSent: false }

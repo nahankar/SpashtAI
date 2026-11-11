@@ -6,9 +6,10 @@ import { Link } from 'react-router-dom'
 
 const API = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:4000'
 
-export function EmailCodeSignIn({ invitedEmail, invitationToken, purpose = 'signin', signupPath = '/auth/register', onVerify }: {
+export function EmailCodeSignIn({ invitedEmail, invitationToken, purpose = 'signin', workspaceSlug, signupPath = '/auth/register', onVerify }: {
   invitedEmail?: string
   invitationToken?: string
+  workspaceSlug?: string
   purpose?: 'signin' | 'signup'
   signupPath?: string
   onVerify: (challengeId: string, code: string) => Promise<void>
@@ -29,7 +30,7 @@ export function EmailCodeSignIn({ invitedEmail, invitationToken, purpose = 'sign
       if (Date.now() < resendAt) throw new Error('Please wait one minute before requesting another code.')
       const response = await fetch(`${API}${invitationToken ? '/api/invitations' : '/api/auth'}/email-code/request`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(invitationToken ? { token: invitationToken } : { email: email.trim(), purpose }),
+        body: JSON.stringify(invitationToken ? { token: invitationToken } : { email: email.trim(), purpose, workspaceSlug }),
       })
       const data = await response.json()
       if (!response.ok) {

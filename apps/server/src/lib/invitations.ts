@@ -371,7 +371,7 @@ export async function findInvitationByToken(token: string) {
       await assertWorkspaceDatabaseSafety(tx)
     }
     const workspace = inv?.workspaceId ? await tx.workspace.findUnique({
-      where: { id: inv.workspaceId }, select: { name: true, slug: true, logoDataUrl: true, accentColor: true },
+      where: { id: inv.workspaceId }, select: { name: true, slug: true, logoDataUrl: true, accentColor: true, googleSignInEnabled: true, emailCodeSignInEnabled: true },
     }) : null
     return inv ? { ...inv, workspace } : null
   })

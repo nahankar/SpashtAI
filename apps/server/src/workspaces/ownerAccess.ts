@@ -10,7 +10,7 @@ export function buildOwnerAccessEmail(workspace: { name: string; slug: string },
   return { subject: `Your ${workspace.name.replace(/[\r\n]/g, ' ')} workspace Owner access on SpashtAI`, text: [
     `You have been assigned Owner access to ${workspace.name} on SpashtAI.`, '',
     `Open your workspace: ${url}`, '',
-    'Sign in with a code emailed to this address or with Google. There is no separate workspace password.',
+    'Sign in using a method enabled for this workspace and this email address. There is no separate workspace password.',
     'If your membership is pending, select Accept invitation on the workspace page.',
     'As Owner you can invite learners and workspace administrators, manage memberships, and configure workspace signup fields and invitation messages.',
     'After acceptance, this email has organization access only. Previous Personal history is preserved but unavailable. Use another email for Personal access. Workspace analytics are available to Owners and Admins; practice products appear as they become available for your organization.', '',

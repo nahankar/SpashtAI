@@ -13,7 +13,8 @@ vi.mock('../src/lib/prisma', async () => {
 const delivery = vi.hoisted(() => ({ sendEmail: vi.fn().mockResolvedValue({ sent: true }) }))
 vi.mock('../src/lib/email', () => ({ sendEmail: delivery.sendEmail }))
 const state = vi.hoisted(() => ({ paused: false }))
-vi.mock('../src/lib/platformSettings', () => ({ areSignupsPaused: async () => state.paused, getSignupsPausedMessage: async () => 'Signups paused', areRewardPointsEnabled: async () => false }))
+vi.mock('../src/lib/platformSettings', () => ({
+  getPlatformSettings: async () => ({ googleSignInEnabled: true, emailCodeSignInEnabled: true }), areSignupsPaused: async () => state.paused, getSignupsPausedMessage: async () => 'Signups paused', areRewardPointsEnabled: async () => false }))
 vi.mock('../src/lib/google-auth', () => ({ verifyGoogleIdToken: async (credential: string) => {
   const data = JSON.parse(credential)
   return { googleId: `google-${data.email}`, email: data.email, emailVerified: data.verified !== false, firstName: 'Test', lastName: 'Learner', avatar: null }

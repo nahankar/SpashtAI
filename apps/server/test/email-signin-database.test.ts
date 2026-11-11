@@ -21,6 +21,7 @@ vi.mock('../src/lib/email', () => ({
   buildPasswordResetEmail: vi.fn(),
 }))
 vi.mock('../src/lib/platformSettings', () => ({
+  getPlatformSettings: async () => ({ googleSignInEnabled: true, emailCodeSignInEnabled: true }),
   areSignupsPaused: async () => config.paused,
   getSignupsPausedMessage: async () => 'Paused',
   areRewardPointsEnabled: async () => false,

@@ -236,6 +236,9 @@ model Workspace {
   maxMembers       Int                     @default(25)
   dailyEvaluations Int                     @default(30)
   concurrentVoice  Int                     @default(2)
+  googleSignInEnabled Boolean @default(true)
+  emailCodeSignInEnabled Boolean @default(true)
+  learnerEmailDomains String[] @default([])
   invitationBatchSize Int                  @default(20)
   invitationHourlyLimit Int?               @default(60)
   invitationWindowStartedAt DateTime?
@@ -1169,6 +1172,8 @@ model PlatformTicker {
 
 model PlatformSettings {
   id                   String   @id @default("default")
+  googleSignInEnabled Boolean @default(true)
+  emailCodeSignInEnabled Boolean @default(true)
   signupsPaused        Boolean  @default(false)
   signupsPausedMessage String?  @db.Text
   adminRateLimitBypass Boolean  @default(false)

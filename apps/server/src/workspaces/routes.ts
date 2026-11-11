@@ -1,3 +1,4 @@
+import { accessPolicySchema, policyData } from '../lib/signInPolicy'
 import { getWorkspaceMemberProfile, updateWorkspaceMemberProfile } from './memberProfiles'
 import { invitationPreview } from './invitationPreview'
 import { sendOwnerAccess } from './ownerAccess'
@@ -45,8 +46,8 @@ platformWorkspacesRouter.use(gate, requireAuth)
 // These routes only accept an identity token. Organization tokens cannot escape
 // through the pre-existing Personal or platform Admin middleware.
 workspaceRouter.get('/', requireAuth, route(req => service.listMyWorkspaces(req.user!.userId)))
-workspaceRouter.post('/entry/:slug', requireAuth, route(req => service.enterWorkspace(req.user!.userId, idSchema.parse(req.params.slug))))
-workspaceRouter.post('/entry/:slug/accept', requireAuth, route(req => service.acceptWorkspaceMembership(req.user!.userId, idSchema.parse(req.params.slug))))
+workspaceRouter.post('/entry/:slug', requireAuth, route(req => service.enterWorkspace(req.user!.userId, idSchema.parse(req.params.slug), req.user!.authMethod)))
+workspaceRouter.post('/entry/:slug/accept', requireAuth, route(req => service.acceptWorkspaceMembership(req.user!.userId, idSchema.parse(req.params.slug), req.user!.authMethod)))
 
 function workspaceClaims(req: Request) {
   const token = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : ''
@@ -69,6 +70,13 @@ function scopedWrite(
 workspaceRouter.post('/current/invitations/preview', scoped(async (_tx, scope, req) => {
   requireWorkspaceManager(scope)
   return invitationPreview(scope.workspace.name, req.body)
+}))
+workspaceRouter.put('/current/access-policy', scopedWrite(async (tx, scope, req) => {
+  requireWorkspaceManager(scope)
+  const policy = accessPolicySchema.parse(req.body)
+  await tx.workspace.update({ where: { id: scope.workspace.id }, data: policyData(policy) })
+  await tx.workspaceAudit.create({ data: { workspaceId: scope.workspace.id, actorUserId: scope.member.userId, action: 'access_policy_updated', metadata: policy } })
+  return { accessPolicy: policy }
 }))
 workspaceRouter.put('/current/enrollment', scopedWrite((tx, scope, req) => saveManagedEnrollment(tx, scope, req.body)))
 workspaceRouter.post('/current/invitations/bulk', route(req => invitations.createWorkspaceInvitationBatch(workspaceClaims(req), req.body)))

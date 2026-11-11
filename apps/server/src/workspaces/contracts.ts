@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { accessPolicySchema } from '../lib/signInPolicyContracts'
 
 export const WORKSPACE_FEATURES = ['coach', 'elevate', 'replay', 'interviews', 'prepare', 'progress_pulse',
   'feedback', 'pro', 'ultra', 'audio_export', 'text_export', 'reprocess'] as const
@@ -44,6 +45,7 @@ export const createWorkspaceSchema = brandingSchema.extend({
   ownerEmail: z.string().trim().toLowerCase().email().max(254),
   limits: limitsSchema.optional(),
   invitationLimits: invitationLimitsSchema.optional(),
+  accessPolicy: accessPolicySchema.optional(),
 }).strict()
 export const featureSettingsSchema = z.object({
   enabled: z.boolean(), memberDefault: z.boolean(),

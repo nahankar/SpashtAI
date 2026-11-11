@@ -17,6 +17,7 @@ const API = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL ||
 const TOKEN_KEY = 'spashtai_invitation_token'
 
 interface Lookup {
+  methods?: { google: boolean; emailCode: boolean }
   status: 'pending' | 'accepted' | 'expired' | 'revoked'
   recipientName: string | null
   invitedEmail: string
@@ -181,11 +182,11 @@ export function AcceptInvitation() {
                 <>
                   {lookup.status === 'pending' ? <>
                     <Button className="w-full" disabled={accepting} onClick={() => handleIdentity({})}>Accept invitation and continue</Button>
-                    <p className="text-xs text-muted-foreground">Your invitation link verifies {lookup.invitedEmail}. No additional code or Google sign-in is needed to join. For future sign-ins, use an emailed code or Google with this address.</p>
+                    <p className="text-xs text-muted-foreground">Your invitation link verifies {lookup.invitedEmail}. No additional code or Google sign-in is needed to join. For future sign-ins, use the methods enabled by your organization with this address.</p>
                   </> : <>
-                    <GoogleSignInButton label="signin_with" onCredential={credential => handleIdentity({ credential })} onError={(message) => setProblem({ kind: 'error', message })} />
-                    <p className="text-center text-xs text-muted-foreground">Or sign in with email</p>
-                    <EmailCodeSignIn invitedEmail={lookup.invitedEmail} invitationToken={token} onVerify={(challengeId, code) => handleIdentity({ challengeId, code })} />
+                    {lookup.methods?.google !== false && <GoogleSignInButton label="signin_with" onCredential={credential => handleIdentity({ credential })} onError={(message) => setProblem({ kind: 'error', message })} />}
+                    {lookup.methods?.google !== false && lookup.methods?.emailCode !== false && <p className="text-center text-xs text-muted-foreground">Or sign in with email</p>}
+                    {lookup.methods?.emailCode !== false && <EmailCodeSignIn invitedEmail={lookup.invitedEmail} invitationToken={token} onVerify={(challengeId, code) => handleIdentity({ challengeId, code })} />}
                   </>}
                 </>
               ) : step === 'profile' ? (

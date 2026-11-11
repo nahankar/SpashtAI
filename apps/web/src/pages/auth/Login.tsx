@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardDescription } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { useSignInPolicy, workspaceSlugFromNext } from '@/components/auth/useSignInPolicy'
 import { EmailCodeSignIn } from '@/components/auth/EmailCodeSignIn'
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
 import { LogoWithBeta } from '@/components/brand/LogoWithBeta'
@@ -21,6 +22,8 @@ export function Login() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const next = safeAppPath(searchParams.get('next'))
+  const workspaceSlug = workspaceSlugFromNext(next)
+  const policy = useSignInPolicy(workspaceSlug)
 
   useEffect(() => {
     const API = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
@@ -31,7 +34,7 @@ export function Login() {
   }, [])
 
   async function handleGoogleCredential(credential: string) {
-    const user = await loginWithGoogle(credential)
+    const user = await loginWithGoogle(credential, undefined, workspaceSlug)
     if (user.needsProfileCompletion) {
       navigate(next ? `/auth/complete-profile?next=${encodeURIComponent(next)}` : '/auth/complete-profile')
       return
@@ -40,7 +43,7 @@ export function Login() {
   }
 
   async function handleEmailCode(challengeId: string, code: string) {
-    const user = await loginWithEmailCode(challengeId, code)
+    const user = await loginWithEmailCode(challengeId, code, undefined, workspaceSlug)
     navigate(user.needsProfileCompletion
       ? (next ? `/auth/complete-profile?next=${encodeURIComponent(next)}` : '/auth/complete-profile')
       : accountDestination(user, next, user.role === 'ADMIN' || user.role === 'SUPER_ADMIN' ? '/admin' : '/'))
@@ -72,7 +75,7 @@ export function Login() {
             <LogoWithBeta imgClassName="h-16 w-auto" />
           </div>
           <CardDescription className="text-base text-foreground font-medium">
-            Sign in to continue
+            {policy.name ? `Sign in to ${policy.name}` : 'Sign in to continue'}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -82,13 +85,15 @@ export function Login() {
             </div>
           )}
 
-          <GoogleSignInButton
+          {policy.loading && <p role="status" className="text-sm">Loading sign-in options…</p>}
+          {policy.error && <p role="alert" className="text-sm text-destructive">{policy.error}</p>}
+          {policy.methods.google && <GoogleSignInButton
             label="signin_with"
             onCredential={handleGoogleCredential}
             onError={setError}
-          />
-          <p className="text-center text-xs text-muted-foreground">Or sign in with email</p>
-          <EmailCodeSignIn signupPath={next ? `/auth/register?next=${encodeURIComponent(next)}` : '/auth/register'} onVerify={handleEmailCode} />
+          />}
+          {policy.methods.google && policy.methods.emailCode && <p className="text-center text-xs text-muted-foreground">Or sign in with email</p>}
+          {policy.methods.emailCode && <EmailCodeSignIn workspaceSlug={workspaceSlug} signupPath={next ? `/auth/register?next=${encodeURIComponent(next)}` : '/auth/register'} onVerify={handleEmailCode} />}
 
           {import.meta.env.DEV && (
             <form onSubmit={handleLocalSignIn} className="space-y-3 border-t pt-4">
