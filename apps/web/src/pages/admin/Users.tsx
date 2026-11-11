@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback } from 'react'
 import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
+import { TrafficLimitsCard } from '@/components/admin/TrafficLimitsCard'
+import { useAuth } from '@/hooks/useAuth'
 import { useConfirm } from '@/hooks/useConfirm'
 import { UserTable } from '@/components/admin/UserTable'
 import { Input } from '@/components/ui/input'
@@ -39,6 +41,7 @@ interface PlatformSettings {
 
 export function Users() {
   const confirm = useConfirm()
+  const { user } = useAuth()
   const [users, setUsers] = useState<UserRow[]>([])
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
@@ -343,6 +346,8 @@ export function Users() {
           </Button>
         </CardContent>
       </Card>
+
+      {user?.role === 'SUPER_ADMIN' && <TrafficLimitsCard />}
 
       <h2 className="text-lg font-semibold">Accounts</h2>
       <div className="flex gap-3">

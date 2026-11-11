@@ -1,0 +1,5 @@
+ALTER TABLE "PlatformSettings"
+  ADD COLUMN "apiRateLimitMax" INTEGER NOT NULL DEFAULT 100 CHECK ("apiRateLimitMax" BETWEEN 1 AND 1000000),
+  ADD COLUMN "apiRateLimitWindowMinutes" INTEGER NOT NULL DEFAULT 1 CHECK ("apiRateLimitWindowMinutes" BETWEEN 1 AND 1440),
+  ADD COLUMN "authRateLimitMax" INTEGER NOT NULL DEFAULT 5 CHECK ("authRateLimitMax" BETWEEN 1 AND 1000000),
+  ADD COLUMN "authRateLimitWindowMinutes" INTEGER NOT NULL DEFAULT 15 CHECK ("authRateLimitWindowMinutes" BETWEEN 1 AND 1440);

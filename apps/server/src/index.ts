@@ -112,7 +112,7 @@ import { trackFeatureUsage } from './middleware/tracking'
 import eventsRouter from './routes/events'
 import { requireFeature, ensureFeatureFlags } from './lib/featureFlags'
 import { ensurePlatformSettings, getPlatformSettings } from './lib/platformSettings'
-import { apiLimiter, setAdminRateLimitBypassEnabled } from './middleware/rate-limit'
+import { apiLimiter, setAdminRateLimitBypassEnabled, setRateLimitSettings } from './middleware/rate-limit'
 import { ingestClientLogs, clientLogsLimiter } from './routes/clientLogs'
 import { logger, requestLogOptions } from './lib/logger'
 import pinoHttp from 'pino-http'
@@ -452,9 +452,26 @@ async function startServer() {
     await ensurePlatformSettings()
     const platformSettings = await getPlatformSettings()
     setAdminRateLimitBypassEnabled(platformSettings.adminRateLimitBypass)
+    setRateLimitSettings(platformSettings)
   } catch (err) {
     console.warn('⚠️  Platform settings seeding failed:', err)
   }
+
+  // Other API processes pick up saved settings without a restart.
+  let refreshingRateLimits = false
+  setInterval(async () => {
+    if (refreshingRateLimits) return
+    refreshingRateLimits = true
+    try {
+      const settings = await prisma.platformSettings.findUniqueOrThrow({ where: { id: 'default' } })
+      setRateLimitSettings(settings)
+      setAdminRateLimitBypassEnabled(settings.adminRateLimitBypass)
+    } catch (err) {
+      console.warn('Traffic limit refresh failed; keeping last applied settings:', err)
+    } finally {
+      refreshingRateLimits = false
+    }
+  }, 30_000).unref()
 
   startSessionDeletionWorker()
   startReplayDeletionWorker()

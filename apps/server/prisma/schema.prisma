@@ -1172,6 +1172,10 @@ model PlatformSettings {
   signupsPaused        Boolean  @default(false)
   signupsPausedMessage String?  @db.Text
   adminRateLimitBypass Boolean  @default(false)
+  apiRateLimitMax      Int      @default(100)
+  apiRateLimitWindowMinutes Int @default(1)
+  authRateLimitMax     Int      @default(5)
+  authRateLimitWindowMinutes Int @default(15)
   // Points display and awards. Off until an admin turns the system on.
   // Pro and Ultra access do not depend on points.
   rewardPointsEnabled  Boolean  @default(false)

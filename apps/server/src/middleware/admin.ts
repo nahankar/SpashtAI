@@ -35,7 +35,7 @@ export async function requireSuperAdmin(req: Request, res: Response, next: NextF
     const user = userId ? await prisma.user.findUnique({ where: { id: userId }, select: { role: true } }) : null
     // JWT roles are a login-time snapshot; demotion/deletion must take effect now.
     if (user?.role !== 'SUPER_ADMIN') {
-      res.status(403).json({ error: 'Super admin access required to publish or retire questions' })
+      res.status(403).json({ error: 'Super admin access required' })
       return
     }
     next()

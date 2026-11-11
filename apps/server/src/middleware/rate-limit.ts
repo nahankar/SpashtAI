@@ -1,4 +1,5 @@
-import rateLimit from 'express-rate-limit'
+import rateLimit, { MemoryStore } from 'express-rate-limit'
+import { DEFAULT_RATE_LIMIT_SETTINGS, rateLimitSettingsSchema, type RateLimitSettings } from '../lib/rateLimitSettings'
 import type { Request, RequestHandler } from 'express'
 import { verifyToken, verifyWorkspaceToken } from '../lib/jwt'
 
@@ -39,24 +40,42 @@ function skipApiRateLimit(req: Request): boolean {
   return adminRateLimitBypassEnabled && hasAdminBearerToken(req)
 }
 
-export const authLimiter = authRateLimitDisabled
-  ? passthrough
-  : rateLimit({
-      windowMs: 15 * 60 * 1000,
-      max: 5,
-      message: { error: 'Too many attempts, please try again later' },
-      standardHeaders: true,
-      legacyHeaders: false,
-    })
+let settings: RateLimitSettings = { ...DEFAULT_RATE_LIMIT_SETTINGS }
 
-export const apiLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 100,
-  skip: skipApiRateLimit,
-  message: { error: 'Too many requests, please try again later' },
-  standardHeaders: true,
-  legacyHeaders: false,
-})
+function createLimiter(kind: 'api' | 'auth') {
+  const store = new MemoryStore()
+  const middleware = rateLimit({
+    windowMs: settings[kind === 'api' ? 'apiRateLimitWindowMinutes' : 'authRateLimitWindowMinutes'] * 60_000,
+    limit: () => settings[kind === 'api' ? 'apiRateLimitMax' : 'authRateLimitMax'],
+    ...(kind === 'api' ? { skip: skipApiRateLimit } : {}),
+    store,
+    message: { error: kind === 'api' ? 'Too many requests, please try again later' : 'Too many attempts, please try again later' },
+    standardHeaders: true,
+    legacyHeaders: false,
+  })
+  return { middleware, store }
+}
+let api = createLimiter('api')
+let auth = createLimiter('auth')
+
+/** Counts survive limit changes. Changing a window starts a fresh window for that limiter. */
+export function setRateLimitSettings(value: RateLimitSettings): void {
+  const next = rateLimitSettingsSchema.parse(value)
+  const previous = settings
+  settings = next
+  if (previous.apiRateLimitWindowMinutes !== next.apiRateLimitWindowMinutes) {
+    api.store.shutdown()
+    api = createLimiter('api')
+  }
+  if (previous.authRateLimitWindowMinutes !== next.authRateLimitWindowMinutes) {
+    auth.store.shutdown()
+    auth = createLimiter('auth')
+  }
+}
+
+export const authLimiter: RequestHandler = (req, res, next) =>
+  authRateLimitDisabled ? passthrough(req, res, next) : auth.middleware(req, res, next)
+export const apiLimiter: RequestHandler = (req, res, next) => api.middleware(req, res, next)
 
 /** Invitation sends and resends, per admin account (production only, like the auth limiter). */
 export const invitationSendLimiter = authRateLimitDisabled
