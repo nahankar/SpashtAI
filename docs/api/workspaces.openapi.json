@@ -2833,6 +2833,166 @@
           }
         }
       }
+    },
+    "/api/workspaces/current/members/{memberId}/profile": {
+      "get": {
+        "summary": "Read a tenant member\u2019s signup profile and custom fields",
+        "description": "Current tenant Owner/Admin only. Returns profile (including read-only sign-in email and resolved location), enrollmentFields, enrollmentResponses and an opaque revision for optimistic edit checks. Excludes credentials and account permission fields.",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "memberId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result. See docs/TENANCY.md for DTO and rollout boundaries."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      },
+      "patch": {
+        "summary": "Correct member signup profile and tenant enrollment answers",
+        "description": "Current tenant Owner/Admin only; target must belong to this tenant. Standard profile fields apply to the shared account. Custom answers update only this workspace membership, using that user\u2019s saved signup field definitions (with current definitions for matching field IDs). Email, Google identity, platform/workspace role and permissions cannot be changed here. Requires the revision from GET; concurrent profile or form-definition changes return 409. Updates and a content-free audit commit atomically.",
+        "security": [
+          {
+            "workspace": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "memberId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result. See docs/TENANCY.md for DTO and rollout boundaries."
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "revision",
+                  "firstName",
+                  "lastName",
+                  "phone",
+                  "dateOfBirth",
+                  "gender",
+                  "pincode",
+                  "enrollmentResponses"
+                ],
+                "properties": {
+                  "revision": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "firstName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "lastName": {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  "phone": {
+                    "type": "string",
+                    "maxLength": 30
+                  },
+                  "dateOfBirth": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "gender": {
+                    "type": "string",
+                    "enum": [
+                      "MALE",
+                      "FEMALE"
+                    ]
+                  },
+                  "pincode": {
+                    "type": "string",
+                    "maxLength": 20
+                  },
+                  "enrollmentResponses": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "oneOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 1000
+                        },
+                        {
+                          "type": "array",
+                          "maxItems": 30,
+                          "items": {
+                            "type": "string",
+                            "maxLength": 120
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {

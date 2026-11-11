@@ -1,3 +1,4 @@
+import { getWorkspaceMemberProfile, updateWorkspaceMemberProfile } from './memberProfiles'
 import { invitationPreview } from './invitationPreview'
 import { sendOwnerAccess } from './ownerAccess'
 import * as invitations from './invitations'
@@ -123,6 +124,8 @@ workspaceRouter.delete('/current/admin/analytics/saved/:id', scopedWrite((tx, sc
 workspaceRouter.post('/current/members', scopedWrite((tx, scope, req) => service.addExistingMember(tx, scope, req.body)))
 workspaceRouter.patch('/current/branding', scopedWrite((tx, scope, req) => service.updateWorkspaceBranding(tx, scope, req.body)))
 workspaceRouter.put('/current/features/:feature', scopedWrite((tx, scope, req) => service.configureWorkspaceFeature(tx, scope, String(req.params.feature), req.body)))
+workspaceRouter.get('/current/members/:memberId/profile', route(req => getWorkspaceMemberProfile(workspaceClaims(req), idSchema.parse(req.params.memberId))))
+workspaceRouter.patch('/current/members/:memberId/profile', route(req => updateWorkspaceMemberProfile(workspaceClaims(req), idSchema.parse(req.params.memberId), req.body)))
 workspaceRouter.patch('/current/members/:memberId', scopedWrite((tx, scope, req) => service.changeWorkspaceMember(tx, scope, idSchema.parse(req.params.memberId), req.body)))
 workspaceRouter.delete('/current/members/:memberId', scopedWrite((tx, scope, req) => service.deleteWorkspaceMember(tx, scope, idSchema.parse(req.params.memberId), req.body)))
 workspaceRouter.put('/current/members/:memberId/features/:feature', scopedWrite((tx, scope, req) => service.configureMemberFeature(tx, scope, idSchema.parse(req.params.memberId), String(req.params.feature), req.body)))

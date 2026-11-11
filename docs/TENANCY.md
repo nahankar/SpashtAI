@@ -150,3 +150,25 @@ visibility does not grant INSERT/UPDATE/DELETE. Existing aggregate-only report c
 their raw-content restriction. Role demotion, suspension and removal apply on the next request.
 The shared account menu in the tenant header shows the signed-in name and Light/Dark/System
 appearance controls, using the same stored theme preference as the main site.
+
+### Member profile corrections
+
+Tenant Users has a Profile button beside Suspend for Owners and Admins. It loads a single
+member through `GET /api/workspaces/current/members/:memberId/profile`, and saves through PATCH
+on the same path. Owners/Admins may correct names, phone, date of birth, gender, pincode and
+custom enrollment answers, including for suspended members. Basic details belong to the shared
+email account; the dialog explains this. Custom answers change only this tenant’s membership.
+Email remains read-only: this endpoint cannot change login identity, Google linking, roles or
+permissions. Signup consent and historical activity are not modified.
+
+The editor preserves the member’s original signup field set (including historical-only fields)
+and uses current definitions for matching field IDs; members with no stored form use the
+current tenant form. Custom choices and required fields are validated. Date of birth must be a
+real calendar date and cannot be in the future. Postal location is looked up outside database
+locks only when the pincode changes.
+
+Every read/write rechecks current manager membership and tenant ownership of the target. A
+revision hashes only the displayed profile/form/answers, so background login bookkeeping does
+not cause conflicts. User row locking serializes shared-account edits across tenants. Stale
+profile/form revisions return 409. Basic and custom edits plus a content-free audit commit in
+one transaction; audit metadata contains field IDs, never profile values or custom answers.

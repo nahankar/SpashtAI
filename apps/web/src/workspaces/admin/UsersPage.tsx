@@ -1,3 +1,4 @@
+import { MemberProfileDialog } from './MemberProfileDialog'
 import { useCallback, useEffect, useState } from 'react'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import {
@@ -74,13 +75,14 @@ export function WorkspaceUsers() {
     <ErrorAlert error={error} />{notice && <p role="status" className="text-sm text-emerald-700">{notice}</p>}
     <Card><CardContent className="pt-6">
       {loading && !items.length ? <Loading /> : items.length === 0 ? <EmptyState>No members match these filters.</EmptyState> :
-        <Accordion type="multiple" className="w-full">{items.map(member => <MemberRow key={member.id} member={member} actor={actor} features={snapshot.features} busy={busy} change={change} />)}</Accordion>}
+        <Accordion type="multiple" className="w-full">{items.map(member => <MemberRow key={member.id} member={member} actor={actor} features={snapshot.features} busy={busy} change={change} onProfileSaved={async () => { setNotice('Profile updated.'); await load() }} />)}</Accordion>}
       {pages.at(-1)?.nextCursor && <div className="pt-4"><Button variant="outline" disabled={loading} onClick={more}>Load more</Button></div>}
     </CardContent></Card>
   </div>
 }
 
-function MemberRow({ member, actor, features, busy, change }: {
+function MemberRow({ member, actor, features, busy, change, onProfileSaved }: {
+  onProfileSaved: () => Promise<void>
   member: Member; actor: Membership['role']; features: Feature[]; busy: boolean
   change: (path: string, method: string, body: unknown, done: string) => Promise<void>
 }) {
@@ -97,6 +99,7 @@ function MemberRow({ member, actor, features, busy, change }: {
         <SelectTrigger aria-label={`Role for ${member.email}`} className="w-32"><SelectValue /></SelectTrigger>
         <SelectContent>{ROLES.map(r => <SelectItem key={r} value={r} disabled={r !== 'LEARNER' && actor !== 'OWNER'}>{words(r)}</SelectItem>)}</SelectContent>
       </Select>
+      <MemberProfileDialog memberId={member.id} disabled={busy} onSaved={onProfileSaved} />
       {member.state !== 'INVITED' && (member.state === 'SUSPENDED'
         ? <Button variant="outline" size="sm" disabled={busy || !editable} onClick={() => change(path, 'PATCH', { state: 'ACTIVE' }, `${member.email} can use the workspace again.`)}>Reactivate</Button>
         : <AlertDialog>
