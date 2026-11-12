@@ -44,7 +44,7 @@ Return exactly one JSON object using one of these shapes:
 {"status":"unsupported","reason":"concise reason"}
 
 Reports: overview (members, active learners, practice counts, evaluation and voice capacity); daily_activity (practice per day);
-learner_activity (practice per learner); feature_usage (usage events by feature, day and learner); progress_pulse
+learner_activity (practice per learner); feature_usage (existing learner practices by product, day and learner; excludes deleted sessions, page views and owner/admin activity); progress_pulse
 (communication skill scores from Elevate and Replay; never Interviews).
 Rules:
 - Never produce SQL, code, database identifiers, or fields outside this contract.

@@ -10,8 +10,6 @@ type Scope = Awaited<ReturnType<typeof establishWorkspace>>
 
 export const WORKSPACE_PRODUCTS = ['elevate', 'replay', 'interviews'] as const
 export type WorkspaceProduct = typeof WORKSPACE_PRODUCTS[number]
-/** Usage events an organization may see; page paths and event metadata are never returned. */
-export const WORKSPACE_USAGE_FEATURES = ['elevate', 'replay', 'interviews', 'progress_pulse', 'feedback', 'app'] as const
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 
 export const workspaceFiltersSchema = z.object({
@@ -164,27 +162,42 @@ export async function workspaceLearnerActivity(tx: WorkspaceTx, scope: Scope, in
   return { range: presentRange(f), learners }
 }
 
+/** Current learner practices, one row per saved session; telemetry is never practice usage. */
 export async function workspaceFeatureUsage(tx: WorkspaceTx, scope: Scope, input: unknown, exporting = false) {
   await asWorkspaceManager(tx, scope)
   const f = await resolveFilters(tx, scope, input)
-  const features = f.product ? [f.product] : [...WORKSPACE_USAGE_FEATURES]
-  const base = Prisma.sql`FROM "FeatureUsage" WHERE "workspaceId" = ${scope.workspace.id}
-    AND feature IN (${Prisma.join(features)}) AND ${inRange('timestamp', f)} ${learnerClause(f)}`
-  const [byAction, daily, byLearner] = await Promise.all([
-    tx.$queryRaw<Array<{ feature: string; action: string; count: bigint; learners: bigint }>>`
-      SELECT feature, action, count(*) AS count, count(DISTINCT "userId") AS learners ${base} GROUP BY feature, action ORDER BY count(*) DESC, feature, action LIMIT ${exporting ? 10001 : 200}`,
-    tx.$queryRaw<Array<{ day: string; feature: string; count: bigint }>>`
-      SELECT ${dayOf('timestamp', f)} AS day, feature, count(*) AS count ${base} GROUP BY 1, feature`,
-    tx.$queryRaw<Array<{ userId: string; count: bigint; lastDay: string }>>`
-      SELECT "userId", count(*) AS count, max(${dayOf('timestamp', f)}) AS "lastDay" ${base} GROUP BY "userId" ORDER BY count(*) DESC, "userId" LIMIT ${exporting ? 10001 : 500}`,
-  ])
-  const who = await identities(tx, scope.workspace.id, byLearner.map(row => row.userId))
+  const features = f.product ? [f.product] : [...WORKSPACE_PRODUCTS]
+  // activities excludes discarded voice sessions and reads Replay's surviving rows.
+  // Membership is workspace-local: owners/admins and former members are not learners.
+  // Materialize the matching practices once. All totals use one database snapshot,
+  // so a concurrent deletion cannot leave the chart and learner table disagreeing.
+  const [counts] = await tx.$queryRaw<Array<{
+    features: Array<{ feature: string; practices: number; learners: number }>
+    daily: Array<{ day: string; product: string; practices: number }>
+    learners: Array<{ userId: string; practices: number; lastDay: string }>
+  }>>`WITH practices AS MATERIALIZED (
+    SELECT a."userId", a.product, a.day FROM (${activities(scope.workspace.id, f)}) a
+    WHERE (SELECT m.role FROM "WorkspaceMember" m WHERE m."workspaceId" = ${scope.workspace.id}
+      AND m."userId" = a."userId") = 'LEARNER'
+  ) SELECT
+    COALESCE((SELECT jsonb_agg(r ORDER BY r.practices DESC, r.feature) FROM (
+      SELECT product AS feature, count(*) AS practices, count(DISTINCT "userId") AS learners
+      FROM practices GROUP BY product
+    ) r), '[]'::jsonb) AS features,
+    COALESCE((SELECT jsonb_agg(r) FROM (
+      SELECT day, product, count(*) AS practices FROM practices GROUP BY day, product
+    ) r), '[]'::jsonb) AS daily,
+    COALESCE((SELECT jsonb_agg(r ORDER BY r.practices DESC, r."userId") FROM (
+      SELECT "userId", count(*) AS practices, max(day) AS "lastDay" FROM practices
+      GROUP BY "userId" ORDER BY count(*) DESC, "userId" LIMIT ${exporting ? 10001 : 500}
+    ) r), '[]'::jsonb) AS learners`
+  const who = await identities(tx, scope.workspace.id, counts.learners.map(row => row.userId))
   return {
     range: presentRange(f),
-    features: byAction.map(row => ({ feature: row.feature, action: row.action, events: Number(row.count), learners: Number(row.learners) })),
+    features: counts.features,
     days: daysBetween(f.from, f.to).map((d): Record<string, string | number> => ({ day: d,
-      ...Object.fromEntries(features.map(feature => [feature, Number(daily.find(row => row.day === d && row.feature === feature)?.count ?? 0)])) })),
-    learners: byLearner.map(row => ({ ...who(row.userId), events: Number(row.count), lastActiveDay: row.lastDay })),
+      ...Object.fromEntries(features.map(feature => [feature, counts.daily.find(row => row.day === d && row.product === feature)?.practices ?? 0])) })),
+    learners: counts.learners.map(row => ({ ...who(row.userId), practices: row.practices, lastActiveDay: row.lastDay })),
   }
 }
 

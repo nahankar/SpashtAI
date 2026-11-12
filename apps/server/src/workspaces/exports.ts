@@ -54,10 +54,11 @@ export async function workspaceExport(tx: WorkspaceTx, scope: Scope, report: Exp
     rows.push(['From', data.range.from], ['To', data.range.to], ['Product', data.range.product ?? 'All'],
       ['Skill', data.range.skill ?? 'All'], ['Learner membership', data.range.learner ?? 'All'])
     if ('features' in data) {
-      addExportSheet(workbook, 'By feature', ['Feature', 'Action', 'Events', 'Learners'], data.features.map(r => [r.feature, r.action, r.events, r.learners]))
+      rows.push(['Counting rule', 'One existing learner practice per session, dated when started; deleted practices, page views, owner/admin activity and former members excluded'])
+      addExportSheet(workbook, 'By feature', ['Feature', 'Practices', 'Learners'], data.features.map(r => [r.feature, r.practices, r.learners]))
       const keys = Object.keys(data.days[0] ?? {}).filter(k => k !== 'day')
       addExportSheet(workbook, 'Daily', ['Day', ...keys], data.days.map(r => [r.day, ...keys.map(k => r[k] ?? 0)]))
-      addExportSheet(workbook, 'By learner', ['Name', 'Email', 'Role', 'Events', 'Last active day'], data.learners.map(r => [r.name, r.email, r.role, r.events, r.lastActiveDay]))
+      addExportSheet(workbook, 'By learner', ['Name', 'Email', 'Role', 'Practices', 'Last active day'], data.learners.map(r => [r.name, r.email, r.role, r.practices, r.lastActiveDay]))
       rowCount = data.features.length + data.days.length + data.learners.length
     } else {
       addExportSheet(workbook, 'Skills', ['Skill', 'Average', 'Samples', 'Learners'], data.skills.map(r => [r.skill, r.average, r.samples, r.learners]))

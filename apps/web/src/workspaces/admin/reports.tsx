@@ -20,9 +20,9 @@ export interface DailyActivity { range: Range; days: Array<{ day: string; active
 export interface LearnerActivity { range: Range; learners: Array<Person & { lastActiveDay: string | null; elevate: number; replay: number; interviews: number }> }
 export interface FeatureUsage {
   range: Range
-  features: Array<{ feature: string; action: string; events: number; learners: number }>
+  features: Array<{ feature: string; practices: number; learners: number }>
   days: Array<Record<string, string | number>>
-  learners: Array<Person & { events: number; lastActiveDay: string }>
+  learners: Array<Person & { practices: number; lastActiveDay: string }>
 }
 export interface PulseReport {
   range: Range
@@ -81,20 +81,20 @@ export function LearnerActivityView({ data }: { data: LearnerActivity }) {
 export function FeatureUsageView({ data }: { data: FeatureUsage }) {
   const features = [...new Set(data.days.flatMap(d => Object.keys(d).filter(k => k !== 'day')))]
   return <div className="space-y-4">
-    <Card><CardHeader><CardTitle className="text-base">Usage by day</CardTitle><CardDescription>Product events recorded in this workspace</CardDescription></CardHeader><CardContent>
-      {data.features.length === 0 ? <EmptyState>No usage recorded in this period.</EmptyState> : <div className="h-72"><ResponsiveContainer width="100%" height="100%">
+    <Card><CardHeader><CardTitle className="text-base">Learner practices by day</CardTitle><CardDescription>Each existing learner practice counts once, on the day it started. Deleted practices, page views, and owner/admin activity are excluded.</CardDescription></CardHeader><CardContent>
+      {data.features.length === 0 ? <EmptyState>No learner practices in this period.</EmptyState> : <div className="h-72"><ResponsiveContainer width="100%" height="100%">
         <LineChart data={data.days}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="day" tickFormatter={shortDay} fontSize={12} /><YAxis allowDecimals={false} fontSize={12} /><Tooltip /><Legend />
           {features.map((f, i) => <Line key={f} dataKey={f} name={featureLabel(f)} stroke={COLORS[i % COLORS.length]} strokeWidth={2} dot={false} />)}
         </LineChart></ResponsiveContainer></div>}
     </CardContent></Card>
     <div className="grid gap-4 lg:grid-cols-2">
-      <Card><CardHeader><CardTitle className="text-base">Actions</CardTitle></CardHeader><CardContent>{data.features.length === 0 ? <EmptyState>No actions.</EmptyState> : <Table>
-        <TableHeader><TableRow><TableHead>Product</TableHead><TableHead>Action</TableHead><TableHead className="text-right">Events</TableHead><TableHead className="text-right">Learners</TableHead></TableRow></TableHeader>
-        <TableBody>{data.features.map(row => <TableRow key={`${row.feature}:${row.action}`}><TableCell><Badge variant="secondary">{featureLabel(row.feature)}</Badge></TableCell><TableCell className="break-all">{row.action.replaceAll('_', ' ')}</TableCell><TableCell className="text-right tabular-nums">{row.events}</TableCell><TableCell className="text-right tabular-nums">{row.learners}</TableCell></TableRow>)}</TableBody>
+      <Card><CardHeader><CardTitle className="text-base">Practices by product</CardTitle></CardHeader><CardContent>{data.features.length === 0 ? <EmptyState>No learner practices.</EmptyState> : <Table>
+        <TableHeader><TableRow><TableHead>Product</TableHead><TableHead className="text-right">Practices</TableHead><TableHead className="text-right">Learners</TableHead></TableRow></TableHeader>
+        <TableBody>{data.features.map(row => <TableRow key={row.feature}><TableCell><Badge variant="secondary">{featureLabel(row.feature)}</Badge></TableCell><TableCell className="text-right tabular-nums">{row.practices}</TableCell><TableCell className="text-right tabular-nums">{row.learners}</TableCell></TableRow>)}</TableBody>
       </Table>}</CardContent></Card>
-      <Card><CardHeader><CardTitle className="text-base">Most active learners</CardTitle></CardHeader><CardContent>{data.learners.length === 0 ? <EmptyState>No learners.</EmptyState> : <Table>
-        <TableHeader><TableRow><TableHead>Learner</TableHead><TableHead className="text-right">Events</TableHead><TableHead>Last active</TableHead></TableRow></TableHeader>
-        <TableBody>{data.learners.map((row, i) => <TableRow key={row.memberId ?? `former-${i}`}><TableCell><Who person={row} /></TableCell><TableCell className="text-right tabular-nums">{row.events}</TableCell><TableCell>{row.lastActiveDay}</TableCell></TableRow>)}</TableBody>
+      <Card><CardHeader><CardTitle className="text-base">Most active learners</CardTitle></CardHeader><CardContent>{data.learners.length === 0 ? <EmptyState>No learners practised in this period.</EmptyState> : <Table>
+        <TableHeader><TableRow><TableHead>Learner</TableHead><TableHead className="text-right">Practices</TableHead><TableHead>Last active</TableHead></TableRow></TableHeader>
+        <TableBody>{data.learners.map((row, i) => <TableRow key={row.memberId ?? `former-${i}`}><TableCell><Who person={row} /></TableCell><TableCell className="text-right tabular-nums">{row.practices}</TableCell><TableCell>{row.lastActiveDay}</TableCell></TableRow>)}</TableBody>
       </Table>}</CardContent></Card>
     </div>
   </div>

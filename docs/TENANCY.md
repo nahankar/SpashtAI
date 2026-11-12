@@ -172,3 +172,20 @@ revision hashes only the displayed profile/form/answers, so background login boo
 not cause conflicts. User row locking serializes shared-account edits across tenants. Stale
 profile/form revisions return 409. Basic and custom edits plus a content-free audit commit in
 one transaction; audit metadata contains field IDs, never profile values or custom answers.
+
+### Feature usage counting
+
+Feature usage reports current saved learner practices, not product telemetry. Each surviving
+Elevate/Interview Session or ReplaySession counts once, whether started or finished, on its
+start day (Replay: creation day) in the organization time zone. Discarded voice sessions
+are excluded immediately, before background deletion finishes; physically deleted Replay
+and voice sessions cannot contribute. Only members whose current workspace role is LEARNER
+are included (including suspended learners); owner/admin and former-member practices are excluded.
+Page views, audio reconnects, answers, Progress Pulse navigation and historical FeatureUsage
+events never increase practice counts. Telemetry remains available for diagnostics.
+
+The chart, product totals, learner ranking, AI feature-usage reports and Excel export share
+the same query and filters. The response uses `practices` instead of `events`, and product
+rows have no `action`. Excel uses Practices headers and records this definition in Report
+details. The learner list is limited to 500 in the UI; exports include all matching rows up
+to 10,000, then fail explicitly. No data migration or deletion is required.

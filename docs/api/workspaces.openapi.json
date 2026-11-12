@@ -2150,8 +2150,8 @@
     },
     "/api/workspaces/current/admin/feature-usage": {
       "get": {
-        "summary": "Feature usage events by feature and day",
-        "description": "Aggregate rows of this organization only, with allowlisted columns; no transcripts, answers or recordings. Days are bucketed in the organization time zone and zero-filled.",
+        "summary": "Existing learner practices by product, day and learner",
+        "description": "Counts each surviving learner Session (Elevate or Interviews) and ReplaySession once. Discarded/deleted sessions, telemetry events, owner/admin practices and former members are excluded. Membership role is evaluated in this workspace at report time; suspended learners remain included. Started and finished practices both count, dated by startedAt (Replay: createdAt) in the organization time zone. Includes date, product, learner and enrollment field filters; days are zero-filled. No transcripts, answers or recordings. UI shows up to 500 learners; Excel export includes all matching learners up to 10,000 or returns 422 without truncation. This replaces event counts: features contain feature, practices, learners (no action/events); learners contain practices instead of events. Daily values are practice counts.",
         "security": [
           {
             "workspace": []
@@ -2230,7 +2230,14 @@
         ],
         "responses": {
           "200": {
-            "description": "JSON result."
+            "description": "Current saved learner practices.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceFeatureUsage"
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/400"
@@ -3738,6 +3745,117 @@
             "items": {
               "type": "string",
               "example": "klsvdit.edu.in"
+            }
+          }
+        }
+      },
+      "WorkspaceFeatureUsage": {
+        "type": "object",
+        "required": [
+          "range",
+          "features",
+          "days",
+          "learners"
+        ],
+        "properties": {
+          "range": {
+            "type": "object",
+            "description": "Resolved inclusive date range, organization time zone and filters."
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "feature",
+                "practices",
+                "learners"
+              ],
+              "properties": {
+                "feature": {
+                  "type": "string",
+                  "enum": [
+                    "elevate",
+                    "interviews",
+                    "replay"
+                  ]
+                },
+                "practices": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "learners": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "days": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "day"
+              ],
+              "properties": {
+                "day": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "elevate": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "interviews": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "replay": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "description": "One row per local day, with practice counts for the selected product or all three products."
+          },
+          "learners": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "memberId",
+                "name",
+                "email",
+                "role",
+                "practices",
+                "lastActiveDay"
+              ],
+              "properties": {
+                "memberId": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "email": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "LEARNER"
+                  ]
+                },
+                "practices": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "lastActiveDay": {
+                  "type": "string",
+                  "format": "date"
+                }
+              }
             }
           }
         }

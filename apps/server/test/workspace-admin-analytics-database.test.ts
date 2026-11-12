@@ -19,7 +19,7 @@ function binary(res: IncomingMessage, done: (error: Error | null, body?: Buffer)
 }
 
 const url = process.env.WORKSPACE_TEST_DATABASE_URL
-if (url && !['postgresql://postgres@127.0.0.1:55443/postgres', 'postgresql://postgres@127.0.0.1:55443/spasht_filters_test'].includes(url)) throw new Error('Use only the isolated tenancy container and an approved test database')
+if (url && !['postgresql://postgres@127.0.0.1:55443/postgres', 'postgresql://postgres@127.0.0.1:55443/spasht_filters_test', 'postgresql://postgres@127.0.0.1:55443/spasht_usage_test'].includes(url)) throw new Error('Use only the isolated tenancy container and an approved test database')
 const suite = url ? describe : describe.skip
 
 const model = vi.hoisted(() => ({ complete: vi.fn<(prompt: string) => Promise<string>>() }))
@@ -160,7 +160,7 @@ suite('organization admin reports and AI Analytics', () => {
     const daily = await get('admin/activity/daily', cs)
     expect(daily.body.days.reduce((sum: number, r: { elevate: number }) => sum + r.elevate, 0)).toBe(1)
     expect((await get('admin/activity/learners', cs)).body.learners.map((r: { memberId: string }) => r.memberId)).toEqual([members[`${alpha}:learner`]])
-    expect((await get('admin/feature-usage', cs)).body.features[0].events).toBe(1)
+    expect((await get('admin/feature-usage', cs)).body.features[0].practices).toBe(1)
     expect((await get('admin/progress-pulse', cs)).body.skills.map((r: { skill: string }) => r.skill)).toEqual(['clarity'])
     expect((await get('admin/overview', 'field=department:CS&field=department:ECE')).body.members.active).toBe(2)
     expect((await get('admin/overview', 'field=department:ECE&field=skills:Java')).body.members.active).toBe(0)
@@ -258,17 +258,17 @@ suite('organization admin reports and AI Analytics', () => {
       expect(maximum.status).toBe(200)
       const workbook = new ExcelJS.Workbook(); await workbook.xlsx.load(maximum.body)
       expect(workbook.getWorksheet('Users')!.rowCount).toBe(10001)
-      await admin.featureUsage.createMany({ data: capIds.map((userId, i) => ({ userId, workspaceId: cap.id, workspaceKind: 'ORGANIZATION', feature: 'elevate', action: `cap_${i % 201}`, timestamp: new Date() })) })
+      await admin.session.createMany({ data: capIds.map(userId => ({ userId, workspaceId: cap.id, workspaceKind: 'ORGANIZATION', module: 'elevate' })) })
       await admin.progressPulse.createMany({ data: capIds.map(userId => ({ userId, workspaceId: cap.id, workspaceKind: 'ORGANIZATION', source: 'elevate', skill: 'clarity', score: 8 })) })
       for (const report of ['feature-usage', 'progress-pulse']) {
         const page = await api.get(`/api/workspaces/current/admin/${report}`).set(token(cap.id, 'owner'))
         expect(page.status).toBe(200); expect(page.body.learners).toHaveLength(500)
-        if (report === 'feature-usage') expect(page.body.features).toHaveLength(200)
+        if (report === 'feature-usage') expect(page.body.features).toEqual([{ feature: 'elevate', practices: 10000, learners: 10000 }])
         const exported = await api.get(`/api/workspaces/current/admin/${report}/export.xlsx`).set(token(cap.id, 'owner')).buffer(true).parse(binary)
         expect(exported.status).toBe(200)
         const full = new ExcelJS.Workbook(); await full.xlsx.load(exported.body)
         expect(full.getWorksheet('By learner')!.rowCount).toBe(10001)
-        if (report === 'feature-usage') expect(full.getWorksheet('By feature')!.rowCount).toBe(202)
+        if (report === 'feature-usage') expect(full.getWorksheet('By feature')!.rowCount).toBe(2)
       }
     } finally {
       await admin.workspace.delete({ where: { id: cap.id } })
@@ -301,13 +301,83 @@ suite('organization admin reports and AI Analytics', () => {
     expect((await api.get('/api/workspaces/current/admin/overview?days=365').set(token(alpha, 'owner'))).status).toBe(400)
   })
 
+  it('counts surviving learner practices once and drops deleted sessions without relying on telemetry', async () => {
+    const ws = await admin.workspace.create({ data: { kind: 'ORGANIZATION', name: 'Practice usage', slug: `${tag}-usage`, timeZone: tz } })
+    try {
+      for (const [who, role] of [['owner', 'OWNER'], ['admin', 'ADMIN'], ['learner', 'LEARNER']] as const) {
+        members[`${ws.id}:${who}`] = (await admin.workspaceMember.create({ data: { workspaceId: ws.id, userId: users[who], role, state: 'ACTIVE', acceptedAt: new Date() } })).id
+      }
+      const voice = (who: string, purpose: 'COMMUNICATION' | 'INTERVIEW') => admin.session.create({ data: {
+        workspaceId: ws.id, workspaceKind: 'ORGANIZATION', userId: users[who], module: purpose === 'INTERVIEW' ? 'interview' : 'elevate', purpose,
+        startedAt: at('2026-11-01T11:00:00Z'), durationSec: 120,
+      } })
+      const replay = (who: string) => admin.replaySession.create({ data: { workspaceId: ws.id, workspaceKind: 'ORGANIZATION', userId: users[who],
+        meetingType: 'standup', userRole: 'host', createdAt: at('2026-11-02T12:00:00Z') } })
+      // Retained practices have no telemetry at all; repeated telemetry must not inflate their count.
+      await voice('learner', 'COMMUNICATION'); await voice('learner', 'INTERVIEW'); await replay('learner')
+      const deletedElevate = await voice('learner', 'COMMUNICATION')
+      const deletedInterview = await voice('learner', 'INTERVIEW')
+      const deletedReplay = await replay('learner')
+      await voice('owner', 'INTERVIEW'); await voice('admin', 'COMMUNICATION'); await replay('admin')
+      await admin.featureUsage.createMany({ data: [
+        ...Array.from({ length: 7 }, () => ({ feature: 'interviews', action: 'rtc_connected', sessionId: deletedInterview.id })),
+        { feature: 'interviews', action: 'practice_start', sessionId: deletedInterview.id },
+        { feature: 'elevate', action: 'session_start', sessionId: deletedElevate.id },
+        { feature: 'replay', action: 'results_viewed', sessionId: deletedReplay.id },
+        { feature: 'progress_pulse', action: 'dashboard_viewed', sessionId: null },
+        { feature: 'app', action: 'page_view', sessionId: null },
+        { feature: 'interviews', action: 'answer_completed', sessionId: null },
+      ].map(event => ({ ...event, userId: users.learner, workspaceId: ws.id, workspaceKind: 'ORGANIZATION', timestamp: at('2026-11-02T12:00:00Z') })) })
+      const get = (extra = '') => api.get(`/api/workspaces/current/admin/feature-usage?${range}${extra}`).set(token(ws.id, 'owner'))
+      const before = await get()
+      expect(before.status).toBe(200)
+      expect(before.body.features).toEqual(['elevate', 'interviews', 'replay'].map(feature => ({ feature, practices: 2, learners: 1 })))
+      // Voice deletion first leaves a tombstone; Replay deletion removes the database row.
+      await admin.session.updateMany({ where: { id: { in: [deletedElevate.id, deletedInterview.id] } }, data: { discardedAt: new Date(), deletionStatus: 'pending' } })
+      await admin.replaySession.delete({ where: { id: deletedReplay.id } })
+      const current = await get()
+      expect(current.status).toBe(200)
+      expect(current.body.features).toEqual(['elevate', 'interviews', 'replay'].map(feature => ({ feature, practices: 1, learners: 1 })))
+      expect(current.body.learners).toEqual([expect.objectContaining({ memberId: members[`${ws.id}:learner`], role: 'LEARNER', practices: 3, lastActiveDay: '2026-11-03' })])
+      expect(current.body.days).toEqual([
+        { day: '2026-11-01', elevate: 0, interviews: 0, replay: 0 },
+        { day: '2026-11-02', elevate: 1, interviews: 1, replay: 0 },
+        { day: '2026-11-03', elevate: 0, interviews: 0, replay: 1 },
+      ])
+      const selected = await get('&product=interviews')
+      expect(selected.body.features).toEqual([{ feature: 'interviews', practices: 1, learners: 1 }])
+      expect(selected.body.days).toEqual([{ day: '2026-11-01', interviews: 0 }, { day: '2026-11-02', interviews: 1 }, { day: '2026-11-03', interviews: 0 }])
+      expect((await get(`&learner=${members[`${ws.id}:owner`]}`)).body.features).toEqual([])
+      expect((await get(`&learner=${members[`${alpha}:learner`]}`)).status).toBe(404)
+      const exported = await api.get(`/api/workspaces/current/admin/feature-usage/export.xlsx?${range}`).set(token(ws.id, 'owner')).buffer(true).parse(binary)
+      expect(exported.status).toBe(200)
+      const workbook = new ExcelJS.Workbook(); await workbook.xlsx.load(exported.body)
+      expect(workbook.getWorksheet('By feature')!.getSheetValues().slice(1)).toEqual([
+        [undefined, 'Feature', 'Practices', 'Learners'], ...['elevate', 'interviews', 'replay'].map(feature => [undefined, feature, 1, 1]),
+      ])
+      expect(workbook.getWorksheet('By learner')!.getRow(2).getCell(4).value).toBe(3)
+      expect(workbook.getWorksheet('Daily')!.rowCount).toBe(4)
+      expect(JSON.stringify(workbook.getWorksheet('Report details')!.getSheetValues())).toContain('Counting rule')
+      await admin.session.deleteMany({ where: { id: { in: [deletedElevate.id, deletedInterview.id] } } })
+      expect((await get()).body).toEqual(current.body)
+      expect(await admin.featureUsage.count({ where: { workspaceId: ws.id } })).toBe(13)
+      // Suspension doesn't erase saved learner practices. A change to staff role does exclude them.
+      await admin.workspaceMember.update({ where: { id: members[`${ws.id}:learner`] }, data: { state: 'SUSPENDED' } })
+      expect((await get()).body.features).toEqual(current.body.features)
+      await admin.workspaceMember.update({ where: { id: members[`${ws.id}:learner`] }, data: { state: 'ACTIVE', role: 'ADMIN' } })
+      const empty = await get()
+      expect(empty.body.features).toEqual([]); expect(empty.body.learners).toEqual([])
+      expect(empty.body.days).toEqual(current.body.days.map((row: { day: string }) => ({ day: row.day, elevate: 0, interviews: 0, replay: 0 })))
+    } finally { await admin.workspace.delete({ where: { id: ws.id } }) }
+  })
+
   it('reports Pulse, usage and overview without raw content', async () => {
     const pulse = await api.get(`/api/workspaces/current/admin/progress-pulse?${range}`).set(token(alpha, 'admin'))
     expect(pulse.body.skills).toEqual([{ skill: 'clarity', average: 7, samples: 2, learners: 1 }, { skill: 'pacing', average: 4, samples: 1, learners: 1 }])
     expect(pulse.body.days.map((d: { average: number | null }) => d.average)).toEqual([null, 6, 6])
     expect((await api.get(`/api/workspaces/current/admin/progress-pulse?${range}&product=interviews`).set(token(alpha, 'admin'))).status).toBe(400)
     const usage = await api.get(`/api/workspaces/current/admin/feature-usage?${range}`).set(token(alpha, 'admin'))
-    expect(usage.body.features).toEqual([{ feature: 'elevate', action: 'session_start', events: 1, learners: 1 }])
+    expect(usage.body.features).toEqual([{ feature: 'elevate', practices: 2, learners: 2 }, { feature: 'interviews', practices: 1, learners: 1 }, { feature: 'replay', practices: 1, learners: 1 }])
     expect(usage.body.days[1]).toMatchObject({ day: '2026-11-02', elevate: 1 })
     const overview = await api.get(`/api/workspaces/current/admin/overview?${range}`).set(token(alpha, 'owner'))
     expect(overview.body).toMatchObject({ members: { active: 4, invited: 0, suspended: 0 }, activeLearners: 2,

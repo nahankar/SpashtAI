@@ -39,7 +39,7 @@ export function WorkspaceFeatureUsage() {
   const q = useFieldQuery(filterQuery(filters))
   const usage = useWorkspaceData<FeatureUsage>(`${BASE}/feature-usage?${q}`)
   return <div className="space-y-5">
-    <PageHeader title="Feature usage" description={rangeLabel(usage.data?.range) || 'How members use each product in this workspace'} actions={<ExportButton path={`${BASE}/feature-usage/export.xlsx?${q}`} filename="feature-usage.xlsx" />} />
+    <PageHeader title="Feature usage" description={rangeLabel(usage.data?.range) || 'Existing learner practices in this workspace'} actions={<ExportButton path={`${BASE}/feature-usage/export.xlsx?${q}`} filename="feature-usage.xlsx" />} />
     <FilterBar filters={filters} onChange={setFilters} />
     <ErrorAlert error={usage.error} />
     {usage.loading && !usage.data ? <Loading /> : usage.data && <FeatureUsageView data={usage.data} />}
