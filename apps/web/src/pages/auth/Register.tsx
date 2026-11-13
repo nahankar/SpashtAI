@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { ApiError } from '@/lib/api-client'
+import { clearPendingGoogleSignup, pendingGoogleSignupCredential } from '@/lib/pending-google-signup'
 import { useAuth } from '@/hooks/useAuth'
 import { accountDestination } from '@/lib/account-access'
 import { safeAppPath } from '@/lib/safe-next-path'
@@ -19,6 +21,9 @@ export function Register() {
   const [pausedMessage, setPausedMessage] = useState('')
   const [checkingPlatform, setCheckingPlatform] = useState(true)
   const [detailsReady, setDetailsReady] = useState(false)
+  const [googlePending, setGooglePending] = useState(() => Boolean(pendingGoogleSignupCredential()))
+  const [emailSignup, setEmailSignup] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
   const [phone, setPhone] = useState('')
   const [dateOfBirth, setDateOfBirth] = useState('')
   const [gender, setGender] = useState<ProfileGender>('')
@@ -45,13 +50,54 @@ export function Register() {
       .finally(() => setCheckingPlatform(false))
   }, [])
 
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (googlePending && !pendingGoogleSignupCredential()) {
+        setGooglePending(false)
+        setError('Your Google verification expired. Continue with Google again; your details are still here.')
+      }
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [googlePending])
+
+  function finishSignIn(user: Awaited<ReturnType<typeof loginWithGoogle>>) {
+    navigate(user.needsProfileCompletion
+      ? (next ? `/auth/complete-profile?next=${encodeURIComponent(next)}` : '/auth/complete-profile')
+      : accountDestination(user, next))
+  }
+
   async function handleGoogleCredential(credential: string) {
-    const user = await loginWithGoogle(credential, { phone, dateOfBirth, gender, pincode }, workspaceSlug)
-    if (user.needsProfileCompletion) {
-      navigate(next ? `/auth/complete-profile?next=${encodeURIComponent(next)}` : '/auth/complete-profile')
+    setError('')
+    try {
+      finishSignIn(await loginWithGoogle(credential, undefined, workspaceSlug))
+    } catch (error) {
+      if (!workspaceSlug && error instanceof ApiError && error.code === 'PROFILE_REQUIRED') {
+        setGooglePending(true)
+        setEmailSignup(false)
+        return
+      }
+      throw error
+    }
+  }
+
+  async function submitDetails(e: React.FormEvent) {
+    e.preventDefault()
+    if (!gender) { setError('Please select Male or Female'); return }
+    setError('')
+    if (!googlePending) { setDetailsReady(true); return }
+    const credential = pendingGoogleSignupCredential()
+    if (!credential) {
+      setGooglePending(false)
+      setError('Your Google verification expired. Continue with Google again; your details are still here.')
       return
     }
-    navigate(accountDestination(user || {}, next))
+    setSubmitting(true)
+    try {
+      finishSignIn(await loginWithGoogle(credential, { phone, dateOfBirth, gender, pincode }))
+    } catch (error) {
+      setGooglePending(Boolean(pendingGoogleSignupCredential()))
+      setError(error instanceof Error ? error.message : 'Unable to create your account. Please try again.')
+    } finally { setSubmitting(false) }
   }
 
   async function handleEmailCode(challengeId: string, code: string) {
@@ -97,8 +143,13 @@ export function Register() {
                 </div>
               )}
 
-              {searchParams.get('finish') === 'google' && <p role="status" className="text-sm text-muted-foreground">Add your details below, then continue with Google to finish creating your account.</p>}
-              <form className="space-y-4" onSubmit={e => { e.preventDefault(); if (!gender) { setError('Please select Male or Female'); return }; setError(''); setDetailsReady(true) }}>
+              {policy.loading && <p role="status" className="text-sm">Loading sign-in options…</p>}
+              {policy.error && <p role="alert" className="text-sm text-destructive">{policy.error}</p>}
+              {!googlePending && policy.methods.google && <GoogleSignInButton label="signup_with" onCredential={handleGoogleCredential} onError={setError} />}
+              {!googlePending && policy.methods.emailCode && !emailSignup && <Button variant="outline" className="w-full" onClick={() => setEmailSignup(true)}>Sign up with email</Button>}
+              {googlePending && <p role="status" className="text-sm text-muted-foreground">Google verified. Add your details to finish creating your account.</p>}
+              {(googlePending || emailSignup) && <form className="space-y-4" onSubmit={submitDetails}>
+                <fieldset disabled={submitting} className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="register-phone">Phone number</Label>
                   <Input id="register-phone" type="tel" inputMode="tel" placeholder="10-digit mobile number" value={phone} onChange={e => { setPhone(e.target.value); setDetailsReady(false) }} required autoComplete="tel" />
@@ -111,22 +162,12 @@ export function Register() {
                   pincode={pincode}
                   onPincodeChange={value => { setPincode(value); setDetailsReady(false) }}
                 />
-                {!detailsReady && <Button type="submit" className="w-full">Continue</Button>}
-              </form>
+                {(googlePending || !detailsReady) && <Button type="submit" className="w-full" disabled={submitting}>{submitting ? 'Creating your account…' : googlePending ? 'Create account' : 'Continue'}</Button>}
+                </fieldset>
+              </form>}
+              {googlePending && <Button variant="ghost" className="w-full" disabled={submitting} onClick={() => { clearPendingGoogleSignup(); setGooglePending(false) }}>Use a different Google account</Button>}
 
-              {detailsReady && (
-                <>
-                {policy.loading && <p role="status" className="text-sm">Loading sign-in options…</p>}
-          {policy.error && <p role="alert" className="text-sm text-destructive">{policy.error}</p>}
-          {policy.methods.google && <GoogleSignInButton
-                  label="signup_with"
-                  onCredential={handleGoogleCredential}
-                  onError={setError}
-                />}
-                {policy.methods.google && policy.methods.emailCode && <p className="text-center text-xs text-muted-foreground">Or sign up with email</p>}
-                {policy.methods.emailCode && <EmailCodeSignIn workspaceSlug={workspaceSlug} purpose="signup" onVerify={handleEmailCode} />}
-                </>
-              )}
+              {emailSignup && detailsReady && !googlePending && policy.methods.emailCode && <EmailCodeSignIn workspaceSlug={workspaceSlug} purpose="signup" onVerify={handleEmailCode} />}
 
               <p className="text-xs text-muted-foreground text-center leading-relaxed">
                 By continuing, you agree to the{' '}

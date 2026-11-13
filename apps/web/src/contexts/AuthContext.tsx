@@ -1,4 +1,5 @@
 import { createContext, useEffect, useState, useCallback, type ReactNode } from 'react'
+import { clearPendingGoogleSignup, withGoogleSignupContinuation } from '@/lib/pending-google-signup'
 import { ApiError, apiClient } from '@/lib/api-client'
 import { isWorkspaceFailure, WorkspaceContextError } from '@/workspaces/activeWorkspace'
 
@@ -132,11 +133,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     credential: string,
     profile?: { phone: string; dateOfBirth: string; gender: string; pincode: string }, workspaceSlug?: string,
   ): Promise<AuthUser> => {
-    const data = await apiClient<{ token: string; user: AuthUser }>('/api/auth/google', {
-      method: 'POST',
-      body: JSON.stringify({ credential, ...profile, workspaceSlug }),
-      skipAuth: true,
-    })
+    const data = await withGoogleSignupContinuation(credential, workspaceSlug, () =>
+      apiClient<{ token: string; user: AuthUser }>('/api/auth/google', {
+        method: 'POST',
+        body: JSON.stringify({ credential, ...profile, workspaceSlug }),
+        skipAuth: true,
+      }))
     localStorage.setItem(TOKEN_KEY, data.token)
     setUser(data.user)
     return data.user
@@ -166,6 +168,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const logout = useCallback(() => {
+    clearPendingGoogleSignup()
     apiClient('/api/auth/logout', { method: 'POST', identityOnly: true }).catch(() => {})
     localStorage.removeItem(TOKEN_KEY)
     setUser(null)
