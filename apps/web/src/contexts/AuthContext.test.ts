@@ -41,6 +41,13 @@ describe('identity hydration', () => {
     expect(isGenuineIdentityRejection(new Error('Authentication required'))).toBe(true)
   })
 
+  it('preserves structured signup errors so Google sign-in can open the required profile form', async () => {
+    const { apiClient } = await import('@/lib/api-client')
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: 'PROFILE_REQUIRED', message: 'Complete your signup details.' }), { status: 400 }))
+    await expect(apiClient('/api/auth/google', { method: 'POST', skipAuth: true })).rejects.toMatchObject({ status: 400, code: 'PROFILE_REQUIRED', message: 'Complete your signup details.' })
+    expect(store.get('spashtai_token')).toBe('identity')
+  })
+
   it('keeps the saved login after a transient /api/auth/me failure', async () => {
     const { apiClient } = await import('@/lib/api-client')
     fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'))

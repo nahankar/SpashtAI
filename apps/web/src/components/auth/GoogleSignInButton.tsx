@@ -1,3 +1,4 @@
+import { activateGoogleButton, dispatchGoogleCredential, type GoogleButtonHandlers } from './googleIdentityCallback'
 import { useEffect, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -26,7 +27,6 @@ declare global {
 
 let scriptPromise: Promise<void> | null = null
 let gsiInitialized = false
-let activeSetBusy: ((busy: boolean) => void) | null = null
 
 function loadGoogleScript(): Promise<void> {
   if (window.google?.accounts?.id) return Promise.resolve()
@@ -67,34 +67,27 @@ export function GoogleSignInButton({
 
   onCredentialRef.current = onCredential
   onErrorRef.current = onError
-  activeSetBusy = setBusy
 
   useEffect(() => {
     if (!GOOGLE_CLIENT_ID) return
 
     let cancelled = false
+    let deactivate: (() => void) | undefined
+    const handlers: GoogleButtonHandlers = {
+      onCredential: credential => onCredentialRef.current(credential),
+      onError: message => onErrorRef.current(message),
+      setBusy,
+    }
 
     loadGoogleScript()
       .then(() => {
         if (cancelled || !containerRef.current || !window.google?.accounts?.id) return
 
+        deactivate = activateGoogleButton(handlers)
         if (!gsiInitialized) {
           window.google.accounts.id.initialize({
             client_id: GOOGLE_CLIENT_ID,
-            callback: async (response) => {
-              if (!response.credential) {
-                onErrorRef.current('Google sign-in was cancelled')
-                return
-              }
-              activeSetBusy?.(true)
-              try {
-                await onCredentialRef.current(response.credential)
-              } catch (err) {
-                onErrorRef.current(err instanceof Error ? err.message : 'Google sign-in failed')
-              } finally {
-                activeSetBusy?.(false)
-              }
-            },
+            callback: dispatchGoogleCredential,
           })
           gsiInitialized = true
         }
@@ -114,7 +107,7 @@ export function GoogleSignInButton({
 
     return () => {
       cancelled = true
-      if (activeSetBusy === setBusy) activeSetBusy = null
+      deactivate?.()
     }
   }, [label])
 

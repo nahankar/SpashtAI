@@ -162,7 +162,7 @@ export async function apiClient<T = unknown>(
     if (body.code === 'TENANT_ONLY_ACCOUNT' && !tenantAccountPath(window.location.pathname)) {
       window.location.href = '/workspaces'
     }
-    throw new ApiError(body.message || body.error || `Request failed: ${response.status}`, response.status, body.code)
+    throw new ApiError(body.message || body.error || `Request failed: ${response.status}`, response.status, body.code || body.error)
   }
 
   // 204 carries no body; calling .json() on it throws.

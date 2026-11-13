@@ -97,7 +97,8 @@ export function Register() {
                 </div>
               )}
 
-              <form className="space-y-4" onSubmit={e => { e.preventDefault(); setDetailsReady(true) }}>
+              {searchParams.get('finish') === 'google' && <p role="status" className="text-sm text-muted-foreground">Add your details below, then continue with Google to finish creating your account.</p>}
+              <form className="space-y-4" onSubmit={e => { e.preventDefault(); if (!gender) { setError('Please select Male or Female'); return }; setError(''); setDetailsReady(true) }}>
                 <div className="space-y-2">
                   <Label htmlFor="register-phone">Phone number</Label>
                   <Input id="register-phone" type="tel" inputMode="tel" placeholder="10-digit mobile number" value={phone} onChange={e => { setPhone(e.target.value); setDetailsReady(false) }} required autoComplete="tel" />

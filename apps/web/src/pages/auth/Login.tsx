@@ -1,3 +1,4 @@
+import { ApiError } from '@/lib/api-client'
 import { useState, useEffect, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
@@ -34,12 +35,20 @@ export function Login() {
   }, [])
 
   async function handleGoogleCredential(credential: string) {
-    const user = await loginWithGoogle(credential, undefined, workspaceSlug)
-    if (user.needsProfileCompletion) {
-      navigate(next ? `/auth/complete-profile?next=${encodeURIComponent(next)}` : '/auth/complete-profile')
-      return
+    try {
+      const user = await loginWithGoogle(credential, undefined, workspaceSlug)
+      if (user.needsProfileCompletion) {
+        navigate(next ? `/auth/complete-profile?next=${encodeURIComponent(next)}` : '/auth/complete-profile')
+        return
+      }
+      navigate(accountDestination(user, next, user.role === 'ADMIN' || user.role === 'SUPER_ADMIN' ? '/admin' : '/'))
+    } catch (err) {
+      if (!workspaceSlug && err instanceof ApiError && err.code === 'PROFILE_REQUIRED') {
+        navigate(`/auth/register?finish=google${next ? `&next=${encodeURIComponent(next)}` : ''}`)
+        return
+      }
+      throw err
     }
-    navigate(accountDestination(user, next, user.role === 'ADMIN' || user.role === 'SUPER_ADMIN' ? '/admin' : '/'))
   }
 
   async function handleEmailCode(challengeId: string, code: string) {

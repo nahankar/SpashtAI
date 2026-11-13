@@ -1,3 +1,5 @@
+import { accountDestination } from '@/lib/account-access'
+import { ApiError } from '@/lib/api-client'
 import { useState, type ReactNode } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
@@ -294,12 +296,20 @@ export function Landing() {
   const [error, setError] = useState('')
 
   async function handleGoogleCredential(credential: string) {
-    const user = await loginWithGoogle(credential)
-    if (user.needsProfileCompletion) {
-      navigate(next ? `/auth/complete-profile?next=${encodeURIComponent(next)}` : '/auth/complete-profile')
-      return
+    try {
+      const user = await loginWithGoogle(credential)
+      if (user.needsProfileCompletion) {
+        navigate(next ? `/auth/complete-profile?next=${encodeURIComponent(next)}` : '/auth/complete-profile')
+        return
+      }
+      navigate(accountDestination(user, next))
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'PROFILE_REQUIRED') {
+        navigate(`/auth/register?finish=google${next ? `&next=${encodeURIComponent(next)}` : ''}`)
+        return
+      }
+      throw err
     }
-    navigate(next || '/')
   }
 
   return (
