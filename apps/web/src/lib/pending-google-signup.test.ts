@@ -1,9 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from './api-client'
-import { clearPendingGoogleSignup, pendingGoogleSignupCredential, withGoogleSignupContinuation } from './pending-google-signup'
+import { clearPendingGoogleSignup, pendingGoogleSignupCredential, pendingGoogleSignupEmail, withGoogleSignupContinuation } from './pending-google-signup'
 const required = () => Promise.reject(new ApiError('Complete your details', 400, 'PROFILE_REQUIRED'))
 afterEach(() => { clearPendingGoogleSignup(); vi.useRealTimers() })
 describe('Google signup continuation', () => {
+  it('shows the account email only after the server requests signup details and removes it on account switch', async () => {
+    const credential = `header.${btoa(JSON.stringify({ email: 'chosen@example.com' })).replace(/=/g, '')}.signature`
+    expect(pendingGoogleSignupEmail()).toBeNull()
+    await expect(withGoogleSignupContinuation(credential, undefined, required)).rejects.toThrow()
+    expect(pendingGoogleSignupEmail()).toBe('chosen@example.com')
+    clearPendingGoogleSignup()
+    expect(pendingGoogleSignupEmail()).toBeNull()
+  })
+  it('handles an unreadable display payload without interrupting signup', async () => {
+    await expect(withGoogleSignupContinuation('unreadable', undefined, required)).rejects.toThrow()
+    expect(pendingGoogleSignupEmail()).toBeNull()
+  })
   it('retains only a server-verified public signup and clears it after completion', async () => {
     await expect(withGoogleSignupContinuation('verified', undefined, required)).rejects.toThrow()
     expect(pendingGoogleSignupCredential()).toBe('verified')

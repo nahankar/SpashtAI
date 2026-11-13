@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { ApiError } from '@/lib/api-client'
-import { clearPendingGoogleSignup, pendingGoogleSignupCredential } from '@/lib/pending-google-signup'
+import { clearPendingGoogleSignup, pendingGoogleSignupCredential, pendingGoogleSignupEmail } from '@/lib/pending-google-signup'
 import { useAuth } from '@/hooks/useAuth'
 import { accountDestination } from '@/lib/account-access'
 import { safeAppPath } from '@/lib/safe-next-path'
@@ -147,7 +147,7 @@ export function Register() {
               {policy.error && <p role="alert" className="text-sm text-destructive">{policy.error}</p>}
               {!googlePending && policy.methods.google && <GoogleSignInButton label="signup_with" onCredential={handleGoogleCredential} onError={setError} />}
               {!googlePending && policy.methods.emailCode && !emailSignup && <Button variant="outline" className="w-full" onClick={() => setEmailSignup(true)}>Sign up with email</Button>}
-              {googlePending && <p role="status" className="text-sm text-muted-foreground">Google verified. Add your details to finish creating your account.</p>}
+              {googlePending && <p role="status" className="text-sm text-muted-foreground">Google verified{pendingGoogleSignupEmail() && <>: <span className="font-medium text-foreground break-all">{pendingGoogleSignupEmail()}</span></>}. Add your details to finish creating your account.</p>}
               {(googlePending || emailSignup) && <form className="space-y-4" onSubmit={submitDetails}>
                 <fieldset disabled={submitting} className="space-y-4">
                 <div className="space-y-2">
