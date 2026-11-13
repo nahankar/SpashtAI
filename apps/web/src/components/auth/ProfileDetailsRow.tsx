@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -67,20 +68,28 @@ export function ProfileDetailsRow({
   pincode: string
   onPincodeChange: (v: string) => void
 }) {
+  const [dateFocused, setDateFocused] = useState(false)
+  const showDatePlaceholder = !dateOfBirth && !dateFocused
   return (
     <div className="grid grid-cols-3 gap-2 items-end">
       <div className="min-w-0 space-y-1.5">
         <Label htmlFor={`${idPrefix}dob`} className="text-xs">
           Date of birth
         </Label>
+        <div className="relative">
         <Input
           id={`${idPrefix}dob`}
           type="date"
           value={dateOfBirth}
+          onFocus={() => setDateFocused(true)}
+          onBlur={() => setDateFocused(false)}
           onChange={(e) => onDateOfBirthChange(e.target.value)}
           required
-          className="px-2 text-xs"
+          className={cn('px-2 text-xs', showDatePlaceholder && '[&::-webkit-datetime-edit]:opacity-0 [&::-webkit-date-and-time-value]:opacity-0')}
         />
+        {/* Safari paints today's date even when the native input value is empty. */}
+        {showDatePlaceholder && <span aria-hidden="true" className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">dd/mm/yyyy</span>}
+        </div>
       </div>
       <div className="min-w-0 space-y-1.5">
         <Label className="text-xs">Gender</Label>
