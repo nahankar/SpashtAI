@@ -76,4 +76,20 @@ describe.skipIf(!config.url)('tenant member profiles (restricted database)',()=>
   const result=await save(f.ownerToken,f.l.id,{...update(initial.body.revision),enrollmentResponses:{branch:'ECE',semester:'5',legacy:'corrected'}})
   expect(result.status,result.text).toBe(200);expect(result.body.enrollmentResponses.legacy).toBe('corrected')
  })
+ it('keeps late-added names blank until an admin saves and synchronizes the single name editor with signup answers',async()=>{
+  const f=await fixture(),names=[{id:'first_name',type:'text',label:'First Name',required:true,options:[]},{id:'last_name',type:'text',label:'Last Name',required:true,options:[]}]
+  await admin.user.update({where:{id:f.learner.id},data:{firstName:null,lastName:null}})
+  await admin.workspace.update({where:{id:f.workspace.id},data:{enrollmentSettings:{fields:[...names,...fields],email:{}}}})
+  const before=await get(f.ownerToken,f.l.id)
+  expect(before.body.profile).toMatchObject({firstName:null,lastName:null})
+  expect(await admin.user.findUnique({where:{id:f.learner.id}})).toMatchObject({firstName:null,lastName:null})
+  expect((await save(f.ownerToken,f.l.id,{...update(before.body.revision),firstName:'',lastName:''})).status).toBe(200)
+  await admin.workspaceMember.update({where:{id:f.l.id},data:{enrollmentFields:[...names,...fields],enrollmentResponses:{branch:'CSE',semester:'1',first_name:'Old',last_name:'Answer'}}})
+  const current=await get(f.ownerToken,f.l.id)
+  const result=await save(f.ownerToken,f.l.id,{...update(current.body.revision),enrollmentResponses:{branch:'ECE',semester:'3',first_name:'Stale',last_name:'Stale'}})
+  expect(result.status,result.text).toBe(200)
+  expect(result.body.profile).toMatchObject({firstName:'Corrected',lastName:'Learner'})
+  expect(result.body.enrollmentResponses).toMatchObject({first_name:'Corrected',last_name:'Learner'})
+ })
+
 })

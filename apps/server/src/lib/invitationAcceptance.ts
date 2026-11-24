@@ -1,7 +1,7 @@
 import { getPlatformSettings } from './platformSettings'
 import { requireLearnerDomain, requireMethod, methodsFor } from './signInPolicy'
 import { lockInvitationTarget, acceptInvitedMembership } from '../workspaces/invitationMembership'
-import { validateEnrollmentResponses } from '../workspaces/enrollment'
+import { enrollmentNames, readEnrollmentSettings, validateEnrollmentResponses } from '../workspaces/enrollment'
 import { WorkspaceError } from '../workspaces/contracts'
 import type { Request } from 'express'
 import type { User } from '@prisma/client'
@@ -94,24 +94,29 @@ export async function acceptInvitation(
 
       if (status === 'accepted') {
         // Idempotent repeat: plain sign-in for the account that accepted it.
-        const account = await resolveGoogleAccount(tx, identity, req, { policy })
+        const account = await resolveGoogleAccount(tx, identity, req, { policy, preserveExistingNames: Boolean(workspace) })
         if (!account.ok) return account
         if (account.user.id !== inv.acceptedUserId) throw new Abort(fail(409, { error: 'invitation_used', message: 'This invitation has already been used.' }))
         if (workspace) await acceptInvitedMembership(tx, inv, account.user.id, workspace.maxMembers, true)
         return { ok: true, user: workspace ? await tx.user.findUniqueOrThrow({ where: { id: account.user.id } }) : account.user, newAccount: false, alreadyAccepted: true, signupsPausedBypass: false, workspacePath }
       }
 
-      const responses = workspace ? validateEnrollmentResponses(inv.enrollmentFields, req.body?.enrollmentResponses) : {}
+      // Pending invitations always use the current form, re-read under the workspace lock.
+      // The original invitation/email snapshot remains immutable; membership retains the accepted form.
+      const fields = workspace ? readEnrollmentSettings(workspace.enrollmentSettings).fields : []
+      const responses = workspace ? validateEnrollmentResponses(fields, req.body?.enrollmentResponses) : {}
+      const signupIdentity = workspace ? { ...identity, ...enrollmentNames(fields, responses) } : identity
       // The approved paused-signup exception applies only to platform invitations. Organization invitations
       // respect the public pause for new identities; see docs/INVITATIONS.md.
-      const account = await resolveGoogleAccount(tx, identity, req, {
+      const account = await resolveGoogleAccount(tx, signupIdentity, req, {
         policy,
+        preserveExistingNames: Boolean(workspace),
         invitationBypassesSignupPause: !workspace,
         profile: located,
       })
       if (!account.ok) return account
       const bypassed = account.created && policy.paused
-      if (workspace) await acceptInvitedMembership(tx, inv, account.user.id, workspace.maxMembers, false, responses)
+      if (workspace) await acceptInvitedMembership(tx, { ...inv, enrollmentFields: fields }, account.user.id, workspace.maxMembers, false, responses)
       await tx.userInvitation.update({
         where: { id: inv.id },
         data: { status: 'ACCEPTED', pendingKey: null, acceptedAt: new Date(), acceptedUserId: account.user.id },

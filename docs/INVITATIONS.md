@@ -241,3 +241,18 @@ Normal API abuse protection, SMTP provider limits, member seats and invitation p
 
 Platform invitations without a tenant retain their separate 20-per-batch/60-per-hour behavior.
 No real recipient email is sent by the automated limit tests.
+
+## Current organization signup fields and account names
+
+Pending organization invitation lookup and acceptance use the workspace's **current** enrollment
+settings, including choices added after an email was sent. Acceptance rechecks them under the workspace
+lock. Invalid or removed choices fail without creating an account; reopen the invitation to refresh the form.
+The original invitation/email snapshot stays immutable. The membership stores the form actually accepted.
+Accepted links do not reapply a changed form or edit historical responses.
+
+Text signup questions identified as First name / Last name (by label or identifier) populate the account's
+name when a **new** account joins. They remain stored as signup answers for compatibility. Profile editing
+shows one name editor and synchronizes those answers on an explicit admin save. Existing accounts are not
+backfilled or forced through signup again when name questions are added later; blank names remain optional
+in the admin editor until an administrator supplies them. Existing signup name answers may be displayed in
+the name editor without writing anything until Save. Sign-in email remains immutable.

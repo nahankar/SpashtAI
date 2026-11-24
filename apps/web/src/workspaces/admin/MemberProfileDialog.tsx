@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ProfileDetailsRow, type ProfileGender } from '@/components/auth/ProfileDetailsRow'
 import { useAuth } from '@/hooks/useAuth'
+import { enrollmentNameKey } from '../enrollmentNames'
 import { EnrollmentFields, type EnrollmentField, type EnrollmentResponses } from '../EnrollmentFields'
 import { workspaceCall } from '../shell/context'
 interface ProfileData {
@@ -22,7 +23,16 @@ export function MemberProfileDialog({ memberId, onSaved, disabled }: { memberId:
     if (!open) return
     let active = true
     setLoading(true); setError(''); setData(null)
-    workspaceCall<ProfileData>(path).then(value => { if (active) setData(value) })
+    workspaceCall<ProfileData>(path).then(value => {
+      if (!active) return
+      // Display earlier signup answers in the single name editor, without writing on read.
+      const profile = { ...value.profile }
+      for (const field of value.enrollmentFields) {
+        const key = enrollmentNameKey(field), answer = value.enrollmentResponses[field.id]
+        if (key && !profile[key] && typeof answer === 'string') profile[key] = answer
+      }
+      setData({ ...value, profile })
+    })
       .catch(e => { if (active) setError(e instanceof Error ? e.message : 'Could not load profile') })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
@@ -48,12 +58,12 @@ export function MemberProfileDialog({ memberId, onSaved, disabled }: { memberId:
       {loading && <p role="status">Loading profile…</p>}{error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {data && <form onSubmit={save} className="space-y-4"><fieldset disabled={busy} className="space-y-4">
         <div className="space-y-1.5"><Label htmlFor={`profile-email-${memberId}`}>Sign-in email</Label><Input id={`profile-email-${memberId}`} value={data.profile.email} readOnly /><p className="text-xs text-muted-foreground">Email is the login identity and cannot be changed in this form.</p></div>
-        <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-1.5"><Label htmlFor={`profile-first-${memberId}`}>First name</Label><Input id={`profile-first-${memberId}`} required maxLength={120} value={data.profile.firstName || ''} onChange={e => profile('firstName', e.target.value)} /></div>
+        <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-1.5"><Label htmlFor={`profile-first-${memberId}`}>First name</Label><Input id={`profile-first-${memberId}`} maxLength={120} value={data.profile.firstName || ''} onChange={e => profile('firstName', e.target.value)} /></div>
           <div className="space-y-1.5"><Label htmlFor={`profile-last-${memberId}`}>Last name</Label><Input id={`profile-last-${memberId}`} maxLength={120} value={data.profile.lastName || ''} onChange={e => profile('lastName', e.target.value)} /></div></div>
         <div className="space-y-1.5"><Label htmlFor={`profile-phone-${memberId}`}>Phone number</Label><Input id={`profile-phone-${memberId}`} required type="tel" maxLength={30} value={data.profile.phone || ''} onChange={e => profile('phone', e.target.value)} /></div>
         <ProfileDetailsRow idPrefix={`member-${memberId}-`} dateOfBirth={data.profile.dateOfBirth || ''} onDateOfBirthChange={value => profile('dateOfBirth', value)} gender={data.profile.gender || ''} onGenderChange={value => profile('gender', value)} pincode={data.profile.pincode || ''} onPincodeChange={value => profile('pincode', value)} />
         <p className="text-xs text-muted-foreground">City, state and country are resolved from the pincode.</p>
-        <section className="space-y-3"><h3 className="font-semibold">Custom signup fields</h3>{data.enrollmentFields.length ? <EnrollmentFields fields={data.enrollmentFields} values={data.enrollmentResponses} onChange={values => setData(d => d && { ...d, enrollmentResponses: values })} /> : <p className="text-sm text-muted-foreground">No custom signup fields.</p>}</section>
+        <section className="space-y-3"><h3 className="font-semibold">Custom signup fields</h3>{data.enrollmentFields.some(field => !enrollmentNameKey(field)) ? <EnrollmentFields fields={data.enrollmentFields.filter(field => !enrollmentNameKey(field))} values={data.enrollmentResponses} onChange={values => setData(d => d && { ...d, enrollmentResponses: values })} /> : <p className="text-sm text-muted-foreground">No custom signup fields.</p>}</section>
       </fieldset><DialogFooter><Button type="button" variant="outline" disabled={busy} onClick={() => setOpen(false)}>Cancel</Button><Button type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save profile'}</Button></DialogFooter></form>}
     </DialogContent></Dialog>
   </>

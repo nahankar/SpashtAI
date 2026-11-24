@@ -70,3 +70,23 @@ export async function saveManagedEnrollment(tx: WorkspaceTx, scope: Awaited<Retu
   requireWorkspaceManager(scope)
   return saveEnrollmentSettings(tx, scope.workspace.id, scope.member.userId, input)
 }
+
+/** Legacy custom name questions represent the account name, not a second identity. */
+export function enrollmentNameKey(field: Pick<EnrollmentField, 'id' | 'label' | 'type'>): 'firstName' | 'lastName' | null {
+  if (field.type !== 'text') return null
+  const normalized = [field.id, field.label].map(value => value.toLowerCase().replace(/[^a-z]/g, ''))
+  if (normalized.includes('firstname')) return 'firstName'
+  if (normalized.includes('lastname')) return 'lastName'
+  return null
+}
+export function enrollmentNames(fields: EnrollmentField[], responses: Prisma.InputJsonObject) {
+  const names: { firstName?: string; lastName?: string } = {}
+  for (const field of fields) {
+    const key = enrollmentNameKey(field), value = responses[field.id]
+    if (key && typeof value === 'string' && value.trim()) {
+      if (value.trim().length > 120) throw new WorkspaceError(400, 'INVALID_ENROLLMENT', `${field.label} must be at most 120 characters`)
+      names[key] = value.trim()
+    }
+  }
+  return names
+}

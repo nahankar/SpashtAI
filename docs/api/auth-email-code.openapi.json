@@ -229,7 +229,7 @@
     "/api/invitations/accept": {
       "post": {
         "summary": "Accept an invitation using Google or an emailed code",
-        "description": "A pending, unexpired emailed invitation token verifies exactly its stored email once. No Google credential or additional emailed code is needed for initial acceptance. Replays without independent authentication return 401, including concurrent submissions. Accepted links require Google or an invitation-bound email code. Acceptance rechecks revocation, expiry, inviter permissions, enrollment, seats, entitlements and membership under the existing row lock. Platform invitations retain the signup-pause exception; organization invitations do not bypass it.",
+        "description": "A pending, unexpired emailed invitation token verifies exactly its stored email once. No Google credential or additional emailed code is needed for initial acceptance. Replays without independent authentication return 401, including concurrent submissions. Accepted links require Google or an invitation-bound email code. Acceptance rechecks revocation, expiry, inviter permissions, enrollment, seats, entitlements and membership under the existing row lock. Platform invitations retain the signup-pause exception; organization invitations do not bypass it. Pending organization invitations validate against the current workspace enrollment form, regardless of when the invitation was sent. Text First name / Last name signup answers populate new accounts only; existing account names are preserved.",
         "security": [],
         "requestBody": {
           "required": true,

@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { Prisma } from '@prisma/client'
 import type { WorkspaceTokenPayload } from '../lib/jwt'
 import { attachSignupLocation, validateProfileFields } from '../lib/profile'
-import { enrollmentFieldsSchema, readEnrollmentSettings, validateEnrollmentResponses } from './enrollment'
+import { enrollmentNameKey, enrollmentFieldsSchema, readEnrollmentSettings, validateEnrollmentResponses } from './enrollment'
 import { WorkspaceError } from './contracts'
 import { requireWorkspaceManager, withLockedWorkspaceAccess, withWorkspaceAccess, type WorkspaceTx, type establishWorkspace } from './context'
 
@@ -11,7 +11,7 @@ type Scope = Awaited<ReturnType<typeof establishWorkspace>>
 const profileSelect = { id: true, email: true, firstName: true, lastName: true, phone: true, dateOfBirth: true, gender: true,
   pincode: true, city: true, state: true, country: true } as const
 const inputSchema = z.object({
-  revision: z.string().regex(/^[a-f0-9]{64}$/), firstName: z.string().trim().min(1).max(120), lastName: z.string().trim().max(120),
+  revision: z.string().regex(/^[a-f0-9]{64}$/), firstName: z.string().trim().max(120), lastName: z.string().trim().max(120),
   phone: z.string().max(30), dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), gender: z.enum(['MALE', 'FEMALE']), pincode: z.string().max(20),
   enrollmentResponses: z.record(z.union([z.string().max(1000), z.array(z.string().max(120)).max(30)])),
 }).strict()
@@ -52,8 +52,14 @@ export async function updateWorkspaceMemberProfile(claims: WorkspaceTokenPayload
     await tx.$queryRaw`SELECT id FROM "User" WHERE id=${target.userId} FOR UPDATE`
     const current = await readProfile(tx, scope, memberId)
     if (current.revision !== body.revision) throw new WorkspaceError(409, 'PROFILE_CHANGED', 'This profile or its signup fields changed. Close and reopen Profile before saving again.')
-    const responses = validateEnrollmentResponses(current.enrollmentFields, body.enrollmentResponses)
-    await tx.user.update({ where: { id: target.userId }, data: { firstName: body.firstName, lastName: body.lastName || null, ...location } })
+    const answers = { ...body.enrollmentResponses }
+    for (const field of current.enrollmentFields) {
+      const key = enrollmentNameKey(field)
+      if (key) answers[field.id] = body[key]
+    }
+    // Names added after joining stay optional for existing members; an admin may fill them later.
+    const responses = validateEnrollmentResponses(current.enrollmentFields.map(field => enrollmentNameKey(field) ? { ...field, required: false } : field), answers)
+    await tx.user.update({ where: { id: target.userId }, data: { firstName: body.firstName || null, lastName: body.lastName || null, ...location } })
     await tx.workspaceMember.update({ where: { id: target.id }, data: { enrollmentResponses: responses, enrollmentFields: current.enrollmentFields as Prisma.InputJsonArray } })
     await tx.workspaceAudit.create({ data: { workspaceId: scope.workspace.id, actorUserId: scope.member.userId,
       action: 'member_profile_updated', subjectId: target.id, metadata: { userId: target.userId,

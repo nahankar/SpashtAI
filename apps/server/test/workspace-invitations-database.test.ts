@@ -208,7 +208,7 @@ suite('workspace email invitation boundaries with a restricted runtime role', ()
     expect(await purgeClosedInvitations()).toBeGreaterThan(0)
     expect(await admin.userInvitation.findUnique({ where: { id: created.body.id } })).toBeNull()
   })
-  it('restricts configuration to managers, snapshots invitation forms and atomically stores workspace-only responses', async () => {
+  it('uses current workspace forms for older invitations and snapshots the accepted responses', async () => {
     const settings = { fields: [
       { id: 'department', type: 'dropdown', label: 'Department', required: true, options: ['CS', 'ECE'], filterable: true },
       { id: 'skills', type: 'checkbox', label: 'Skills', required: true, options: ['Java', 'Python'] },
@@ -221,19 +221,21 @@ suite('workspace email invitation boundaries with a restricted runtime role', ()
     const email = addr('custom'), created = await post(tokenA, { email }); expect(created.status).toBe(200)
     const token = mailToken(alpha, email), mail = captured(alpha).find(m => m.to === email)!
     expect(mail.subject).toBe(settings.email.subject); expect(mail.text).toContain(settings.email.message)
-    // Editing defaults cannot change a form or email somebody has already received.
-    expect((await request(app).put(`/api/admin/workspaces/${alpha}/enrollment`).set(bearer(platformToken)).send({ fields: [], email: {} })).status).toBe(200)
+    // Choices added after sending are immediately available on the original link.
+    const currentSettings = { ...settings, fields: settings.fields.map(f => f.id === 'department' ? { ...f, options: [...f.options, 'EEE'] } : f) }
+    expect((await request(app).put(`/api/admin/workspaces/${alpha}/enrollment`).set(bearer(platformToken)).send(currentSettings)).status).toBe(200)
     const lookup = await request(app).post('/api/invitations/lookup').send({ token })
-    // The recipient sees only the questions; report-filter settings stay with the organization.
-    expect(lookup.body.enrollmentFields).toEqual(settings.fields.map(({ filterable: _filterable, ...field }: { filterable?: boolean }) => field))
+    // The recipient sees only the questions; report-filter settings and email templates stay private.
+    expect(lookup.body.workspace.enrollmentSettings).toBeUndefined()
+    expect(lookup.body.enrollmentFields).toEqual(currentSettings.fields.map(({ filterable: _filterable, ...field }: { filterable?: boolean }) => field))
     expect((await accept(token, email)).status).toBe(400)
     expect(await admin.user.findUnique({ where: { email } })).toBeNull()
-    const responses = { department: 'CS', skills: ['Java', 'Python'], roll: 'CS-42' }
+    const responses = { department: 'EEE', skills: ['Java', 'Python'], roll: 'CS-42' }
     const accepted = await request(app).post('/api/invitations/accept').send({ token, credential: JSON.stringify({ email }), enrollmentResponses: responses, ...SIGNUP_PROFILE })
     expect(accepted.status, JSON.stringify(accepted.body)).toBe(200)
     const user = await admin.user.findUniqueOrThrow({ where: { email } })
     const m = await admin.workspaceMember.findUniqueOrThrow({ where: { workspaceId_userId: { workspaceId: alpha, userId: user.id } } })
-    expect(m.enrollmentResponses).toEqual(responses); expect(m.enrollmentFields).toEqual(settings.fields.map(f => ({ filterable: false, ...f })))
+    expect(m.enrollmentResponses).toEqual(responses); expect(m.enrollmentFields).toEqual(currentSettings.fields.map(f => ({ filterable: false, ...f })))
     const managers = await request(app).get('/api/workspaces/current/members').set(bearer(tokenManager))
     expect(managers.body.items.find((row: { id: string }) => row.id === m.id).enrollmentResponses).toEqual(responses)
     expect((await request(app).get('/api/workspaces/current/members').set(bearer(tokenLearner))).status).toBe(403)
@@ -242,6 +244,33 @@ suite('workspace email invitation boundaries with a restricted runtime role', ()
     expect((await admin.workspaceMember.findUniqueOrThrow({ where: { id: m.id } })).enrollmentResponses).toEqual(responses)
     const snap = await admin.userInvitation.findUniqueOrThrow({ where: { id: created.body.id } })
     await expect(admin.userInvitation.update({ where: { id: snap.id }, data: { emailMessage: 'changed' } })).rejects.toThrow()
+  })
+  it('uses signup name answers for new accounts, preserves existing names and rejects stale form choices', async () => {
+    const fields = [
+      { id: 'first_name', type: 'text', label: 'First Name', required: true, options: [] },
+      { id: 'last_name', type: 'text', label: 'Last Name', required: true, options: [] },
+      { id: 'branch', type: 'dropdown', label: 'Branch', required: true, options: ['CSE'] },
+    ]
+    const settings = { fields, email: {} }, endpoint = `/api/admin/workspaces/${alpha}/enrollment`
+    expect((await request(app).put(endpoint).set(bearer(platformToken)).send(settings)).status).toBe(200)
+    const email = addr('named-new'); await post(tokenA, { email })
+    const token = mailToken(alpha, email)
+    const changed = fields.map(f => f.id === 'branch' ? { ...f, options: ['EEE'] } : f)
+    await request(app).put(endpoint).set(bearer(platformToken)).send({ fields: changed, email: {} })
+    const responses = { first_name: '  Candidate  ', last_name: 'Learner', branch: 'CSE' }
+    const stale = await request(app).post('/api/invitations/accept').send({ token, ...SIGNUP_PROFILE, enrollmentResponses: responses })
+    expect(stale.status, stale.text).toBe(400)
+    expect(await admin.user.findUnique({ where: { email } })).toBeNull()
+    const accepted = await request(app).post('/api/invitations/accept').send({ token, ...SIGNUP_PROFILE, enrollmentResponses: { ...responses, branch: 'EEE' } })
+    expect(accepted.status, accepted.text).toBe(200)
+    expect(await admin.user.findUnique({ where: { email } })).toMatchObject({ firstName: 'Candidate', lastName: 'Learner' })
+    const existingEmail = addr('named-existing')
+    const existing = await admin.user.create({ data: { email: existingEmail, firstName: null, lastName: null } })
+    await post(tokenA, { email: existingEmail }); const existingToken = mailToken(alpha, existingEmail)
+    const result = await request(app).post('/api/invitations/accept').send({ token: existingToken, ...SIGNUP_PROFILE, enrollmentResponses: { ...responses, branch: 'EEE' } })
+    expect(result.status, result.text).toBe(200)
+    expect(await admin.user.findUnique({ where: { id: existing.id } })).toMatchObject({ firstName: null, lastName: null })
+    await request(app).put(endpoint).set(bearer(platformToken)).send({ fields: [], email: {} })
   })
   it('sends bulk recipients privately, isolates tenant scope, and returns duplicates without resending', async () => {
     const emails = [addr('bulk-a'), addr('bulk-b')]

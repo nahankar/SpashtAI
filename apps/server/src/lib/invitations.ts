@@ -1,6 +1,6 @@
 import crypto from 'crypto'
 import { reserveInvitationSend } from './invitationBatch'
-import { emailContentSchema } from '../workspaces/enrollment'
+import { emailContentSchema, readEnrollmentSettings } from '../workspaces/enrollment'
 import { Prisma, type InvitationDeliveryStatus, type UserInvitation } from '@prisma/client'
 import { z } from 'zod'
 import { prisma } from './prisma'
@@ -371,9 +371,13 @@ export async function findInvitationByToken(token: string) {
       await assertWorkspaceDatabaseSafety(tx)
     }
     const workspace = inv?.workspaceId ? await tx.workspace.findUnique({
-      where: { id: inv.workspaceId }, select: { name: true, slug: true, logoDataUrl: true, accentColor: true, googleSignInEnabled: true, emailCodeSignInEnabled: true },
+      where: { id: inv.workspaceId }, select: { name: true, slug: true, logoDataUrl: true, accentColor: true, googleSignInEnabled: true, emailCodeSignInEnabled: true, enrollmentSettings: true },
     }) : null
-    return inv ? { ...inv, workspace } : null
+    if (!inv) return null
+    if (!workspace) return { ...inv, workspace: null }
+    const { enrollmentSettings, ...branding } = workspace
+    return { ...inv, workspace: branding, enrollmentFields: inv.status === 'PENDING'
+      ? readEnrollmentSettings(enrollmentSettings).fields : inv.enrollmentFields }
   })
 }
 

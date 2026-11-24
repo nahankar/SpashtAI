@@ -44,6 +44,8 @@ export async function resolveGoogleAccount(
     invitationBypassesSignupPause?: boolean
     /** Required to create an account. Existing accounts may sign in without it. */
     profile?: SignupProfile | null
+    /** Tenant invitation form changes must not backfill names on existing accounts. */
+    preserveExistingNames?: boolean
   },
 ): Promise<GoogleSignInResult> {
   let user = await db.user.findFirst({
@@ -73,8 +75,8 @@ export async function resolveGoogleAccount(
       data: {
         googleId: user.googleId ?? googleUser.googleId,
         emailVerified: user.emailVerified || googleUser.emailVerified,
-        firstName: user.firstName ?? googleUser.firstName,
-        lastName: user.lastName ?? googleUser.lastName,
+        firstName: opts.preserveExistingNames ? user.firstName : user.firstName ?? googleUser.firstName,
+        lastName: opts.preserveExistingNames ? user.lastName : user.lastName ?? googleUser.lastName,
         avatar: user.avatar ?? googleUser.avatar,
         lastLoginAt: new Date(),
         loginCount: { increment: 1 },

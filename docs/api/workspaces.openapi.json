@@ -2886,7 +2886,7 @@
       },
       "patch": {
         "summary": "Correct member signup profile and tenant enrollment answers",
-        "description": "Current tenant Owner/Admin only; target must belong to this tenant. Standard profile fields apply to the shared account. Custom answers update only this workspace membership, using that user\u2019s saved signup field definitions (with current definitions for matching field IDs). Email, Google identity, platform/workspace role and permissions cannot be changed here. Requires the revision from GET; concurrent profile or form-definition changes return 409. Updates and a content-free audit commit atomically.",
+        "description": "Current tenant Owner/Admin only; target must belong to this tenant. Standard profile fields apply to the shared account. Custom answers update only this workspace membership, using that user\u2019s saved signup field definitions (with current definitions for matching field IDs). Email, Google identity, platform/workspace role and permissions cannot be changed here. Requires the revision from GET; concurrent profile or form-definition changes return 409. Updates and a content-free audit commit atomically. First and last names may remain blank for legacy members. Recognized custom First Name/Last Name answers are synchronized from these account name fields on explicit admin save; they are not separate name editors.",
         "security": [
           {
             "workspace": []
@@ -2949,7 +2949,6 @@
                   },
                   "firstName": {
                     "type": "string",
-                    "minLength": 1,
                     "maxLength": 120
                   },
                   "lastName": {

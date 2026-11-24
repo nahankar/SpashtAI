@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { enrollmentSettingsSchema, filterableEnrollmentFields, validateEnrollmentResponses } from '../src/workspaces/enrollment'
+import { enrollmentNames, enrollmentNameKey, enrollmentSettingsSchema, filterableEnrollmentFields, validateEnrollmentResponses } from '../src/workspaces/enrollment'
 import { buildInvitationEmail } from '../src/lib/invitations'
 import { batchEmailsSchema, runInvitationBatch } from '../src/lib/invitationBatch'
 import { WorkspaceError } from '../src/workspaces/contracts'
@@ -64,5 +64,17 @@ describe('workspace enrollment contract', () => {
     expect(batchEmailsSchema.safeParse(Array.from({ length: 21 }, (_, i) => `${i}@example.invalid`)).success).toBe(false)
     const result = await runInvitationBatch(['ok', 'seat', 'db'], async email => { if (email === 'seat') throw new WorkspaceError(409, 'SEAT_LIMIT', 'No seats'); if (email === 'db') throw new Error('secret connection string'); return 'saved' })
     expect(result.results).toEqual([{ email: 'ok', ok: true, invitation: 'saved' }, { email: 'seat', ok: false, error: 'No seats' }, { email: 'db', ok: false, error: 'Could not create this invitation. Check its status before retrying' }])
+  })
+})
+
+describe('signup account names', () => {
+  it('recognizes legacy name text questions by label or identifier only', () => {
+    const first = { id: 'field_abc', label: 'First Name', type: 'text', required: true, options: [], filterable: false } as const
+    expect(enrollmentNameKey(first)).toBe('firstName')
+    expect(enrollmentNameKey({ ...first, id: 'last_name', label: 'Surname' })).toBe('lastName')
+    expect(enrollmentNameKey({ ...first, label: 'Emergency contact first name' })).toBeNull()
+    expect(enrollmentNameKey({ ...first, type: 'dropdown' })).toBeNull()
+    expect(enrollmentNames([{ ...first, options: [] }], { field_abc: '  Candidate  ' })).toEqual({ firstName: 'Candidate' })
+    expect(() => enrollmentNames([{ ...first, options: [] }], { field_abc: 'x'.repeat(121) })).toThrow()
   })
 })
