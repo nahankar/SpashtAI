@@ -181,11 +181,18 @@ export async function finishLearnerAssessment(job: Claim, invocation: Invocation
 }
 
 export async function learnerFindings(runId: string, ownerId: string, tx: Tx = prisma) {
+  return findings(runId, ownerId, tx, true)
+}
+/** Same integrity and assessment-release rules, without acquiring a writable session lock. */
+export async function reviewLearnerFindings(runId: string, ownerId: string, tx: Tx) {
+  return findings(runId, ownerId, tx, false)
+}
+async function findings(runId: string, ownerId: string, tx: Tx, lock: boolean) {
   const found = await tx.interviewRun.findFirst({ where: { id: runId, ownerId }, include: { owner: { select: { hideTranscriptText: true } } } })
   if (!found) throw new BankError(404, 'Interview not found')
   // A Personal account switch never hides a learner's own organization feedback.
   const run = currentDataScope() ? { ...found, owner: { hideTranscriptText: false } } : found
-  await lockWritableSession(tx, run.sessionId)
+  if (lock) await lockWritableSession(tx, run.sessionId)
   const rows = await tx.interviewAttempt.findMany({ where: { runId }, orderBy: { index: 'asc' },
     include: { answerSnapshots: { include: { assessment: true } }, transcriptIssues: { include: { segment: { select: { id: true, audioStatus: true } } } },
       chunks: { select: { segment: { select: { id: true, audioStatus: true } } } } } })

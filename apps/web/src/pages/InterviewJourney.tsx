@@ -1,4 +1,4 @@
-import { appPath } from '@/workspaces/activeWorkspace'
+import { appPath, getActiveWorkspace } from '@/workspaces/activeWorkspace'
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
@@ -320,7 +320,7 @@ export function InterviewJourney() {
 
   const ownJourney = !journey.user?.id || journey.user.id === user?.id
   // Admins can read any journey, but launches and edits are owner-only on the server.
-  const readOnly = !ownJourney
+  const readOnly = !ownJourney || Boolean(getActiveWorkspace())
 
   return (
     <div className="space-y-6">
@@ -395,7 +395,7 @@ export function InterviewJourney() {
 
       {readOnly && (
         <div role="status" className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
-          You are viewing {formatSessionOwner(journey.user)}'s interview journey. It is read-only: only the owner can start practice, log interviews or make changes.
+          {getActiveWorkspace() ? 'Workspace Prepare review is read-only. Starting practices and changing journeys are not available here.' : <>You are viewing {formatSessionOwner(journey.user)}'s interview journey. It is read-only: only the owner can start practice, log interviews or make changes.</>}
         </div>
       )}
 

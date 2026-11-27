@@ -29,7 +29,7 @@ export type InterviewRun = {
   // Pinned when the practice started with Interview conversation access; earlier runs stay manual.
   conversationMode?: boolean;
 }
-export type InterviewHistory = { id: string; sessionId: string; track: string; experienceBand: string; startingDifficulty: string;
+export type InterviewHistory = { user?: { id: string; firstName?: string | null; lastName?: string | null; email?: string }; readOnly?: boolean; id: string; sessionId: string; track: string; experienceBand: string; startingDifficulty: string;
   startedAt: string; endedAt: string|null; retainedAt: string|null; questionCount: number
   answeredCount?: number; skippedCount?: number; incompleteCount?: number }
 /** Practice times the learner's plan allows (server-verified); null is no time limit. */

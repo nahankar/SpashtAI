@@ -1000,7 +1000,7 @@ function ReanalyzeOverlay({ status, error, hasPriorAssessment, onDismiss, onRetr
 
 export function ReplayResults() {
   const { id } = useParams<{ id: string }>()
-  useFeatureMilestone('replay', 'results_viewed', id)
+
   const navigate = useNavigate()
   const { user, updateUser } = useAuth()
   const exportFlags = useUserExportFlags()
@@ -1019,6 +1019,8 @@ export function ReplayResults() {
     ? 'Back to Coach'
     : 'Back to Replay'
   const [data, setData] = useState<ReplayResultData | null>(null)
+  const readOnly = data?.session.readOnly === true
+  useFeatureMilestone('replay', 'results_viewed', id, Boolean(data) && !readOnly)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const seenResultRef = useRef<string | null>(null)
@@ -1061,12 +1063,12 @@ export function ReplayResults() {
   useEffect(() => { loadResults(); return () => resultsRequestRef.current?.abort() }, [loadResults])
 
   useEffect(() => {
-    if (!data || !id || seenResultRef.current === id) return
+    if (!data || readOnly || !id || seenResultRef.current === id) return
     seenResultRef.current = id
     void markCoachHomeResultSeen('replay', id).catch((error) =>
       console.warn('mark Coach Home Replay result seen', error),
     )
-  }, [data, id])
+  }, [data, id, readOnly])
 
   const { dialogOpen, setDialogOpen, reanalyzing, reanalyzeError, startReanalyze, dismissReanalyze, retryReanalyze } =
     useReanalyze(id, loadResults)
@@ -1335,6 +1337,7 @@ export function ReplayResults() {
           <Link to={backTo} className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
             <ArrowLeft className="h-3.5 w-3.5" /> {backLabel}
           </Link>
+          {readOnly && <Badge variant="outline">Read only · workspace review</Badge>}
           <h1 className="text-2xl font-bold">
             {session.sessionName || (isInterviewRecording ? 'Interview event recording' : 'Replay Results')}
           </h1>
@@ -1342,7 +1345,7 @@ export function ReplayResults() {
             {data.evidence.identity.speaker && (
               <span className="inline-flex items-center gap-1 font-medium text-primary">
                 Confirmed speaker: {data.evidence.identity.speaker}
-                {data.evidence.identity.state === 'confirmed' && (
+                {!readOnly && data.evidence.identity.state === 'confirmed' && (
                   <Button
                     type="button"
                     variant="ghost"
@@ -1368,7 +1371,7 @@ export function ReplayResults() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {!isInterviewRecording && (pulseLoading ? (
+          {!readOnly && !isInterviewRecording && (pulseLoading ? (
             <Button variant="outline" size="sm" disabled>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Updating...
             </Button>
@@ -1392,7 +1395,7 @@ export function ReplayResults() {
               <TrendingUp className="mr-2 h-4 w-4" /> {pulseStatus === 'skipped' ? 'Track in Pulse' : 'Track in Pulse'}
             </Button>
           ))}
-          {exportFlags.enableReprocess && (
+          {!readOnly && exportFlags.enableReprocess && (
             <Button variant="outline" size="sm" onClick={() => setDialogOpen(true)}>
               <RefreshCw className="mr-2 h-4 w-4" /> Re-analyze
             </Button>
@@ -1411,7 +1414,7 @@ export function ReplayResults() {
 
       {/* Ask AI Coach about this session — inert "Pro" placeholder until an admin
           enables the `session_chat` flag, then interactive (see SessionChat). */}
-      {id ? (
+      {id && !readOnly ? (
         <div className="mb-4 flex justify-end">
           <SessionChat module="replay" sessionId={id} />
         </div>
@@ -1447,6 +1450,7 @@ export function ReplayResults() {
       <ReplayEvidencePanel
         key={`${id}:${data.evidence.recording?.signature}:${data.evidence.identity.revision}`}
         sessionId={id!}
+        readOnly={readOnly}
         evidence={data.evidence}
         audioDisabled={!!data.audioDownloadDisabled || exportFlags.hideAudioDownload}
         speakerHint={session.participantName}

@@ -1,3 +1,4 @@
+import { canReviewWorkspaceSessions } from '../lib/dataScope'
 import { Router, type NextFunction, type Request, type Response } from 'express'
 import { z } from 'zod'
 import { isValidInternalAgentRequest, requireAuth } from '../middleware/auth'
@@ -7,7 +8,7 @@ import { reqLog } from '../lib/logger'
 import { prisma } from '../lib/prisma'
 import { deleteSession } from './sessions'
 import { recordFeatureUsage, recordUserFeatureUsage } from '../middleware/tracking'
-import { learnerFindings, wakeLearnerEvaluator } from '../interviews/evaluator/learner'
+import { reviewLearnerFindings, learnerFindings, wakeLearnerEvaluator } from '../interviews/evaluator/learner'
 import { nextSchema } from '../interviews/practice/contracts'
 import { recordTranscriptIssue, acceptRecordingAcknowledgment, recordingAcknowledgment, agentFinishAnswer, agentPrepareNext, captureCommittedTurn, endPractice, finishAnswer, markQuestionAsked, ownedCaptureReceipt, practiceDetail, practiceHistory, practiceOptions, prepareBankAttempt, recordAssistance, saveCaptureReceipt, startPractice, voiceState } from '../interviews/practice/service'
 
@@ -37,12 +38,19 @@ practiceRouter.post('/runs', route(async (req, res) => {
 }))
 practiceRouter.get('/runs/:runId', route(async (req, res) => { res.json(await practiceDetail(req.params.runId, req.user!.userId)) }))
 practiceRouter.get('/runs/:runId/assessments', route(async (req, res) => {
-  res.json({ assessments: await prisma.$transaction(tx => learnerFindings(req.params.runId, req.user!.userId, tx)) })
+  res.json({ assessments: await prisma.$transaction(async tx => {
+    const run = await tx.interviewRun.findFirst({
+      where: { id: req.params.runId, ...(canReviewWorkspaceSessions() ? {} : { ownerId: req.user!.userId }) },
+      select: { ownerId: true },
+    })
+    if (!run) throw new BankError(404, 'Interview not found')
+    return canReviewWorkspaceSessions() ? reviewLearnerFindings(req.params.runId, run.ownerId, tx) : learnerFindings(req.params.runId, run.ownerId, tx)
+  }) })
 }))
 practiceRouter.get('/playback/:sessionId/assessments', route(async (req, res) => {
-  const run = await prisma.interviewRun.findFirst({ where: { sessionId: req.params.sessionId, ownerId: req.user!.userId }, select: { id: true } })
+  const run = await prisma.interviewRun.findFirst({ where: { sessionId: req.params.sessionId, ...(canReviewWorkspaceSessions() ? {} : { ownerId: req.user!.userId }) }, select: { id: true, ownerId: true } })
   if (!run) throw new BankError(404, 'Interview not found')
-  res.json({ assessments: await prisma.$transaction(tx => learnerFindings(run.id, req.user!.userId, tx)) })
+  res.json({ assessments: await prisma.$transaction(tx => canReviewWorkspaceSessions() ? reviewLearnerFindings(run.id, run.ownerId, tx) : learnerFindings(run.id, req.user!.userId, tx)) })
 }))
 practiceRouter.post('/runs/:runId/next', route(async (req, res) => {
   const body = nextSchema.parse(req.body ?? {})

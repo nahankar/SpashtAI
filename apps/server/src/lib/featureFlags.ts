@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express'
 import { prisma } from './prisma'
-import { currentDataScope, type DataScope } from './dataScope'
+import { canReviewWorkspaceSessions, currentDataScope, type DataScope } from './dataScope'
 
 /** Product modules that may be shown in navigation and counted in Pulse. */
 export type PlatformFeature = 'elevate' | 'replay' | 'prepare' | 'interviews' | 'quick_try'
@@ -264,7 +264,7 @@ export async function isFeatureEnabled(feature: PlatformFeature): Promise<boolea
 export function requireFeature(feature: PlatformFeature) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      if (await isFeatureAccessible(feature, req.user?.userId)) {
+      if ((req.method === 'GET' && canReviewWorkspaceSessions()) || await isFeatureAccessible(feature, req.user?.userId)) {
         next()
         return
       }

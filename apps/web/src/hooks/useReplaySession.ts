@@ -60,6 +60,7 @@ export interface ReplayResultData {
   transcriptJsonExportDisabled?: boolean
   audioDownloadDisabled?: boolean
   session: {
+    readOnly?: boolean
     id: string
     sessionName?: string | null
     meetingType: string

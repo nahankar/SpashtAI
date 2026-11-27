@@ -1,4 +1,4 @@
-import { appPath } from '@/workspaces/activeWorkspace'
+import { appPath, getActiveWorkspace } from '@/workspaces/activeWorkspace'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useFeatureMilestone } from '@/hooks/useFeatureMilestone'
@@ -401,7 +401,7 @@ export function SessionReplay({
 } = {}) {
   const params = useParams<{ sessionId: string }>()
   const sessionId = sessionIdProp ?? params.sessionId
-  useFeatureMilestone(variant === 'interview' ? 'interviews' : 'elevate', 'results_viewed', sessionId, !embedded)
+  useFeatureMilestone(variant === 'interview' ? 'interviews' : 'elevate', 'results_viewed', sessionId, !embedded && !['OWNER', 'ADMIN'].includes(getActiveWorkspace()?.role || ''))
   const isPro = useIsPro()
 
   const [turns, setTurns] = useState<ReplayTurn[]>([])

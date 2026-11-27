@@ -32,7 +32,7 @@ function ownedReplayWhere(req: Request, id: string) {
   return replaySessionAccessWhere(
     id,
     req.user!.userId,
-    isPrivilegedRole(req.user?.role),
+    isPrivilegedRole(req.user?.role) || (req.method === 'GET' && canReviewWorkspaceSessions()),
   )
 }
 
@@ -78,7 +78,7 @@ import {
 } from '../lib/aws-transcribe'
 // DEV-ONLY: streaming transcription — remove before production
 import { transcribeStreamingFromFile } from '../lib/aws-transcribe-streaming'
-import { currentDataScope } from '../lib/dataScope'
+import { canReviewWorkspaceSessions, currentDataScope } from '../lib/dataScope'
 import { activityMediaDir, mediaPathAllowed, workspaceMediaPrefix } from '../lib/mediaStorage'
 import { workspacePlan } from '../workspaces/productAccess'
 import { reenterDataScope } from '../workspaces/requestScope'
@@ -1089,6 +1089,7 @@ router.get('/sessions/:id/results', async (req: Request, res: Response) => {
     res.json({
       session: {
         id: session.id,
+        readOnly: Boolean(currentDataScope() && session.userId !== req.user?.userId),
         sessionName: session.sessionName,
         meetingType: session.meetingType,
         userRole: session.userRole,

@@ -28,7 +28,7 @@ describe('workspace pages', () => {
 
   it('shows Admins the dashboard entry even before any product is turned on', () => {
     const html = home('ADMIN', [])
-    expect(html).toContain('href="/w/klsvdit/admin"'); expect(html).toContain('No products yet')
+    expect(html).toContain('href="/w/klsvdit/admin"'); expect(html).toContain('href="/w/klsvdit/prepare"')
   })
 
   it('keeps the product bar on workspace administration and puts admin pages in the side navigation', () => {

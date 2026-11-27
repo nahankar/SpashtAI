@@ -1,3 +1,4 @@
+import { canReviewWorkspaceSessions } from '../lib/dataScope'
 import {
   InterviewQuestionSource,
   Prisma,
@@ -170,7 +171,7 @@ router.post('/', trackFeatureUsage('prepare', 'journey_created'), async (req, re
 
 router.get('/:id', async (req, res) => {
   try {
-    const privileged = isPrivilegedRole(await currentListRole(req))
+    const privileged = isPrivilegedRole(await currentListRole(req)) || canReviewWorkspaceSessions()
     const preparation = privileged
       ? await prisma.preparation.findFirst({
           where: { id: req.params.id },

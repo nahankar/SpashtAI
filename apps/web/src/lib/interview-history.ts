@@ -15,11 +15,12 @@ export function applyRetain(runs: InterviewHistory[], run: InterviewHistory, res
 }
 
 export type HistoryPage = { runs: InterviewHistory[]; total: number; ownerTotal: number; nextOffset: number | null }
-export type HistoryQuery = { q: string; status: string; sort: SortField; dir: SortDir }
+export type HistoryQuery = { q: string; user?: string; status: string; sort: SortField; dir: SortDir }
 /** The server applies search, status and sort to the whole owned history; the page only asks for a slice. */
 export function historyPath(query: HistoryQuery, offset = 0, limit = 20) {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset), status: query.status, sort: query.sort === 'name' || query.sort === 'status' ? query.sort : 'date', dir: query.dir })
   if (query.q.trim()) params.set('q', query.q.trim())
+  if (query.user?.trim()) params.set('user', query.user.trim())
   return `/api/interviews/runs?${params}`
 }
 

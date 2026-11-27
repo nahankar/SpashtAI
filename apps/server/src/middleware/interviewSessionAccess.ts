@@ -1,3 +1,4 @@
+import { canReviewWorkspaceSessions } from '../lib/dataScope'
 import type { NextFunction, Request, Response } from 'express'
 import { prisma } from '../lib/prisma'
 import { requireFeature } from '../lib/featureFlags'
@@ -18,7 +19,7 @@ async function checkInterview(req: Request, res: Response, id: string, execution
   if (!isValidInternalAgentRequest(req)) {
     if (!req.user) requireAuth(req, res, () => undefined)
     if (res.headersSent) return true
-    if (req.user?.userId !== run.ownerId) { res.status(404).json({ error: 'Session not found' }); return true }
+    if (req.user?.userId !== run.ownerId && !(!execution && canReviewWorkspaceSessions())) { res.status(404).json({ error: 'Session not found' }); return true }
   }
   if (execution) {
     await practiceExecutionAccess(run.ownerId)

@@ -15,6 +15,7 @@ function contextStatement(base: PrismaClient, scope: DataScope) {
 }
 
 export async function applyDataScope(tx: Prisma.TransactionClient, scope: DataScope) {
+  if (scope.reader === 'practice_review') await tx.$executeRawUnsafe('SET TRANSACTION READ ONLY')
   await tx.$executeRaw`SELECT set_config('app.workspace_actor_id', ${scope.actorId}, true),
     set_config('app.workspace_id', ${scope.workspaceId}, true),
     set_config('app.workspace_platform_admin', 'false', true),
@@ -24,7 +25,7 @@ export async function applyDataScope(tx: Prisma.TransactionClient, scope: DataSc
 /** Executes one lazy Prisma operation inside a short transaction that first establishes the scope. */
 function deferred(base: PrismaClient, scope: DataScope, raw: AnyPromise): Deferred {
   let running: Promise<unknown> | undefined
-  const run = () => (running ??= base.$transaction([contextStatement(base, scope), raw]).then(results => results[1]))
+  const run = () => (running ??= base.$transaction([...(scope.reader === 'practice_review' ? [base.$executeRawUnsafe('SET TRANSACTION READ ONLY')] : []), contextStatement(base, scope), raw]).then(results => results.at(-1)))
   return {
     [RAW]: raw,
     then: (onFulfilled, onRejected) => run().then(onFulfilled, onRejected),
@@ -87,8 +88,9 @@ export function createScopedPrisma<T extends PrismaClient>(base: T): T {
             }, options as never)
           }
           const items = (input as Array<AnyPromise | Deferred>).map(item => (item as Deferred)[RAW] ?? item)
-          return target.$transaction([contextStatement(target, scope), ...items], options as never)
-            .then(results => results.slice(1))
+          const prefix = [...(scope.reader === 'practice_review' ? [target.$executeRawUnsafe('SET TRANSACTION READ ONLY')] : []), contextStatement(target, scope)]
+          return target.$transaction([...prefix, ...items], options as never)
+            .then(results => results.slice(prefix.length))
         }
       }
       if (typeof property === 'string' && RAW_METHODS.has(property)) {

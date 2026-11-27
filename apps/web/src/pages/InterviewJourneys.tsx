@@ -1,4 +1,4 @@
-import { appPath } from '@/workspaces/activeWorkspace'
+import { appPath, getActiveWorkspace } from '@/workspaces/activeWorkspace'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, Bug, Calendar, Loader2, Plus, Trash2 } from 'lucide-react'
@@ -77,7 +77,7 @@ function JourneyRow({
         <div className="flex w-full shrink-0 items-center justify-end gap-2 sm:w-auto">
           <Link to={appPath(`/prepare/interviews/${journey.id}`)}>
             <Button size="sm" variant="outline">
-              {finished ? 'View journey' : 'Continue'} <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+              {finished || Boolean(getActiveWorkspace()) ? 'View journey' : 'Continue'} <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
             </Button>
           </Link>
           <Link to={appPath('/feedback/new')} title="Report an issue with this interview journey">
@@ -90,7 +90,7 @@ function JourneyRow({
               <Bug className="h-4 w-4" />
             </Button>
           </Link>
-          <Button
+          {!getActiveWorkspace() && <Button
             size="icon"
             variant="ghost"
             className="h-8 w-8 text-muted-foreground hover:text-destructive"
@@ -98,7 +98,7 @@ function JourneyRow({
             aria-label={`Delete ${journey.title}`}
           >
             <Trash2 className="h-4 w-4" />
-          </Button>
+          </Button>}
         </div>
       </CardContent>
     </Card>
@@ -106,7 +106,9 @@ function JourneyRow({
 }
 
 export function InterviewJourneys() {
-  const { isAdmin } = useAuth()
+  const { isAdmin: platformAdmin } = useAuth()
+  const workspace = getActiveWorkspace()
+  const isAdmin = workspace ? ['OWNER', 'ADMIN'].includes(workspace.role) : platformAdmin
   const confirm = useConfirm()
   const [journeys, setJourneys] = useState<Preparation[]>([])
   const [loading, setLoading] = useState(true)
@@ -191,14 +193,14 @@ export function InterviewJourneys() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-sm font-medium text-primary">Prepare · Perform</p>
-          <h1 className="text-2xl font-bold">Your interviews</h1>
+          <h1 className="text-2xl font-bold">{workspace ? 'Prepare · Interview journeys' : 'Your interviews'}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Keep every interview process, practice, recording, and next round in one place.
+            {workspace ? 'Review existing workspace journeys and their saved practices. Read only.' : 'Keep every interview process, practice, recording, and next round in one place.'}
           </p>
         </div>
-        <Link to={appPath('/prepare/new')}>
+        {!workspace && <Link to={appPath('/prepare/new')}>
           <Button className="w-full sm:w-auto"><Plus className="mr-2 h-4 w-4" /> New interview journey</Button>
-        </Link>
+        </Link>}
       </div>
 
       {error && (
@@ -213,13 +215,13 @@ export function InterviewJourneys() {
       {!error && journeys.length === 0 ? (
         <Card>
           <CardContent className="py-14 text-center">
-            <h2 className="text-xl font-semibold">Prepare for your next interview</h2>
+            <h2 className="text-xl font-semibold">{workspace ? 'No saved workspace journeys' : 'Prepare for your next interview'}</h2>
             <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
               Track each process and always know which conversation is next.
             </p>
-            <Link to={appPath('/prepare/new')}>
+            {!workspace && <Link to={appPath('/prepare/new')}>
               <Button className="mt-5">Create interview journey</Button>
-            </Link>
+            </Link>}
           </CardContent>
         </Card>
       ) : !error ? (

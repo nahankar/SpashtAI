@@ -14,7 +14,7 @@ describe('workspace navigation', () => {
   it('gives Owners and Admins the full workspace administration, independent of product access', () => {
     for (const role of ['OWNER', 'ADMIN'] as const) {
       const nav = workspaceNav(role, [])
-      expect(nav.learner).toEqual([])
+      expect(nav.learner.map(i => i.to)).toEqual(['prepare'])
       expect(nav.admin.map(i => i.label)).toEqual(['Dashboard', 'Users', 'Invitations', 'Feedback', 'Feature usage', 'Progress Pulse', 'AI Analytics', 'Workspace settings'])
       expect(nav.admin.every(item => item.to.startsWith('admin'))).toBe(true)
     }

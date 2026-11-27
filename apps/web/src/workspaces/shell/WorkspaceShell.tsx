@@ -1,3 +1,5 @@
+import { InterviewJourneys } from '@/pages/InterviewJourneys'
+import { InterviewJourney } from '@/pages/InterviewJourney'
 import { UserDropdown } from '@/components/layout/UserDropdown'
 import { useAuth } from '@/hooks/useAuth'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
@@ -83,6 +85,9 @@ export function WorkspaceShell({ slug }: { slug: string }) {
           <Route path="interviews" element={<Product feature="interviews"><Interviews /></Product>} />
           <Route path="interviews/history" element={<Product feature="interviews"><InterviewHistory /></Product>} />
           <Route path="interviews/playback/:sessionId" element={<Product feature="interviews"><SessionReplay variant="interview" sessionChatDisabled /></Product>} />
+          <Route path="prepare" element={<PrepareHistoryAccess><InterviewJourneys /></PrepareHistoryAccess>} />
+          <Route path="prepare/interviews" element={<PrepareHistoryAccess><InterviewJourneys /></PrepareHistoryAccess>} />
+          <Route path="prepare/interviews/:id" element={<PrepareHistoryAccess><InterviewJourney /></PrepareHistoryAccess>} />
           <Route path="progress" element={<Product feature="progress_pulse"><ProgressPulse /></Product>} />
           <Route path="feedback" element={<Product feature="feedback"><MyFeedback /></Product>} />
           <Route path="feedback/new" element={<Product feature="feedback"><NewFeedback /></Product>} />
@@ -188,6 +193,7 @@ export function WorkspaceHome() {
   const base = `/w/${encodeURIComponent(slug)}`
   const DESCRIPTIONS: Record<string, string> = {
     elevate: 'Live voice practice with instant feedback.', replay: 'Upload a recording and get a detailed review.', interviews: 'Practise interview questions and review your answers.',
+    prepare: 'Review saved interview journeys and their linked practices. Read only.',
     progress: 'Track your communication skills over time.', feedback: 'Tell your organization and SpashtAI what to improve.',
   }
   return <div className="space-y-6">
@@ -201,4 +207,9 @@ export function WorkspaceHome() {
     {nav.admin.length > 0 && <Card><CardHeader><CardTitle className="text-base">Administration</CardTitle><CardDescription>Members, invitations, usage and progress for this workspace only.</CardDescription></CardHeader>
       <CardContent><Button asChild><Link to={`${base}/admin`}>Open dashboard</Link></Button></CardContent></Card>}
   </div>
+}
+
+function PrepareHistoryAccess({ children }: { children: ReactNode }) {
+  const { slug, snapshot } = useWorkspaceShell()
+  return isManager(snapshot.membership.role) ? <>{children}</> : <Navigate to={`/w/${encodeURIComponent(slug)}`} replace />
 }

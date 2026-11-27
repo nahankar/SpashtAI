@@ -189,3 +189,33 @@ the same query and filters. The response uses `practices` instead of `events`, a
 rows have no `action`. Excel uses Practices headers and records this definition in Report
 details. The learner list is limited to 500 in the UI; exports include all matching rows up
 to 10,000, then fail explicitly. No data migration or deletion is required.
+
+### Workspace owners/admins reviewing other users
+
+Owners and Admins review saved sessions on the existing product pages: Elevate,
+Replay, Interview history and Prepare's existing journey list/detail pages. The
+shared SessionFilters bar provides session search, “Filter by user name”, status
+and date/sort controls. No separate Session review page or learner dropdown is added.
+Other users' cards open results/playback rather than resuming their practice.
+Editing, deleting, retaining, confirming a Replay speaker, tracking another user's
+Pulse, re-analysis and session chat remain unavailable for those records.
+
+Current manager membership is checked on each request. Expanded access is bound
+only to allowlisted product GET routes and session-bound recording-ticket creation.
+The `practice_review` reader adds SELECT policies for the current organization's
+saved Session, ReplaySession and Preparation parents. Children inherit their parent
+visibility, and restrictive SQL policies block all product writes in this mode.
+The scoped Prisma client also starts these transactions read-only. Mutation requests
+keep normal ownership checks and never receive the review reader. `scope=mine`
+retains the existing owner-only behavior for personal pickers.
+
+Personal, deleted/discarded and other-organization records remain inaccessible.
+Interview feedback uses the learner's existing assessment release/integrity rules;
+reviewing it neither evaluates an answer nor locks it for writing. Recording access
+uses the existing authenticated/session-bound playback flow. Product pages continue
+to use workspace media, plan and export restrictions.
+
+Prepare navigation is exposed to managers for reviewing existing workspace journeys
+only; new Prepare journeys and writes remain disabled in organization workspaces.
+Learner navigation/access is unchanged. Deploy migration
+`20261128090000_workspace_practice_review` before the new application code.

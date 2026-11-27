@@ -30,7 +30,7 @@ export const preparationInclude = {
   },
   interview: true,
   stages: { orderBy: { sequence: 'asc' as const } },
-  practices: { select: { id: true } },
+  practices: { where: { session: { discardedAt: null } }, select: { id: true } },
   recordings: { select: { id: true } },
 } satisfies Prisma.PreparationInclude
 
@@ -45,6 +45,7 @@ export const preparationDetailInclude = {
   },
   questions: { orderBy: { createdAt: 'asc' as const } },
   practices: {
+    where: { session: { discardedAt: null } },
     orderBy: { createdAt: 'desc' as const },
     select: {
       id: true,

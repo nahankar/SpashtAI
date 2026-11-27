@@ -52,7 +52,8 @@ export function ReplayDeliveryNote({ evidence }: { evidence: ReplayEvidence }) {
   </span>
 }
 
-export function ReplayEvidencePanel({ sessionId, evidence, audioDisabled, speakerHint, sessionName, meetingDate, speakerAliases, userFullName, onAliasesSaved, editing: editingProp, onEditingChange, onConfirmed }: {
+export function ReplayEvidencePanel({ readOnly = false, sessionId, evidence, audioDisabled, speakerHint, sessionName, meetingDate, speakerAliases, userFullName, onAliasesSaved, editing: editingProp, onEditingChange, onConfirmed }: {
+  readOnly?: boolean
   sessionId: string
   evidence: ReplayEvidence
   audioDisabled: boolean
@@ -120,6 +121,7 @@ export function ReplayEvidencePanel({ sessionId, evidence, audioDisabled, speake
     }
   }
   async function confirm() {
+    if (readOnly) return
     if (!title.trim() || !date) {
       setMessage('Confirm the session name and meeting date before analysis.')
       return
@@ -160,7 +162,7 @@ export function ReplayEvidencePanel({ sessionId, evidence, audioDisabled, speake
   const playable = !!evidence.recording && !audioDisabled
   const singleUnlabelled = evidence.speakerChoice === 'single_unlabelled'
   const optionLabel = (label: string) => singleUnlabelled ? 'This recording is only my speech' : label
-  const showSpeakerChoices = !confirmed || editing
+  const showSpeakerChoices = !readOnly && (!confirmed || editing)
   const identityForm = showSpeakerChoices ? <>
     <div className="grid gap-4 md:grid-cols-2">
       <div className="grid gap-2">

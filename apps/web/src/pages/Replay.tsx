@@ -1,4 +1,4 @@
-import { appPath } from '@/workspaces/activeWorkspace'
+import { appPath, getActiveWorkspace } from '@/workspaces/activeWorkspace'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useNavigate, Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -198,7 +198,9 @@ function EditSessionDialog({
 }
 
 export function Replay() {
-  const { isAdmin } = useAuth()
+  const { isAdmin: platformAdmin, user } = useAuth()
+  const workspace = getActiveWorkspace()
+  const isAdmin = workspace ? ['OWNER', 'ADMIN'].includes(workspace.role) : platformAdmin
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const confirm = useConfirm()
@@ -771,11 +773,12 @@ export function Replay() {
             const badge = STATUS_BADGE[s.status] || STATUS_BADGE.pending
             const hasResult = s.status === 'completed' && s.result
             const isSelected = selectedReplay.has(s.id)
+            const readOnly = Boolean(workspace && s.user?.id !== user?.id)
             return (
               <Card key={s.id} className={`transition-all hover:shadow-md ${isSelected ? 'ring-2 ring-primary' : ''}`}>
                 <CardContent className="flex items-center gap-4 py-4">
                   {/* Checkbox */}
-                  <button
+                  {!readOnly && <button
                     onClick={() =>
                       setSelectedReplay((prev) => {
                         const n = new Set(prev)
@@ -791,7 +794,7 @@ export function Replay() {
                     ) : (
                       <Square className="h-5 w-5 text-muted-foreground" />
                     )}
-                  </button>
+                  </button>}
 
                   {/* Details */}
                   <div className="min-w-0 flex-1">
@@ -842,7 +845,7 @@ export function Replay() {
                           Details <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
                         </Button>
                       </Link>
-                    ) : s.status === 'pending' ? (
+                    ) : s.status === 'pending' && !readOnly ? (
                       <Button size="sm" variant="outline" onClick={() => handleContinue(s)}>
                         Continue <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
                       </Button>
@@ -859,7 +862,7 @@ export function Replay() {
                         <Bug className="h-4 w-4" />
                       </Button>
                     </Link>
-                    <DropdownMenu>
+                    {!readOnly && <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground">
                           <MoreVertical className="h-4 w-4" />
@@ -892,7 +895,7 @@ export function Replay() {
                           <Trash2 className="mr-2 h-4 w-4" /> Delete
                         </DropdownMenuItem>
                       </DropdownMenuContent>
-                    </DropdownMenu>
+                    </DropdownMenu>}
                   </div>
                 </CardContent>
               </Card>

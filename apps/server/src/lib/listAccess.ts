@@ -1,9 +1,10 @@
+import { canReviewWorkspaceSessions } from './dataScope'
 import type { Request } from 'express'
 import { prisma } from './prisma'
 import { isPrivilegedRole } from './userExportFlags'
 
 export function ownerListWhere(userId: string, role?: string): { userId?: string } {
-  return isPrivilegedRole(role) ? {} : { userId }
+  return isPrivilegedRole(role) || canReviewWorkspaceSessions() ? {} : { userId }
 }
 
 /**

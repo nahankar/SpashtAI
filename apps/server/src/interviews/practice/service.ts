@@ -1,3 +1,4 @@
+import { canReviewWorkspaceSessions } from '../../lib/dataScope'
 import { projectInterviewTranscript } from './projection'
 import { requestDeliveryAlignment } from '../../lib/deliveryAlignmentWorker'
 import type { Prisma } from '@prisma/client'
@@ -259,7 +260,8 @@ export async function finishAnswer(runId: string, attemptId: string, ownerId: st
 }
 export async function practiceDetail(runId: string, ownerId: string) {
   return prisma.$transaction(async tx => {
-    const run = await ownedRun(tx, runId, ownerId)
+    const run = canReviewWorkspaceSessions() ? await tx.interviewRun.findFirst({ where: { id: runId, session: { discardedAt: null } } }) : await ownedRun(tx, runId, ownerId)
+    if (!run) throw new BankError(404, 'Interview not found')
     const attempts = await tx.interviewAttempt.findMany({ where: { runId }, orderBy: { index: 'asc' },
       include: { answerSnapshots: { select: { answerText: true, textSource: true, textRevision: true, assistance: true } },
         chunks: { include: { segment: { select: { segmentIndex: true } } } } } })
@@ -269,7 +271,7 @@ export async function practiceDetail(runId: string, ownerId: string) {
       recordingConsentAt: run.recordingConsentAt, recordingConsentVersion: run.recordingConsentVersion,
       // Conversation only while the run pinned it and the owner still has access, matching the agent's voiceState.
       evaluationEnabled: run.evaluationPolicySnapshot !== null,
-      conversationMode: run.conversationPolicySnapshot !== null && await conversationAccess(ownerId, tx),
+      conversationMode: run.ownerId === ownerId && run.conversationPolicySnapshot !== null && await conversationAccess(ownerId, tx),
       attempts: attempts.map(a => ({ ...learnerAttempt(a), completionReason: a.completionReason,
         capturedText: a.chunks.sort((x,y) => x.segment.segmentIndex-y.segment.segmentIndex || x.localTurnIndex-y.localTurnIndex).map(c => c.text).join('\n'),
         capturedParts: a.chunks.map(c => ({ segmentId: c.segmentId, sourceTurnId: c.sourceTurnId, text: c.text, createdAt: c.createdAt })),
@@ -313,7 +315,7 @@ export async function practiceOptions(ownerId: string) {
 }
 export const historyQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20), offset: z.coerce.number().int().min(0).max(100_000).default(0),
-  q: z.string().trim().max(120).default(''), status: z.enum(['all', 'active', 'ended']).default('all'),
+  q: z.string().trim().max(120).default(''), user: z.string().trim().max(200).optional(), scope: z.literal('mine').optional(), status: z.enum(['all', 'active', 'ended']).default('all'),
   sort: z.enum(['date', 'name', 'status']).default('date'), dir: z.enum(['asc', 'desc']).default('desc'),
 }).strict()
 /** One page of the owner's practices. Search, status and sort apply to the whole history, not just the page. */
@@ -336,15 +338,17 @@ export async function acceptRecordingAcknowledgment(ownerId: string, input: unkn
 }
 export async function practiceHistory(ownerId: string, input: unknown = {}) {
   const query = historyQuerySchema.parse(input)
-  const owned: Prisma.InterviewRunWhereInput = { ownerId, session: { discardedAt: null } }
-  const text = query.q ? { OR: (['track', 'startingDifficulty', 'experienceBand'] as const).map(field => ({ [field]: { contains: query.q, mode: 'insensitive' as const } })) } : {}
+  const reviewing = canReviewWorkspaceSessions()
+  const owned: Prisma.InterviewRunWhereInput = { ...(reviewing ? {} : { ownerId }), session: { discardedAt: null } }
+  const text = query.q ? { OR: [...(['track', 'startingDifficulty', 'experienceBand'] as const).map(field => ({ [field]: { contains: query.q, mode: 'insensitive' as const } })), { id: query.q }, { sessionId: query.q }, { session: { sessionName: { contains: query.q, mode: 'insensitive' as const } } }] } : {}
   const status = query.status === 'all' ? {} : { session: { discardedAt: null, endedAt: query.status === 'ended' ? { not: null } : null } }
-  const where: Prisma.InterviewRunWhereInput = { AND: [owned, text, status] }
+  const user = reviewing && query.user ? { owner: { AND: query.user.split(/\s+/).filter(Boolean).slice(0, 10).map(part => ({ OR: ['firstName','lastName','email'].map(field => ({ [field]: { contains: part, mode: 'insensitive' as const } })) })) } } : {}
+  const where: Prisma.InterviewRunWhereInput = { AND: [owned, text, status, user] }
   const order: Prisma.InterviewRunOrderByWithRelationInput[] = query.sort === 'name' ? [{ track: query.dir }]
     : query.sort === 'status' ? [{ session: { endedAt: { sort: query.dir, nulls: query.dir === 'asc' ? 'first' : 'last' } } }] : []
   const [rows, total, ownerTotal] = await Promise.all([
     prisma.interviewRun.findMany({ where, orderBy: [...order, { createdAt: query.sort === 'date' ? query.dir : 'desc' }, { id: 'desc' }], skip: query.offset, take: query.limit,
-      select: { id: true, sessionId: true, track: true, experienceBand: true, startingDifficulty: true, createdAt: true,
+      select: { id: true, sessionId: true, track: true, experienceBand: true, startingDifficulty: true, createdAt: true, owner: { select: { id: true, firstName: true, lastName: true, email: true } },
         session: { select: { endedAt: true, retainedAt: true } }, _count: { select: { attempts: true } } } }),
     prisma.interviewRun.count({ where }), prisma.interviewRun.count({ where: owned }),
   ])
@@ -353,7 +357,7 @@ export async function practiceHistory(ownerId: string, input: unknown = {}) {
   const count = (runId: string, status: string) => counts.find(c => c.runId === runId && c.status === status)?._count._all ?? 0
   const next = query.offset + rows.length
   return { runs: rows.map(r => ({ id: r.id, sessionId: r.sessionId, track: r.track, experienceBand: r.experienceBand,
-    startingDifficulty: r.startingDifficulty, startedAt: r.createdAt, ...r.session, questionCount: r._count.attempts,
+    startingDifficulty: r.startingDifficulty, startedAt: r.createdAt, ...r.session, ...(reviewing ? { user: r.owner, readOnly: r.owner.id !== ownerId } : {}), questionCount: r._count.attempts,
     answeredCount: count(r.id, 'ANSWERED'), skippedCount: count(r.id, 'SKIPPED'), incompleteCount: count(r.id, 'INCOMPLETE') })),
     total, ownerTotal, nextOffset: next < total ? next : null }
 }

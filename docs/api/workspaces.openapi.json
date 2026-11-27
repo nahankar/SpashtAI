@@ -3073,6 +3073,237 @@
           }
         }
       }
+    },
+    "/api/interviews/runs": {
+      "get": {
+        "summary": "Interview history within the current workspace",
+        "description": "Learners see their own saved practices. Current workspace Owners/Admins see saved practices for members of that workspace and may filter by user (name/email), q (track, difficulty, experience, session name or exact run/session ID), status, sort, dir, offset and limit. scope=mine keeps the owner-only view. Manager rows include minimal user identity and readOnly=true when owned by someone else. Deleted/discarded practices remain excluded. Response shape {runs,total,ownerTotal,nextOffset} is preserved. Product routes require the normal identity Bearer token plus x-spasht-workspace; current active membership is rechecked and no other tenant or Personal records are granted.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "user",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "dir",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "x-spasht-workspace",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Verified organization token, in addition to the identity Bearer token."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Existing product response, with read-only tenant review where authorized."
+          },
+          "401": {
+            "description": "Sign in or re-enter the workspace."
+          },
+          "403": {
+            "description": "Access denied."
+          },
+          "404": {
+            "description": "Record absent or unavailable in the current scope."
+          }
+        }
+      }
+    },
+    "/api/interviews/runs/{runId}": {
+      "get": {
+        "summary": "Read a saved interview practice",
+        "description": "Current tenant managers may read another user\u2019s practice within the current workspace. The request runs in a read-only transaction and does not acquire mutable session/run locks. Existing owner-only write endpoints remain unchanged. Product routes require the normal identity Bearer token plus x-spasht-workspace; current active membership is rechecked and no other tenant or Personal records are granted.",
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-spasht-workspace",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Verified organization token, in addition to the identity Bearer token."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Existing product response, with read-only tenant review where authorized."
+          },
+          "401": {
+            "description": "Sign in or re-enter the workspace."
+          },
+          "403": {
+            "description": "Access denied."
+          },
+          "404": {
+            "description": "Record absent or unavailable in the current scope."
+          }
+        }
+      }
+    },
+    "/api/interviews/playback/{sessionId}/assessments": {
+      "get": {
+        "summary": "Read existing interview feedback",
+        "description": "Workspace manager reviews share the learner feedback projection, including assessment release after practice ends and transcript-integrity handling. No new grading or background job is requested. Product routes require the normal identity Bearer token plus x-spasht-workspace; current active membership is rechecked and no other tenant or Personal records are granted.",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-spasht-workspace",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Verified organization token, in addition to the identity Bearer token."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Existing product response, with read-only tenant review where authorized."
+          },
+          "401": {
+            "description": "Sign in or re-enter the workspace."
+          },
+          "403": {
+            "description": "Access denied."
+          },
+          "404": {
+            "description": "Record absent or unavailable in the current scope."
+          }
+        }
+      }
+    },
+    "/api/replay/sessions": {
+      "get": {
+        "summary": "Saved Replay history",
+        "description": "Current tenant managers may read Replay sessions within their workspace. Other users\u2019 results return session.readOnly=true. Existing results, status, media and plan-restricted downloads can be read, while edit, speaker confirmation, re-analysis, Pulse tracking and delete remain owner-only. scope=mine restricts the history to the caller. Product routes require the normal identity Bearer token plus x-spasht-workspace; current active membership is rechecked and no other tenant or Personal records are granted.",
+        "parameters": [
+          {
+            "name": "x-spasht-workspace",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Verified organization token, in addition to the identity Bearer token."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Existing product response, with read-only tenant review where authorized."
+          },
+          "401": {
+            "description": "Sign in or re-enter the workspace."
+          },
+          "403": {
+            "description": "Access denied."
+          },
+          "404": {
+            "description": "Record absent or unavailable in the current scope."
+          }
+        }
+      }
+    },
+    "/api/preparations": {
+      "get": {
+        "summary": "Saved Prepare journeys",
+        "description": "Current workspace managers may read existing journeys using the existing list and detail GET endpoints, even though Prepare creation is not enabled in workspaces. Other users\u2019 mutations remain denied. Personal and other-workspace records are not visible. Product routes require the normal identity Bearer token plus x-spasht-workspace; current active membership is rechecked and no other tenant or Personal records are granted.",
+        "parameters": [
+          {
+            "name": "x-spasht-workspace",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Verified organization token, in addition to the identity Bearer token."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Existing product response, with read-only tenant review where authorized."
+          },
+          "401": {
+            "description": "Sign in or re-enter the workspace."
+          },
+          "403": {
+            "description": "Access denied."
+          },
+          "404": {
+            "description": "Record absent or unavailable in the current scope."
+          }
+        }
+      }
     }
   },
   "components": {

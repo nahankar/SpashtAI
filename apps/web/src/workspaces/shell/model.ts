@@ -1,12 +1,13 @@
 import type { Feature, Membership } from '../client'
 
-export type WorkspaceProductFeature = 'elevate' | 'replay' | 'interviews' | 'progress_pulse' | 'feedback'
+export type WorkspaceProductFeature = 'elevate' | 'replay' | 'interviews' | 'prepare' | 'progress_pulse' | 'feedback'
 export interface NavItem { to: string; label: string; feature?: WorkspaceProductFeature }
 
 const LEARNER_NAV: NavItem[] = [
   { to: 'elevate', label: 'Elevate', feature: 'elevate' },
   { to: 'replay', label: 'Replay', feature: 'replay' },
   { to: 'interviews', label: 'Interviews', feature: 'interviews' },
+  { to: 'prepare', label: 'Prepare', feature: 'prepare' },
   { to: 'progress', label: 'Progress Pulse', feature: 'progress_pulse' },
   { to: 'feedback', label: 'Feedback', feature: 'feedback' },
 ]
@@ -42,7 +43,7 @@ export function isManager(role: Membership['role']) {
 export function workspaceNav(role: Membership['role'], features: Feature[]) {
   const allowed = allowedFeatures(features)
   return {
-    learner: LEARNER_NAV.filter(item => item.feature && allowed[item.feature]),
+    learner: LEARNER_NAV.filter(item => item.feature && (allowed[item.feature] || (item.feature === 'prepare' && isManager(role)))),
     admin: isManager(role) ? ADMIN_NAV : [],
   }
 }
