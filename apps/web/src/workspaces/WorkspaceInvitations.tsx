@@ -113,7 +113,7 @@ export function WorkspaceInvitations({ role, features, emailContent, workspaceNa
         <DialogFooter><Button variant="outline" disabled={busy} onClick={() => setDraft(null)}>Cancel</Button><Button disabled={busy} onClick={() => action('', draft)}>Confirm invitation</Button></DialogFooter>
       </>}</DialogContent>
     </Dialog>
-    <Card><CardHeader><CardTitle className="text-base">Sent invitations</CardTitle></CardHeader><CardContent className="space-y-4">
+    <Card><CardHeader><CardTitle className="text-base">Sent invitations</CardTitle><CardDescription>One current invitation per email address. Resending moves it back to Pending.</CardDescription></CardHeader><CardContent className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Input aria-label="Search invitations by name or email" placeholder="Search by name or email…" value={search} disabled={busy} maxLength={200} onChange={e => { resetSelection(); setSearch(e.target.value) }} />
         <Select value={status} disabled={busy} onValueChange={v => { resetSelection(); setStatus(v) }}>

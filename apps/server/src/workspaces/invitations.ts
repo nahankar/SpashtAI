@@ -38,9 +38,18 @@ function mayManage(scope: Scope, role: string) {
 async function audit(tx: WorkspaceTx, scope: Scope, action: string, id: string, metadata: Prisma.InputJsonObject = {}) {
   await tx.workspaceAudit.create({ data: { workspaceId: scope.workspace.id, actorUserId: scope.member.userId, action, subjectId: id, metadata } })
 }
+/** Historical attempts remain auditable; the administrator list has one current row per mailbox. */
+async function currentInvitationIds(tx: WorkspaceTx, workspaceId: string) {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT DISTINCT ON (lower(btrim(email))) id
+    FROM "UserInvitation" WHERE "workspaceId"=${workspaceId}
+    ORDER BY lower(btrim(email)), "createdAt" DESC, id DESC`
+  return rows.map(row => row.id)
+}
 export async function listWorkspaceInvitations(tx: WorkspaceTx, scope: Scope, input: unknown) {
   requireWorkspaceManager(scope)
-  const query = workspaceInvitationQuery.parse(input), now = new Date(), base = { workspaceId: scope.workspace.id }
+  const query = workspaceInvitationQuery.parse(input), now = new Date()
+  // Choose the current record before applying filters, so an expired filter cannot revive an older row.
+  const base = { workspaceId: scope.workspace.id, id: { in: await currentInvitationIds(tx, scope.workspace.id) } }
   const where: Prisma.UserInvitationWhereInput = { ...base, AND: [
     ...(query.status ? [viewWhere(query.status, now)] : []),
     ...(query.role ? [{ proposedRole: query.role }] : []),
@@ -92,6 +101,10 @@ export async function changeWorkspaceInvitation(claims: WorkspaceTokenPayload, i
     const current = await tx.userInvitation.findFirst({ where: { id, workspaceId: scope.workspace.id } })
     if (!current) throw new WorkspaceError(404, 'INVITATION_NOT_FOUND', 'Invitation not found')
     mayManage(scope, current.proposedRole!)
+    const latest = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "UserInvitation"
+      WHERE "workspaceId"=${scope.workspace.id} AND lower(btrim(email))=lower(btrim(${current.email}))
+      ORDER BY "createdAt" DESC, id DESC LIMIT 1`
+    if (latest[0]?.id !== id) throw new WorkspaceError(409, 'INVITATION_SUPERSEDED', 'A newer invitation exists for this email. Refresh the list to use it')
     if (current.status === 'ACCEPTED' || action === 'resend' && current.status === 'REVOKED') throw new WorkspaceError(409, 'INVITATION_CLOSED', 'This invitation cannot be changed')
     if (action === 'revoke' && effectiveStatus(current) === 'expired') throw new WorkspaceError(409, 'INVITATION_EXPIRED', 'This invitation has expired and cannot be revoked')
     if (action === 'revoke' && current.status === 'REVOKED') return { invitation: current, token, workspaceName: scope.workspace.name, workspaceSlug: scope.workspace.slug }
