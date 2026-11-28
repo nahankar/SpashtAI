@@ -38,18 +38,10 @@ function mayManage(scope: Scope, role: string) {
 async function audit(tx: WorkspaceTx, scope: Scope, action: string, id: string, metadata: Prisma.InputJsonObject = {}) {
   await tx.workspaceAudit.create({ data: { workspaceId: scope.workspace.id, actorUserId: scope.member.userId, action, subjectId: id, metadata } })
 }
-/** Historical attempts remain auditable; the administrator list has one current row per mailbox. */
-async function currentInvitationIds(tx: WorkspaceTx, workspaceId: string) {
-  const rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT DISTINCT ON (lower(btrim(email))) id
-    FROM "UserInvitation" WHERE "workspaceId"=${workspaceId}
-    ORDER BY lower(btrim(email)), "createdAt" DESC, id DESC`
-  return rows.map(row => row.id)
-}
 export async function listWorkspaceInvitations(tx: WorkspaceTx, scope: Scope, input: unknown) {
   requireWorkspaceManager(scope)
   const query = workspaceInvitationQuery.parse(input), now = new Date()
-  // Choose the current record before applying filters, so an expired filter cannot revive an older row.
-  const base = { workspaceId: scope.workspace.id, id: { in: await currentInvitationIds(tx, scope.workspace.id) } }
+  const base = { workspaceId: scope.workspace.id }
   const where: Prisma.UserInvitationWhereInput = { ...base, AND: [
     ...(query.status ? [viewWhere(query.status, now)] : []),
     ...(query.role ? [{ proposedRole: query.role }] : []),
@@ -74,8 +66,13 @@ export async function createWorkspaceInvitation(claims: WorkspaceTokenPayload, i
     if (member?.state === 'ACTIVE') throw new WorkspaceError(409, 'ALREADY_MEMBER', 'This person is already an active member')
     if (member && member.role !== body.role) throw new WorkspaceError(409, 'MEMBERSHIP_ROLE_CONFLICT', 'The existing pending membership has a different role')
     const key = pendingInvitationKey(scope.workspace.id, body.email)
-    await tx.userInvitation.updateMany({ where: { workspaceId: scope.workspace.id, email: body.email, status: 'PENDING', expiresAt: { lte: now } }, data: { status: 'EXPIRED', pendingKey: null } })
-    if (await tx.userInvitation.findUnique({ where: { pendingKey: key } })) throw new WorkspaceError(409, 'DUPLICATE_PENDING', 'A pending invitation exists. Resend it instead')
+    const priorRows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "UserInvitation"
+      WHERE "workspaceId"=${scope.workspace.id} AND lower(btrim(email))=${body.email} FOR UPDATE`
+    const prior = priorRows[0] && await tx.userInvitation.findUnique({ where: { id: priorRows[0].id } })
+    if (prior) {
+      mayManage(scope, prior.proposedRole!)
+      if (effectiveStatus(prior) === 'pending') throw new WorkspaceError(409, 'DUPLICATE_PENDING', 'A pending invitation exists. Resend it instead')
+    }
     if (!member && await reservedWorkspaceSeats(tx, scope.workspace.id) >= scope.workspace.maxMembers) throw new WorkspaceError(409, 'SEAT_LIMIT', 'This workspace has no available seats')
     for (const [feature, allowed] of Object.entries(body.memberFeatures)) {
       if (allowed && !(await tx.workspaceFeature.findUnique({ where: { workspaceId_feature: { workspaceId: scope.workspace.id, feature } } }))?.entitled) throw new WorkspaceError(403, 'NOT_ENTITLED', 'Member settings cannot exceed workspace entitlements')
@@ -83,6 +80,8 @@ export async function createWorkspaceInvitation(claims: WorkspaceTokenPayload, i
     const settings = readEnrollmentSettings(scope.workspace.enrollmentSettings)
     const email = body.emailContent ?? settings.email
     await reserveWorkspaceInvitationSend(tx, scope.workspace)
+    // A newly reviewed invitation replaces the closed row atomically. Resend keeps the same row and snapshot.
+    if (prior) await tx.userInvitation.delete({ where: { id: prior.id } })
     const invitation = await tx.userInvitation.create({ data: { workspaceId: scope.workspace.id, email: body.email, recipientName: body.name || null,
       enrollmentFields: settings.fields, emailSubject: email.subject || null, emailMessage: email.message || null,
       proposedRole: body.role, memberFeatures: body.memberFeatures, pendingKey: key, tokenHash, expiresAt: expiryFrom(now), invitedById: scope.member.userId,
@@ -101,10 +100,6 @@ export async function changeWorkspaceInvitation(claims: WorkspaceTokenPayload, i
     const current = await tx.userInvitation.findFirst({ where: { id, workspaceId: scope.workspace.id } })
     if (!current) throw new WorkspaceError(404, 'INVITATION_NOT_FOUND', 'Invitation not found')
     mayManage(scope, current.proposedRole!)
-    const latest = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "UserInvitation"
-      WHERE "workspaceId"=${scope.workspace.id} AND lower(btrim(email))=lower(btrim(${current.email}))
-      ORDER BY "createdAt" DESC, id DESC LIMIT 1`
-    if (latest[0]?.id !== id) throw new WorkspaceError(409, 'INVITATION_SUPERSEDED', 'A newer invitation exists for this email. Refresh the list to use it')
     if (current.status === 'ACCEPTED' || action === 'resend' && current.status === 'REVOKED') throw new WorkspaceError(409, 'INVITATION_CLOSED', 'This invitation cannot be changed')
     if (action === 'revoke' && effectiveStatus(current) === 'expired') throw new WorkspaceError(409, 'INVITATION_EXPIRED', 'This invitation has expired and cannot be revoked')
     if (action === 'revoke' && current.status === 'REVOKED') return { invitation: current, token, workspaceName: scope.workspace.name, workspaceSlug: scope.workspace.slug }

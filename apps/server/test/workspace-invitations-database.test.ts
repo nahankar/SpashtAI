@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 vi.mock('../src/lib/prisma', async () => {
   const { PrismaClient } = await import('@prisma/client')
   const url = process.env.WORKSPACE_TEST_DATABASE_URL
-  if (url && !['postgresql://postgres@127.0.0.1:55443/postgres', 'postgresql://postgres@127.0.0.1:55443/spasht_filters_test'].includes(url)) throw new Error('Use the isolated tenancy database')
+  if (url && !['postgresql://postgres@127.0.0.1:55443/postgres', 'postgresql://postgres@127.0.0.1:55443/spasht_filters_test', 'postgresql://postgres@127.0.0.1:55443/spasht_unique_invitations_test'].includes(url)) throw new Error('Use the isolated tenancy database')
   return { prisma: new PrismaClient({ datasourceUrl: url?.replace('postgresql://postgres@', 'postgresql://tenancy_test_app@') ?? 'postgresql://unused:5432/unused' }) }
 })
 const delivery = vi.hoisted(() => ({ sendEmail: vi.fn().mockResolvedValue({ sent: true }) }))
@@ -20,7 +20,7 @@ vi.mock('../src/lib/google-auth', () => ({ verifyGoogleIdToken: async (credentia
   return { googleId: `google-${data.email}`, email: data.email, emailVerified: data.verified !== false, firstName: 'Test', lastName: 'Learner', avatar: null }
 } }))
 const url = process.env.WORKSPACE_TEST_DATABASE_URL
-if (url && !['postgresql://postgres@127.0.0.1:55443/postgres', 'postgresql://postgres@127.0.0.1:55443/spasht_filters_test'].includes(url)) throw new Error('Use the isolated tenancy database')
+if (url && !['postgresql://postgres@127.0.0.1:55443/postgres', 'postgresql://postgres@127.0.0.1:55443/spasht_filters_test', 'postgresql://postgres@127.0.0.1:55443/spasht_unique_invitations_test'].includes(url)) throw new Error('Use the isolated tenancy database')
 const suite = url ? describe : describe.skip
 suite('workspace email invitation boundaries with a restricted runtime role', () => {
   const admin = new PrismaClient({ datasourceUrl: url || 'postgresql://unused:5432/unused' })
@@ -373,7 +373,7 @@ suite('workspace email invitation boundaries with a restricted runtime role', ()
     expect((await request(app).post(`${base}/${records[1].id}/revoke`).set(bearer(tokenManager))).status).toBe(403)
   })
 
-  it('lists/counts one current row per email and transitions that same row on resend and acceptance', async () => {
+  it('stores one row per email and transitions that same row on resend and acceptance', async () => {
     const email = addr('unique-current'), created = await post(tokenA, { email })
     expect(created.status).toBe(200)
     await admin.userInvitation.update({ where: { id: created.body.id }, data: { expiresAt: new Date(0), createdAt: new Date(Date.now() - 60000) } })
@@ -382,8 +382,8 @@ suite('workspace email invitation boundaries with a restricted runtime role', ()
     expect((await list()).body.items.map((r: { id: string }) => r.id)).toEqual([newer.body.id])
     expect((await list('expired')).body.total).toBe(0)
     const before = (await list()).body.counts
-    expect((await request(app).post(`${base}/${created.body.id}/resend`).set(bearer(tokenA))).body.code).toBe('INVITATION_SUPERSEDED')
-    expect((await request(app).post(`${base}/${created.body.id}/revoke`).set(bearer(tokenA))).body.code).toBe('INVITATION_SUPERSEDED')
+    expect((await request(app).post(`${base}/${created.body.id}/resend`).set(bearer(tokenA))).status).toBe(404)
+    expect((await request(app).post(`${base}/${created.body.id}/revoke`).set(bearer(tokenA))).status).toBe(404)
     await admin.userInvitation.update({ where: { id: newer.body.id }, data: { expiresAt: new Date(0) } })
     expect((await list('expired')).body.total).toBe(1)
     const resent = await request(app).post(`${base}/${newer.body.id}/resend`).set(bearer(tokenA))
@@ -391,7 +391,7 @@ suite('workspace email invitation boundaries with a restricted runtime role', ()
     expect((await list('expired')).body.total).toBe(0)
     expect((await list('pending')).body.total).toBe(1)
     expect((await list()).body.counts).toEqual(before)
-    expect(await admin.userInvitation.count({ where: { workspaceId: alpha, email } })).toBe(2) // Audit history is retained; resend adds no row.
+    expect(await admin.userInvitation.count({ where: { workspaceId: alpha, email } })).toBe(1) // Re-inviting replaces the closed row; resend adds no row.
     expect((await accept(mailToken(alpha, email), email)).status).toBe(200)
     const accepted = await list('accepted'); expect(accepted.body.total).toBe(1)
     expect(accepted.body.items[0]).toMatchObject({ id: newer.body.id, status: 'accepted' })
@@ -400,6 +400,17 @@ suite('workspace email invitation boundaries with a restricted runtime role', ()
     expect(accepted.body.counts.accepted).toBe(before.accepted + 1)
     const currentEmails = await admin.userInvitation.groupBy({ by: ['email'], where: { workspaceId: alpha } })
     expect(Object.values(accepted.body.counts).reduce((sum: number, n) => sum + Number(n), 0)).toBe(currentEmails.length)
+  })
+
+  it('rejects duplicate stored mailboxes and serializes competing re-invitations', async () => {
+    const email = addr('database-unique'), created = await post(tokenA, { email }); expect(created.status).toBe(200)
+    const original = await admin.userInvitation.findUniqueOrThrow({ where: { id: created.body.id } })
+    await expect(admin.userInvitation.create({ data: { ...original, id: `${original.id}-duplicate`, email: ` ${email.toUpperCase()} `, tokenHash: `${original.tokenHash}-duplicate`, pendingKey: null } })).rejects.toMatchObject({ code: 'P2002' })
+    await admin.userInvitation.update({ where: { id: original.id }, data: { expiresAt: new Date(0) } })
+    const attempts = await Promise.all([post(tokenA, { email }), post(tokenA, { email })])
+    expect(attempts.map(r => r.status).sort()).toEqual([200, 409])
+    expect(await admin.userInvitation.count({ where: { workspaceId: alpha, email } })).toBe(1)
+    expect((await admin.userInvitation.findFirstOrThrow({ where: { workspaceId: alpha, email } })).status).toBe('PENDING')
   })
 
 })

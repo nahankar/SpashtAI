@@ -256,3 +256,18 @@ shows one name editor and synchronizes those answers on an explicit admin save. 
 backfilled or forced through signup again when name questions are added later; blank names remain optional
 in the admin editor until an administrator supplies them. Existing signup name answers may be displayed in
 the name editor without writing anything until Save. Sign-in email remains immutable.
+
+### One invitation per workspace email
+
+Organization invitations store at most one row per workspace and normalized email address
+(case-insensitive, ignoring surrounding whitespace). A partial database unique index enforces this;
+platform invitations and invitations in other workspaces remain separate.
+
+Resend updates the existing row and token to Pending; acceptance changes that row to Accepted.
+Creating a newly reviewed invitation after the previous one closed replaces that closed row in the
+same transaction. Live pending invitations must be resent. Role, seat, signup-domain and delivery
+limits are checked before replacement. A failed replacement rolls back the deletion.
+
+Migration `20261128140000_unique_workspace_invitation_email` removes older organization invitation
+rows, keeping the newest by creation time and ID before installing the unique index. Back up the
+organization invitation data before applying it. This does not delete users or memberships.

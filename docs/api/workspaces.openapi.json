@@ -1084,7 +1084,7 @@
     "/api/workspaces/current/invitations": {
       "get": {
         "summary": "List/count only current organization invitations (20 per page)",
-        "description": "Active workspace Owner/Admin required. Search matches recipient name or email, case-insensitively across all pages. Status, role and email-delivery filters combine. Counts remain workspace-wide; total is the filtered count. Each page contains at most 20 rows. Only the newest invitation per normalized email is listed/counted; historical records are retained. This selection precedes all filters. Resend updates that same current row to pending; acceptance changes it to accepted.",
+        "description": "Active workspace Owner/Admin required. Search matches recipient name or email, case-insensitively across all pages. Status, role and email-delivery filters combine. Counts remain workspace-wide; total is the filtered count. Each page contains at most 20 rows. One invitation is stored per normalized email within each workspace. Resend updates the same row to pending; acceptance changes it to accepted.",
         "security": [
           {
             "workspace": []
@@ -1181,7 +1181,7 @@
       },
       "post": {
         "summary": "Invite a verified Google identity to this workspace",
-        "description": "Active workspace Owner/Admin required. Admin may grant/manage LEARNER only; Owner may grant all workspace roles. No platform role changes. SMTP runs after commit. New identities respect paused public signups.",
+        "description": "Active workspace Owner/Admin required. Admin may grant/manage LEARNER only; Owner may grant all workspace roles. No platform role changes. SMTP runs after commit. New identities respect paused public signups. A newly reviewed invitation replaces an existing closed invitation atomically. A live pending invitation must be resent instead; a workspace cannot store duplicate emails.",
         "security": [
           {
             "workspace": []
@@ -1236,7 +1236,7 @@
     "/api/workspaces/current/invitations/{id}/resend": {
       "post": {
         "summary": "Resend with a new token and expiry",
-        "description": "Active workspace Owner/Admin required. Admin may grant/manage LEARNER only; Owner may grant all workspace roles. No platform role changes. SMTP runs after commit. New identities respect paused public signups. Superseded historical rows return 409 INVITATION_SUPERSEDED.",
+        "description": "Active workspace Owner/Admin required. Admin may grant/manage LEARNER only; Owner may grant all workspace roles. No platform role changes. SMTP runs after commit. New identities respect paused public signups.",
         "security": [
           {
             "workspace": []
@@ -1290,7 +1290,7 @@
     "/api/workspaces/current/invitations/{id}/revoke": {
       "post": {
         "summary": "Revoke a pending invitation",
-        "description": "Active workspace Owner/Admin required. Admin may manage LEARNER invitations only. Expired invitations return 409 INVITATION_EXPIRED; accepted invitations cannot be changed. Already revoked invitations are idempotent. No email is sent. Superseded historical rows return 409 INVITATION_SUPERSEDED.",
+        "description": "Active workspace Owner/Admin required. Admin may manage LEARNER invitations only. Expired invitations return 409 INVITATION_EXPIRED; accepted invitations cannot be changed. Already revoked invitations are idempotent. No email is sent.",
         "security": [
           {
             "workspace": []

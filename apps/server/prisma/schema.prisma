@@ -1631,6 +1631,8 @@ model UserInvitation {
   recipientName        String?
   status               InvitationStatus @default(PENDING)
   // While PENDING: email for platform, workspace:<id>:<email> for organization invitations.
+  // Organization mailbox uniqueness is enforced by the partial expression index in
+  // 20261128140000_unique_workspace_invitation_email (workspaceId + lower(trim(email))).
   pendingKey           String?          @unique
   // SHA-256 of the acceptance token. The raw token exists only in the sent link.
   tokenHash            String           @unique
