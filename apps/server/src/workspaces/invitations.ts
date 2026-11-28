@@ -18,6 +18,9 @@ export const workspaceInvitationInput = z.object({
 }).strict()
 export const workspaceInvitationQuery = z.object({
   status: z.enum(['pending', 'accepted', 'expired', 'revoked']).optional(),
+  q: z.string().trim().max(200).optional(),
+  role: z.enum(['OWNER', 'ADMIN', 'LEARNER']).optional(),
+  delivery: z.enum(['SENDING', 'SENT', 'FAILED', 'DEV_CAPTURED']).optional(),
   page: z.coerce.number().int().min(1).max(10000).default(1),
 }).strict()
 export const pendingInvitationKey = (workspaceId: string, email: string) => `workspace:${workspaceId}:${email}`
@@ -38,7 +41,12 @@ async function audit(tx: WorkspaceTx, scope: Scope, action: string, id: string, 
 export async function listWorkspaceInvitations(tx: WorkspaceTx, scope: Scope, input: unknown) {
   requireWorkspaceManager(scope)
   const query = workspaceInvitationQuery.parse(input), now = new Date(), base = { workspaceId: scope.workspace.id }
-  const where = { ...base, ...(query.status ? viewWhere(query.status, now) : {}) }
+  const where: Prisma.UserInvitationWhereInput = { ...base, AND: [
+    ...(query.status ? [viewWhere(query.status, now)] : []),
+    ...(query.role ? [{ proposedRole: query.role }] : []),
+    ...(query.delivery ? [{ deliveryStatus: query.delivery }] : []),
+    ...(query.q ? [{ OR: [{ email: { contains: query.q, mode: 'insensitive' as const } }, { recipientName: { contains: query.q, mode: 'insensitive' as const } }] }] : []),
+  ] }
   const [items, total, ...counts] = await Promise.all([
     tx.userInvitation.findMany({ where, orderBy: [{ createdAt: 'desc' }, { id: 'asc' }], skip: (query.page - 1) * 20, take: 20 }),
     tx.userInvitation.count({ where }), ...INVITATION_VIEWS.map(status => tx.userInvitation.count({ where: { ...base, ...viewWhere(status, now) } })),
@@ -85,6 +93,7 @@ export async function changeWorkspaceInvitation(claims: WorkspaceTokenPayload, i
     if (!current) throw new WorkspaceError(404, 'INVITATION_NOT_FOUND', 'Invitation not found')
     mayManage(scope, current.proposedRole!)
     if (current.status === 'ACCEPTED' || action === 'resend' && current.status === 'REVOKED') throw new WorkspaceError(409, 'INVITATION_CLOSED', 'This invitation cannot be changed')
+    if (action === 'revoke' && effectiveStatus(current) === 'expired') throw new WorkspaceError(409, 'INVITATION_EXPIRED', 'This invitation has expired and cannot be revoked')
     if (action === 'revoke' && current.status === 'REVOKED') return { invitation: current, token, workspaceName: scope.workspace.name, workspaceSlug: scope.workspace.slug }
     if (action === 'resend' && effectiveStatus(current) !== 'pending' && await reservedWorkspaceSeats(tx, scope.workspace.id) >= scope.workspace.maxMembers) throw new WorkspaceError(409, 'SEAT_LIMIT', 'This workspace has no available seats')
     if (action === 'resend') {

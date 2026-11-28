@@ -1084,7 +1084,7 @@
     "/api/workspaces/current/invitations": {
       "get": {
         "summary": "List/count only current organization invitations (20 per page)",
-        "description": "Active workspace Owner/Admin required. Admin may grant/manage LEARNER only; Owner may grant all workspace roles. No platform role changes. SMTP runs after commit. New identities respect paused public signups.",
+        "description": "Active workspace Owner/Admin required. Search matches recipient name or email, case-insensitively across all pages. Status, role and email-delivery filters combine. Counts remain workspace-wide; total is the filtered count. Each page contains at most 20 rows.",
         "security": [
           {
             "workspace": []
@@ -1112,6 +1112,39 @@
               "minimum": 1,
               "maximum": 10000,
               "default": 1
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "role",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "OWNER",
+                "ADMIN",
+                "LEARNER"
+              ]
+            }
+          },
+          {
+            "name": "delivery",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "SENDING",
+                "SENT",
+                "FAILED",
+                "DEV_CAPTURED"
+              ]
             }
           }
         ],
@@ -1256,8 +1289,8 @@
     },
     "/api/workspaces/current/invitations/{id}/revoke": {
       "post": {
-        "summary": "Revoke a pending or expired invitation",
-        "description": "Active workspace Owner/Admin required. Admin may grant/manage LEARNER only; Owner may grant all workspace roles. No platform role changes. SMTP runs after commit. New identities respect paused public signups.",
+        "summary": "Revoke a pending invitation",
+        "description": "Active workspace Owner/Admin required. Admin may manage LEARNER invitations only. Expired invitations return 409 INVITATION_EXPIRED; accepted invitations cannot be changed. Already revoked invitations are idempotent. No email is sent.",
         "security": [
           {
             "workspace": []

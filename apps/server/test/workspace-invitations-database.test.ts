@@ -343,4 +343,34 @@ suite('workspace email invitation boundaries with a restricted runtime role', ()
     }
   })
 
+  it('searches names/emails across pages and combines role, delivery, expiry and tenant filters', async () => {
+    const name = `${tag} Filter Person`
+    const records = []
+    for (const [suffix, proposedRole, deliveryStatus, expiresAt] of [
+      ['filter-learner', 'LEARNER', 'FAILED', new Date(0)],
+      ['filter-admin', 'ADMIN', 'SENT', new Date(0)],
+      ['filter-pending', 'LEARNER', 'FAILED', new Date(Date.now() + 86400000)],
+    ] as const) {
+      const r = await post(tokenA, { email: addr(suffix), name, role: proposedRole }); expect(r.status, r.text).toBe(200)
+      records.push(await admin.userInvitation.update({ where: { id: r.body.id }, data: { deliveryStatus, expiresAt } }))
+    }
+    const other = await post(tokenB, { email: addr('filter-other'), name }); expect(other.status).toBe(200)
+    const list = (query: Record<string, string>) => request(app).get(base).query(query).set(bearer(tokenA))
+    const all = await list({ q: name.toUpperCase() }); expect(all.status).toBe(200); expect(all.body.total).toBe(3)
+    const expired = await list({ q: name, status: 'expired', role: 'LEARNER', delivery: 'FAILED' })
+    expect(expired.status, expired.text).toBe(200); expect(expired.body.items.map((r: { id: string }) => r.id)).toEqual([records[0].id])
+    expect((await list({ q: addr('filter-admin').toUpperCase(), role: 'ADMIN', delivery: 'SENT' })).body.total).toBe(1)
+    expect((await list({ q: name, status: 'pending', role: 'LEARNER', delivery: 'FAILED' })).body.items.map((r: { id: string }) => r.id)).toEqual([records[2].id])
+    expect((await list({ delivery: 'DELIVERED' })).status).toBe(400)
+    // Pending-but-expired and explicitly expired records both reject revoke without changing history.
+    for (const status of ['PENDING', 'EXPIRED'] as const) {
+      await admin.userInvitation.update({ where: { id: records[0].id }, data: { status } })
+      const revoke = await request(app).post(`${base}/${records[0].id}/revoke`).set(bearer(tokenA))
+      expect(revoke.status).toBe(409); expect(revoke.body.code).toBe('INVITATION_EXPIRED')
+      expect((await admin.userInvitation.findUniqueOrThrow({ where: { id: records[0].id } })).status).toBe(status)
+    }
+    expect((await request(app).post(`${base}/${records[0].id}/resend`).set(bearer(tokenA))).status).toBe(200)
+    expect((await request(app).post(`${base}/${records[1].id}/revoke`).set(bearer(tokenManager))).status).toBe(403)
+  })
+
 })
